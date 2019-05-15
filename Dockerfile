@@ -59,11 +59,8 @@ COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
-COPY --from=cli /usr/bin/oc /usr/bin/
+COPY --from=cli /usr/bin/oc /usr/bin
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
-RUN ls -l /usr/bin/oc /usr/bin/kubectl
-
-COPY --from=openshift/origin-cli /usr/bin/oc /usr/bin/oc2
 
 # copy git commit number into image
 COPY .git/HEAD /root/.git/HEAD
