@@ -17,9 +17,7 @@ COPY go-controller/ .
 # build the binaries
 RUN make
 
-FROM openshift/origin-cli AS cli
-
-FROM openshift/origin-base
+FROM openshift/origin-cli
 
 USER root
 
@@ -44,7 +42,6 @@ RUN yum install -y  \
 	"openvswitch2.11-ovn-host" \
 	"openvswitch2.11-ovn-vtep" \
 	"openvswitch2.11-devel" \
-	containernetworking-plugins \
 	iproute strace socat && \
 	yum clean all
 
@@ -56,10 +53,8 @@ RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/
 
 COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
-COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
-COPY --from=cli /usr/bin/oc /usr/bin
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
 
 # copy git commit number into image
