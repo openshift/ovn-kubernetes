@@ -2,6 +2,7 @@ package kube
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -9,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -33,11 +35,29 @@ type Kube struct {
 	KClient kubernetes.Interface
 }
 
+func updateWithRetry(f func() (interface{}, error)) error {
+	var err error
+	_ = utilwait.ExponentialBackoff(utilwait.Backoff{
+		Duration: time.Second,
+		Factor:   1.5,
+		Steps:    5,
+	}, func() (bool, error) {
+		_, err = f()
+		if err != nil {
+			logrus.Infof("updateWithRetry: %v", err)
+		}
+		return err == nil, nil
+	})
+	return err
+}
+
 // SetAnnotationOnPod takes the pod object and key/value string pair to set it as an annotation
 func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
 	logrus.Infof("Setting annotations %s=%s on pod %s", key, value, pod.Name)
 	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
-	_, err := k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, []byte(patchData))
+	err := updateWithRetry(func() (interface{}, error) {
+		return k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, []byte(patchData))
+	})
 	if err != nil {
 		logrus.Errorf("Error in setting annotation on pod %s/%s: %v", pod.Name, pod.Namespace, err)
 	}
@@ -48,7 +68,9 @@ func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
 func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 	logrus.Infof("Setting annotations %s=%s on node %s", key, value, node.Name)
 	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
-	_, err := k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
+	err := updateWithRetry(func() (interface{}, error) {
+		return k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
+	})
 	if err != nil {
 		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
 	}
