@@ -37,6 +37,7 @@ RUN INSTALL_PKGS=" \
 	openvswitch2.11 openvswitch2.11-devel \
 	openvswitch2.11-ovn-common openvswitch2.11-ovn-central \
 	openvswitch2.11-ovn-host openvswitch2.11-ovn-vtep \
+	libibverbs \
 	containernetworking-plugins \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
