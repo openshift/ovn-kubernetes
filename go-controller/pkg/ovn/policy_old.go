@@ -730,11 +730,13 @@ func (oc *Controller) handlePeerNamespaceAndPodSelectorOld(
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
 				np.Lock()
-				defer np.Unlock()
-
 				if np.deleted {
+					np.Unlock()
 					return
 				}
+				// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdateOld
+				// on existing pods so we have to yield the lock
+				np.Unlock()
 
 				podHandler, err := oc.watchFactory.AddFilteredPodHandler(namespace.Name,
 					podSelector,
@@ -751,6 +753,12 @@ func (oc *Controller) handlePeerNamespaceAndPodSelectorOld(
 					}, nil)
 				if err != nil {
 					logrus.Errorf("error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
+					return
+				}
+				np.Lock()
+				defer np.Unlock()
+				if np.deleted {
+					_ = oc.watchFactory.RemovePodHandler(podHandler)
 					return
 				}
 				np.podHandlerList = append(np.podHandlerList, podHandler)
