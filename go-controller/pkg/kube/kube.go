@@ -3,6 +3,7 @@ package kube
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -10,7 +11,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 )
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -19,6 +22,7 @@ type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
 	UpdateNodeStatus(node *kapi.Node) error
+	DeleteAnnotationOnNode(node *kapi.Node, key string) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
@@ -65,6 +69,43 @@ func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(node)
 	if err != nil {
 		logrus.Errorf("Error in updating status on node %s: %v", node.Name, err)
+	}
+	return err
+}
+
+// DeleteAnnotationOnNode takes the node object and annotation name to delete
+func (k *Kube) DeleteAnnotationOnNode(node *kapi.Node, key string) error {
+	logrus.Infof("Deleting annotation %s on node %s", key, node.Name)
+
+	var curNode *kapi.Node
+	err := retry.RetryOnConflict(
+		wait.Backoff{
+			Steps:    20,
+			Duration: 50 * time.Millisecond,
+			Jitter:   1.0,
+		},
+		func() error {
+			var err error
+			if curNode == nil {
+				// First time through just use passed-in node
+				curNode = node
+			} else {
+				// Subsequent times we need to re-fetch the node
+				// to get updates that caused the conflict
+				curNode, err = k.KClient.CoreV1().Nodes().Get(node.Name, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+			}
+
+			delete(curNode.Annotations, key)
+			if _, err := k.KClient.CoreV1().Nodes().Update(curNode); err != nil {
+				return err
+			}
+			return nil
+		})
+	if err != nil {
+		logrus.Errorf("Error deleting annotation %s on node %s: %v", key, node.Name, err)
 	}
 	return err
 }
