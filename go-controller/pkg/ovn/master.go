@@ -212,11 +212,12 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// Skip the second address of the LogicalSwitch's subnet since we set it aside for the
 	// management port on that node.
 	secondIP := util.NextIP(ip)
+	thirdIP := util.NextIP(secondIP)
 
 	// Create a logical switch and set its subnet.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
 		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-		"other-config:exclude_ips="+secondIP.String(),
+		"other-config:exclude_ips="+secondIP.String()+".."+thirdIP.String(),
 		"external-ids:gateway_ip="+firstIP)
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)

@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
@@ -79,6 +80,8 @@ type Controller struct {
 
 	// supports port_group?
 	portGroupSupport bool
+
+	extensionClusterSubnets []config.CIDRNetworkEntry
 }
 
 const (
@@ -91,7 +94,7 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, extensionClusterSubnets []config.CIDRNetworkEntry) *Controller {
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -108,12 +111,16 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		loadbalancerGWCache:      make(map[string]string),
+		extensionClusterSubnets:  extensionClusterSubnets,
 	}
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run() error {
-	for _, f := range []func() error{oc.WatchNodes, oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
+func (oc *Controller) Run(nodeSelector *metav1.LabelSelector) error {
+	if err := oc.WatchNodes(nodeSelector); err != nil {
+		return err
+	}
+	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
 		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
@@ -250,9 +257,9 @@ func (oc *Controller) WatchNamespaces() error {
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes() error {
+func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 	gatewaysHandled := make(map[string]bool)
-	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)

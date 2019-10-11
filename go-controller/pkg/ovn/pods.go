@@ -294,7 +294,21 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	annotation, err := util.MarshalPodAnnotation(podCIDR, podMac, gatewayIP.IP, nil)
+	routes := []util.PodRoute{}
+	if gatewayIP != nil && len(oc.extensionClusterSubnets) > 0 {
+		// Get the 3rd address in the node's subnet; the first is taken
+		// by the k8s-cluster-router port, the second by the management port
+		second := util.NextIP(gatewayIP.IP)
+		extGWIP := util.NextIP(second)
+		for _, subnet := range oc.extensionClusterSubnets {
+			routes = append(routes, util.PodRoute{
+				Dest:    subnet.CIDR.String(),
+				NextHop: extGWIP.String(),
+			})
+		}
+	}
+
+	annotation, err := util.MarshalPodAnnotation(podCIDR, podMac, gatewayIP.IP, routes)
 	if err != nil {
 		logrus.Errorf("error creating pod network annotation: %v", err)
 		return
