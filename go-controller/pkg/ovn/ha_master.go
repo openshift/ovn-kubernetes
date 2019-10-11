@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -25,18 +26,21 @@ type HAMasterController struct {
 	nodeName      string
 	isLeader      bool
 	leaderElector *leaderelection.LeaderElector
+	nodeSelector  *metav1.LabelSelector
 }
 
 // NewHAMasterController creates a new HA Master controller
 func NewHAMasterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
-	nodeName string) *HAMasterController {
-	ovnController := NewOvnController(kubeClient, wf)
+	nodeName string, extensionClusterSubnets []config.CIDRNetworkEntry,
+	nodeSelector *metav1.LabelSelector) *HAMasterController {
+	ovnController := NewOvnController(kubeClient, wf, extensionClusterSubnets)
 	return &HAMasterController{
 		kubeClient:    kubeClient,
 		ovnController: ovnController,
 		nodeName:      nodeName,
 		isLeader:      false,
 		leaderElector: nil,
+		nodeSelector:  nodeSelector,
 	}
 }
 
@@ -120,5 +124,5 @@ func (hacontroller *HAMasterController) ConfigureAsActive(masterNodeName string)
 		return err
 	}
 
-	return hacontroller.ovnController.Run()
+	return hacontroller.ovnController.Run(hacontroller.nodeSelector)
 }

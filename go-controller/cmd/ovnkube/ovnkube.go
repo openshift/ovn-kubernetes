@@ -17,12 +17,15 @@ import (
 	"github.com/urfave/cli"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kexec "k8s.io/utils/exec"
 )
 
@@ -100,6 +103,12 @@ func main() {
 	c.Flags = append(c.Flags, config.OvnSBFlags...)
 	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
 	c.Flags = append(c.Flags, config.MasterHAFlags...)
+	c.Flags = append(c.Flags, hocontroller.GetHybridOverlayCLIFlags([]cli.Flag{
+		cli.BoolFlag{
+			Name:  "enable-hybrid-overlay",
+			Usage: "Enables hybrid overlay operation (requires --init-master and/or --init-node)",
+		}})...)
+
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -217,13 +226,28 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("unable to setup configuration watch: %v", err)
 	}
 
+	enableHybridOverlay := ctx.Bool("enable-hybrid-overlay")
+
 	if master != "" {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("Windows is not supported as master node")
 		}
 
+		var nodeSelector *metav1.LabelSelector
+		var hybridOverlayClusterSubnets []config.CIDRNetworkEntry
+		if enableHybridOverlay {
+			hybridOverlayClusterSubnets, err = hocontroller.GetHybridOverlayClusterSubnets(ctx)
+			if err != nil {
+				return err
+			}
+
+			nodeSelector = &metav1.LabelSelector{
+				MatchLabels: map[string]string{v1.LabelOSStable: "linux"},
+			}
+		}
+
 		// run the HA master controller to init the master
-		ovnHAController := ovn.NewHAMasterController(clientset, factory, master)
+		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, hybridOverlayClusterSubnets, nodeSelector)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
 			return err
 		}
@@ -236,6 +260,12 @@ func runOvnKube(ctx *cli.Context) error {
 
 		clusterController := ovncluster.NewClusterController(clientset, factory)
 		if err := clusterController.StartClusterNode(node); err != nil {
+			return err
+		}
+	}
+
+	if enableHybridOverlay {
+		if err := hocontroller.StartHybridOverlay(ctx, master != "", node, clientset, factory); err != nil {
 			return err
 		}
 	}
