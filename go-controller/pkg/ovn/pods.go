@@ -238,19 +238,44 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
-	out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
-		"--may-exist", "lsp-add", logicalSwitch, portName,
-		"--", "lsp-set-addresses",
-		portName, "dynamic", "--", "set",
-		"logical_switch_port", portName,
-		"external-ids:namespace="+pod.Namespace,
-		"external-ids:logical_switch="+logicalSwitch,
-		"external-ids:pod=true")
-	if err != nil {
-		logrus.Errorf("Error while creating logical port %s "+
-			"stdout: %q, stderr: %q (%v)",
-			portName, out, stderr, err)
-		return
+	oldAnnotation, isStaticIP := pod.Annotations["ovn"]
+
+	// If pod already has annotations, just add the lsp with static ip/mac.
+	// Else, create the lsp with dynamic addresses.
+	if isStaticIP {
+		ipAddress := oc.getIPFromOvnAnnotation(oldAnnotation)
+		macAddress := oc.getMacFromOvnAnnotation(oldAnnotation)
+
+		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
+			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
+			fmt.Sprintf("%s %s", macAddress, ipAddress), "--", "set",
+			"logical_switch_port", portName,
+			"external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch,
+			"external-ids:pod=true", "--", "--if-exists",
+			"clear", "logical_switch_port", portName, "dynamic_addresses")
+		if err != nil {
+			logrus.Errorf("Failed to add logical port to switch "+
+				"stdout: %q, stderr: %q (%v)",
+				out, stderr, err)
+			return
+		}
+	} else {
+		out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
+			"--may-exist", "lsp-add", logicalSwitch, portName,
+			"--", "lsp-set-addresses",
+			portName, "dynamic", "--", "set",
+			"logical_switch_port", portName,
+			"external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch,
+			"external-ids:pod=true")
+		if err != nil {
+			logrus.Errorf("Error while creating logical port %s "+
+				"stdout: %q, stderr: %q (%v)",
+				portName, out, stderr, err)
+			return
+		}
+
 	}
 
 	oc.logicalPortCache[portName] = logicalSwitch
