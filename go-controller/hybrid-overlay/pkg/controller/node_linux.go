@@ -97,14 +97,7 @@ func getPodDetails(pod *kapi.Pod, nodeName string) (string, string) {
 	if err != nil {
 		return "", ""
 	}
-	ip, _, err := net.ParseCIDR(podInfo.IP)
-	if err != nil {
-		return "", ""
-	}
-	if _, err := net.ParseMAC(podInfo.MAC); err != nil {
-		return "", ""
-	}
-	return ip.String(), podInfo.MAC
+	return podInfo.IP.String(), podInfo.MAC.String()
 }
 
 // podChanged returns true if any relevant pod attributes changed
