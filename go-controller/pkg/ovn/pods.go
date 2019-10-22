@@ -245,13 +245,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
-	oldAnnotation, isStaticIP := pod.Annotations["ovn"]
+	podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
 
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
-	if isStaticIP {
-		ipAddress := oc.getIPFromOvnAnnotation(oldAnnotation)
-		macAddress := oc.getMacFromOvnAnnotation(oldAnnotation)
+	if podAnnotation != nil {
+		ipAddress := podAnnotation.IP.IP.String()
+		macAddress := podAnnotation.MAC.String()
 
 		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
 			logicalSwitch, portName, "--", "lsp-set-addresses", portName,

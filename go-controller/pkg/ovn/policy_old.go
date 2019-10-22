@@ -531,8 +531,7 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-	if ipAddress == "" {
+	if _, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"]); err != nil {
 		return
 	}
 
@@ -637,8 +636,12 @@ func (oc *Controller) handlePeerPodSelectorAddUpdateOld(
 	obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-	if ipAddress == "" || addressMap[ipAddress] {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
+		return
+	}
+	ipAddress := podAnnotation.IP.IP.String()
+	if addressMap[ipAddress] {
 		return
 	}
 
@@ -663,10 +666,11 @@ func (oc *Controller) handlePeerPodSelectorDeleteOld(
 
 	pod := obj.(*kapi.Pod)
 
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-	if ipAddress == "" {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
 		return
 	}
+	ipAddress := podAnnotation.IP.IP.String()
 
 	np.Lock()
 	defer np.Unlock()

@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"strconv"
@@ -197,47 +196,6 @@ func (oc *Controller) deletePortGroup(hashName string) {
 			hashName, stderr, err)
 		return
 	}
-}
-
-func (oc *Controller) getMacFromOvnAnnotation(ovnAnnotation string) string {
-	ovnAnnotationMap, err := oc.getAnnotationMap(ovnAnnotation)
-	if err != nil {
-		logrus.Errorf("Error retrieving ovn annotation %s from pod object: %s", ovnAnnotation, err.Error())
-		return ""
-	}
-
-	return ovnAnnotationMap["mac_address"]
-}
-
-func (oc *Controller) getIPFromOvnAnnotation(ovnAnnotation string) string {
-	ovnAnnotationMap, err := oc.getAnnotationMap(ovnAnnotation)
-	if err != nil {
-		logrus.Errorf("Error retrieving ovn annotation %s from pod object: %s", ovnAnnotation, err.Error())
-		return ""
-	}
-
-	ipAddressMask := strings.Split(ovnAnnotationMap["ip_address"], "/")
-	if len(ipAddressMask) != 2 {
-		logrus.Errorf("Error in splitting ip address")
-		return ""
-	}
-
-	return ipAddressMask[0]
-}
-
-func (oc *Controller) getAnnotationMap(ovnAnnotation string) (map[string]string, error) {
-	if ovnAnnotation == "" {
-		return nil, fmt.Errorf("ovn annotation is empty")
-	}
-
-	var ovnAnnotationMap map[string]string
-	err := json.Unmarshal([]byte(ovnAnnotation), &ovnAnnotationMap)
-	if err != nil {
-		logrus.Errorf("Error in json unmarshaling ovn annotation (%v)", err)
-		return nil, err
-	}
-
-	return ovnAnnotationMap, nil
 }
 
 func stringSliceMembership(slice []string, key string) bool {
