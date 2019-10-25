@@ -165,7 +165,25 @@ func (m *MasterController) releaseNodeSubnet(nodeName string, nodeSubnet *net.IP
 	return fmt.Errorf("failed to delete subnet %s for node %q: subnet not found in any CIDR range or already available", nodeSubnet, nodeName)
 }
 
-func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Annotator) error {
+func (m *MasterController) deletePodsWithHybridOverlayIP(ip net.IP) error {
+	pods, err := m.kube.GetPods("")
+	if err != nil {
+		return fmt.Errorf("failed to get all pods: %v", err)
+	}
+
+	for _, pod := range pods.Items {
+		if podInfo, _ := util.UnmarshalPodAnnotation(pod.Annotations["ovn"]); err != nil {
+			if podInfo.IP.IP.Equal(ip) {
+				err := m.kube.DeletePod(pod.Namespace, pod.Name)
+				return fmt.Errorf("failed to delete conflicting hybrid overlay IP pod %s/%s: %v",
+					pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (m *MasterController) setupHybridOverlay(node *kapi.Node, annotator kube.Annotator) error {
 	// Only applicable to Linux nodes
 	if houtil.IsWindowsNode(node) {
 		return nil
@@ -194,15 +212,24 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		if portMAC == nil {
 			portMAC, _ = net.ParseMAC(util.GenerateMac())
 		}
-		if portIP == nil {
-			// Get the 3rd address in the node's subnet; the first is taken
-			// by the k8s-cluster-router port, the second by the management port
-			first := util.NextIP(subnet.IP)
-			second := util.NextIP(first)
-			portIP = util.NextIP(second)
+
+		// The hybrid overlay claims the 3rd address on the node switch; make
+		// sure it's excluded from dynamic addressing
+		_, secondIP := util.GetNodeWellKnownAddresses(subnet)
+		portIP = util.NextIP(secondIP.IP)
+		stdout, stderr, err := util.RunOVNNbctl("--", "set", "logical_switch", node.Name,
+			"other-config:exclude_ips="+secondIP.IP.String()+".."+portIP.String())
+		if err != nil {
+			return fmt.Errorf("failed to set hybrid overlay exclude IP on node %s"+
+				", stdout: %q, stderr: %q, error: %v", node.Name, stdout, stderr, err)
 		}
 
-		var stderr string
+		// Kill any pods that conflict with the hybrid overlay port IP
+		if err := m.deletePodsWithHybridOverlayIP(portIP); err != nil {
+			logrus.Errorf(err.Error())
+			// ignore and continue
+		}
+
 		_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", node.Name, portName,
 			"--", "lsp-set-addresses", portName, portMAC.String()+" "+portIP.String())
 		if err != nil {
@@ -229,7 +256,7 @@ func (m *MasterController) Add(node *kapi.Node) {
 		logrus.Errorf("failed to update node %q hybrid overlay subnet annotation: %v", node.Name, err)
 	}
 
-	if err := m.handleOverlayPort(node, annotator); err != nil {
+	if err := m.setupHybridOverlay(node, annotator); err != nil {
 		logrus.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err)
 	}
 
