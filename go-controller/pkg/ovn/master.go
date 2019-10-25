@@ -188,6 +188,23 @@ func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	return subnet, nil
 }
 
+func (oc *Controller) deletePodsWithThirdIP(ip net.IP) error {
+	pods, err := oc.kube.GetPods("")
+	if err != nil {
+		return fmt.Errorf("failed to get all pods: %v", err)
+	}
+
+	for _, pod := range pods.Items {
+		if podInfo, _ := util.UnmarshalPodAnnotation(pod.Annotations["ovn"]); err != nil {
+			if podInfo.IP.IP.Equal(ip) {
+				err := oc.kube.DeletePod(pod.Namespace, pod.Name)
+				return fmt.Errorf("failed to delete 3rd IP pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
 	ip := util.NextIP(hostsubnet.IP)
 	n, _ := hostsubnet.Mask.Size()
@@ -213,6 +230,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// management port on that node.
 	secondIP := util.NextIP(ip)
 	thirdIP := util.NextIP(secondIP)
+	if err := oc.deletePodsWithThirdIP(thirdIP); err != nil {
+		logrus.Errorf(err.Error())
+		// ignore and continue
+	}
 
 	// Create a logical switch and set its subnet.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,

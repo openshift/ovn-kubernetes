@@ -27,6 +27,7 @@ type Interface interface {
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
 	GetPodsByLabels(namespace string, selector labels.Selector) (*kapi.PodList, error)
+	DeletePod(namespace, name string) error
 	GetNodes() (*kapi.NodeList, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
@@ -135,6 +136,11 @@ func (k *Kube) GetPodsByLabels(namespace string, selector labels.Selector) (*kap
 	options := metav1.ListOptions{}
 	options.LabelSelector = selector.String()
 	return k.KClient.CoreV1().Pods(namespace).List(options)
+}
+
+// DeletePod deletes a Pod from kubernetes apiserver given the namespace and name
+func (k *Kube) DeletePod(namespace, name string) error {
+	return k.KClient.CoreV1().Pods(namespace).Delete(name, nil)
 }
 
 // GetNodes returns the list of all Node objects from kubernetes
