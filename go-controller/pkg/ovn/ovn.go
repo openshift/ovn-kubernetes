@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
@@ -53,6 +54,9 @@ type Controller struct {
 	// For each namespace, a lock to protect critical regions
 	namespaceMutex map[string]*sync.Mutex
 
+	// Need to make calls to namespaceMutex also thread-safe
+	namespaceMutexMutex sync.Mutex
+
 	// For each namespace, a map of policy name to 'namespacePolicy'.
 	namespacePolicies map[string]map[string]*namespacePolicy
 
@@ -79,6 +83,8 @@ type Controller struct {
 
 	// supports port_group?
 	portGroupSupport bool
+
+	extensionClusterSubnets []config.CIDRNetworkEntry
 }
 
 const (
@@ -91,7 +97,7 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, extensionClusterSubnets []config.CIDRNetworkEntry) *Controller {
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -101,6 +107,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		namespaceAddressSet:      make(map[string]map[string]bool),
 		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
 		namespaceMutex:           make(map[string]*sync.Mutex),
+		namespaceMutexMutex:      sync.Mutex{},
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
@@ -108,12 +115,16 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		loadbalancerGWCache:      make(map[string]string),
+		extensionClusterSubnets:  extensionClusterSubnets,
 	}
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run() error {
-	for _, f := range []func() error{oc.WatchNodes, oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
+func (oc *Controller) Run(nodeSelector *metav1.LabelSelector) error {
+	if err := oc.WatchNodes(nodeSelector); err != nil {
+		return err
+	}
+	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
 		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
@@ -205,7 +216,7 @@ func (oc *Controller) WatchNetworkPolicy() error {
 	_, err := oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.AddNetworkPolicy(policy)
+			oc.addNetworkPolicy(policy)
 			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -213,7 +224,7 @@ func (oc *Controller) WatchNetworkPolicy() error {
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
 				oc.deleteNetworkPolicy(oldPolicy)
-				oc.AddNetworkPolicy(newPolicy)
+				oc.addNetworkPolicy(newPolicy)
 			}
 			return
 		},
@@ -250,9 +261,9 @@ func (oc *Controller) WatchNamespaces() error {
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes() error {
+func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 	gatewaysHandled := make(map[string]bool)
-	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
@@ -260,16 +271,30 @@ func (oc *Controller) WatchNodes() error {
 			if err != nil {
 				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
 			}
+			err = oc.syncNodeManagementPort(node)
+			if err != nil {
+				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
+			}
 			if !config.Gateway.NodeportEnable {
 				return
 			}
 			gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
 		},
 		UpdateFunc: func(old, new interface{}) {
+			oldNode := old.(*kapi.Node)
+			node := new.(*kapi.Node)
+			oldMacAddress, _ := oldNode.Annotations[OvnNodeManagementPortMacAddress]
+			macAddress, _ := node.Annotations[OvnNodeManagementPortMacAddress]
+			logrus.Debugf("Updated event for Node %q", node.Name)
+			if oldMacAddress != macAddress {
+				err := oc.syncNodeManagementPort(node)
+				if err != nil {
+					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
+				}
+			}
 			if !config.Gateway.NodeportEnable {
 				return
 			}
-			node := new.(*kapi.Node)
 			if !gatewaysHandled[node.Name] {
 				gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
 			}

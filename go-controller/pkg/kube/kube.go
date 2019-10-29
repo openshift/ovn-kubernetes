@@ -3,14 +3,18 @@ package kube
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"encoding/json"
 	"github.com/sirupsen/logrus"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 )
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -18,11 +22,15 @@ import (
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
+	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error
 	UpdateNodeStatus(node *kapi.Node) error
+	DeleteAnnotationOnNode(node *kapi.Node, key string) error
+	DeleteAnnotationsOnNode(node *kapi.Node, keys []string) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
 	GetPodsByLabels(namespace string, selector labels.Selector) (*kapi.PodList, error)
+	DeletePod(namespace, name string) error
 	GetNodes() (*kapi.NodeList, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
@@ -59,12 +67,82 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 	return err
 }
 
+// SetAnnotationsOnNode takes the node object and map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	logrus.Infof("Setting annotations %v on node %s", annotations, node.Name)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		logrus.Errorf("Error in setting annotations on node %s: %v", node.Name, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, patchData)
+	if err != nil {
+		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+	}
+	return err
+}
+
 // UpdateNodeStatus takes the node object and sets the provided update status
 func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	logrus.Infof("Updating status on node %s", node.Name)
 	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(node)
 	if err != nil {
 		logrus.Errorf("Error in updating status on node %s: %v", node.Name, err)
+	}
+	return err
+}
+
+// DeleteAnnotationOnNode takes the node object and annotation name to delete
+func (k *Kube) DeleteAnnotationOnNode(node *kapi.Node, key string) error {
+	return k.DeleteAnnotationsOnNode(node, []string{key})
+}
+
+// DeleteAnnotationsOnNode takes the node object and a list of annotation names to delete
+func (k *Kube) DeleteAnnotationsOnNode(node *kapi.Node, keys []string) error {
+	logrus.Infof("Deleting annotation %s on node %s", keys, node.Name)
+
+	var curNode *kapi.Node
+	err := retry.RetryOnConflict(
+		wait.Backoff{
+			Steps:    20,
+			Duration: 50 * time.Millisecond,
+			Jitter:   1.0,
+		},
+		func() error {
+			var err error
+			if curNode == nil {
+				// First time through just use passed-in node
+				curNode = node
+			} else {
+				// Subsequent times we need to re-fetch the node
+				// to get updates that caused the conflict
+				curNode, err = k.KClient.CoreV1().Nodes().Get(node.Name, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+			}
+
+			for _, key := range keys {
+				delete(curNode.Annotations, key)
+			}
+			if _, err := k.KClient.CoreV1().Nodes().Update(curNode); err != nil {
+				return err
+			}
+			return nil
+		})
+	if err != nil {
+		logrus.Errorf("Error deleting annotations %s on node %s: %v", keys, node.Name, err)
 	}
 	return err
 }
@@ -94,6 +172,11 @@ func (k *Kube) GetPodsByLabels(namespace string, selector labels.Selector) (*kap
 	options := metav1.ListOptions{}
 	options.LabelSelector = selector.String()
 	return k.KClient.CoreV1().Pods(namespace).List(options)
+}
+
+// DeletePod deletes a Pod from kubernetes apiserver given the namespace and name
+func (k *Kube) DeletePod(namespace, name string) error {
+	return k.KClient.CoreV1().Pods(namespace).Delete(name, nil)
 }
 
 // GetNodes returns the list of all Node objects from kubernetes
