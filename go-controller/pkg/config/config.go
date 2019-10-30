@@ -863,7 +863,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	// Logging setup
 	overrideFields(&Logging, &cfg.Logging)
 	overrideFields(&Logging, &cliConfig.Logging)
-	logrus.SetLevel(logrus.Level(Logging.Level))
+	logrus.SetLevel(logrus.Level(5))
 	if Logging.File != "" {
 		var file *os.File
 		if _, err = os.Stat(filepath.Dir(Logging.File)); os.IsNotExist(err) {
