@@ -7,6 +7,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -147,6 +148,16 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 		return fmt.Errorf("failed to flush ip address of %s (%v)",
 			localnetBridgeNextHop, err)
 	}
+
+	go func() {
+		stdout, stderr, err := util.RunIP("addr", "show", "dev", localnetBridgeNextHop)
+		if err != nil {
+			logrus.Info("####E %s: %s", time.Now(), stderr)
+		} else {
+			logrus.Info("##### %s: %s", time.Now(), stdout)
+		}
+		time.Sleep(1)
+	}()
 
 	// Set localnetBridgeNextHop with an IP address.
 	_, _, err = util.RunIP("addr", "add",
