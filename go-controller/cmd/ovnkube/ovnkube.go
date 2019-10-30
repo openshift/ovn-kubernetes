@@ -179,7 +179,7 @@ func runOvnKube(ctx *cli.Context) error {
 		panic(err.Error())
 	}
 
-	// create factory and start the controllers asked for
+	// create factory and start the controllers asked forddd
 	stopChan := make(chan struct{})
 	factory, err := factory.NewWatchFactory(clientset, stopChan)
 	if err != nil {
