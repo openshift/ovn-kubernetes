@@ -7,6 +7,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -141,13 +143,6 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 		return fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
 	}
 
-	// Flush IPv4 address of localnetBridgeNextHop.
-	_, _, err = util.RunIP("addr", "flush", "dev", localnetBridgeNextHop)
-	if err != nil {
-		return fmt.Errorf("failed to flush ip address of %s (%v)",
-			localnetBridgeNextHop, err)
-	}
-
 	// Set localnetBridgeNextHop with an IP address.
 	_, _, err = util.RunIP("addr", "add",
 		localnetGatewayNextHopSubnet,
@@ -156,6 +151,18 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 		return fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
 	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		for i := 0; i < 100; i++ {
+			stdout, _, _ := util.RunIP("addr", "show", "dev", localnetBridgeNextHop)
+			logrus.Infof("####### %s", stdout)
+			time.Sleep(1*time.Second)
+		}
+	}()
+	wg.Wait()
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName)
 	if err != nil {
