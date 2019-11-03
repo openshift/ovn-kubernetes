@@ -25,6 +25,9 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+RUN sed -i -e 's/enabled \?= \?0/enabled = 1/' /etc/yum.repos.d/*
+RUN ls /etc/yum.repos.d/*
+
 # install needed rpms - openvswitch must be 2.10.4 or higher
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
@@ -34,9 +37,9 @@ RUN yum install -y  \
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils openssl firewalld-filesystem \
 	libpcap  hostname iproute strace socat \
-	openvswitch2.11 openvswitch2.11-devel \
-	openvswitch2.11-ovn-common openvswitch2.11-ovn-central \
-	openvswitch2.11-ovn-host openvswitch2.11-ovn-vtep \
+	openvswitch2.12 openvswitch2.12-devel \
+	openvswitch2.12-ovn-common openvswitch2.12-ovn-central \
+	openvswitch2.12-ovn-host openvswitch2.12-ovn-vtep \
 	containernetworking-plugins \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
