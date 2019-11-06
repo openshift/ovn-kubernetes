@@ -33,10 +33,9 @@ RUN yum install -y  \
 
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils openssl firewalld-filesystem \
-	libpcap  hostname iproute strace socat \
+	libpcap  iproute strace \
 	openvswitch2.11 openvswitch2.11-devel \
-	openvswitch2.11-ovn-common openvswitch2.11-ovn-central \
-	openvswitch2.11-ovn-host openvswitch2.11-ovn-vtep \
+	ovn2.11 ovn2.11-central ovn2.11-host ovn2.11-vtep \
 	containernetworking-plugins \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
