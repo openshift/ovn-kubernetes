@@ -504,7 +504,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
+func (oc *Controller) WatchNodes() error {
 	var gatewaysFailed sync.Map
 	macAddressFailed := make(map[string]bool)
 	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
