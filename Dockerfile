@@ -34,13 +34,19 @@ RUN yum install -y  \
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils openssl firewalld-filesystem \
 	libpcap  hostname iproute strace socat \
-	openvswitch2.11 openvswitch2.11-devel \
-	openvswitch2.11-ovn-common openvswitch2.11-ovn-central \
-	openvswitch2.11-ovn-host openvswitch2.11-ovn-vtep \
-	containernetworking-plugins \
+	openvswitch2.12 openvswitch2.12-devel \
+	containernetworking-plugins yum-utils \
 	" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum clean all && rm -rf /var/cache/*
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS
+
+RUN INSTALL_PKGS=" \
+	ovn2.11 ovn2.11-central ovn2.11-host ovn2.11-vtep \
+	" && \
+	yumdownloader --enablerepo=rhel-fast-datapath-beta --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS
+
+RUN rpm -Uhv --force --nodeps ovn2.11*
+
+RUN yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /etc/cni/net.d && \
