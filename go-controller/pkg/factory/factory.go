@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"hash/fnv"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -56,11 +57,45 @@ func (h *Handler) kill() error {
 	return nil
 }
 
+type eventKind int
+
+const (
+	addEvent eventKind = iota
+	updateEvent
+	deleteEvent
+)
+
+type event struct {
+	obj    interface{}
+	oldObj interface{}
+	kind   eventKind
+}
+
 type informer struct {
 	sync.Mutex
 	oType    reflect.Type
 	inf      cache.SharedIndexInformer
 	handlers map[uint64]*Handler
+	events   []chan *event
+}
+
+func (i *informer) forEachQueuedHandler(obj interface{}, f func(h *Handler)) {
+	objType := reflect.TypeOf(obj)
+	if objType != i.oType {
+		logrus.Errorf("object type %v did not match expected %v", objType, i.oType)
+		return
+	}
+
+	i.Lock()
+	curHandlers := make([]*Handler, 0, len(i.handlers))
+	for _, handler := range i.handlers {
+		curHandlers = append(curHandlers, handler)
+	}
+	i.Unlock()
+
+	for _, handler := range curHandlers {
+		f(handler)
+	}
 }
 
 func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
@@ -116,6 +151,53 @@ func (i *informer) removeHandler(handler *Handler) error {
 	return nil
 }
 
+func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
+	for {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				return
+			}
+			switch e.kind {
+			case addEvent:
+				i.forEachQueuedHandler(e.obj, func(h *Handler) {
+					h.OnAdd(e.obj)
+				})
+			case updateEvent:
+				i.forEachQueuedHandler(e.obj, func(h *Handler) {
+					h.OnUpdate(e.oldObj, e.obj)
+				})
+			case deleteEvent:
+				i.forEachQueuedHandler(e.obj, func(h *Handler) {
+					h.OnDelete(e.obj)
+				})
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+func (i *informer) enqueueEvent(oldObj, obj interface{}, kind eventKind) {
+	meta, err := getObjectMeta(i.oType, obj)
+	if err != nil {
+		logrus.Errorf("object has no meta: %v", err)
+		return
+	}
+
+	// Distribute the object to an event queue based on a hash of its
+	// namespaced name, so that all events for a given object are
+	// serialized in one queue.
+	h := fnv.New32()
+	_, _ = h.Write([]byte(meta.Namespace + "/" + meta.Name))
+	queueIdx := h.Sum32() % uint32(numEventQueues)
+	i.events[queueIdx] <- &event{
+		obj:    obj,
+		oldObj: oldObj,
+		kind:   kind,
+	}
+}
+
 func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface{}, error) {
 	if expectedType == reflect.TypeOf(obj) {
 		return obj, nil
@@ -130,6 +212,28 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 		return nil, fmt.Errorf("expected tombstone object resource type %v but got %v", expectedType, objType)
 	}
 	return obj, nil
+}
+
+func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			logrus.Debugf("queueing %v ADD event", i.oType)
+			i.enqueueEvent(nil, obj, addEvent)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			logrus.Debugf("queueing %v UPDATE event", i.oType)
+			i.enqueueEvent(oldObj, newObj, updateEvent)
+		},
+		DeleteFunc: func(obj interface{}) {
+			realObj, err := ensureObjectOnDelete(obj, i.oType)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				return
+			}
+			logrus.Debugf("queueing %v DELETE event", i.oType)
+			i.enqueueEvent(nil, realObj, deleteEvent)
+		},
+	}
 }
 
 func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
@@ -157,6 +261,31 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 	}
 }
 
+func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
+	return &informer{
+		oType:    oType,
+		inf:      sharedInformer,
+		handlers: make(map[uint64]*Handler),
+	}
+}
+
+func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
+	i := newBaseInformer(oType, sharedInformer)
+	i.inf.AddEventHandler(i.newFederatedHandler())
+	return i
+}
+
+func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer, stopChan chan struct{}) *informer {
+	i := newBaseInformer(oType, sharedInformer)
+	i.events = make([]chan *event, numEventQueues)
+	for j := 0; j < numEventQueues; j++ {
+		i.events[j] = make(chan *event, 1)
+		go i.processEvents(i.events[j], stopChan)
+	}
+	i.inf.AddEventHandler(i.newFederatedQueuedHandler())
+	return i
+}
+
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
 	// Must be first member in the struct due to Golang ARM/x86 32-bit
@@ -171,15 +300,8 @@ const (
 	resyncInterval        = 12 * time.Hour
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
+	numEventQueues int    = 10
 )
-
-func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
-	return &informer{
-		oType:    oType,
-		inf:      sharedInformer,
-		handlers: make(map[uint64]*Handler),
-	}
-}
 
 var (
 	podType       reflect.Type = reflect.TypeOf(&kapi.Pod{})
@@ -203,16 +325,12 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	}
 
 	// Create shared informers we know we'll use
-	wf.informers[podType] = newInformer(podType, wf.iFactory.Core().V1().Pods().Informer())
+	wf.informers[podType] = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), stopChan)
 	wf.informers[serviceType] = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
 	wf.informers[endpointsType] = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
 	wf.informers[policyType] = newInformer(policyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
 	wf.informers[namespaceType] = newInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
-	wf.informers[nodeType] = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
-
-	for _, informer := range wf.informers {
-		informer.inf.AddEventHandler(informer.newFederatedHandler())
-	}
+	wf.informers[nodeType] = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), stopChan)
 
 	wf.iFactory.Start(stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(stopChan) {
