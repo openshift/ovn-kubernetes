@@ -36,6 +36,9 @@ const (
 	OvnNodeGatewayIP = "k8s.ovn.org/node-gateway-ip"
 	// OvnNodeGatewayNextHop is the Next Hop
 	OvnNodeGatewayNextHop = "k8s.ovn.org/node-gateway-next-hop"
+	// OvnServiceIdledAt is a constant string representing the Service annotation key
+	// whose value indicates the time stamp in RFC3339 format when a Service was idled
+	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
 )
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
