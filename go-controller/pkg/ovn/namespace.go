@@ -159,7 +159,8 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace) {
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
-	logrus.Debugf("Adding namespace: %s", ns.Name)
+	logrus.Infof("Adding namespace: %s", ns.Name)
+	defer logrus.Infof("DONE Adding namespace: %s", ns.Name)
 	oc.namespaceMutexMutex.Lock()
 	mutex, ok := oc.namespaceMutex[ns.Name]
 	if !ok {
@@ -201,7 +202,8 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
-	logrus.Debugf("Updating namespace: old %s new %s", old.Name, newer.Name)
+	logrus.Infof("Updating namespace: old %s new %s", old.Name, newer.Name)
+	defer logrus.Infof("DONE Updating namespace: old %s new %s", old.Name, newer.Name)
 
 	mutex := oc.getNamespaceLock(newer.Name)
 	if mutex == nil {
@@ -213,7 +215,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
-	logrus.Debugf("Deleting namespace: %+v", ns.Name)
+	logrus.Infof("Deleting namespace: %s", ns.Name)
+	defer logrus.Infof("DONE Deleting namespace: %s", ns.Name)
 	oc.namespaceMutexMutex.Lock()
 	defer oc.namespaceMutexMutex.Unlock()
 
