@@ -240,14 +240,14 @@ func (oc *Controller) deleteACLPortGroup(portGroupName,
 }
 
 func (oc *Controller) addToACL(portGroup, logicalPort string) error {
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.getLogicalPortInfo(logicalPort)
 	if err != nil {
 		return err
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", portGroup, "ports", logicalPortUUID, "--",
-		"add", "port_group", portGroup, "ports", logicalPortUUID)
+		"port_group", portGroup, "ports", portInfo.uuid, "--",
+		"add", "port_group", portGroup, "ports", portInfo.uuid)
 	if err != nil {
 		return fmt.Errorf("failed to add logicalPort %s to portGroup %s "+
 			"stderr: %q (%v)", logicalPort, portGroup, stderr, err)
@@ -256,13 +256,13 @@ func (oc *Controller) addToACL(portGroup, logicalPort string) error {
 }
 
 func (oc *Controller) deleteFromACL(portGroup, logicalPort string) error {
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.getLogicalPortInfo(logicalPort)
 	if err != nil {
 		return err
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", portGroup, "ports", logicalPortUUID)
+		"port_group", portGroup, "ports", portInfo.uuid)
 	if err != nil {
 		return fmt.Errorf("failed to delete logicalPort %s to portGroup %s "+
 			"stderr: %q (%v)", logicalPort, portGroup, stderr, err)
@@ -567,9 +567,9 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	// Get the logical port name.
+	// Get the logical port info
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.getLogicalPortInfo(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
@@ -582,7 +582,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	if np.localPods[logicalPort] {
+	if _, ok := np.localPods[logicalPort]; ok {
 		return
 	}
 
@@ -593,14 +593,14 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID, "--",
-		"add", "port_group", np.portGroupUUID, "ports", logicalPortUUID)
+		"port_group", np.portGroupUUID, "ports", portInfo.uuid, "--",
+		"add", "port_group", np.portGroupUUID, "ports", portInfo.uuid)
 	if err != nil {
 		logrus.Errorf("Failed to add logicalPort %s to portGroup %s "+
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
 	}
 
-	np.localPods[logicalPort] = true
+	np.localPods[logicalPort] = portInfo
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(
@@ -612,9 +612,9 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	// Get the logical port name.
+	// Get the logical port info
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.getLogicalPortInfo(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
@@ -627,21 +627,21 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	if !np.localPods[logicalPort] {
+	if _, ok := np.localPods[logicalPort]; !ok {
 		return
 	}
 	delete(np.localPods, logicalPort)
 	oc.localPodDelDefaultDeny(policy, logicalPort)
 
-	if logicalPortUUID == "" || np.portGroupUUID == "" {
+	if np.portGroupUUID == "" {
 		return
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID)
+		"port_group", np.portGroupUUID, "ports", portInfo.uuid)
 	if err != nil {
 		logrus.Errorf("Failed to delete logicalPort %s from portGroup %s "+
-			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
+			"stderr: %q (%v)", portInfo.uuid, np.portGroupUUID, stderr, err)
 	}
 }
 
@@ -726,7 +726,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	np.egressPolicies = make([]*gressPolicy, 0)
 	np.podHandlerList = make([]*factory.Handler, 0)
 	np.nsHandlerList = make([]*factory.Handler, 0)
-	np.localPods = make(map[string]bool)
+	np.localPods = make(map[string]*lpInfo)
 
 	// Create a port group for the policy. All the pods that this policy
 	// selects will be eventually added to this port group.

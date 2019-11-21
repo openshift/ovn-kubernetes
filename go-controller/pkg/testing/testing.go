@@ -1,11 +1,13 @@
 package testing
 
 import (
+	"fmt"
 	"strings"
 
 	kexec "k8s.io/utils/exec"
 	fakeexec "k8s.io/utils/exec/testing"
 
+	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 )
@@ -60,9 +62,13 @@ func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
 		parts := strings.Split(expected.Cmd, " ")
 		gomega.Expect(len(parts)).To(gomega.BeNumerically(">=", 2))
 
+		defer GinkgoRecover()
 		executedCommandline := cmd + " " + strings.Join(args, " ")
 		expectedCommandline := "/fake-bin/" + strings.Join(parts, " ")
 		// Expect the incoming 'args' to equal the fake/expected command 'parts'
+		if executedCommandline != expectedCommandline {
+			fmt.Printf("executed:\n    %q\n !=\n    %q\n", executedCommandline, expectedCommandline)
+		}
 		gomega.Expect(executedCommandline).To(gomega.Equal(expectedCommandline), "Called command doesn't match expected fake command")
 
 		return &fakeexec.FakeCmd{

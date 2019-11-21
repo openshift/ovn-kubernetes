@@ -527,17 +527,17 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	if _, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"]); err != nil {
+	if pod.Spec.NodeName == "" {
 		return
 	}
 
-	logicalSwitch := pod.Spec.NodeName
-	if logicalSwitch == "" {
-		return
-	}
-
-	// Get the logical port name.
+	// Get the logical port info
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	portInfo, err := oc.getLogicalPortInfo(logicalPort)
+	if err != nil {
+		logrus.Errorf(err.Error())
+		return
+	}
 
 	np.Lock()
 	defer np.Unlock()
@@ -546,22 +546,22 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 		return
 	}
 
-	if np.localPods[logicalPort] {
+	if _, ok := np.localPods[logicalPort]; ok {
 		return
 	}
 
-	oc.localPodAddDefaultDenyOld(policy, logicalPort, logicalSwitch)
+	oc.localPodAddDefaultDenyOld(policy, logicalPort, portInfo.logicalSwitch)
 
 	// For each ingress rule, add a ACL
 	for _, ingress := range np.ingressPolicies {
-		oc.localPodAddOrDelACLOld(addACL, policy, pod, ingress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(addACL, policy, pod, ingress, portInfo.logicalSwitch)
 	}
 	// For each egress rule, add a ACL
 	for _, egress := range np.egressPolicies {
-		oc.localPodAddOrDelACLOld(addACL, policy, pod, egress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(addACL, policy, pod, egress, portInfo.logicalSwitch)
 	}
 
-	np.localPods[logicalPort] = true
+	np.localPods[logicalPort] = portInfo
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFuncOld(
@@ -569,13 +569,17 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	logicalSwitch := pod.Spec.NodeName
-	if logicalSwitch == "" {
+	if pod.Spec.NodeName == "" {
 		return
 	}
 
-	// Get the logical port name.
+	// Get the logical port info
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	portInfo, err := oc.getLogicalPortInfo(logicalPort)
+	if err != nil {
+		logrus.Errorf(err.Error())
+		return
+	}
 
 	np.Lock()
 	defer np.Unlock()
@@ -584,19 +588,19 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 		return
 	}
 
-	if !np.localPods[logicalPort] {
+	if _, ok := np.localPods[logicalPort]; !ok {
 		return
 	}
 	delete(np.localPods, logicalPort)
-	oc.localPodDelDefaultDenyOld(policy, logicalPort, logicalSwitch)
+	oc.localPodDelDefaultDenyOld(policy, logicalPort, portInfo.logicalSwitch)
 
 	// For each ingress rule, remove the ACL
 	for _, ingress := range np.ingressPolicies {
-		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, ingress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, ingress, portInfo.logicalSwitch)
 	}
 	// For each egress rule, remove the ACL
 	for _, egress := range np.egressPolicies {
-		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, egress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, egress, portInfo.logicalSwitch)
 	}
 }
 
@@ -684,7 +688,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	np.egressPolicies = make([]*gressPolicy, 0)
 	np.podHandlerList = make([]*factory.Handler, 0)
 	np.nsHandlerList = make([]*factory.Handler, 0)
-	np.localPods = make(map[string]bool)
+	np.localPods = make(map[string]*lpInfo)
 
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
@@ -806,27 +810,6 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	oc.handleLocalPodSelectorOld(policy, np)
 }
 
-func (oc *Controller) getLogicalSwitchForLogicalPort(
-	logicalPort string) string {
-	if oc.logicalPortCache[logicalPort] != "" {
-		return oc.logicalPortCache[logicalPort]
-	}
-
-	logicalSwitch, stderr, err := util.RunOVNNbctl("get",
-		"logical_switch_port", logicalPort, "external-ids:logical_switch")
-	if err != nil {
-		logrus.Errorf("Error obtaining logical switch for %s, stderr: %q (%v)",
-			logicalPort, stderr, err)
-		return ""
-	}
-	if logicalSwitch == "" {
-		logrus.Errorf("Error obtaining logical switch for %s",
-			logicalPort)
-		return ""
-	}
-	return logicalSwitch
-}
-
 func (oc *Controller) deleteNetworkPolicyOld(
 	policy *knet.NetworkPolicy) {
 	logrus.Infof("Deleting network policy %s in namespace %s",
@@ -867,10 +850,8 @@ func (oc *Controller) deleteNetworkPolicyOld(
 	// We should now stop all the handlers go routines.
 	oc.shutdownHandlers(np)
 
-	for logicalPort := range np.localPods {
-		logicalSwitch := oc.getLogicalSwitchForLogicalPort(
-			logicalPort)
-		oc.localPodDelDefaultDenyOld(policy, logicalPort, logicalSwitch)
+	for _, portInfo := range np.localPods {
+		oc.localPodDelDefaultDenyOld(policy, portInfo.name, portInfo.logicalSwitch)
 	}
 	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
 

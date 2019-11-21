@@ -56,9 +56,10 @@ type pod struct {
 	podMAC     string
 	namespace  string
 	portName   string
+	portUUID   string
 }
 
-func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) (to pod) {
+func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace, portUUID string) (to pod) {
 	to = pod{
 		nodeName:   nodeName,
 		nodeSubnet: nodeSubnet,
@@ -69,6 +70,7 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 		podMAC:     podMAC,
 		namespace:  namespace,
 		portName:   namespace + "_" + podName,
+		portUUID:   portUUID,
 	}
 	return
 }
@@ -90,12 +92,14 @@ func (p pod) addNodeSetupCmds(fexec *ovntest.FakeExec) {
 func (p pod) addCmds(fexec *ovntest.FakeExec, exists, fail, gatewayCached bool) {
 	// pod setup
 	if exists {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lsp-add %s %s -- lsp-set-addresses %s %s %s -- set logical_switch_port %s external-ids:namespace=namespace external-ids:logical_switch=%s external-ids:pod=true -- --if-exists clear logical_switch_port %s dynamic_addresses", p.nodeName, p.portName, p.portName, p.podMAC, p.podIP, p.portName, p.nodeName, p.portName),
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --wait=sb -- --may-exist lsp-add %s %s -- lsp-set-addresses %s %s %s -- set logical_switch_port %s external-ids:namespace=namespace external-ids:logical_switch=%s external-ids:pod=true -- get logical_switch_port %s _uuid -- --if-exists clear logical_switch_port %s dynamic_addresses", p.nodeName, p.portName, p.portName, p.podMAC, p.podIP, p.portName, p.nodeName, p.portName, p.portName),
+			Output: p.portUUID + "\n",
 		})
 	} else {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --wait=sb -- --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:logical_switch=" + p.nodeName + " external-ids:pod=true",
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --wait=sb -- --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:logical_switch=" + p.nodeName + " external-ids:pod=true -- get logical_switch_port " + p.portName + " _uuid",
+			Output: p.portUUID + "\n",
 		})
 	}
 	if !gatewayCached {
@@ -179,6 +183,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
@@ -236,6 +241,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
@@ -287,6 +293,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
@@ -343,6 +350,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
@@ -396,6 +404,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
@@ -448,6 +457,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
@@ -482,6 +492,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
@@ -529,6 +540,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					"namespace",
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				fExec := ovntest.NewFakeExec()
