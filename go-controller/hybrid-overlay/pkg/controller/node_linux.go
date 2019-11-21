@@ -152,6 +152,10 @@ func (n *NodeController) syncPods(pods []interface{}) {
 
 // Start is the top level function to run hybrid-sdn in node mode
 func (n *NodeController) Start(wf *factory.WatchFactory) error {
+	if err := n.ensureHybridOverlayBridge(); err != nil {
+		return err
+	}
+
 	if err := n.startNodeWatch(wf); err != nil {
 		return err
 	}
@@ -228,11 +232,7 @@ func (n *NodeController) windowsNodeAddOrUpdate(node *kapi.Node) error {
 
 // Add handles node additions
 func (n *NodeController) Add(node *kapi.Node) {
-	if node.Name == n.nodeName {
-		if err := n.ensureHybridOverlayBridge(); err != nil {
-			logrus.Errorf(err.Error())
-		}
-	} else {
+	if node.Name != n.nodeName {
 		if err := n.windowsNodeAddOrUpdate(node); err != nil {
 			logrus.Warning(err)
 		}
@@ -271,16 +271,6 @@ func (n *NodeController) Delete(node *kapi.Node) {
 
 // Sync handles local node initialization and removing stale nodes on startup
 func (n *NodeController) Sync(nodes []*kapi.Node) {
-	// First ensure our local hybrid overlay is initialized
-	for _, node := range nodes {
-		if node.Name == n.nodeName {
-			if err := n.ensureHybridOverlayBridge(); err != nil {
-				logrus.Errorf(err.Error())
-			}
-			break
-		}
-	}
-
 	kubeNodes := make(map[string]bool)
 	for _, node := range nodes {
 		if houtil.IsWindowsNode(node) {
@@ -364,11 +354,9 @@ func getIPAsHexString(ip net.IP) string {
 }
 
 func (n *NodeController) ensureHybridOverlayBridge() error {
-	if n.subnet == nil {
-		var err error
-		if n.subnet, err = getLocalNodeSubnet(n.nodeName); err != nil {
-			return err
-		}
+	var err error
+	if n.subnet, err = getLocalNodeSubnet(n.nodeName); err != nil {
+		return err
 	}
 
 	portName := houtil.GetHybridOverlayPortName(n.nodeName)
