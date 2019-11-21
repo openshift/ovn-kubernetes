@@ -24,8 +24,8 @@ type namespacePolicy struct {
 	egressPolicies  []*gressPolicy
 	podHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
-	localPods       map[string]bool //pods effected by this policy
-	portGroupUUID   string          //uuid for OVN port_group
+	localPods       map[string]*lpInfo //pods effected by this policy
+	portGroupUUID   string             //uuid for OVN port_group
 	portGroupName   string
 	deleted         bool //deleted policy
 }

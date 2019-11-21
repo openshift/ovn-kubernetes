@@ -112,6 +112,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespaceT.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				tExec := ovntest.NewFakeExec()

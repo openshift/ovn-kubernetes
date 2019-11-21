@@ -34,6 +34,15 @@ type ServiceVIPKey struct {
 	protocol kapi.Protocol
 }
 
+type lpInfo struct {
+	name          string
+	uuid          string
+	logicalSwitch string
+	// removeTime marks the time after which this port should be removed
+	// from the cache
+	removeTime time.Time
+}
+
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
@@ -58,12 +67,9 @@ type Controller struct {
 	// A cache of all logical switches seen by the watcher
 	logicalSwitchCache map[string]bool
 
-	// A cache of all logical ports seen by the watcher and
-	// its corresponding logical switch
-	logicalPortCache map[string]string
-
-	// A cache of all logical ports and its corresponding uuids.
-	logicalPortUUIDCache map[string]string
+	// A cache of all logical ports known to the controller
+	logicalPortCache      map[string]*lpInfo
+	logicalPortCacheMutex sync.Mutex
 
 	// For each namespace, a map from pod IP address to logical port name
 	// for all pods in that namespace.
@@ -130,8 +136,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		watchFactory:             wf,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
 		logicalSwitchCache:       make(map[string]bool),
-		logicalPortCache:         make(map[string]string),
-		logicalPortUUIDCache:     make(map[string]string),
+		logicalPortCache:         make(map[string]*lpInfo),
 		namespaceAddressSet:      make(map[string]map[string]string),
 		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
 		namespaceMutex:           make(map[string]*sync.Mutex),
@@ -167,6 +172,8 @@ func (oc *Controller) Run(stopChan chan struct{}) error {
 			return err
 		}
 	}
+
+	go oc.startLogicalPortCacheCleaner(stopChan)
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		go oc.ovnControllerEventChecker(stopChan)

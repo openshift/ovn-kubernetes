@@ -68,10 +68,6 @@ func (n networkPolicy) addNamespaceSelectorCmdsForGress(fexec *ovntest.FakeExec,
 
 func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, pod pod) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists get logical_switch_port %s _uuid", pod.portName),
-		Output: fakeUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=ingressDefaultDeny",
 		Output: fakeUUID,
 	})
@@ -88,13 +84,13 @@ func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, pod pod) {
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid -- add port_group fake_uuid ports fake_uuid",
+		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID + " -- add port_group fake_uuid ports " + pod.portUUID,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid -- add port_group fake_uuid ports fake_uuid",
+		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID + " -- add port_group fake_uuid ports " + pod.portUUID,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid -- add port_group fake_uuid ports fake_uuid",
+		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID + " -- add port_group fake_uuid ports " + pod.portUUID,
 	})
 }
 
@@ -170,10 +166,10 @@ func (n networkPolicy) delCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy k
 	}
 	if withLocal {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid",
+			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid",
+			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID,
 		})
 	}
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -185,7 +181,7 @@ func (n networkPolicy) delCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy k
 	})
 }
 
-func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy knet.NetworkPolicy, withLocal bool) {
+func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy knet.NetworkPolicy, withLocal bool) {
 	for i := range networkPolicy.Spec.Ingress {
 		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i)
 		hashedLocalAddressSet := hashedAddressSet(localPeerPods)
@@ -202,13 +198,13 @@ func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy knet.Ne
 	}
 	if withLocal {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid",
+			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid",
+			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid",
+			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports " + pod.portUUID,
 		})
 	}
 }
@@ -323,6 +319,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -412,6 +409,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace2.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -516,6 +514,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -711,6 +710,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -777,7 +777,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.delCmds(fExec)
 				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-				npTest.delPodCmds(fExec, networkPolicy, true)
+				npTest.delPodCmds(fExec, nPodTest, networkPolicy, true)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -808,6 +808,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace2.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -886,7 +887,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.delCmds(fExec)
 				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-				npTest.delPodCmds(fExec, networkPolicy, false)
+				npTest.delPodCmds(fExec, nPodTest, networkPolicy, false)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -916,6 +917,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},

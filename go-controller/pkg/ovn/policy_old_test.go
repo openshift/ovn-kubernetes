@@ -391,6 +391,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -481,6 +482,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace2.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -586,6 +588,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -772,6 +775,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -869,6 +873,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace2.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
@@ -984,6 +989,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.4",
 					"11:22:33:44:55:66",
 					namespace1.Name,
+					"8a86f6d8-7972-4253-b0bd-ddbef66e9303",
 				)
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
