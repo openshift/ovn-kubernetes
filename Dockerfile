@@ -34,11 +34,11 @@ RUN yum install -y  \
 RUN INSTALL_PKGS=" \
 	PyYAML openssl firewalld-filesystem \
 	libpcap iproute strace \
-	openvswitch2.12 openvswitch2.12-devel \
+	openvswitch2.12-2.12.0 openvswitch2.12-devel-2.12.0 \
 	containernetworking-plugins yum-utils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yumdownloader ovn2.11 ovn2.11-central ovn2.11-host ovn2.11-vtep && \
+	yumdownloader ovn2.11-2.11.1 ovn2.11-central-2.11.1 ovn2.11-host-2.11.1 ovn2.11-vtep-2.11.1 && \
 	rpm -Uhv --force --nodeps ovn2.11* && rm -f *.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
