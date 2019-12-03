@@ -13,6 +13,7 @@ import (
 const (
 	// Annotation used to enable/disable multicast in the namespace
 	nsMulticastAnnotation = "k8s.ovn.org/multicast-enabled"
+	// Legacy annotation used to enable/disable multicast in the namespace
 	legacyMulticastAnnotation = "netnamespace.network.openshift.io/multicast-enabled"
 )
 

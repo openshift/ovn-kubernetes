@@ -260,7 +260,8 @@ func (ovn *Controller) handleExternalIPs(svc *kapi.Service, svcPort kapi.Service
 // service was idled.
 func keepEmptyLB(service *kapi.Service) bool {
 	_, ok := service.Annotations[OvnServiceIdledAt]
-	return config.Kubernetes.OVNEmptyLbEvents && ok
+	_, legacyOk := service.Annotations[LegacyServiceIdledAt]
+	return config.Kubernetes.OVNEmptyLbEvents && (ok || legacyOk)
 }
 
 func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {

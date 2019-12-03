@@ -27,6 +27,8 @@ const (
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
 	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
+	// LegacyServiceIdledAt is a previous version of OvnServiceIdledAt
+	LegacyServiceIdledAt = "idling.alpha.openshift.io/idled-at"
 	// OvnNodeGatewayMode is the mode of the gateway
 	OvnNodeGatewayMode = "k8s.ovn.org/node-gateway-mode"
 	// OvnNodeGatewayVlanID is the vlanid used by the gateway
