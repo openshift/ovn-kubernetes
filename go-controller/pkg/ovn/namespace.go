@@ -13,6 +13,7 @@ import (
 const (
 	// Annotation used to enable/disable multicast in the namespace
 	nsMulticastAnnotation = "k8s.ovn.org/multicast-enabled"
+	legacyMulticastAnnotation = "netnamespace.network.openshift.io/multicast-enabled"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
@@ -125,7 +126,8 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace) {
 		return
 	}
 
-	enabled := (ns.Annotations[nsMulticastAnnotation] == "true")
+	legacyEnabled := (ns.Annotations[legacyMulticastAnnotation] == "true")
+	enabled := (ns.Annotations[nsMulticastAnnotation] == "true") || legacyEnabled
 	enabledOld := oc.multicastEnabled[ns.Name]
 
 	if enabledOld == enabled {
