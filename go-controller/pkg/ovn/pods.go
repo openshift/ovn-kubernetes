@@ -105,25 +105,24 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 	}
 }
 
-func (oc *Controller) getLogicalPortUUID(logicalPort string) string {
+func (oc *Controller) getLogicalPortUUID(logicalPort string) (string, error) {
 	if oc.logicalPortUUIDCache[logicalPort] != "" {
-		return oc.logicalPortUUIDCache[logicalPort]
+		return oc.logicalPortUUIDCache[logicalPort], nil
 	}
 
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "get",
 		"logical_switch_port", logicalPort, "_uuid")
 	if err != nil {
-		logrus.Errorf("Error while getting uuid for logical_switch_port "+
+		return "", fmt.Errorf("Error while getting uuid for logical_switch_port "+
 			"%s, stderr: %q, err: %v", logicalPort, stderr, err)
-		return ""
 	}
 
 	if out == "" {
-		return out
+		return "", fmt.Errorf("empty uuid for logical_switch_port %s", logicalPort)
 	}
 
 	oc.logicalPortUUIDCache[logicalPort] = out
-	return oc.logicalPortUUIDCache[logicalPort]
+	return oc.logicalPortUUIDCache[logicalPort], nil
 }
 
 func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (*net.IPNet, error) {
