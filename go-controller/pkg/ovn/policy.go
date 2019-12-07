@@ -568,7 +568,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 	portInfo, err := oc.getLogicalPortInfo(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
@@ -613,7 +613,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 	portInfo, err := oc.getLogicalPortInfo(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
