@@ -162,7 +162,10 @@ func (p pod) delFromNamespaceCmds(fexec *ovntest.FakeExec, pod pod, isMulticastE
 }
 
 var _ = Describe("OVN Pod Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn FakeOVN
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -171,6 +174,12 @@ var _ = Describe("OVN Pod Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		fakeOvn = FakeOVN{}
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("during execution", func() {
@@ -196,7 +205,6 @@ var _ = Describe("OVN Pod Operations", func() {
 					Output: "\n",
 				})
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
 					Items: []v1.Pod{
 						*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -255,7 +263,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				fExec := ovntest.NewFakeExec()
 				t.baseCmds(fExec)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
 					Items: []v1.Pod{},
 				})
@@ -313,7 +320,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
 					Items: []v1.Pod{
 						*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -370,7 +376,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingFailedPod(fExec)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
 					Items: []v1.Pod{
 						*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -424,7 +429,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
 					Items: []v1.Pod{
 						*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -476,7 +480,6 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				t.delCmds(fExec)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec)
 				fakeOvn.controller.WatchPods()
 
@@ -511,7 +514,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
 					Items: []v1.Pod{
 						*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -559,7 +561,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
 					Items: []v1.Pod{
 						*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
