@@ -128,11 +128,11 @@ func (oc *Controller) getLogicalPortInfo(logicalPort string) (*lpInfo, error) {
 
 	// Some sanity checking
 	uuid := strings.TrimSpace(lines[0])
-	if strings.Index(uuid, "-") < 0 {
+	if !strings.Contains(uuid, "-") {
 		return nil, fmt.Errorf("unexpected logical switch port %s UUID %q", logicalPort, lines[0])
 	}
 	ls := strings.TrimSpace(lines[1])
-	if strings.Index(ls, `"`) < 0 {
+	if !strings.Contains(ls, `"`) {
 		return nil, fmt.Errorf("unexpected logical switch port %s switch %q", logicalPort, lines[1])
 	}
 
@@ -305,7 +305,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	uuid := out
-	if strings.Index(uuid, "-") < 0 {
+	if !strings.Contains(uuid, "-") {
 		return fmt.Errorf("invalid logical port %s uuid %q", portName, out)
 	}
 	oc.logicalPortCacheMutex.Lock()
