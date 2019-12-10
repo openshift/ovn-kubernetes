@@ -1,0 +1,22 @@
+# This Dockerfile builds an image containing the Windows ovn binaries
+# layered on top of the Linux ovn-kubernetes image.
+FROM openshift/origin-release:golang-1.12 AS builder
+
+WORKDIR /go-controller
+COPY go-controller/ .
+
+# build the binaries
+RUN CGO_ENABLED=0 make windows
+
+FROM openshift/origin-ovn-kubernetes
+
+COPY --from=builder /go-controller/_output/go/bin/windows/ovnkube.exe /usr/share/openshift/windows/
+COPY --from=builder /go-controller/_output/go/bin/windows/hybrid-overlay.exe /usr/share/openshift/windows/
+COPY --from=builder /go-controller/_output/go/bin/windows/ovn-k8s-cni-overlay.exe /usr/share/openshift/windows/
+
+LABEL io.k8s.display-name="ovn kubernetes" \
+      io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
+      summary="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
+      io.openshift.tags="openshift" \
+      maintainer="Phil Cameron <pcameron@redhat.com>"
+
