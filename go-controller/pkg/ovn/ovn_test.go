@@ -20,6 +20,7 @@ type FakeOVN struct {
 	fakeClient *fake.Clientset
 	watcher    *factory.WatchFactory
 	controller *Controller
+	stopChan   chan struct{}
 }
 
 func (o *FakeOVN) start(ctx *cli.Context, fexec *ovntest.FakeExec, objects ...runtime.Object) {
@@ -34,14 +35,19 @@ func (o *FakeOVN) start(ctx *cli.Context, fexec *ovntest.FakeExec, objects ...ru
 }
 
 func (o *FakeOVN) restart() {
-	o.watcher.Shutdown()
+	o.shutdown()
 	o.init()
+}
+
+func (o *FakeOVN) shutdown() {
+	close(o.stopChan)
 }
 
 func (o *FakeOVN) init() {
 	var err error
 
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, make(chan struct{}))
+	o.stopChan = make(chan struct{})
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.stopChan)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.controller = NewOvnController(o.fakeClient, o.watcher, nil)

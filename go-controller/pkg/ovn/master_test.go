@@ -234,7 +234,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, nil)
 			Expect(clusterController).NotTo(BeNil())
@@ -308,7 +308,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, nil)
 			Expect(clusterController).NotTo(BeNil())
@@ -459,7 +459,7 @@ subnet=%s
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, nil)
 			Expect(clusterController).NotTo(BeNil())
@@ -685,7 +685,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer wf.Shutdown()
+			defer close(stop)
 
 			clusterController := NewOvnController(fakeClient, wf, nil)
 			Expect(clusterController).NotTo(BeNil())
@@ -905,7 +905,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer wf.Shutdown()
+			defer close(stop)
 
 			clusterController := NewOvnController(fakeClient, wf, nil)
 			Expect(clusterController).NotTo(BeNil())
