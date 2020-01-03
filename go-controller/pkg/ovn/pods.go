@@ -224,7 +224,7 @@ func (oc *Controller) startLogicalPortCacheCleaner(stopChan <-chan struct{}) {
 		case <-time.After(10 * time.Second):
 			oc.logicalPortCacheMutex.Lock()
 			for logicalPort, lp := range oc.logicalPortCache {
-				if time.Now().After(lp.removeTime) {
+				if !lp.removeTime.IsZero() && time.Now().After(lp.removeTime) {
 					logrus.Warningf("#################### deleteLogicalPort() %s delete from cache", logicalPort)
 					delete(oc.logicalPortCache, logicalPort)
 				}
