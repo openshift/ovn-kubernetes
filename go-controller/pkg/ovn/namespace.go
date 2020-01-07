@@ -210,17 +210,11 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	logrus.Infof("@@@@@@@ Updating namespace: old %s new %s", old.Name, newer.Name)
 
-	// A big fat lock per namespace to prevent race conditions
-	// with namespace resources like address sets and deny acls.
-	oc.namespaceMutexMutex.Lock()
-	defer oc.namespaceMutexMutex.Unlock()
-
-	mutex, ok := oc.namespaceMutex[newer.Name]
-	if !ok {
+	mutex := oc.getNamespaceLock(newer.Name)
+	if mutex == nil {
 		logrus.Infof("@@@@@@@ Updating namespace %s: already deleted!", newer.Name)
 		return
 	}
-	mutex.Lock()
 	defer mutex.Unlock()
 
 	oc.multicastUpdateNamespace(newer)
@@ -228,15 +222,12 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	logrus.Infof("@@@@@@@ Deleting namespace: %s", ns.Name)
-	oc.namespaceMutexMutex.Lock()
-	defer oc.namespaceMutexMutex.Unlock()
 
-	mutex, ok := oc.namespaceMutex[ns.Name]
-	if !ok {
+	mutex := oc.getNamespaceLock(ns.Name)
+	if mutex == nil {
 		logrus.Infof("@@@@@@@ Deleting namespace %s: already deleted!", ns.Name)
 		return
 	}
-	mutex.Lock()
 	defer mutex.Unlock()
 
 	oc.deleteAddressSet(hashedAddressSet(ns.Name))
