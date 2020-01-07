@@ -717,18 +717,18 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 
 	if oc.namespacePolicies[policy.Namespace] != nil &&
 		oc.namespacePolicies[policy.Namespace][policy.Name] != nil {
-		logrus.Debugf("%s policy already exists", npdesc(policy))
+		logrus.Infof("%s policy already exists", npdesc(policy))
 		return
 	}
 
-	logrus.Debugf("%s waiting for namespace event", npdesc(policy))
+	logrus.Infof("%s waiting for namespace event", npdesc(policy))
 	err := oc.waitForNamespaceEvent(policy.Namespace)
 	if err != nil {
 		logrus.Errorf("failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
 		return
 	}
-	logrus.Debugf("%s DONE waiting for namespace event", npdesc(policy))
+	logrus.Infof("%s DONE waiting for namespace event", npdesc(policy))
 
 	np := &namespacePolicy{}
 	np.name = policy.Name
@@ -755,7 +755,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
 	for i, ingressJSON := range policy.Spec.Ingress {
-		logrus.Debugf("Network policy ingress is %+v", ingressJSON)
+		logrus.Infof("Network policy ingress is %+v", ingressJSON)
 
 		ingress := newGressPolicy(knet.PolicyTypeIngress, i)
 
@@ -816,7 +816,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	// Go through each egress rule.  For each egress rule, create an
 	// addressSet for the peer pods.
 	for i, egressJSON := range policy.Spec.Egress {
-		logrus.Debugf("Network policy egress is %+v", egressJSON)
+		logrus.Infof("Network policy egress is %+v", egressJSON)
 
 		egress := newGressPolicy(knet.PolicyTypeEgress, i)
 
@@ -880,7 +880,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	// effects, add them to the port group.
 	oc.handleLocalPodSelector(policy, np)
 
-	logrus.Debugf("%s DONE adding", npdesc(policy))
+	logrus.Infof("%s DONE adding", npdesc(policy))
 }
 
 func (oc *Controller) deleteNetworkPolicyPortGroup(

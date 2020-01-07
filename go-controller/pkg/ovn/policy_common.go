@@ -259,17 +259,17 @@ func (oc *Controller) handlePeerPodSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
-				logrus.Debugf("#### [%s/%s] PP add pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
+				logrus.Infof("#### [%s/%s] PP add pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
 				oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
-				logrus.Debugf("#### [%s/%s] PP delete pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
+				logrus.Infof("#### [%s/%s] PP delete pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
 				oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				pod := newObj.(*kapi.Pod)
-				logrus.Debugf("#### [%s/%s] PP update pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
+				logrus.Infof("#### [%s/%s] PP update pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
 				oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
 			},
 		}, nil)
@@ -288,7 +288,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				logrus.Debugf("%s NAP add matching namespace %s", npdesc(policy), namespace.Name)
+				logrus.Infof("%s NAP add matching namespace %s", npdesc(policy), namespace.Name)
 				np.Lock()
 				alreadyDeleted := np.deleted
 				np.Unlock()
@@ -303,18 +303,18 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 					cache.ResourceEventHandlerFuncs{
 						AddFunc: func(obj interface{}) {
 							pod := obj.(*kapi.Pod)
-							logrus.Debugf("#### [%s/%s] add pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
+							logrus.Infof("#### [%s/%s] add pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
 							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, obj)
 						},
 						DeleteFunc: func(obj interface{}) {
 							pod := obj.(*kapi.Pod)
-							logrus.Debugf("#### [%s/%s] delete pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
+							logrus.Infof("#### [%s/%s] delete pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
 							oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
 							oc.handlePeerPodSelectorDeleteACLRules(obj, gress)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
 							pod := newObj.(*kapi.Pod)
-							logrus.Debugf("#### [%s/%s] update pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
+							logrus.Infof("#### [%s/%s] update pod matches NP %s/%s", pod.Namespace, pod.Name, policy.Namespace, policy.Name)
 							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
 						},
 					}, nil)
@@ -332,11 +332,11 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 			},
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				logrus.Debugf("%s NAP delete matching namespace %s", npdesc(policy), namespace.Name)
+				logrus.Infof("%s NAP delete matching namespace %s", npdesc(policy), namespace.Name)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				namespace := newObj.(*kapi.Namespace)
-				logrus.Debugf("%s NAP update matching namespace %s", npdesc(policy), namespace.Name)
+				logrus.Infof("%s NAP update matching namespace %s", npdesc(policy), namespace.Name)
 			},
 		}, nil)
 	if err != nil {
@@ -360,7 +360,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				logrus.Debugf("%s NP add matching namespace %s", npdesc(policy), namespace.Name)
+				logrus.Infof("%s NP add matching namespace %s", npdesc(policy), namespace.Name)
 				np.Lock()
 				defer np.Unlock()
 				if np.deleted {
@@ -374,7 +374,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			},
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				logrus.Debugf("%s NP delete matching namespace %s", npdesc(policy), namespace.Name)
+				logrus.Infof("%s NP delete matching namespace %s", npdesc(policy), namespace.Name)
 				np.Lock()
 				defer np.Unlock()
 				if np.deleted {
@@ -388,7 +388,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				namespace := newObj.(*kapi.Namespace)
-				logrus.Debugf("%s NP update matching namespace %s", npdesc(policy), namespace.Name)
+				logrus.Infof("%s NP update matching namespace %s", npdesc(policy), namespace.Name)
 			},
 		}, nil)
 	if err != nil {
