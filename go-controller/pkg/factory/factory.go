@@ -325,7 +325,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	}
 
 	// Create shared informers we know we'll use
-	wf.informers[podType] = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), stopChan)
+	wf.informers[podType] = newInformer(podType, wf.iFactory.Core().V1().Pods().Informer())
 	wf.informers[serviceType] = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
 	wf.informers[endpointsType] = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
 	wf.informers[policyType] = newInformer(policyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
