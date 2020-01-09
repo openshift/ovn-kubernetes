@@ -16,7 +16,15 @@ COPY go-controller/ .
 
 # build the binaries
 RUN CGO_ENABLED=0 make
-RUN CGO_ENABLED=0 make windows
+
+# only build windows on supported platforms
+# otherwise create a dummy windows binary to allow subsequent COPY to still work
+RUN if [[ $(arch) =~ ^(x86_64|i386)$ ]]; then \
+      CGO_ENABLED=0 make windows; \
+    else \
+      mkdir -p /go-controller/_output/go/bin/windows/ && \
+      touch /go-controller/_output/go/bin/windows/hybrid-overlay-noop; \
+    fi
 
 FROM openshift/origin-cli AS cli
 
@@ -52,7 +60,11 @@ RUN mkdir -p /var/run/openvswitch && \
 COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
-COPY --from=builder /go-controller/_output/go/bin/windows/hybrid-overlay /root/windows/
+COPY --from=builder /go-controller/_output/go/bin/windows/hybrid-overlay* /root/windows/
+
+RUN if [[ ! $(arch) =~ ^(x86_64|i386)$ ]]; then \
+      rm -rf /root/windows; \
+    fi
 
 COPY --from=cli /usr/bin/oc /usr/bin/
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
