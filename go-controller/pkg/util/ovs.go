@@ -312,9 +312,10 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 			fmt.Sprintf("--private-key=%s", config.OvnNorth.PrivKey),
 			fmt.Sprintf("--certificate=%s", config.OvnNorth.Cert),
 			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnNorth.CACert),
-			fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()))
+			fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()),
+			"--no-leader-only")
 	} else if config.OvnNorth.Scheme == config.OvnDBSchemeTCP {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()), "--no-leader-only")
 	}
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 	cmdArgs = append(cmdArgs, args...)
@@ -362,10 +363,12 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 			fmt.Sprintf("--certificate=%s", config.OvnSouth.Cert),
 			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnSouth.CACert),
 			fmt.Sprintf("--db=%s", config.OvnSouth.GetURL()),
+			"--no-leader-only",
 		}
 	} else if config.OvnSouth.Scheme == config.OvnDBSchemeTCP {
 		cmdArgs = []string{
 			fmt.Sprintf("--db=%s", config.OvnSouth.GetURL()),
+			"--no-leader-only",
 		}
 	}
 
