@@ -245,6 +245,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return err
 	}
 
+	start2 := time.Now()
+	logrus.Infof("[%s/%s] addLogicalPort after wait LS %v", pod.Namespace, pod.Name, time.Since(start))
+
 	portName := podLogicalPortName(pod)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
@@ -282,12 +285,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		}
 	}
 
+	start3 := time.Now()
+	logrus.Infof("[%s/%s] addLogicalPort after lsp-add %v [+%v since wait LS]", pod.Namespace, pod.Name, time.Since(start), time.Since(start2))
+
 	oc.logicalPortCache[portName] = logicalSwitch
 
 	gatewayIP, err := oc.getGatewayFromSwitch(logicalSwitch)
 	if err != nil {
 		return fmt.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
 	}
+
+	start4 := time.Now()
+	logrus.Infof("[%s/%s] addLogicalPort after get gateway %v [+%v since lsp-add]", pod.Namespace, pod.Name, time.Since(start), time.Since(start3))
 
 	var podMac net.HardwareAddr
 	var podIP net.IP
@@ -308,6 +317,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			"stdout: %q, stderr: %q, (%v)", portName, out, stderr, err)
 	}
 
+	start5 := time.Now()
+	logrus.Infof("[%s/%s] addLogicalPort after wait addrs %v [+%v since get gateway]", pod.Namespace, pod.Name, time.Since(start), time.Since(start4))
+
 	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIP.Mask}
 
 	// now set the port security for the logical switch port
@@ -317,6 +329,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("error while setting port security for logical port %s "+
 			"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 	}
+
+	start6 := time.Now()
+	logrus.Infof("[%s/%s] addLogicalPort after port-sec %v [+%v since wait addrs]", pod.Namespace, pod.Name, time.Since(start), time.Since(start5))
 
 	routes := []util.PodRoute{}
 	if gatewayIP != nil && len(oc.hybridOverlayClusterSubnets) > 0 {
@@ -344,6 +359,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	oc.addPodToNamespace(pod.Namespace, podIP, portName)
 
+	start7 := time.Now()
+	logrus.Infof("[%s/%s] addLogicalPort after addToNamespace %v [+%v since port-sec]", pod.Namespace, pod.Name, time.Since(start), time.Since(start6))
+
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
 		podCIDR, podMac, gatewayIP, marshalledAnnotation)
 	err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation)
@@ -351,11 +369,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("failed to set annotation on pod %s - %v", pod.Name, err)
 	}
 
+	start8 := time.Now()
+	logrus.Infof("[%s/%s] addLogicalPort after set annotations %v [+%v since addToNamespace]", pod.Namespace, pod.Name, time.Since(start), time.Since(start7))
+
 	// If we're setting the annotation for the first time, observe the creation
 	// latency metric.
 	if !annotationsSet {
 		recordPodCreated(pod)
 	}
 
+	logrus.Infof("[%s/%s] addLogicalPort after recordPodCreated %v [+%v since set annotations]", pod.Namespace, pod.Name, time.Since(start), time.Since(start8))
 	return nil
 }
