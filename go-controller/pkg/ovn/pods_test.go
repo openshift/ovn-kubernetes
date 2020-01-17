@@ -99,7 +99,7 @@ func (p pod) addCmds(fexec *ovntest.FakeExec, exists, fail, gatewayCached bool) 
 		})
 	} else {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --wait=sb -- --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:logical_switch=" + p.nodeName + " external-ids:pod=true",
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:logical_switch=" + p.nodeName + " external-ids:pod=true",
 		})
 	}
 	if !gatewayCached {
@@ -133,7 +133,13 @@ func (p pod) addCmdsForNonExistingPodGatewayCached(fexec *ovntest.FakeExec) {
 }
 
 func (p pod) addCmdsForExistingPod(fexec *ovntest.FakeExec) {
-	p.addCmds(fexec, true, false, false)
+	// pod setup
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lsp-add %s %s -- lsp-set-addresses %s %s %s -- set logical_switch_port %s external-ids:namespace=namespace external-ids:logical_switch=%s external-ids:pod=true -- --if-exists clear logical_switch_port %s dynamic_addresses", p.nodeName, p.portName, p.portName, p.podMAC, p.podIP, p.portName, p.nodeName, p.portName),
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP + "/24",
+	})
 }
 
 func (p pod) addCmdsForNonExistingFailedPod(fexec *ovntest.FakeExec) {
