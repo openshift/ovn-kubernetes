@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -459,19 +460,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
 	// subnet since we set it aside for the management port on that node.
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
-
-	nodeLRPMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
-	if err != nil {
-		logrus.Errorf("Failed to get logical router port,stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if nodeLRPMac == "" {
-		nodeLRPMac = util.GenerateMac()
-	}
-
+	nodeLRPMac := util.IPAddrToHWAddr(firstIP.IP)
 	clusterRouter := util.GetK8sClusterRouter()
+
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
 		nodeLRPMac, firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
@@ -601,7 +594,7 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
 }
 
 func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
-	oc.clearInitialNodeNetworkUnavailableCondition(node)
+	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 
 	hostsubnet, _ = ParseNodeHostSubnet(node)
 	if hostsubnet != nil {
@@ -702,8 +695,16 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet *net.IPNet) error {
 // TODO: make upstream kubelet more flexible with overlays and GCE so this
 // condition doesn't get added for network plugins that don't want it, and then
 // we can remove this function.
-func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
-	// Informer cache should not be mutated, so get a copy of the object
+func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newNode *kapi.Node) {
+	// If it is not a Cloud Provider node, then nothing to do.
+	if origNode.Spec.ProviderID == "" {
+		return
+	}
+	// if newNode is not nil, then we are called from UpdateFunc()
+	if newNode != nil && reflect.DeepEqual(origNode.Status.Conditions, newNode.Status.Conditions) {
+		return
+	}
+
 	cleared := false
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
@@ -712,7 +713,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi
 		if err != nil {
 			return err
 		}
-
+		// Informer cache should not be mutated, so get a copy of the object
 		node := oldNode.DeepCopy()
 
 		for i := range node.Status.Conditions {
