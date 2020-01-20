@@ -93,6 +93,9 @@ type Controller struct {
 	// to add a egress deny rule.
 	lspEgressDenyCache map[string]int
 
+	// A cache of all the windows nodes on the network
+	windowsNodeCache map[string]bool
+
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
 
@@ -142,6 +145,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		namespaceMutexMutex:         sync.Mutex{},
 		lspIngressDenyCache:         make(map[string]int),
 		lspEgressDenyCache:          make(map[string]int),
+		windowsNodeCache:            make(map[string]bool),
 		lspMutex:                    &sync.Mutex{},
 		lsMutex:                     &sync.Mutex{},
 		gatewayCache:                make(map[string]string),
@@ -341,6 +345,13 @@ func podScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
 }
 
+func (oc *Controller) isWindowsNode(nodeName string) bool {
+	if _, exists := oc.windowsNodeCache[nodeName]; exists {
+		return true
+	}
+	return false
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
 	var retryPods sync.Map
@@ -348,6 +359,9 @@ func (oc *Controller) WatchPods() error {
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
+				return
+			}
+			if oc.isWindowsNode(pod.Spec.NodeName) {
 				return
 			}
 
@@ -366,6 +380,9 @@ func (oc *Controller) WatchPods() error {
 			if !podWantsNetwork(pod) {
 				return
 			}
+			if oc.isWindowsNode(pod.Spec.NodeName) {
+				return
+			}
 
 			_, retry := retryPods.Load(pod.UID)
 			if podScheduled(pod) && retry {
@@ -378,6 +395,9 @@ func (oc *Controller) WatchPods() error {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			if oc.isWindowsNode(pod.Spec.NodeName) {
+				return
+			}
 			oc.deleteLogicalPort(pod)
 			retryPods.Delete(pod.UID)
 		},
@@ -511,12 +531,15 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
+			if node.Status.NodeInfo.OperatingSystem == "windows" {
+				oc.windowsNodeCache[node.Name] = true
+				return
+			}
 			hostSubnet, err := oc.addNode(node)
 			if err != nil {
 				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
 				return
 			}
-
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
 				macAddressFailed[node.Name] = true
@@ -532,6 +555,11 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
 			logrus.Debugf("Updated event for Node %q", node.Name)
+			if _, exist := oc.windowsNodeCache[node.Name]; exist && node.Name != oldNode.Name {
+				delete(oc.windowsNodeCache, node.Name)
+				oc.windowsNodeCache[node.Name] = true
+				return
+			}
 			if macAddressFailed[node.Name] || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
@@ -560,6 +588,10 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 			logrus.Debugf("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
+			if _, exists := oc.windowsNodeCache[node.Name]; exists {
+				delete(oc.windowsNodeCache, node.Name)
+				return
+			}
 			nodeSubnet, _ := ParseNodeHostSubnet(node)
 			err := oc.deleteNode(node.Name, nodeSubnet)
 			if err != nil {
