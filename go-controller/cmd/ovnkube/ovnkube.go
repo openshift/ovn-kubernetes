@@ -252,7 +252,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 		// run the HA master controller to init the master
 		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan,
-			hybridOverlayClusterSubnets, nil)
+			hybridOverlayClusterSubnets)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
 			return err
 		}
