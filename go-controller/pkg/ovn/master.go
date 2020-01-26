@@ -506,14 +506,21 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 			excludeIPs += ".." + thirdIP.String()
 		}
 	}
-
 	// Create a logical switch and set its subnet.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-		excludeIPs,
-		"external-ids:gateway_ip="+firstIP.String())
+	var stdout string
+	if config.IPv6Mode {
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
+			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String())
+	} else {
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
+			"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
+			excludeIPs,
+			"external-ids:gateway_ip="+firstIP.String())
+	}
+
 	if err != nil {
-		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		logrus.Errorf("Failed to create a logical switch %v for ipv6 mode: %v, stdout: %q, stderr: %q, error: %v",
+			nodeName, config.IPv6Mode, stdout, stderr, err)
 		return err
 	}
 
@@ -578,6 +585,24 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		logrus.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
 	}
+
+	// Add the node to the logical switch cache
+	oc.lsMutex.Lock()
+	defer oc.lsMutex.Unlock()
+	if existing, ok := oc.logicalSwitchCache[nodeName]; ok {
+		if !reflect.DeepEqual(existing, hostsubnet) {
+			logrus.Warningf("Node %q logical switch already in cache with subnet %v; replacing with %v", nodeName, existing, hostsubnet)
+			if err := addAllowACLFromNode(nodeName, hostsubnet.IP.String()); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := addAllowACLFromNode(nodeName, hostsubnet.IP.String()); err != nil {
+			return err
+		}
+	}
+
+	oc.logicalSwitchCache[nodeName] = hostsubnet
 
 	return nil
 }
