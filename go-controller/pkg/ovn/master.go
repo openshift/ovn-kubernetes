@@ -570,9 +570,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// Add the node to the logical switch cache
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
-	if oc.logicalSwitchCache[nodeName] != nil {
-		oc.logicalSwitchCache[nodeName] = hostsubnet
+	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostsubnet) {
+		logrus.Warningf("Node %q logical switch already in cache with subnet %v; replacing with %v", nodeName, existing, hostsubnet)
 	}
+	oc.logicalSwitchCache[nodeName] = hostsubnet
 
 	return nil
 }
