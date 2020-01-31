@@ -58,12 +58,8 @@ type Controller struct {
 	// A cache of all logical switches seen by the watcher and their subnets
 	logicalSwitchCache map[string]*net.IPNet
 
-	// A cache of all logical ports seen by the watcher and
-	// its corresponding logical switch
-	logicalPortCache map[string]string
-
-	// A cache of all logical ports and its corresponding uuids.
-	logicalPortUUIDCache map[string]string
+	// A cache of all logical ports known to the controller
+	logicalPortCache *portCache
 
 	// For each namespace, a map from pod IP address to logical port name
 	// for all pods in that namespace.
@@ -126,14 +122,13 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}, hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *Controller {
 	return &Controller{
 		kube:                        &kube.Kube{KClient: kubeClient},
 		watchFactory:                wf,
 		masterSubnetAllocator:       allocator.NewSubnetAllocator(),
 		logicalSwitchCache:          make(map[string]*net.IPNet),
-		logicalPortCache:            make(map[string]string),
-		logicalPortUUIDCache:        make(map[string]string),
+		logicalPortCache:            newPortCache(stopChan),
 		namespaceAddressSet:         make(map[string]map[string]string),
 		namespacePolicies:           make(map[string]map[string]*namespacePolicy),
 		namespaceMutex:              make(map[string]*sync.Mutex),

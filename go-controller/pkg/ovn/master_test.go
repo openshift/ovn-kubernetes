@@ -234,7 +234,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			clusterController := NewOvnController(fakeClient, f, nil)
+			clusterController := NewOvnController(fakeClient, f, stopChan, nil)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -308,7 +308,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			clusterController := NewOvnController(fakeClient, f, nil)
+			clusterController := NewOvnController(fakeClient, f, stopChan, nil)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -465,7 +465,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			clusterController := NewOvnController(fakeClient, f, nil)
+			clusterController := NewOvnController(fakeClient, f, stopChan, nil)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -695,7 +695,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stop)
 
-			clusterController := NewOvnController(fakeClient, wf, nil)
+			clusterController := NewOvnController(fakeClient, wf, stop, nil)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -914,7 +914,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stop)
 
-			clusterController := NewOvnController(fakeClient, wf, nil)
+			clusterController := NewOvnController(fakeClient, wf, stop, nil)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID

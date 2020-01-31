@@ -47,7 +47,7 @@ func NewHAMasterController(kubeClient kubernetes.Interface, wf *factory.WatchFac
 	nodeName string, stopChan chan struct{},
 	hybridOverlayClusterSubnets []config.CIDRNetworkEntry,
 	nodeSelector *metav1.LabelSelector) *HAMasterController {
-	ovnController := NewOvnController(kubeClient, wf, hybridOverlayClusterSubnets)
+	ovnController := NewOvnController(kubeClient, wf, stopChan, hybridOverlayClusterSubnets)
 	return &HAMasterController{
 		kubeClient:      kubeClient,
 		ovnController:   ovnController,
