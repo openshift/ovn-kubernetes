@@ -46,7 +46,6 @@ type Controller struct {
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
 
-	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[string]string
@@ -56,8 +55,8 @@ type Controller struct {
 	loadbalancerGWCache map[string]string
 	defGatewayRouter    string
 
-	// A cache of all logical switches seen by the watcher
-	logicalSwitchCache map[string]bool
+	// A cache of all logical switches seen by the watcher and their subnets
+	logicalSwitchCache map[string]*net.IPNet
 
 	// A cache of all logical ports seen by the watcher and
 	// its corresponding logical switch
@@ -96,8 +95,7 @@ type Controller struct {
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
 
-	// A mutex for gatewayCache and logicalSwitchCache which holds
-	// logicalSwitch information
+	// A mutex for logicalSwitchCache which holds logicalSwitch information
 	lsMutex *sync.Mutex
 
 	// Per namespace multicast enabled?
@@ -133,7 +131,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		kube:                        &kube.Kube{KClient: kubeClient},
 		watchFactory:                wf,
 		masterSubnetAllocator:       allocator.NewSubnetAllocator(),
-		logicalSwitchCache:          make(map[string]bool),
+		logicalSwitchCache:          make(map[string]*net.IPNet),
 		logicalPortCache:            make(map[string]string),
 		logicalPortUUIDCache:        make(map[string]string),
 		namespaceAddressSet:         make(map[string]map[string]string),
@@ -144,7 +142,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspEgressDenyCache:          make(map[string]int),
 		lspMutex:                    &sync.Mutex{},
 		lsMutex:                     &sync.Mutex{},
-		gatewayCache:                make(map[string]string),
 		loadbalancerClusterCache:    make(map[string]string),
 		loadbalancerGWCache:         make(map[string]string),
 		multicastEnabled:            make(map[string]bool),
@@ -566,7 +563,6 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 				logrus.Error(err)
 			}
 			oc.lsMutex.Lock()
-			delete(oc.gatewayCache, node.Name)
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
 			gatewaysFailed.Delete(node.Name)
