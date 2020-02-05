@@ -42,6 +42,7 @@ type Controller struct {
 	watchFactory *factory.WatchFactory
 
 	masterSubnetAllocator *allocator.SubnetAllocator
+	joinSubnetAllocator   *allocator.SubnetAllocator
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
@@ -132,6 +133,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		watchFactory:                wf,
 		masterSubnetAllocator:       allocator.NewSubnetAllocator(),
 		logicalSwitchCache:          make(map[string]*net.IPNet),
+		joinSubnetAllocator:         allocator.NewSubnetAllocator(),
 		logicalPortCache:            make(map[string]string),
 		logicalPortUUIDCache:        make(map[string]string),
 		namespaceAddressSet:         make(map[string]map[string]string),
@@ -485,7 +487,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 		return err
 	}
 	if subnet == nil {
-		subnet, _ = ParseNodeHostSubnet(node)
+		subnet, _ = parseNodeHostSubnet(node)
 	}
 	if l3GatewayConfig[OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
@@ -557,8 +559,9 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 			logrus.Debugf("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnet, _ := ParseNodeHostSubnet(node)
-			err := oc.deleteNode(node.Name, nodeSubnet)
+			nodeSubnet, _ := parseNodeHostSubnet(node)
+			joinSubnet, _ := parseNodeJoinSubnet(node)
+			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
 				logrus.Error(err)
 			}
