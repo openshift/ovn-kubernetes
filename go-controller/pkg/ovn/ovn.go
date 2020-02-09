@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -336,8 +339,26 @@ func podScheduled(pod *kapi.Pod) bool {
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
 	var retryPods sync.Map
+	var timestamp int64
+
+	go func() {
+		for {
+			<-time.After(10 * time.Second)
+			now := time.Now().Unix()
+			val := atomic.LoadInt64(&timestamp)
+			if now > val+120 {
+				buf := make([]byte, 1<<16)
+				runtime.Stack(buf, true)
+				logrus.Errorf("pod handler stall\n%s", string(buf))
+				os.Exit(3)
+			}
+		}
+	}()
+
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			now := time.Now().Unix()
+			atomic.StoreInt64(&timestamp, now)
 			pod := obj.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
 				return
@@ -354,6 +375,8 @@ func (oc *Controller) WatchPods() error {
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
+			now := time.Now().Unix()
+			atomic.StoreInt64(&timestamp, now)
 			pod := newer.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
 				return
@@ -369,6 +392,8 @@ func (oc *Controller) WatchPods() error {
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
+			now := time.Now().Unix()
+			atomic.StoreInt64(&timestamp, now)
 			pod := obj.(*kapi.Pod)
 			oc.deleteLogicalPort(pod)
 			retryPods.Delete(pod.UID)
