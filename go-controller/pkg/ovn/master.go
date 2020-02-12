@@ -553,9 +553,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// big enough (/24 or greater), exclude the hybrid overlay port IP (even
 	// if hybrid overlay is not enabled) to allow enabling hybrid overlay
 	// in a running cluster without disrupting nodes.
-	var excludeIPs string
+	var stdout string
 	if !config.IPv6Mode {
-		excludeIPs = "other-config:exclude_ips=" + secondIP.IP.String()
+		excludeIPs := secondIP.IP.String()
 
 		excludeHybridOverlayIP := true
 		for _, clusterEntry := range config.Default.ClusterSubnets {
@@ -568,13 +568,17 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 			thirdIP := util.NextIP(secondIP.IP)
 			excludeIPs += ".." + thirdIP.String()
 		}
+
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
+			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String(),
+			"other-config:exclude_ips="+excludeIPs,
+			"external-ids:gateway_ip="+firstIP.String())
+	} else {
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
+			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String(),
+			"external-ids:gateway_ip="+firstIP.String())
 	}
 
-	// Create a logical switch and set its subnet.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-		excludeIPs,
-		"external-ids:gateway_ip="+firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
