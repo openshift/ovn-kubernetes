@@ -32,11 +32,11 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-RUN INSTALL_PKGS=" \
-	PyYAML openssl firewalld-filesystem \
+RUN export OVN_PKG=$(if [[ $(arch) == 'x86_64' ]]; then echo ovn2.12; else echo ovn2.11; fi) && \
+	INSTALL_PKGS="PyYAML openssl firewalld-filesystem \
 	libpcap iproute strace \
 	openvswitch2.12 openvswitch2.12-devel \
-	ovn2.12 ovn2.12-central ovn2.12-host ovn2.12-vtep \
+	$OVN_PKG $OVN_PKG-central $OVN_PKG-host $OVN_PKG-vtep \
 	containernetworking-plugins yum-utils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
