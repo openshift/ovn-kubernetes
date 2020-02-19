@@ -15,7 +15,7 @@ import (
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
 func WriteCNIConfig(ConfDir string, fileName string) error {
 	bytes, err := json.Marshal(&types.NetConf{
-		CNIVersion: "0.3.1",
+		CNIVersion: "0.4.0",
 		Name:       "ovn-kubernetes",
 		Type:       CNI.Plugin,
 	})
