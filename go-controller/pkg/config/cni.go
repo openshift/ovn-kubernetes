@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/containernetworking/cni/pkg/types"
+	"github.com/containernetworking/cni/pkg/version"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 )
@@ -56,6 +57,11 @@ func ReadCNIConfig(bytes []byte) (*ovntypes.NetConf, error) {
 	conf := &ovntypes.NetConf{}
 	if err := json.Unmarshal(bytes, conf); err != nil {
 		return nil, err
+	}
+	if conf.RawPrevResult != nil {
+		if err := version.ParsePrevResult(&conf.NetConf); err != nil {
+			return nil, err
+		}
 	}
 	return conf, nil
 }

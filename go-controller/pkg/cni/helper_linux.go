@@ -377,6 +377,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 
 // PlatformSpecificCleanup deletes the OVS port
 func (pr *PodRequest) PlatformSpecificCleanup() error {
+	logrus.Warningf("######## CNIConfig %v", pr.CNIConf.PrevResult)
 	ifaceName := pr.SandboxID[:15]
 	ovsArgs := []string{
 		"del-port", "br-int", ifaceName,
