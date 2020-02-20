@@ -36,11 +36,14 @@ RUN INSTALL_PKGS=" \
 	PyYAML openssl firewalld-filesystem \
 	libpcap iproute strace \
 	openvswitch2.12 openvswitch2.12-devel \
-	ovn2.12 ovn2.12-central ovn2.12-host ovn2.12-vtep \
 	containernetworking-plugins yum-utils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum clean all && rm -rf /var/cache/*
+
+COPY ovn2.13* .
+
+RUN yum install -y ./ovn2.13-vtep-2.13.0-0.el7fdn.x86_64.rpm ./ovn2.13-host-2.13.0-0.el7fdn.x86_64.rpm ./ovn2.13-debuginfo-2.13.0-0.el7fdn.x86_64.rpm ./ovn2.13-central-2.13.0-0.el7fdn.x86_64.rpm ./ovn2.13-2.13.0-0.el7fdn.x86_64.rpm 
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
