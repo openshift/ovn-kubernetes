@@ -66,7 +66,7 @@ func (n *NodeController) Start(wf *factory.WatchFactory) error {
 // For a windows node, this means watching for all nodes and programming the routing
 func (n *NodeController) Add(node *kapi.Node) {
 
-	_, ok := node.Annotations[types.HybridOverlayHostSubnet]
+	_, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 	if !ok {
 		logrus.Debugf("Cannot add node '%s' as the k8s.ovn.org/hybrid-overlay-hostsubnet annotation is missing on that node!", node.Name)
 		return
@@ -180,7 +180,7 @@ func (n *NodeController) Sync(nodes []*kapi.Node) {
 //  3. Initializing every VXLAN tunnels toward other
 func (n *NodeController) InitSelf() {
 	// Retrieve the host prefix from the annotations
-	hostsubnet, ok := n.thisNode.Annotations[types.HybridOverlayHostSubnet]
+	hostsubnet, ok := n.thisNode.Annotations[types.HybridOverlayNodeSubnet]
 
 	if !ok {
 		logrus.Errorf("Couldn't retreive the host subnet from the '%s' node's annotations", n.thisNode.Name)
@@ -337,8 +337,11 @@ func (n *NodeController) InitSelf() {
 				logrus.Errorf("Error creating the network: no DRMAC address")
 				return
 			}
-			n.kube.SetAnnotationOnNode(n.thisNode, types.HybridOverlayDrMac, policySettings.Address)
-
+			if err := n.kube.SetAnnotationsOnNode(n.thisNode, map[string]interface{}{
+				types.HybridOverlayDrMac: policySettings.Address,
+			}); err != nil {
+				logrus.Errorf("failed to set DRMAC annotation on node: %v", err)
+			}
 			break
 		}
 	}
@@ -382,8 +385,8 @@ func (n *NodeController) UninitSelf() {
 		}
 	}
 
-	// remove the node annotations
-	n.kube.DeleteAnnotationOnNode(n.thisNode, types.HybridOverlayDrMac)
+	// remove the node annotation by setting its value to nil
+	n.kube.SetAnnotationsOnNode(n.thisNode, map[string]interface{}{types.HybridOverlayDrMac: nil})
 
 	// Find the network and remove it
 	network, err := hcn.GetNetworkByID(n.networkID)

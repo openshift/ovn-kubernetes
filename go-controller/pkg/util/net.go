@@ -38,15 +38,17 @@ func intToIP(i *big.Int) net.IP {
 
 // GetPortAddresses returns the MAC and IP of the given logical switch port
 func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
-	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
+	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: %v", portName, err)
+		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
+			portName, out, stderr, err)
 	}
+	// Convert \r\n to \n to support Windows line endings
+	out = strings.Replace(out, "\r\n", "\n", -1)
+	addresses := strings.Split(out, "\n")
+	out = addresses[0]
 	if out == "[]" {
-		out, _, err = RunOVNNbctl("get", "logical_switch_port", portName, "addresses")
-		if err != nil {
-			return nil, nil, fmt.Errorf("Error while obtaining static addresses for %s: %v", portName, err)
-		}
+		out = addresses[1]
 	}
 	if out == "[]" || out == "[dynamic]" {
 		// No addresses
@@ -56,7 +58,7 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
 	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
 	outStr := strings.Trim(out, `"[]`)
-	addresses := strings.Split(outStr, " ")
+	addresses = strings.Split(outStr, " ")
 	if len(addresses) != 2 {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
 	}
@@ -107,4 +109,19 @@ func GetNodeWellKnownAddresses(subnet *net.IPNet) (*net.IPNet, *net.IPNet) {
 // JoinHostPortInt32 is like net.JoinHostPort(), but with an int32 for the port
 func JoinHostPortInt32(host string, port int32) string {
 	return net.JoinHostPort(host, strconv.Itoa(int(port)))
+}
+
+// IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
+// a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, we'll use the first two bytes and last two bytes and hope
+// that results in a unique MAC for the scope of where it's used.
+func IPAddrToHWAddr(ip net.IP) string {
+	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
+	ip4 := ip.To4()
+	if ip4 != nil {
+		// safe to use private MAC prefix: 0A:58
+		return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip4[0], ip4[1], ip4[2], ip4[3])
+	}
+
+	// IPv6 - use the first two and last two bytes.
+	return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[14], ip[15])
 }

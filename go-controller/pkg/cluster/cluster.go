@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -26,14 +27,19 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 	}
 }
 
-func setupOVNNode(nodeName string) error {
+func setupOVNNode(node *kapi.Node) error {
 	var err error
+
+	nodeName, err := util.GetNodeHostname(node)
+	if err != nil {
+		return fmt.Errorf("failed to obtain hostname from node %q: %v", node.Name, err)
+	}
 
 	nodeIP := config.Default.EncapIP
 	if nodeIP == "" {
-		nodeIP, err = util.GetNodeIP(nodeName)
+		nodeIP, err = util.GetNodeIP(node)
 		if err != nil {
-			return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
+			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
 	} else {
 		if ip := net.ParseIP(nodeIP); ip == nil {
@@ -48,6 +54,8 @@ func setupOVNNode(nodeName string) error {
 		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
+		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
+			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", nodeName),
 	)
 	if err != nil {
@@ -59,7 +67,15 @@ func setupOVNNode(nodeName string) error {
 		if err != nil {
 			return err
 		}
-		_, stderr, errSet := util.RunOVNSbctl("set", "encap", systemID,
+		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+			fmt.Sprintf("chassis_name=%s", systemID))
+		if err != nil {
+			return err
+		}
+		if len(uuid) == 0 {
+			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
+		}
+		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
 			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
 		)
 		if errSet != nil {

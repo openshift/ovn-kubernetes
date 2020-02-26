@@ -4,8 +4,12 @@ package cni
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -14,6 +18,8 @@ import (
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 func renameLink(curName, newName string) error {
@@ -33,6 +39,10 @@ func renameLink(curName, newName string) error {
 	}
 
 	return nil
+}
+
+func setSysctl(sysctl string, newVal int) error {
+	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0640)
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
@@ -338,10 +348,28 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 				return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
 			}
 		}
-		return nil
+
+		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
+			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
+			if err != nil {
+				logrus.Warningf("failed to disable IPv6 DAD: %q", err)
+			}
+		}
+		return ip.SettleAddresses(contIface.Name, 10)
 	})
 	if err != nil {
-		return nil, err
+		logrus.Warningf("failed to configure container network namespace: %q", err)
+	}
+
+	err = wait.PollImmediate(100*time.Millisecond, 20*time.Second, func() (bool, error) {
+		stdout, err := ofctlExec("dump-flows", "br-int")
+		if err != nil {
+			return false, nil
+		}
+		return strings.Contains(stdout, ifInfo.IP.IP.String()), nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil

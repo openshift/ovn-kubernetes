@@ -25,6 +25,7 @@ func newNamespaceMeta(namespace string) metav1.ObjectMeta {
 		Labels: map[string]string{
 			"name": namespace,
 		},
+		Annotations: map[string]string{},
 	}
 }
 
@@ -36,22 +37,27 @@ func newNamespace(namespace string) *v1.Namespace {
 	}
 }
 
-func (n namespace) baseCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
+func (n namespace) baseCmds(fexec *ovntest.FakeExec, namespaces ...v1.Namespace) {
+	namespacesRes := ""
+	for _, n := range namespaces {
+		namespacesRes += fmt.Sprintf("name=%s\n", n.Name)
+	}
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
-		Output: fmt.Sprintf("name=%s\n", namespace.Name),
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
-		Output: fmt.Sprintf("name=%s\n", namespace.Name),
+		Output: namespacesRes,
 	})
 }
 
-func (n namespace) addCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
-	n.baseCmds(fexec, namespace)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
-	})
+func (n namespace) addCmds(fexec *ovntest.FakeExec, namespaces ...v1.Namespace) {
+	for _, n := range namespaces {
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(n.Name),
+			Output: fmt.Sprintf("name=%s\n", n.Name),
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(n.Name)),
+		})
+	}
 }
 
 func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
@@ -60,15 +66,32 @@ func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 	})
 }
 
-func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
-	n.baseCmds(fexec, namespace)
+func (n namespace) addPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf(`ovn-nbctl --timeout=15 set address_set %s addresses="%s"`, hashedAddressSet(namespace.Name), tP.podIP),
 	})
 }
 
+func (n namespace) delPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
+	})
+}
+
+func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
+		Output: fmt.Sprintf("name=%s\n", namespace.Name),
+	})
+	n.addPodCmds(fexec, tP, namespace)
+}
+
 var _ = Describe("OVN Namespace Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+		fExec   *ovntest.FakeExec
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -77,6 +100,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		fExec = ovntest.NewFakeExec()
+		fakeOvn = NewFakeOVN(fExec, true)
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("on startup", func() {
@@ -97,11 +127,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 					namespaceT.Name,
 				)
 
-				tExec := ovntest.NewFakeExec()
-				test.addCmdsWithPods(tExec, tP, namespaceT)
+				test.baseCmds(fExec, namespaceT)
+				test.addCmdsWithPods(fExec, tP, namespaceT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, tExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -117,7 +146,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -132,11 +161,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test := namespace{}
 				namespaceT := *newNamespace("namespace1")
 
-				tExec := ovntest.NewFakeExec()
-				test.addCmds(tExec, namespaceT)
+				test.baseCmds(fExec, namespaceT)
+				test.addCmds(fExec, namespaceT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, tExec, &v1.NamespaceList{
+				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						namespaceT,
 					},
@@ -145,7 +173,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -164,11 +192,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test := namespace{}
 				namespaceT := *newNamespace("namespace1")
 
-				fExec := ovntest.NewFakeExec()
+				test.baseCmds(fExec, namespaceT)
 				test.addCmds(fExec, namespaceT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec, &v1.NamespaceList{
+				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						namespaceT,
 					},
@@ -178,13 +205,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 				namespace, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(namespace).NotTo(BeNil())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				test.delCmds(fExec, namespaceT)
 
 				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespaceT.Name, metav1.NewDeleteOptions(1))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}

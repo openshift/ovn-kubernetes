@@ -16,6 +16,7 @@ COPY go-controller/ .
 
 # build the binaries
 RUN CGO_ENABLED=0 make
+RUN CGO_ENABLED=0 make windows
 
 FROM openshift/origin-cli AS cli
 
@@ -35,24 +36,27 @@ RUN INSTALL_PKGS=" \
 	PyYAML openssl firewalld-filesystem \
 	libpcap iproute strace \
 	openvswitch2.12 openvswitch2.12-devel \
+	ovn2.12 ovn2.12-central ovn2.12-host ovn2.12-vtep \
 	containernetworking-plugins yum-utils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yumdownloader ovn2.11 ovn2.11-central ovn2.11-host ovn2.11-vtep && \
-	rpm -Uhv --force --nodeps ovn2.11* && rm -f *.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
+    mkdir -p /var/run/ovn && \
     mkdir -p /etc/cni/net.d && \
     mkdir -p /opt/cni/bin && \
-    mkdir -p /usr/libexec/cni/
+    mkdir -p /usr/libexec/cni/ && \
+    mkdir -p /root/windows/
 
 COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
+COPY --from=builder /go-controller/_output/go/bin/windows/hybrid-overlay.exe /root/windows/
 
-COPY --from=cli /usr/bin/oc /usr/bin
+COPY --from=cli /usr/bin/oc /usr/bin/
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
+RUN stat /usr/bin/oc
 
 # copy git commit number into image
 COPY .git/HEAD /root/.git/HEAD

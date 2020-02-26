@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -26,7 +28,7 @@ import (
 type postReadyFn func() error
 
 func isOVNControllerReady(name string) (bool, error) {
-	const runDir string = "/var/run/openvswitch/"
+	runDir := util.GetOvnRunDir()
 
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
@@ -60,7 +62,7 @@ func isOVNControllerReady(name string) (bool, error) {
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 		if err != nil {
-			return false, fmt.Errorf("failed to get aggregate flow statistics: %v", err)
+			return false, nil
 		}
 		return !strings.Contains(stdout, "flow_count=0"), nil
 	})
@@ -69,6 +71,21 @@ func isOVNControllerReady(name string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func getNodeHostSubnetAnnotation(node *kapi.Node) (string, error) {
+	subnet, ok := node.Annotations[ovn.OvnNodeSubnets]
+	if ok {
+		nodeSubnets := make(map[string]string)
+		if err := json.Unmarshal([]byte(subnet), &nodeSubnets); err != nil {
+			return "", fmt.Errorf("error parsing node-subnets annotation: %v", err)
+		}
+		subnet, ok = nodeSubnets["default"]
+	}
+	if !ok {
+		return "", fmt.Errorf("node %q has no subnet annotation", node.Name)
+	}
+	return subnet, nil
 }
 
 // StartClusterNode learns the subnet assigned to it by the master controller
@@ -80,6 +97,11 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var clusterSubnets []string
 	var cidr string
 	var wg sync.WaitGroup
+
+	// Setting debug log level during node bring up to expose bring up process.
+	// Log level is returned to configured value when bring up is complete.
+	var LogLevel = logrus.GetLevel()
+	logrus.SetLevel(5)
 
 	if config.MasterHA.ManageDBServers {
 		var readyChan = make(chan bool, 1)
@@ -99,7 +121,10 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	err = setupOVNNode(name)
+	if node, err = cluster.Kube.GetNode(name); err != nil {
+		return fmt.Errorf("error retrieving node %s: %v", name, err)
+	}
+	err = setupOVNNode(node)
 	if err != nil {
 		return err
 	}
@@ -116,8 +141,9 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			logrus.Errorf("error retrieving node %s: %v", name, err)
 			return false, nil
 		}
-		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", node.Name, "other-config:subnet"); err != nil {
-			logrus.Errorf("error retrieving logical switch: %v", err)
+		cidr, err = getNodeHostSubnetAnnotation(node)
+		if err != nil {
+			logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
 			return false, nil
 		}
 		return true, nil
@@ -139,28 +165,27 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	type readyFunc func(string, string) (bool, error)
 	var readyFuncs []readyFunc
-	var nodeAnnotations map[string]string
-	var postReady postReadyFn
 
-	// If gateway is enabled, get gateway annotations
-	if config.Gateway.Mode != config.GatewayModeDisabled {
-		nodeAnnotations, postReady, err = cluster.initGateway(node.Name, subnet.String())
-		if err != nil {
-			return err
-		}
-		readyFuncs = append(readyFuncs, GatewayReady)
+	// get gateway annotations
+	gwAnnotations, postReady, err := cluster.initGateway(node.Name, subnet.String())
+	if err != nil {
+		return err
 	}
+	readyFuncs = append(readyFuncs, GatewayReady)
 
 	// Get management port annotations
 	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
 	if err != nil {
 		return err
 	}
-
 	readyFuncs = append(readyFuncs, ManagementPortReady)
 
-	// Combine mgmtPortAnnotations with any existing gwyAnnotations
+	// Combine mgmtPortAnnotations and gwAnnotations into nodeAnnotations
+	nodeAnnotations := make(map[string]interface{})
 	for k, v := range mgmtPortAnnotations {
+		nodeAnnotations[k] = v
+	}
+	for k, v := range gwAnnotations {
 		nodeAnnotations[k] = v
 	}
 
@@ -174,6 +199,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	portName := "k8s-" + node.Name
 
+	logrus.Infof("Waiting for GatewayReady and ManagementPortReady on node %s", node.Name)
 	// Wait for the portMac to be created
 	for _, f := range readyFuncs {
 		go func(rf readyFunc) {
@@ -194,6 +220,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
 		}
 	}
+	logrus.Infof("Gateway and ManagementPort are Ready")
 
 	if postReady != nil {
 		err = postReady()
@@ -201,6 +228,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			return err
 		}
 	}
+
+	logrus.SetLevel(LogLevel)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
@@ -240,7 +269,7 @@ func updateOVNConfig(ep *kapi.Endpoints, readyChan chan bool) error {
 
 //watchConfigEndpoints starts the watching of Endpoint resource and calls back to the appropriate handler logic
 func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) error {
-	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace,
+	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace, nil,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				ep := obj.(*kapi.Endpoints)

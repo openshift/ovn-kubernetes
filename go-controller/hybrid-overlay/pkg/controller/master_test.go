@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net"
 	"strings"
 
@@ -30,27 +31,23 @@ func mustParseCIDR(cidr string) *net.IPNet {
 }
 
 func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: "ovn-nbctl --timeout=15 get logical_switch_port int-" + nodeName + " dynamic_addresses",
-		// hybrid overlay ports have static addresses
-		Output: "[]",
-	})
 	addresses := hybMAC + " " + hybIP
 	addresses = strings.TrimSpace(addresses)
+
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: "ovn-nbctl --timeout=15 get logical_switch_port int-" + nodeName + " addresses",
+		Cmd: "ovn-nbctl --timeout=15 get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
 		// hybrid overlay ports have static addresses
-		Output: "[" + addresses + "]",
+		Output: "[]\n[" + addresses + "]\n",
 	})
 }
 
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet string) v1.Node {
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		annotations[ovn.OvnHostSubnet] = ovnHostSubnet
+		annotations[ovn.OvnNodeSubnets] = fmt.Sprintf(`{"default": "%s"}`, ovnHostSubnet)
 	}
 	if hybridHostSubnet != "" {
-		annotations[types.HybridOverlayHostSubnet] = hybridHostSubnet
+		annotations[types.HybridOverlayNodeSubnet] = hybridHostSubnet
 	}
 	return v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -104,7 +101,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -115,13 +112,17 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// Windows node should be allocated a subnet
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).NotTo(HaveKey(ovn.OvnNodeSubnets))
 
 			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows",
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -146,7 +147,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -157,7 +158,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// Linux node (without OVN subnet annotation) should not have an hybrid overlay subnet annotation
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).NotTo(HaveKey(types.HybridOverlayHostSubnet))
+			Expect(updatedNode.Annotations).NotTo(HaveKey(types.HybridOverlayNodeSubnet))
 
 			Consistently(fexec.CalledMatchesExpected()).Should(BeTrue())
 
@@ -194,7 +195,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -205,7 +206,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// Linux node #1 should have the same hybrid overlay subnet annotation
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 
 			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
 			return nil
@@ -241,7 +242,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -252,7 +253,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// Linux node #1 should have the same hybrid overlay subnet annotation
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 
 			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
 			return nil
@@ -291,7 +292,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -303,14 +304,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := kube.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = kube.DeleteAnnotationOnNode(updatedNode, "ovn_host_subnet")
+			err = kube.SetAnnotationsOnNode(updatedNode, map[string]interface{}{ovn.OvnNodeSubnets: nil})
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() map[string]string {
 				updatedNode, err = kube.GetNode(nodeName)
 				Expect(err).NotTo(HaveOccurred())
 				return updatedNode.Annotations
-			}, 5, 1).ShouldNot(HaveKey(types.HybridOverlayHostSubnet))
+			}, 5, 1).ShouldNot(HaveKey(types.HybridOverlayNodeSubnet))
 
 			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
 			return nil

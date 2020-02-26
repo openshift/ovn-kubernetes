@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -28,6 +29,19 @@ type namespacePolicy struct {
 	portGroupUUID   string          //uuid for OVN port_group
 	portGroupName   string
 	deleted         bool //deleted policy
+}
+
+func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
+	np := &namespacePolicy{
+		name:            policy.Name,
+		namespace:       policy.Namespace,
+		ingressPolicies: make([]*gressPolicy, 0),
+		egressPolicies:  make([]*gressPolicy, 0),
+		podHandlerList:  make([]*factory.Handler, 0),
+		nsHandlerList:   make([]*factory.Handler, 0),
+		localPods:       make(map[string]bool),
+	}
+	return np
 }
 
 type gressPolicy struct {
@@ -91,6 +105,13 @@ func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
 	gp.ipBlockExcept = append(gp.ipBlockExcept, ipblockJSON.Except...)
 }
 
+func ipMatch() string {
+	if config.IPv6Mode {
+		return "ip6"
+	}
+	return "ip4"
+}
+
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	var l3Match, addresses string
 	for _, addressSet := range gp.sortedPeerAddressSets {
@@ -101,12 +122,12 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 		addresses = fmt.Sprintf("%s, $%s", addresses, addressSet)
 	}
 	if addresses == "" {
-		l3Match = "ip4"
+		l3Match = ipMatch()
 	} else {
 		if gp.policyType == knet.PolicyTypeIngress {
-			l3Match = fmt.Sprintf("ip4.src == {%s}", addresses)
+			l3Match = fmt.Sprintf("%s.src == {%s}", ipMatch(), addresses)
 		} else {
-			l3Match = fmt.Sprintf("ip4.dst == {%s}", addresses)
+			l3Match = fmt.Sprintf("%s.dst == {%s}", ipMatch(), addresses)
 		}
 	}
 	return l3Match
@@ -117,19 +138,19 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) string {
 	ipBlockCidr := fmt.Sprintf("{%s}", strings.Join(gp.ipBlockCidr, ", "))
 	if gp.policyType == knet.PolicyTypeIngress {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.src == %s && %s\"",
-				ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"%s.src == %s && %s\"",
+				ipMatch(), ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.src == %s && %s && %s\"",
-				ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"%s.src == %s && %s && %s\"",
+				ipMatch(), ipBlockCidr, l4Match, lportMatch)
 		}
 	} else {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.dst == %s && %s\"",
-				ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"%s.dst == %s && %s\"",
+				ipMatch(), ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.dst == %s && %s && %s\"",
-				ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"%s.dst == %s && %s && %s\"",
+				ipMatch(), ipBlockCidr, l4Match, lportMatch)
 		}
 	}
 	return match
@@ -176,7 +197,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return
 	}
@@ -196,8 +217,25 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	for k := range addressMap {
 		addresses = append(addresses, k)
 	}
-	oc.setAddressSet(addressSet, addresses)
+	setAddressSet(addressSet, addresses)
+}
 
+func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress *gressPolicy) {
+	pod := obj.(*kapi.Pod)
+	logicalPort := podLogicalPortName(pod)
+
+	oc.lspMutex.Lock()
+	delete(oc.lspIngressDenyCache, logicalPort)
+	delete(oc.lspEgressDenyCache, logicalPort)
+	oc.lspMutex.Unlock()
+
+	if !oc.portGroupSupport {
+		if gress.policyType == knet.PolicyTypeIngress {
+			deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
+		} else {
+			deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
+		}
+	}
 }
 
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
@@ -207,7 +245,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return
 	}
@@ -229,7 +267,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	for k := range addressMap {
 		addresses = append(addresses, k)
 	}
-	oc.setAddressSet(addressSet, addresses)
+	setAddressSet(addressSet, addresses)
 }
 
 func (oc *Controller) handlePeerPodSelector(
@@ -258,14 +296,7 @@ func (oc *Controller) handlePeerPodSelector(
 	np.podHandlerList = append(np.podHandlerList, h)
 }
 
-func (oc *Controller) handlePeerNamespaceAndPodSelector(
-	policy *knet.NetworkPolicy,
-	namespaceSelector *metav1.LabelSelector,
-	podSelector *metav1.LabelSelector,
-	addressSet string,
-	addressMap map[string]bool,
-	np *namespacePolicy) {
-
+func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPolicy, gress *gressPolicy, namespaceSelector *metav1.LabelSelector, podSelector *metav1.LabelSelector, addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -288,6 +319,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 						},
 						DeleteFunc: func(obj interface{}) {
 							oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
+							oc.handlePeerPodSelectorDeleteACLRules(obj, gress)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
 							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
@@ -385,40 +417,16 @@ const (
 	defaultMcastAllowPriority = "1012"
 )
 
-func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
-	subnet, stderr, err := util.RunOVNNbctl("get", "logical_switch",
-		logicalSwitch, "other-config:subnet")
-	if err != nil {
-		logrus.Errorf("failed to get the logical_switch %s subnet, "+
-			"stderr: %q (%v)", logicalSwitch, stderr, err)
-		return err
-	}
-
-	if subnet == "" {
-		return fmt.Errorf("logical_switch %q had no subnet", logicalSwitch)
-	}
-
-	ip, _, err := net.ParseCIDR(subnet)
-	if err != nil {
-		logrus.Errorf("failed to parse subnet %s", subnet)
-		return err
-	}
-
-	// K8s only supports IPv4 right now. The second IP address of the
-	// network is the node IP address.
-	ip = ip.To4()
-	ip[3] = ip[3] + 2
-	address := ip.String()
-
-	match := fmt.Sprintf("ip4.src==%s", address)
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
+func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
+	match := fmt.Sprintf("%s.src==%s", ipMatch(), mgmtPortIP.String())
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
-		logrus.Errorf("failed to create the node acl for "+
+		return fmt.Errorf("failed to create the node acl for "+
 			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
 	}
 
-	return err
+	return nil
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {

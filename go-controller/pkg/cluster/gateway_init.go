@@ -1,13 +1,17 @@
 package cluster
 
 import (
+	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 
-	"github.com/sirupsen/logrus"
 	"net"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -83,11 +87,22 @@ func (cluster *OvnClusterController) initGateway(
 		}
 	}
 
+	var err error
+	var systemID string
+	var prFn postReadyFn
+	var annotations map[string]map[string]string
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		annotations, err := initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
-		return annotations, nil, err
+		systemID, err = util.GetNodeChassisID()
+		if err != nil {
+			return nil, nil, err
+		}
+		annotations, err = initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
 	case config.GatewayModeShared:
+		systemID, err = util.GetNodeChassisID()
+		if err != nil {
+			return nil, nil, err
+		}
 		gatewayNextHop := config.Gateway.NextHop
 		gatewayIntf := config.Gateway.Interface
 		if gatewayNextHop == "" || gatewayIntf == "" {
@@ -105,10 +120,31 @@ func (cluster *OvnClusterController) initGateway(
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		return initSharedGateway(nodeName, subnet, gatewayNextHop, gatewayIntf, cluster.watchFactory)
+		annotations, prFn, err = initSharedGateway(nodeName, subnet, gatewayNextHop, gatewayIntf,
+			cluster.watchFactory)
+	case config.GatewayModeDisabled:
+		annotations = map[string]map[string]string{
+			ovn.OvnDefaultNetworkGateway: {
+				ovn.OvnNodeGatewayMode: string(config.GatewayModeDisabled),
+			},
+		}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	// marshal the annotation into string
+	bytes, err := json.Marshal(annotations)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal l3 gateway information %v for node %q: (%v)",
+			annotations, nodeName, err)
 	}
 
-	return nil, nil, nil
+	nodeAnnotations := map[string]string{ovn.OvnNodeL3GatewayConfig: string(bytes)}
+	if systemID != "" {
+		nodeAnnotations[ovn.OvnNodeChassisID] = systemID
+	}
+
+	return nodeAnnotations, prFn, nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
@@ -127,12 +163,6 @@ func CleanupClusterNode(name string) error {
 		logrus.Errorf("Failed to cleanup Gateway, error: %v", err)
 	}
 
-	// Make sure br-int is deleted, the management internal port is also deleted at the same time.
-	stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "del-br", "br-int")
-	if err != nil {
-		logrus.Errorf("Failed to delete bridge br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-	}
-
 	// Delete iptable rules for management port on Linux.
 	if runtime.GOOS != "windows" {
 		DelMgtPortIptRules(name)
@@ -141,18 +171,26 @@ func CleanupClusterNode(name string) error {
 	return nil
 }
 
-// GatewayReady will check to see if the gateway was created
+// GatewayReady will check to see if we have successfully added SNAT OpenFlow rules in the L3Gateway Routers
 func GatewayReady(nodeName string, portName string) (bool, error) {
-
-	gatewayRouter := "GR_" + nodeName
-	stdout, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "etor-"+gatewayRouter)
-	if err != nil {
-		logrus.Errorf("Error while obtaining gateway router addresses for %s - %v", nodeName, err)
-		return false, nil
-	}
-	// Did master create etor-GR_nodeName port on ls?
-	if stdout == "" || stderr != "" {
-		return false, nil
+	// OpenFlow table 41 performs SNATing of packets that are heading to physical network from
+	// logical network.
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		var cidr, match string
+		cidr = clusterSubnet.CIDR.String()
+		if strings.Contains(cidr, ":") {
+			match = "ipv6,ipv6_src=" + cidr
+		} else {
+			match = "ip,nw_src=" + cidr
+		}
+		stdout, _, err := util.RunOVSOfctl("--no-stats", "--no-names", "dump-flows", "br-int",
+			"table=41,"+match)
+		if err != nil {
+			return false, nil
+		}
+		if !strings.Contains(stdout, cidr) {
+			return false, nil
+		}
 	}
 	return true, nil
 }

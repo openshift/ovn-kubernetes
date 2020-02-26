@@ -143,6 +143,7 @@ apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 cacert=/path/to/kubeca.crt
 service-cidr=172.18.0.0/24
+no-hostsubnet-nodes=label=another-test-label
 
 [logging]
 loglevel=5
@@ -225,6 +226,12 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("uses expected defaults", func() {
+		// Don't pick up defaults from the environment
+		os.Unsetenv("KUBECONFIG")
+		os.Unsetenv("K8S_CACERT")
+		os.Unsetenv("K8S_APISERVER")
+		os.Unsetenv("K8S_TOKEN")
+
 		app.Action = func(ctx *cli.Context) error {
 			cfgPath, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -239,11 +246,13 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Kubeconfig).To(Equal(""))
 			Expect(Kubernetes.CACert).To(Equal(""))
 			Expect(Kubernetes.Token).To(Equal(""))
-			Expect(Kubernetes.APIServer).To(Equal("http://localhost:8080"))
+			Expect(Kubernetes.APIServer).To(Equal(DefaultAPIServer))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.16.1.0/24"))
+			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal(""))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.128.0.0/14"), 23},
 			}))
+			Expect(IPv6Mode).To(Equal(false))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
@@ -294,7 +303,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -358,7 +367,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -529,6 +538,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
+			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("test=pass"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.130.0.0/15"), 24},
 			}))
@@ -565,6 +575,7 @@ var _ = Describe("Config Operations", func() {
 			"-k8s-token=asdfasdfasdfasfd",
 			"-k8s-service-cidr=172.15.0.0/24",
 			"-nb-address=ssl://6.5.4.3:6651",
+			"-no-hostsubnet-nodes=test=pass",
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
@@ -618,7 +629,7 @@ service-cidr=172.18.0.0/24
 
 	It("overrides config file and defaults with CLI legacy cluster-subnet option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-cluster-subnets=172.18.0.0/24
+cluster-subnets=172.18.0.0/23
 `), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -628,14 +639,15 @@ cluster-subnets=172.18.0.0/24
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("172.15.0.0/24"), 24},
+				{mustParseCIDR("172.15.0.0/23"), 24},
 			}))
+			Expect(IPv6Mode).To(Equal(false))
 			return nil
 		}
 		cliArgs := []string{
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
-			"-cluster-subnet=172.15.0.0/24",
+			"-cluster-subnet=172.15.0.0/23",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -744,6 +756,7 @@ mode=shared
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
+			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("label=another-test-label"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
@@ -784,6 +797,52 @@ mode=shared
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("does not override config file settings with default cli options", func() {
+		kubeconfigFile, err := createTempFile("kubeconfig")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeconfigFile)
+
+		kubeCAFile, err := createTempFile("kube-ca.crt")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeCAFile)
+
+		err = writeTestConfigFile(cfgFile.Name())
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+
+			Expect(Default.MTU).To(Equal(1500))
+			Expect(Default.ConntrackZone).To(Equal(64321))
+			Expect(Default.RawClusterSubnets).To(Equal("10.129.0.0/14/23"))
+			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
+				{mustParseCIDR("10.129.0.0/14"), 23},
+			}))
+			Expect(Logging.File).To(Equal("/var/log/ovnkube.log"))
+			Expect(Logging.Level).To(Equal(5))
+			Expect(CNI.ConfDir).To(Equal("/etc/cni/net.d22"))
+			Expect(CNI.Plugin).To(Equal("ovn-k8s-cni-overlay22"))
+			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigFile))
+			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
+			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
+			Expect(Kubernetes.ServiceCIDR).To(Equal("172.18.0.0/24"))
+
+			return nil
+		}
+
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-k8s-cacert=" + kubeCAFile,
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -842,7 +901,7 @@ mode=shared
 			Expect(a.GetURL()).To(Equal(nbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
 
 		It("configures client southbound SSL correctly", func() {
@@ -875,7 +934,32 @@ mode=shared
 			Expect(a.GetURL()).To(Equal(sbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+		})
+
+		It("configures client northbound and southbound Scheme correctly when watch-endpoint specified", func() {
+
+			fexec := ovntest.NewFakeExec()
+
+			cliConfig := &OvnAuthConfig{
+				Address: "watch-endpoint",
+				PrivKey: keyFile,
+				Cert:    certFile,
+				CACert:  caFile,
+			}
+			MasterHA.ManageDBServers = true
+
+			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(a.PrivKey).To(Equal(keyFile))
+			Expect(a.Cert).To(Equal(certFile))
+			Expect(a.CACert).To(Equal(caFile))
+			Expect(a.Address).To(Equal("watch-endpoint"))
+			Expect(a.northbound).To(BeFalse())
+			Expect(a.externalID).To(Equal("ovn-remote"))
+
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
 	})
 
@@ -982,7 +1066,7 @@ mode=shared
 				})
 
 			generateTests("the OVN URL has no port",
-				"Failed to parse OVN address tcp:4.3.2.1",
+				"failed to parse OVN DB host/port \"4.3.2.1\": address 4.3.2.1: missing port in address",
 				func() []string {
 					return []string{
 						"address=tcp://4.3.2.1",
