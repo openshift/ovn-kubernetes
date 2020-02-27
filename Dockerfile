@@ -70,6 +70,10 @@ COPY dist/images/ovn-debug.sh /root/
 RUN mv /usr/bin/ovn-controller /usr/bin/ovn-controller.ORIG
 COPY ovn-controller /usr/bin/
 
+#####
+RUN mv /usr/sbin/ovsdb-server /ovsdb-server
+COPY ovsdb-server /usr/sbin/
+
 # iptables wrappers
 COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
 COPY ./dist/images/iptables-scripts/iptables-save /usr/sbin/
