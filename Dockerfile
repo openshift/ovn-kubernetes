@@ -67,6 +67,9 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 COPY dist/images/ovnkube.sh /root/
 COPY dist/images/ovn-debug.sh /root/
 
+RUN mv /usr/bin/ovn-controller /usr/bin/ovn-controller.ORIG
+COPY ovn-controller /usr/bin/
+
 # iptables wrappers
 COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
 COPY ./dist/images/iptables-scripts/iptables-save /usr/sbin/
