@@ -524,7 +524,7 @@ func (oc *Controller) WatchNodes() error {
 				return
 			}
 
-			logrus.Debugf("Added event for Node %q", node.Name)
+			logrus.Infof("Added event for Node %q", node.Name)
 			hostSubnet, err := oc.addNode(node)
 			if err != nil {
 				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
@@ -535,11 +535,15 @@ func (oc *Controller) WatchNodes() error {
 			if err != nil {
 				logrus.Errorf("error creating management port for node %s: %v", node.Name, err)
 				mgmtPortFailed.Store(node.Name, true)
+			} else {
+				logrus.Infof("created management port for node %s", node.Name)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
-				logrus.Errorf(err.Error())
+				logrus.Errorf("error creating gateway for node %s: %v", node.Name, err)
 				gatewaysFailed.Store(node.Name, true)
+			} else {
+				logrus.Infof("created gateway for node %s", node.Name)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -552,10 +556,11 @@ func (oc *Controller) WatchNodes() error {
 			}
 			if !shouldUpdate {
 				// the hostsubnet is not assigned by ovn-kubernetes
+				logrus.Infof("not updating node %s", node.Name)
 				return
 			}
 
-			logrus.Debugf("Updated event for Node %q", node.Name)
+			logrus.Infof("Updated event for Node %q", node.Name)
 
 			_, failed := mgmtPortFailed.Load(node.Name)
 			if failed || macAddressChanged(oldNode, node) {
@@ -564,6 +569,7 @@ func (oc *Controller) WatchNodes() error {
 					logrus.Errorf("error updating management port for node %s: %v", node.Name, err)
 					mgmtPortFailed.Store(node.Name, true)
 				} else {
+					logrus.Infof("updated management port for node %s", node.Name)
 					mgmtPortFailed.Delete(node.Name)
 				}
 			}
@@ -577,6 +583,7 @@ func (oc *Controller) WatchNodes() error {
 					logrus.Errorf(err.Error())
 					gatewaysFailed.Store(node.Name, true)
 				} else {
+					logrus.Infof("updated gateway for node %s", node.Name)
 					gatewaysFailed.Delete(node.Name)
 				}
 			}
