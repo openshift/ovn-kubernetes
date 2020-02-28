@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/ovn-controller.ORIG $@ -v
+exec /ovn-controller $@ -v

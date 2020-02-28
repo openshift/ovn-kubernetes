@@ -36,7 +36,7 @@ func isOVNControllerReady(name string) (bool, error) {
 	}
 
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		ctlFile := runDir + fmt.Sprintf("ovn-controller.ORIG.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
+		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
 		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
 		if err == nil {
 			logrus.Infof("node %s connection status = %s", name, ret)

@@ -42,6 +42,11 @@ RUN INSTALL_PKGS=" \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum clean all && rm -rf /var/cache/*
 
+RUN curl -O http://people.redhat.com/dcbw/ovn2.12-2.12.0-32.el7fdn.x86_64.rpm && \
+	curl -O http://people.redhat.com/dcbw/ovn2.12-central-2.12.0-32.el7fdn.x86_64.rpm && \
+	curl -O http://people.redhat.com/dcbw/ovn2.12-host-2.12.0-32.el7fdn.x86_64.rpm && \
+	rpm -Uhv --nodeps --force ovn2.12-*2.12.0-32*.rpm
+
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
     mkdir -p /etc/cni/net.d && \
@@ -67,7 +72,7 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 COPY dist/images/ovnkube.sh /root/
 COPY dist/images/ovn-debug.sh /root/
 
-RUN mv /usr/bin/ovn-controller /usr/bin/ovn-controller.ORIG
+RUN mv /usr/bin/ovn-controller /
 COPY ovn-controller /usr/bin/
 
 #####
