@@ -9,7 +9,7 @@
 # are built in this Dockerfile and included in the image (instead of the rpm)
 #
 
-FROM openshift/origin-release:golang-1.12 AS builder
+FROM openshift/origin-release:rhel-8-golang-1.12  AS builder
 
 WORKDIR /go-controller
 COPY go-controller/ .
@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 make windows
 
 FROM openshift/origin-cli AS cli
 
-FROM openshift/origin-base
+FROM registry-proxy.engineering.redhat.com/rh-osbs/openshift-ose-base:ubi8
 
 USER root
 
@@ -36,11 +36,15 @@ RUN INSTALL_PKGS=" \
 	PyYAML openssl firewalld-filesystem \
 	libpcap iproute strace \
 	openvswitch2.12 openvswitch2.12-devel \
-	ovn2.12 ovn2.12-central ovn2.12-host ovn2.12-vtep \
 	containernetworking-plugins yum-utils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum clean all && rm -rf /var/cache/*
+
+
+COPY ovn2.13* .
+
+RUN yum install -y ./ovn2.13*.rpm 
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
