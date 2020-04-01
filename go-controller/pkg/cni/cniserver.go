@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -44,7 +45,7 @@ import (
 var registerMetricsOnce sync.Once
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string) *Server {
+func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
 	registerMetricsOnce.Do(func() {
 		prometheus.MustRegister(metricCNIRequestDuration)
 	})
@@ -58,7 +59,8 @@ func NewCNIServer(rundir string) *Server {
 		Server: http.Server{
 			Handler: router,
 		},
-		rundir: rundir,
+		rundir:  rundir,
+		kclient: kclient,
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/", s.handleCNIRequest).Methods("POST")
@@ -163,7 +165,7 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	klog.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
-	result, err := s.requestFunc(req)
+	result, err := s.requestFunc(req, s.kclient)
 	hasErr := "false"
 	if err != nil {
 		hasErr = "true"
