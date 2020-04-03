@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 )
@@ -13,6 +16,27 @@ const (
 	// Annotation used to enable/disable multicast in the namespace
 	nsMulticastAnnotation = "k8s.ovn.org/multicast-enabled"
 )
+
+func WaitForNamespace(name string, wf *factory.WatchFactory) (*kapi.Namespace, error) {
+	var namespaceBackoff = utilwait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
+	var namespace *kapi.Namespace
+	if err := utilwait.ExponentialBackoff(namespaceBackoff, func() (bool, error) {
+		var err error
+		namespace, err = wf.GetNamespace(name)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// Namespace not found; don't bother waiting longer
+				return false, err
+			}
+			klog.Warningf("error getting namespace: %v", err)
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to get namespace object: %v", err)
+	}
+	return namespace, nil
+}
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	expectedNs := make(map[string]bool)
