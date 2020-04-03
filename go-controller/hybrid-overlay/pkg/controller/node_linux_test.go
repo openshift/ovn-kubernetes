@@ -385,6 +385,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				// Deletes flows for pod in OVS that is not in Kube
+				"ovs-ofctl del-flows br-ext table=0,cookie=0xaabbccdd/0xffffffff",
 				"ovs-ofctl del-flows br-ext table=10,cookie=0xaabbccdd/0xffffffff",
 			})
 
@@ -435,6 +436,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				// Refreshes flows for pod that is in OVS and in Kube
 				"ovs-ofctl add-flow br-ext table=10,cookie=0x7fdcde17,priority=100,ip,nw_dst=" + pod1IP + ",actions=set_field:" + hybMAC + "->eth_src,set_field:" + pod1MAC + "->eth_dst,output:ext",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch mynode other-config:subnet",
+				Output: testNodeSubnet,
 			})
 
 			_, err := config.InitConfig(ctx, fexec, nil)

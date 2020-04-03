@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -152,7 +153,7 @@ func waitForPodAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	return podMac, podIP, nil
 }
 
-func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute, net.IP, error) {
+func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, namespaceExternalGW string) ([]util.PodRoute, net.IP, error) {
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
@@ -168,9 +169,10 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 			break
 		}
 	}
+	gatewayIPnet := util.GetNodeGatewayIfAddr(subnet)
 	var gatewayIP net.IP
 	routes := make([]util.PodRoute, 0)
-	if otherDefaultRoute {
+	if otherDefaultRoute || namespaceExternalGW != "" {
 		for _, clusterSubnet := range config.Default.ClusterSubnets {
 			var route util.PodRoute
 			route.Dest = clusterSubnet.CIDR
@@ -182,6 +184,11 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 			route.Dest = serviceSubnet
 			route.NextHop = gatewayIPnet.IP
 			routes = append(routes, route)
+		}
+		if namespaceExternalGW != "" {
+			// We use .3 as gateway as the namespace contains namespaceExternalGW annotation for. The value of the annotation
+			// will be used in the hybrid overlay code for setting the outer destination on VXLAN packets
+			gatewayIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
 		}
 	} else {
 		gatewayIP = gatewayIPnet.IP
@@ -199,7 +206,6 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 			})
 		}
 	}
-
 	return routes, gatewayIP, nil
 }
 
@@ -326,8 +332,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	if annotation == nil {
-		gwIfAddr := util.GetNodeGatewayIfAddr(nodeSubnet)
-		routes, gwIP, err := getRoutesGatewayIP(pod, gwIfAddr)
+		namespace, err := WaitForNamespace(pod.Namespace, oc.watchFactory)
+		if err != nil {
+			return err
+		}
+		routes, gwIP, err := getRoutesGatewayIP(pod, nodeSubnet, namespace.GetAnnotations()[hotypes.HybridOverlayExternalGw])
 		if err != nil {
 			return err
 		}
