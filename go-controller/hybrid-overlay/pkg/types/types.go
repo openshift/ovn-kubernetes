@@ -9,11 +9,15 @@ const (
 	HybridOverlayAnnotationBase = "k8s.ovn.org/hybrid-overlay-"
 	// HybridOverlayNodeSubnet holds the pod CIDR assigned to the node
 	HybridOverlayNodeSubnet = HybridOverlayAnnotationBase + "node-subnet"
-	// HybridOverlayDrMac holds the MAC address of the Distributed Router/gateway
-	HybridOverlayDrMac = HybridOverlayAnnotationBase + "distributed-router-gateway-mac"
+	// HybridOverlayDRMAC holds the MAC address of the Distributed Router/gateway
+	HybridOverlayDRMAC = HybridOverlayAnnotationBase + "distributed-router-gateway-mac"
+	// HybridOverlayExternalGW holds the IP address of the external gateway to route default traffic
+	HybridOverlayExternalGw = HybridOverlayAnnotationBase + "external-gw"
 
 	// HybridOverlayVNI is the VNI for VXLAN tunnels between nodes/endpoints
 	HybridOverlayVNI = 4097
+	// HybridOverlayExternalGWVNI is the VNI for VXLAN tunnels between nodes and the external gateway
+	HybridOverlayExternalGwVNI = 4098
 )
 
 // NodeHandler interface respresents the three functions that get called by the informer upon respective events
