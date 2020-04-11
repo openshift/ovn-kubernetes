@@ -10,8 +10,13 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
-	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"k8s.io/klog"
+)
+
+// K8sMgmtIntfName name to be used as an OVS internal port on the node
+const (
+	K8sMgmtIntfName = "ovn-k8s-mp0"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty
@@ -23,9 +28,8 @@ func StringArg(context *cli.Context, name string) (string, error) {
 	return val, nil
 }
 
-// GetK8sMgmtIntfName returns the correct length interface name to be used
-// as an OVS internal port on the node
-func GetK8sMgmtIntfName(nodeName string) string {
+// GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
+func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
 		return "k8s-" + (nodeName[:11])
 	}
@@ -37,7 +41,7 @@ func GetNodeChassisID() (string, error) {
 	chassisID, stderr, err := RunOVSVsctl("--if-exists", "get",
 		"Open_vSwitch", ".", "external_ids:system-id")
 	if err != nil {
-		logrus.Errorf("No system-id configured in the local host, "+
+		klog.Errorf("No system-id configured in the local host, "+
 			"stderr: %q, error: %v", stderr, err)
 		return "", err
 	}
@@ -50,6 +54,11 @@ func GetNodeChassisID() (string, error) {
 
 var updateNodeSwitchLock sync.Mutex
 
+// UpdateNodeSwitchExcludeIPs should be called after adding the management port
+// and after adding the hybrid overlay port, and ensures that each port's IP
+// is added to the logical switch's exclude_ips. This prevents ovn-northd log
+// spam about duplicate IP addresses.
+// See https://github.com/ovn-org/ovn-kubernetes/pull/779
 func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	if config.IPv6Mode {
 		// We don't exclude any IPs in IPv6
@@ -76,19 +85,9 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	}
 
 	_, managementPortCIDR := GetNodeWellKnownAddresses(subnet)
-	hybridOverlayIP := NextIP(managementPortCIDR.IP)
-
-	// Only exclude the hybrid overlay IP if host subnets are big enough
-	excludeHybridOverlayIP := true
-	for _, clusterEntry := range config.Default.ClusterSubnets {
-		if clusterEntry.HostSubnetLength > 24 {
-			excludeHybridOverlayIP = false
-			break
-		}
-	}
-
 	var excludeIPs string
-	if excludeHybridOverlayIP {
+	if config.HybridOverlay.Enabled {
+		hybridOverlayIP := NextIP(managementPortCIDR.IP)
 		if haveHybridOverlayPort && haveManagementPort {
 			// no excluded IPs required
 		} else if !haveHybridOverlayPort && !haveManagementPort {
@@ -188,7 +187,7 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 	}
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
-		logrus.Errorf("failed marshaling podNetworks map %v", podNetworks)
+		klog.Errorf("failed marshaling podNetworks map %v", podNetworks)
 		return nil, err
 	}
 	return map[string]string{

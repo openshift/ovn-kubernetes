@@ -5,14 +5,14 @@ import (
 	"net"
 	"strings"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 // GatewayCleanup removes all the NB DB objects created for a node's gateway
 func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	// Get the cluster router
 	clusterRouter := GetK8sClusterRouter()
-	gatewayRouter := fmt.Sprintf("GR_%s", nodeName)
+	gatewayRouter := GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var routerIP string
@@ -43,10 +43,10 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	staticRouteCleanup(clusterRouter, nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
-	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del", "join_"+nodeName)
+	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del", JoinSwitchPrefix+nodeName)
 	if err != nil {
-		return fmt.Errorf("Failed to delete the join logical switch join_%s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
+		return fmt.Errorf("Failed to delete the join logical switch %s, "+
+			"stderr: %q, error: %v", JoinSwitchPrefix+nodeName, stderr, err)
 	}
 
 	// Remove the gateway router associated with nodeName
@@ -58,7 +58,7 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	}
 
 	// Remove external switch
-	externalSwitch := "ext_" + nodeName
+	externalSwitch := ExternalSwitchPrefix + nodeName
 	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del",
 		externalSwitch)
 	if err != nil {
@@ -74,22 +74,29 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-	k8sNSLbTCP, k8sNSLbUDP, err := getGatewayLoadBalancers(gatewayRouter)
+	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
 	if err != nil {
 		return err
 	}
 	if k8sNSLbTCP != "" {
 		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbTCP)
 		if err != nil {
-			return fmt.Errorf("Failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
+			return fmt.Errorf("failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
 				"error: %v", k8sNSLbTCP, stderr, err)
 		}
 	}
 	if k8sNSLbUDP != "" {
 		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbUDP)
 		if err != nil {
-			return fmt.Errorf("Failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
-				"error: %v", k8sNSLbTCP, stderr, err)
+			return fmt.Errorf("failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
+				"error: %v", k8sNSLbUDP, stderr, err)
+		}
+	}
+	if k8sNSLbSCTP != "" {
+		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbSCTP)
+		if err != nil {
+			return fmt.Errorf("failed to delete Gateway router SCTP load balancer %s, stderr: %q, "+
+				"error: %v", k8sNSLbSCTP, stderr, err)
 		}
 	}
 	return nil
@@ -103,7 +110,7 @@ func staticRouteCleanup(clusterRouter string, nextHops []string) {
 			"--columns=_uuid", "find", "logical_router_static_route",
 			"nexthop=\""+nextHop+"\"")
 		if err != nil {
-			logrus.Errorf("Failed to fetch all routes with "+
+			klog.Errorf("Failed to fetch all routes with "+
 				"IP %s as nexthop, stderr: %q, "+
 				"error: %v", nextHop, stderr, err)
 			continue
@@ -115,7 +122,7 @@ func staticRouteCleanup(clusterRouter string, nextHops []string) {
 			_, stderr, err = RunOVNNbctl("--if-exists", "remove",
 				"logical_router", clusterRouter, "static_routes", route)
 			if err != nil {
-				logrus.Errorf("Failed to delete static route %s"+
+				klog.Errorf("Failed to delete static route %s"+
 					", stderr: %q, err = %v", route, stderr, err)
 				continue
 			}
