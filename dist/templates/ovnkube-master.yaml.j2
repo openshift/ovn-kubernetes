@@ -10,7 +10,7 @@ metadata:
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This daemonset launches the ovn-kubernetes networking components.
+      This Deployment launches the ovn-kubernetes master node networking components.
 spec:
   progressDeadlineSeconds: 600
   replicas: 1
@@ -38,8 +38,32 @@ spec:
       serviceAccountName: ovn
       hostNetwork: true
 
-      containers:
+      # required to be scheduled on a linux node with node-role.kubernetes.io/master label and
+      # only one instance of ovnkube-master pod per node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/master
+                    operator: In
+                    values:
+                      - ""
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - "linux"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                      - ovnkube-master
+              topologyKey: kubernetes.io/hostname
 
+      containers:
       # ovn-northd - v3
       - name: ovn-northd
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -52,6 +76,7 @@ spec:
           capabilities:
             add: ["SYS_NICE"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
@@ -74,42 +99,22 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_NORTHD
-          value: "-vconsole:info"
-        - name: OVN_NET_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: net_cidr
-        - name: OVN_SVC_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: svc_cidr
+          value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_NODE
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        ports:
-        - name: healthz
-          containerPort: 10257
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10257
-        #     scheme: HTTP
-        lifecycle:
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
       # end of container
 
       - name: nbctl-daemon
@@ -121,6 +126,7 @@ spec:
         securityContext:
           runAsUser: 0
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
@@ -138,24 +144,21 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: OVN_LOG_NBCTLD
+          value: "{{ ovn_loglevel_nbctld }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
 
-        ports:
-        - name: healthz
-          containerPort: 10260
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10258
-        #     scheme: HTTP
-        lifecycle:
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-nbctld"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+        # end of container
 
       - name: ovnkube-master
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -166,6 +169,7 @@ spec:
         securityContext:
           runAsUser: 0
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
@@ -186,7 +190,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVNKUBE_LOGLEVEL
-          value: "{{ ovn_kube_master_log_level }}"
+          value: "{{ ovnkube_master_loglevel }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -210,28 +214,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        - name: OVNKUBE_POD_IP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.podIP
-
-        ports:
-        - name: healthz
-          containerPort: 10254
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10254
-        #     scheme: HTTP
-        lifecycle:
       # end of container
 
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-        kubernetes.io/os: "linux"
       volumes:
       # TODO: Need to check why we need this?
       - name: host-var-run-dbus
