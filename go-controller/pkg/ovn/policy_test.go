@@ -73,10 +73,6 @@ func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, pod pod) {
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @ingressDefaultDeny && arp\" action=allow external-ids:default-deny-policy-type=Ingress",
-		Output: fakeUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=egressDefaultDeny",
 		Output: fakeUUID,
 	})
