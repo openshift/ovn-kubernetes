@@ -17,7 +17,7 @@ import (
 
 	"k8s.io/klog"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
