@@ -3,15 +3,18 @@ package cni
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -68,23 +71,20 @@ func podDescription(pr *PodRequest) string {
 	return fmt.Sprintf("[%s/%s]", pr.PodNamespace, pr.PodName)
 }
 
-func (pr *PodRequest) cmdAdd() ([]byte, error) {
+func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
-	clientset, err := util.NewClientset(&config.Kubernetes)
-	if err != nil {
-		return nil, fmt.Errorf("could not create kubernetes clientset: %v", err)
-	}
-	kubecli := &kube.Kube{KClient: clientset}
+	kubecli := &kube.Kube{KClient: kclient}
 
 	// Get the IP address and MAC address from the API server.
 	// Exponential back off ~32 seconds + 7* t(api call)
 	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
 	var annotations map[string]string
+	var err error
 	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
 		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
@@ -92,7 +92,7 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 				// Pod not found; don't bother waiting longer
 				return false, err
 			}
-			logrus.Warningf("error getting pod annotations: %v", err)
+			klog.Warningf("error getting pod annotations: %v", err)
 			return false, nil
 		}
 		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
@@ -146,20 +146,21 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 // HandleCNIRequest is the callback for all the requests
 // coming to the cniserver after being procesed into PodRequest objects
 // Argument '*PodRequest' encapsulates all the necessary information
+// kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandleCNIRequest(request *PodRequest) ([]byte, error) {
+func HandleCNIRequest(request *PodRequest, kclient kubernetes.Interface) ([]byte, error) {
 	pd := podDescription(request)
-	logrus.Infof("%s dispatching pod network request %v", pd, request)
+	klog.Infof("%s dispatching pod network request %v", pd, request)
 	var result []byte
 	var err error
 	switch request.Command {
 	case CNIAdd:
-		result, err = request.cmdAdd()
+		result, err = request.cmdAdd(kclient)
 	case CNIDel:
 		result, err = request.cmdDel()
 	default:
 	}
-	logrus.Infof("%s CNI request %v, result %q, err %v", pd, request, string(result), err)
+	klog.Infof("%s CNI request %v, result %q, err %v", pd, request, string(result), err)
 	if err != nil {
 		// Prefix errors with pod info for easier failure debugging
 		return nil, fmt.Errorf("%s %v", pd, err)
@@ -174,20 +175,33 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}
 
-	// Build the result structure to pass back to the runtime
-	ipVersion := "6"
-	if podInterfaceInfo.IP.IP.To4() != nil {
-		ipVersion = "4"
+	gateways := map[string]net.IP{}
+	for _, gw := range podInterfaceInfo.Gateways {
+		if gw.To4() != nil && gateways["4"] == nil {
+			gateways["4"] = gw
+		} else if gw.To4() == nil && gateways["6"] == nil {
+			gateways["6"] = gw
+		}
 	}
+
+	// Build the result structure to pass back to the runtime
+	ips := []*current.IPConfig{}
+	for _, ipcidr := range podInterfaceInfo.IPs {
+		ip := &current.IPConfig{
+			Interface: current.Int(1),
+			Address:   *ipcidr,
+		}
+		if utilnet.IsIPv6CIDR(ipcidr) {
+			ip.Version = "6"
+		} else {
+			ip.Version = "4"
+		}
+		ip.Gateway = gateways[ip.Version]
+		ips = append(ips, ip)
+	}
+
 	return &current.Result{
 		Interfaces: interfacesArray,
-		IPs: []*current.IPConfig{
-			{
-				Version:   ipVersion,
-				Interface: current.Int(1),
-				Address:   *podInterfaceInfo.IP,
-				Gateway:   podInterfaceInfo.GW,
-			},
-		},
+		IPs:        ips,
 	}, nil
 }

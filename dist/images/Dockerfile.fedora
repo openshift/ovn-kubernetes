@@ -22,16 +22,18 @@ RUN INSTALL_PKGS=" \
         ovn ovn-central ovn-host \
 	iptables iproute strace socat \
         " && \
-	dnf install --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
+	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-# REMOVE ME when ovn is fixed
-RUN dnf -y downgrade ovn
+# ensure we pick up ovn-20.03.0-2.fc31 for SCTP fixes/support
+# this should have no effect in the future once the
+# RPM has propagated to all stable mirrors and can be removed
+RUN dnf install -y ovn --best --advisory=FEDORA-2020-b570bbc33b || true
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/
 
-COPY ovnkube /usr/bin/
+COPY ovnkube ovn-kube-util /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # copy git commit number into image
@@ -40,8 +42,7 @@ COPY git_info /root
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
-COPY ovn-debug.sh /root/
-COPY ovndb-raft-functions /root/
+COPY ovndb-raft-functions.sh /root/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \

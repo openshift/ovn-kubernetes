@@ -23,7 +23,7 @@ spec:
 # ovnkube-db
 # daemonset version 3
 # starts ovn NB/SB ovsdb daemons, each in a separate container
-# it is running on master node for now, but does not need to be the case
+# it is running on master for now, but does not need to be the case
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -76,6 +76,7 @@ spec:
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -88,6 +89,13 @@ spec:
           name: host-var-log-ovs
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -96,8 +104,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NB
-          value: "-vconsole:info -vfile:info"
+        - name: OVN_LOGLEVEL_NB
+          value: "{{ ovn_loglevel_nb }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -107,18 +115,18 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        ports:
-        - name: healthz
-          containerPort: 10256
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10256
-        #     scheme: HTTP
-        lifecycle:
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
       # end of container
 
       # sb-ovsdb - v3
@@ -133,6 +141,7 @@ spec:
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -145,6 +154,13 @@ spec:
           name: host-var-log-ovs
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -153,8 +169,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_SB
-          value: "-vconsole:info -vfile:info"
+        - name: OVN_LOGLEVEL_SB
+          value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -164,18 +180,19 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        ports:
-        - name: healthz
-          containerPort: 10255
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10255
-        #     scheme: HTTP
-        lifecycle:
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+
       # end of container
 
       nodeSelector:
@@ -188,5 +205,12 @@ spec:
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
+      - name: host-slash
+        hostPath:
+          path: /
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
       tolerations:
       - operator: "Exists"

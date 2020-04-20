@@ -3,21 +3,11 @@ package util
 import (
 	"fmt"
 	"math/big"
-	"math/rand"
 	"net"
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 )
-
-// GenerateMac generates mac address.
-func GenerateMac() string {
-	prefix := "00:00:00"
-	newRand := rand.New(rand.NewSource(time.Now().UnixNano()))
-	mac := fmt.Sprintf("%s:%02X:%02X:%02X", prefix, newRand.Intn(255), newRand.Intn(255), newRand.Intn(255))
-	return mac
-}
 
 // NextIP returns IP incremented by 1
 func NextIP(ip net.IP) net.IP {
@@ -74,15 +64,15 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port
-func GetOVSPortMACAddress(portName string) (string, error) {
+func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
 		"interface", portName, "mac_in_use")
 	if err != nil {
-		return "", fmt.Errorf("failed to get MAC address for %q, stderr: %q, error: %v",
+		return nil, fmt.Errorf("failed to get MAC address for %q, stderr: %q, error: %v",
 			portName, stderr, err)
 	}
 	if macAddress == "[]" {
-		return "", fmt.Errorf("no mac_address found for %q", portName)
+		return nil, fmt.Errorf("no mac_address found for %q", portName)
 	}
 	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
 		// There is a known issue with OVS not correctly picking up the
@@ -90,20 +80,31 @@ func GetOVSPortMACAddress(portName string) (string, error) {
 		stdout, stderr, err := RunPowershell("$(Get-NetAdapter", "-IncludeHidden",
 			"-InterfaceAlias", fmt.Sprintf("\"%s\"", portName), ").MacAddress")
 		if err != nil {
-			return "", fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
+			return nil, fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
 		}
-		// Windows returns it in 00-00-00-00-00-00 format, we want ':' instead of '-'
-		macAddress = strings.ToLower(strings.Replace(stdout, "-", ":", -1))
+		macAddress = stdout
 	}
-	return macAddress, nil
+	return net.ParseMAC(macAddress)
 }
 
-// GetNodeWellKnownAddresses returns routerIP, Management Port IP and prefix len
-// for a given subnet
-func GetNodeWellKnownAddresses(subnet *net.IPNet) (*net.IPNet, *net.IPNet) {
-	routerIP := NextIP(subnet.IP)
-	return &net.IPNet{IP: routerIP, Mask: subnet.Mask},
-		&net.IPNet{IP: NextIP(routerIP), Mask: subnet.Mask}
+// GetNodeGatewayIfAddr returns the node logical switch gateway address
+// (the ".1" address)
+func GetNodeGatewayIfAddr(subnet *net.IPNet) *net.IPNet {
+	return &net.IPNet{IP: NextIP(subnet.IP), Mask: subnet.Mask}
+}
+
+// GetNodeManagementIfAddr returns the node logical switch management port address
+// (the ".2" address)
+func GetNodeManagementIfAddr(subnet *net.IPNet) *net.IPNet {
+	gwIfAddr := GetNodeGatewayIfAddr(subnet)
+	return &net.IPNet{IP: NextIP(gwIfAddr.IP), Mask: subnet.Mask}
+}
+
+// GetNodeHybridOverlayIfAddr returns the node logical switch hybrid overlay
+// port address (the ".3" address)
+func GetNodeHybridOverlayIfAddr(subnet *net.IPNet) *net.IPNet {
+	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
+	return &net.IPNet{IP: NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
 }
 
 // JoinHostPortInt32 is like net.JoinHostPort(), but with an int32 for the port
@@ -114,14 +115,14 @@ func JoinHostPortInt32(host string, port int32) string {
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
 // a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, we'll use the first two bytes and last two bytes and hope
 // that results in a unique MAC for the scope of where it's used.
-func IPAddrToHWAddr(ip net.IP) string {
+func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
 	ip4 := ip.To4()
 	if ip4 != nil {
 		// safe to use private MAC prefix: 0A:58
-		return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip4[0], ip4[1], ip4[2], ip4[3])
+		return net.HardwareAddr{0x0A, 0x58, ip4[0], ip4[1], ip4[2], ip4[3]}
 	}
 
 	// IPv6 - use the first two and last two bytes.
-	return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[14], ip[15])
+	return net.HardwareAddr{0x0A, 0x58, ip[0], ip[1], ip[14], ip[15]}
 }

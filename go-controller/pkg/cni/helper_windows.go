@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/Microsoft/hcsshim"
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -23,12 +23,12 @@ import (
 // attach it to the desired network. This function finds the HNS Id of the
 // network based on the gatewayIP. If more than one suitable network it's found,
 // return an error asking to give the HNS Network Id in config.
-func getHNSIdFromConfigOrByGatewayIP(gatewayIP net.IP) (string, error) {
+func getHNSIdFromConfigOrByGatewayIP(gatewayIPs []net.IP) (string, error) {
 	if config.CNI.WinHNSNetworkID != "" {
-		logrus.Infof("Using HNS Network Id from config: %v", config.CNI.WinHNSNetworkID)
+		klog.Infof("Using HNS Network Id from config: %v", config.CNI.WinHNSNetworkID)
 		return config.CNI.WinHNSNetworkID, nil
 	}
-	if gatewayIP == nil {
+	if len(gatewayIPs) == 0 {
 		return "", fmt.Errorf("no gateway IP and no HNS Network ID given")
 	}
 	hnsNetworkId := ""
@@ -38,7 +38,7 @@ func getHNSIdFromConfigOrByGatewayIP(gatewayIP net.IP) (string, error) {
 	}
 	for _, hnsNW := range hnsNetworks {
 		for _, hnsNWSubnet := range hnsNW.Subnets {
-			if strings.Compare(gatewayIP.String(), hnsNWSubnet.GatewayAddress) == 0 {
+			if strings.Compare(gatewayIPs[0].String(), hnsNWSubnet.GatewayAddress) == 0 {
 				if len(hnsNetworkId) == 0 {
 					hnsNetworkId = hnsNW.Id
 				} else {
@@ -49,7 +49,7 @@ func getHNSIdFromConfigOrByGatewayIP(gatewayIP net.IP) (string, error) {
 		}
 	}
 	if len(hnsNetworkId) != 0 {
-		logrus.Infof("HNS Network Id found: %v", hnsNetworkId)
+		klog.Infof("HNS Network Id found: %v", hnsNetworkId)
 		return hnsNetworkId, nil
 	}
 	return "", fmt.Errorf("Could not find any suitable network to attach the container")
@@ -58,52 +58,52 @@ func getHNSIdFromConfigOrByGatewayIP(gatewayIP net.IP) (string, error) {
 // createHNSEndpoint creates the HNS endpoint with the given configuration.
 // On success it returns the created HNS endpoint.
 func createHNSEndpoint(hnsConfiguration *hcsshim.HNSEndpoint) (*hcsshim.HNSEndpoint, error) {
-	logrus.Infof("Creating HNS endpoint")
+	klog.Infof("Creating HNS endpoint")
 	hnsConfigBytes, err := json.Marshal(hnsConfiguration)
 	if err != nil {
 		return nil, err
 	}
-	logrus.Infof("hnsConfigBytes: %v", string(hnsConfigBytes))
+	klog.Infof("hnsConfigBytes: %v", string(hnsConfigBytes))
 
 	createdHNSEndpoint, err := hcsshim.HNSEndpointRequest("POST", "", string(hnsConfigBytes))
 	if err != nil {
-		logrus.Errorf("Could not create the HNSEndpoint, error: %v", err)
+		klog.Errorf("Could not create the HNSEndpoint, error: %v", err)
 		return nil, err
 	}
-	logrus.Infof("Created HNS endpoint with ID: %v", createdHNSEndpoint.Id)
+	klog.Infof("Created HNS endpoint with ID: %v", createdHNSEndpoint.Id)
 	return createdHNSEndpoint, nil
 }
 
 // containerHotAttachEndpoint attaches the given endpoint to a running container
 func containerHotAttachEndpoint(existingHNSEndpoint *hcsshim.HNSEndpoint, containerID string) error {
-	logrus.Infof("Attaching endpoint %v to container %v", existingHNSEndpoint.Id, containerID)
+	klog.Infof("Attaching endpoint %v to container %v", existingHNSEndpoint.Id, containerID)
 	if err := hcsshim.HotAttachEndpoint(containerID, existingHNSEndpoint.Id); err != nil {
-		logrus.Infof("Error attaching the endpoint to the container, error: %v", err)
+		klog.Infof("Error attaching the endpoint to the container, error: %v", err)
 		return err
 	}
-	logrus.Infof("Endpoint attached successfully to the container")
+	klog.Infof("Endpoint attached successfully to the container")
 	return nil
 }
 
 // deleteHNSEndpoint deletes the given endpoint if it exists
 func deleteHNSEndpoint(endpointName string) error {
-	logrus.Infof("Deleting HNS endpoint: %v", endpointName)
+	klog.Infof("Deleting HNS endpoint: %v", endpointName)
 	// The HNS endpoint must be manually deleted
 	hnsEndpoint, err := hcsshim.GetHNSEndpointByName(endpointName)
 	if err == nil {
-		logrus.Infof("Fetched endpoint: %v", endpointName)
+		klog.Infof("Fetched endpoint: %v", endpointName)
 		// Endpoint exists, try to delete it
 		_, err = hnsEndpoint.Delete()
 		if err != nil {
-			logrus.Warningf("Failed to delete HNS endpoint: %q", err)
+			klog.Warningf("Failed to delete HNS endpoint: %q", err)
 		} else {
-			logrus.Infof("HNS endpoint successfully deleted: %q", endpointName)
+			klog.Infof("HNS endpoint successfully deleted: %q", endpointName)
 		}
 		// Return the error in case delete failed, we don't want to leak any HNS Endpoints
 		return err
 	}
 	// If endpoint was not found just log a message and return no error
-	logrus.Infof("No endpoint with name %v was found, error %v", endpointName, err)
+	klog.Infof("No endpoint with name %v was found, error %v", endpointName, err)
 	return nil
 }
 
@@ -118,7 +118,11 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	if conf.DeviceID != "" {
 		return nil, fmt.Errorf("failure OVS-Offload is not supported in Windows")
 	}
-	ipMaskSize, _ := ifInfo.IP.Mask.Size()
+	if len(ifInfo.IPs) != 1 {
+		return nil, fmt.Errorf("dual-stack is not supported in Windows")
+	}
+
+	ipMaskSize, _ := ifInfo.IPs[0].Mask.Size()
 	// NOTE(abalutoiu): The endpoint name should not depend on the container ID.
 	// This is for backwards compatibility in kubernetes which calls the CNI
 	// even for containers that are not the infra container.
@@ -131,15 +135,15 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if err != nil {
 			errHNSDelete := deleteHNSEndpoint(endpointName)
 			if errHNSDelete != nil {
-				logrus.Warningf("Failed to delete the HNS Endpoint, reason: %q", errHNSDelete)
+				klog.Warningf("Failed to delete the HNS Endpoint, reason: %q", errHNSDelete)
 			}
 		}
 	}()
 
 	var hnsNetworkId string
-	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(ifInfo.GW)
+	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(ifInfo.Gateways)
 	if err != nil {
-		logrus.Infof("Error when detecting the HNS Network Id: %q", err)
+		klog.Infof("Error when detecting the HNS Network Id: %q", err)
 		return nil, err
 	}
 
@@ -148,7 +152,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	var createdEndpoint *hcsshim.HNSEndpoint
 	createdEndpoint, err = hcsshim.GetHNSEndpointByName(endpointName)
 	if err != nil {
-		logrus.Infof("HNS endpoint %q does not exist", endpointName)
+		klog.Infof("HNS endpoint %q does not exist", endpointName)
 
 		// HNSEndpoint requires the xx-xx-xx-xx-xx-xx format for the MacAddress field
 		macAddressIpFormat := strings.Replace(ifInfo.MAC.String(), ":", "-", -1)
@@ -156,7 +160,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		hnsEndpoint := &hcsshim.HNSEndpoint{
 			Name:           endpointName,
 			VirtualNetwork: hnsNetworkId,
-			IPAddress:      ifInfo.IP.IP,
+			IPAddress:      ifInfo.IPs[0].IP,
 			MacAddress:     macAddressIpFormat,
 			PrefixLength:   uint8(ipMaskSize),
 			DNSServerList:  strings.Join(conf.DNS.Nameservers, ","),
@@ -167,12 +171,12 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 			return nil, err
 		}
 	} else {
-		logrus.Infof("HNS endpoint already exists with name: %q", endpointName)
+		klog.Infof("HNS endpoint already exists with name: %q", endpointName)
 	}
 
 	err = containerHotAttachEndpoint(createdEndpoint, pr.SandboxID)
 	if err != nil {
-		logrus.Warningf("Failed to hot attach HNS Endpoint %q to container %q, reason: %q", endpointName, pr.SandboxID, err)
+		klog.Warningf("Failed to hot attach HNS Endpoint %q to container %q, reason: %q", endpointName, pr.SandboxID, err)
 		return nil, err
 	}
 
@@ -184,7 +188,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	// within a pod. Issue: https://github.com/kubernetes/kubernetes/issues/64188
 	ifaceName, errFind := ovsFind("interface", "name", "external-ids:iface-id="+ifaceID)
 	if errFind == nil && len(ifaceName) > 0 && ifaceName[0] != "" {
-		logrus.Infof("HNS endpoint %q already set up for container %q", endpointName, pr.SandboxID)
+		klog.Infof("HNS endpoint %q already set up for container %q", endpointName, pr.SandboxID)
 		return []*current.Interface{}, nil
 	}
 
@@ -196,7 +200,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		"interface", endpointName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IP),
+		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IPs[0]),
 	}
 	var out []byte
 	out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
@@ -213,7 +217,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 
 	out, err = exec.Command("powershell", mtuArgs...).CombinedOutput()
 	if err != nil {
-		logrus.Warningf("Failed to set MTU on endpoint %q, with: %q", endpointName, string(out))
+		klog.Warningf("Failed to set MTU on endpoint %q, with: %q", endpointName, string(out))
 		return nil, fmt.Errorf("failed to set MTU on endpoint, reason: %q", err)
 	}
 
@@ -234,7 +238,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
-		logrus.Warningf("cleanup failed, required CNI variable missing from args: %v", pr)
+		klog.Warningf("cleanup failed, required CNI variable missing from args: %v", pr)
 		return nil
 	}
 
@@ -245,10 +249,10 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
-		logrus.Warningf("failed to delete OVS port %s: %v  %q", endpointName, err, string(out))
+		klog.Warningf("failed to delete OVS port %s: %v  %q", endpointName, err, string(out))
 	}
 	if err = deleteHNSEndpoint(endpointName); err != nil {
-		logrus.Warningf("failed to delete HNSEndpoint %v: %v", endpointName, err)
+		klog.Warningf("failed to delete HNSEndpoint %v: %v", endpointName, err)
 	}
 	// TODO: uncomment when OVS QoS is supported on Windows
 	// _ = clearPodBandwidth(args.ContainerID)

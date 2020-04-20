@@ -52,7 +52,7 @@ func (n namespace) addCmds(fexec *ovntest.FakeExec, namespaces ...v1.Namespace) 
 	for _, n := range namespaces {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(n.Name),
-			Output: fmt.Sprintf("name=%s\n", n.Name),
+			Output: fakeUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(n.Name)),
@@ -66,16 +66,28 @@ func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 	})
 }
 
-func (n namespace) addPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf(`ovn-nbctl --timeout=15 set address_set %s addresses="%s"`, hashedAddressSet(namespace.Name), tP.podIP),
-	})
+func (n namespace) addPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace, set bool) {
+	if set {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf(`ovn-nbctl --timeout=15 set address_set %s addresses="%s"`, hashedAddressSet(namespace.Name), tP.podIP),
+		})
+	} else {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses %s`, hashedAddressSet(namespace.Name), tP.podIP),
+		})
+	}
 }
 
-func (n namespace) delPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
-	})
+func (n namespace) delPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace, clear bool) {
+	if clear {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
+		})
+	} else {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedAddressSet(namespace.Name), tP.podIP),
+		})
+	}
 }
 
 func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
@@ -83,7 +95,7 @@ func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
 		Output: fmt.Sprintf("name=%s\n", namespace.Name),
 	})
-	n.addPodCmds(fexec, tP, namespace)
+	n.addPodCmds(fexec, tP, namespace, true)
 }
 
 var _ = Describe("OVN Namespace Operations", func() {
@@ -95,14 +107,14 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
 
 		fExec = ovntest.NewFakeExec()
-		fakeOvn = NewFakeOVN(fExec, true)
+		fakeOvn = NewFakeOVN(fExec)
 	})
 
 	AfterEach(func() {
@@ -142,6 +154,8 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 				)
+				podMAC := ovntest.MustParseMAC("11:22:33:44:55:66")
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, ovntest.MustParseIP(tP.podIP))
 				fakeOvn.controller.WatchNamespaces()
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})

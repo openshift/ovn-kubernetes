@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -63,30 +63,20 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	if err := netlink.LinkSetHardwareAddr(link, ifInfo.MAC); err != nil {
 		return fmt.Errorf("failed to add mac address %s to %s: %v", ifInfo.MAC, link.Attrs().Name, err)
 	}
-	addr := &netlink.Addr{IPNet: ifInfo.IP}
-	if err := netlink.AddrAdd(link, addr); err != nil {
-		return fmt.Errorf("failed to add IP addr %s to %s: %v", ifInfo.IP, link.Attrs().Name, err)
+	for _, ip := range ifInfo.IPs {
+		addr := &netlink.Addr{IPNet: ip}
+		if err := netlink.AddrAdd(link, addr); err != nil {
+			return fmt.Errorf("failed to add IP addr %s to %s: %v", ip, link.Attrs().Name, err)
+		}
 	}
-
-	var foundDefault bool
+	for _, gw := range ifInfo.Gateways {
+		if err := ip.AddRoute(nil, gw, link); err != nil {
+			return fmt.Errorf("failed to add gateway route: %v", err)
+		}
+	}
 	for _, route := range ifInfo.Routes {
 		if err := ip.AddRoute(route.Dest, route.NextHop, link); err != nil {
 			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
-		}
-
-		if ones, _ := route.Dest.Mask.Size(); ones == 0 {
-			foundDefault = true
-		}
-	}
-
-	if !foundDefault {
-		// If the pod routes did not include a default route,
-		// add a "default" default route via the pod's gateway, if
-		// one exists
-		if ifInfo.GW != nil {
-			if err := ip.AddRoute(nil, ifInfo.GW, link); err != nil {
-				return fmt.Errorf("failed to add gateway route: %v", err)
-			}
 		}
 	}
 
@@ -189,33 +179,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 	}
 
-	physlink, err := netlink.LinkByName(uplink)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed getting link for %s: %v", uplink, err)
-	}
-
-	// 7. Clean up any left over bandwidth configuration, before proceeding.
-	// Probably put this in a function that cleans up/resets other configs too.
-	err = netlink.LinkSetVfTxRate(physlink, vfIndex, 0)
-	if err != nil {
-		logrus.Infof("failed to clean up bandwidth on %s (%s/%d): %v", pciAddrs, physlink, vfIndex, err)
-	}
-
-	// 8. set rate, if any.
-	if ifInfo.Egress > 0 {
-		// Rate in Mbps, LinkSetVfTxRate takes an int, and a value of 0 means no rate limit.
-		if ifInfo.Egress < 1000000 {
-			return nil, nil, fmt.Errorf("rate of %d bps not supported on device %s/%d", ifInfo.Egress, uplink, vfIndex)
-		}
-		// in Mbps
-		egressMbps := int(ifInfo.Egress / 1000000)
-		err = netlink.LinkSetVfTxRate(physlink, vfIndex, egressMbps)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed setting link bandwidth of %d Mbps on device %s/%d: %v", egressMbps, uplink, vfIndex, err)
-		}
-	}
-
-	// 9. Move VF to Container namespace
+	// 7. Move VF to Container namespace
 	err = moveIfToNetns(vfNetdevice, netns)
 	if err != nil {
 		return nil, nil, err
@@ -281,7 +245,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 
 	var hostIface, contIface *current.Interface
 
-	logrus.Debugf("CNI Conf %v", pr.CNIConf)
+	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
@@ -302,8 +266,13 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
 	for _, uuid := range uuids {
 		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			logrus.Warningf("failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+			klog.Warningf("failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
 		}
+	}
+
+	ipStrs := make([]string, len(ifInfo.IPs))
+	for i, ip := range ifInfo.IPs {
+		ipStrs[i] = ip.String()
 	}
 
 	// Add the new sandbox's OVS port
@@ -312,7 +281,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		"interface", hostIface.Name,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IP),
+		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", pr.SandboxID),
 	}
 
@@ -352,13 +321,13 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
 			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
 			if err != nil {
-				logrus.Warningf("failed to disable IPv6 DAD: %q", err)
+				klog.Warningf("failed to disable IPv6 DAD: %q", err)
 			}
 		}
 		return ip.SettleAddresses(contIface.Name, 10)
 	})
 	if err != nil {
-		logrus.Warningf("failed to configure container network namespace: %q", err)
+		klog.Warningf("failed to settle addresses: %q", err)
 	}
 
 	err = wait.PollImmediate(100*time.Millisecond, 20*time.Second, func() (bool, error) {
@@ -366,7 +335,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if err != nil {
 			return false, nil
 		}
-		return strings.Contains(stdout, ifInfo.IP.IP.String()), nil
+		return strings.Contains(stdout, ifInfo.IPs[0].IP.String()), nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
@@ -384,7 +353,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
-		logrus.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
+		klog.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
 
 	_ = clearPodBandwidth(pr.SandboxID)

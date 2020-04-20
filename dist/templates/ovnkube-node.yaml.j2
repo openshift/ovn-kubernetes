@@ -11,7 +11,7 @@ metadata:
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This daemonset launches the ovn-kubernetes networking components.
+      This DaemonSet launches the ovn-kubernetes networking components for worker nodes.
 spec:
   selector:
     matchLabels:
@@ -48,14 +48,22 @@ spec:
             command:
             - /usr/share/openvswitch/scripts/ovs-ctl
             - status
-          initialDelaySeconds: 15
-          periodSeconds: 5
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovs-daemons"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
 
         securityContext:
           runAsUser: 0
           # Permission could be reduced by selecting an appropriate SELinux policy
           privileged: true
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /lib/modules
           name: host-modules
@@ -100,6 +108,7 @@ spec:
           capabilities:
             add: ["SYS_NICE"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
@@ -112,6 +121,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -120,44 +132,26 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVNKUBE_LOGLEVEL
-          value: "4"
-        - name: OVN_NET_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: net_cidr
-        - name: OVN_SVC_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: svc_cidr
+        - name: OVN_LOG_CONTROLLER
+          value: "{{ ovn_loglevel_controller }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_NODE
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
 
-        ports:
-        - name: healthz
-          containerPort: 10258
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10258
-        #     scheme: HTTP
-        lifecycle:
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
 
       - name: ovnkube-node
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -173,6 +167,7 @@ spec:
           privileged: true
           {% endif %}
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # for the iptables wrapper
         - mountPath: /host
@@ -195,6 +190,9 @@ spec:
           name: host-opt-cni-bin
         - mountPath: /etc/cni/net.d
           name: host-etc-cni-netd
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
         {% if kind is defined and kind -%}
         - mountPath: /var/run/netns
           name: host-netns
@@ -209,7 +207,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVNKUBE_LOGLEVEL
-          value: "5"
+          value: "{{ ovnkube_node_loglevel }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -238,22 +236,23 @@ spec:
           value: "{{ ovn_gateway_mode }}"
         - name: OVN_GATEWAY_OPTS
           value: "{{ ovn_gateway_opts }}"
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: "{{ ovn_hybrid_overlay_net_cidr }}"
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
 
-        ports:
-        - name: healthz
-          containerPort: 10259
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10259
-        #     scheme: HTTP
         lifecycle:
           preStop:
             exec:
               command: ["/root/ovnkube.sh", "cleanup-ovn-node"]
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
 
       nodeSelector:
         kubernetes.io/os: "linux"
@@ -289,6 +288,10 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
       - name: host-slash
         hostPath:
           path: /
