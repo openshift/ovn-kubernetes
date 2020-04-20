@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -54,13 +56,18 @@ func podToCookie(pod *kapi.Pod) string {
 	return nameToCookie(pod.Namespace + "_" + pod.Name)
 }
 
-func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
+func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, wf *factory.WatchFactory) error {
 	podIPs, podMAC, err := getPodDetails(pod, n.nodeName)
 	if err != nil {
 		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
 		return n.deletePod(pod)
 	}
 
+	namespace, err := ovn.WaitForNamespace(pod.Namespace, wf)
+	if err != nil {
+		return err
+	}
+	namespaceExternalGW := namespace.GetAnnotations()[hotypes.HybridOverlayExternalGw]
 	cookie := podToCookie(pod)
 	for _, podIP := range podIPs {
 		_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
@@ -68,12 +75,50 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
 		if err != nil {
 			return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
+		if namespaceExternalGW != "" {
+			_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
+				fmt.Sprintf("table=0, cookie=0x%s, priority=100, ip, nw_src=%s, actions=load:%s->NXM_NX_TUN_ID[0..31],set_field:%s->tun_dst,output:%s", cookie, podIP.IP, strconv.Itoa(hotypes.HybridOverlayVNI), namespaceExternalGW, extVXLANName))
+			if err != nil {
+				return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			}
+			node, err := wf.GetNode(n.nodeName)
+			if err != nil {
+				return fmt.Errorf("failed to get node %s: %v", n.nodeName, err)
+			}
+			subnet, _, _, err := getNodeDetails(node)
+			if err != nil {
+				return fmt.Errorf("failed to get node %s details: %v", n.nodeName, err)
+			}
+			extBridgeMacAddress, err := util.GetOVSPortMACAddress(extBridgeName)
+			if err != nil {
+				return fmt.Errorf("failed to get external bridge %s: %v", extBridgeName, err)
+			}
+			extBridgeMacRaw := strings.Replace(extBridgeMacAddress.String(), ":", "", -1)
+			_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
+				fmt.Sprintf("cookie=0x%s,table=0,priority=100,arp,in_port=%s,arp_tpa=%s,"+
+					"actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],"+
+					"mod_dl_src:%s,"+
+					"load:0x2->NXM_OF_ARP_OP[],"+
+					"move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],"+
+					"load:0x%s->NXM_NX_ARP_SHA[],"+
+					"move:NXM_OF_ARP_TPA[]->NXM_NX_REG0[],"+
+					"move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],"+
+					"move:NXM_NX_REG0[]->NXM_OF_ARP_SPA[],"+
+					"IN_PORT",
+					cookie, extVXLANName, subnet, extBridgeMacAddress.String(), extBridgeMacRaw))
+			if err != nil {
+				return fmt.Errorf("failed to add ARP responder flow for node %q: %v", n.nodeName, err)
+			}
+		}
 	}
 	return nil
 }
 
 func (n *NodeController) deletePod(pod *kapi.Pod) error {
 	if pod.Spec.NodeName == n.nodeName {
+		if err := deleteFlowsByCookie(0, podToCookie(pod)); err != nil {
+			return fmt.Errorf("failed to delete flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
 		if err := deleteFlowsByCookie(10, podToCookie(pod)); err != nil {
 			return fmt.Errorf("failed to delete flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
@@ -151,6 +196,9 @@ func (n *NodeController) syncPods(pods []interface{}) {
 	}
 
 	for cookie := range cookiesToRemove {
+		if err := deleteFlowsByCookie(0, cookie); err != nil {
+			klog.Errorf("failed clean stale hybrid overlay pod flow %q: %v", cookie, err)
+		}
 		if err := deleteFlowsByCookie(10, cookie); err != nil {
 			klog.Errorf("failed clean stale hybrid overlay pod flow %q: %v", cookie, err)
 		}
@@ -170,7 +218,7 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if err := n.addOrUpdatePod(pod); err != nil {
+			if err := n.addOrUpdatePod(pod, wf); err != nil {
 				klog.Warningf("failed to handle pod %v addition: %v", pod, err)
 			}
 		},
@@ -178,7 +226,7 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 			podNew := newer.(*kapi.Pod)
 			podOld := old.(*kapi.Pod)
 			if podChanged(podOld, podNew, n.nodeName) {
-				if err := n.addOrUpdatePod(podNew); err != nil {
+				if err := n.addOrUpdatePod(podNew, wf); err != nil {
 					klog.Warningf("failed to handle pod %v update: %v", podNew, err)
 				}
 			}
