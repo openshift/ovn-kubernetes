@@ -11,6 +11,8 @@ const (
 	HybridOverlayNodeSubnet = HybridOverlayAnnotationBase + "node-subnet"
 	// HybridOverlayDRMAC holds the MAC address of the Distributed Router/gateway
 	HybridOverlayDRMAC = HybridOverlayAnnotationBase + "distributed-router-gateway-mac"
+	// HybridOverlayExternalGW is a namespace annotation that holds the IP address of the external gateway to route default traffic
+	HybridOverlayExternalGw = HybridOverlayAnnotationBase + "external-gw"
 
 	// HybridOverlayVNI is the VNI for VXLAN tunnels between nodes/endpoints
 	HybridOverlayVNI = 4097
