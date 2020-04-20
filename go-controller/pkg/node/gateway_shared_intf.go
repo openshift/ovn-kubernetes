@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"regexp"
 	"strings"
@@ -284,7 +285,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	return nil
 }
 
-func (n *OvnNode) initSharedGateway(subnet, gwNextHop, gwIntf string,
+func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf string,
 	nodeAnnotator kube.Annotator) (postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
@@ -324,7 +325,7 @@ func (n *OvnNode) initSharedGateway(subnet, gwNextHop, gwIntf string,
 		return nil, fmt.Errorf("Failed to get interface details for %s (%v)",
 			gwIntf, err)
 	}
-	if ipAddress == "" {
+	if ipAddress == nil {
 		return nil, fmt.Errorf("%s does not have a ipv4 address", gwIntf)
 	}
 
@@ -333,8 +334,21 @@ func (n *OvnNode) initSharedGateway(subnet, gwNextHop, gwIntf string,
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = util.SetSharedL3GatewayConfig(nodeAnnotator, ifaceID, macAddress, ipAddress, gwNextHop,
-		config.Gateway.NodeportEnable, config.Gateway.VLANID)
+	chassisID, err := util.GetNodeChassisID()
+	if err != nil {
+		return nil, err
+	}
+
+	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+		Mode:           config.GatewayModeShared,
+		ChassisID:      chassisID,
+		InterfaceID:    ifaceID,
+		MACAddress:     macAddress,
+		IPAddresses:    []*net.IPNet{ipAddress},
+		NextHops:       []net.IP{gwNextHop},
+		NodePortEnable: config.Gateway.NodeportEnable,
+		VLANID:         &config.Gateway.VLANID,
+	})
 	if err != nil {
 		return nil, err
 	}
