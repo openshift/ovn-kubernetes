@@ -17,12 +17,17 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
+	"github.com/vishvananda/netlink"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
 
 const (
 	testOVSMAC     string = "11:22:33:44:55:66"
+	testMgmtMAC    string = "06:05:04:03:02:01"
 	testDRMAC      string = "00:00:00:7a:af:04"
 	testNodeSubnet string = "1.2.3.0/24"
 	testNodeIP     string = "1.2.3.3"
@@ -35,6 +40,10 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string)
 		Output: testNodeSubnet,
 	})
 	addGetPortAddressesCmds(fexec, nodeName, testDRMAC, testNodeIP)
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface ovn-k8s-mp0 mac_in_use",
+		Output: testMgmtMAC,
+	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --may-exist add-br br-ext -- set Bridge br-ext fail_mode=secure",
 	})
@@ -44,7 +53,6 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string)
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 set bridge br-ext other-config:hwaddr=" + testOVSMAC,
-		"ip link set br-ext up",
 		"ovs-vsctl --timeout=15 --may-exist add-port br-int int -- --may-exist add-port br-ext ext -- set Interface int type=patch options:peer=ext external-ids:iface-id=int-" + nodeName + " -- set Interface ext type=patch options:peer=int",
 		"ovs-ofctl add-flow br-ext table=0,priority=0,actions=drop",
 	})
@@ -99,10 +107,69 @@ func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
 	}
 }
 
+func addLink(name string) {
+	err := netlink.LinkAdd(&netlink.Dummy{
+		LinkAttrs: netlink.LinkAttrs{
+			Name: name,
+		},
+	})
+	Expect(err).NotTo(HaveOccurred())
+	origLink, err := netlink.LinkByName(name)
+	Expect(err).NotTo(HaveOccurred())
+	err = netlink.LinkSetUp(origLink)
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func expectRouteForSubnet(routes []netlink.Route, subnet *net.IPNet, hoIfAddr net.IP) {
+	found := false
+	for _, route := range routes {
+		if route.Dst.String() == subnet.String() && route.Gw.String() == hoIfAddr.String() {
+			found = true
+			break
+		}
+	}
+	Expect(found).To(BeTrue())
+}
+
+func validateNetlinkState(nodeSubnet string) {
+	link, err := netlink.LinkByName(extBridgeName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(link.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
+
+	link, err = netlink.LinkByName(util.K8sMgmtIntfName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(link.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
+
+	routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
+	Expect(err).NotTo(HaveOccurred())
+
+	// Expect a route to the hybrid overlay CIDR via the .3 address
+	// through the management port
+	_, ipnet, err := net.ParseCIDR(nodeSubnet)
+	Expect(err).NotTo(HaveOccurred())
+	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(ipnet)
+	for _, hoSubnet := range config.HybridOverlay.ClusterSubnets {
+		expectRouteForSubnet(routes, hoSubnet.CIDR, hybridOverlayIfAddr.IP)
+	}
+}
+
+func appRun(app *cli.App, netns ns.NetNS) {
+	_ = netns.Do(func(ns.NetNS) error {
+		defer GinkgoRecover()
+		err := app.Run([]string{
+			app.Name,
+			hoNodeCliArg,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		return nil
+	})
+}
+
 var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 	var (
 		app   *cli.App
 		fexec *ovntest.FakeExec
+		netns ns.NetNS
 	)
 	const thisNode string = "mynode"
 
@@ -117,6 +184,22 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		fexec = ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
+
+		netns, err = testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+
+		// prepare br-ext and ovn-k8s-mp0 in original namespace
+		_ = netns.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			addLink(extBridgeName)
+			addLink(util.K8sMgmtIntfName)
+			return nil
+		})
+	})
+
+	AfterEach(func() {
+		Expect(netns.Close()).To(Succeed())
+		Expect(testutils.UnmountNS(netns)).To(Succeed())
 	})
 
 	It("does not set up tunnels for non-hybrid-overlay nodes without annotations", func() {
@@ -155,12 +238,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
-
-		err := app.Run([]string{
-			app.Name,
-			hoNodeCliArg,
-		})
-		Expect(err).NotTo(HaveOccurred())
+		appRun(app, netns)
 	})
 
 	It("does not set up tunnels for non-hybrid-overlay nodes with subnet annotations", func() {
@@ -206,14 +284,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			validateNetlinkState(node1Subnet)
 			return nil
 		}
-
-		err := app.Run([]string{
-			app.Name,
-			hoNodeCliArg,
-		})
-		Expect(err).NotTo(HaveOccurred())
+		appRun(app, netns)
 	})
 
 	It("sets up local node hybrid overlay bridge", func() {
@@ -253,12 +327,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
-
-		err := app.Run([]string{
-			app.Name,
-			hoNodeCliArg,
-		})
-		Expect(err).NotTo(HaveOccurred())
+		appRun(app, netns)
 	})
 
 	It("sets up tunnels for Windows nodes", func() {
@@ -305,15 +374,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-
+			validateNetlinkState(node1Subnet)
 			return nil
 		}
-
-		err := app.Run([]string{
-			app.Name,
-			hoNodeCliArg,
-		})
-		Expect(err).NotTo(HaveOccurred())
+		appRun(app, netns)
 	})
 
 	It("removes stale node flows on initial sync", func() {
@@ -360,12 +424,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			return nil
 		}
-
-		err := app.Run([]string{
-			app.Name,
-			hoNodeCliArg,
-		})
-		Expect(err).NotTo(HaveOccurred())
+		appRun(app, netns)
 	})
 
 	It("removes stale pod flows on initial sync", func() {
@@ -407,9 +466,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			return nil
 		}
-
-		err := app.Run([]string{app.Name})
-		Expect(err).NotTo(HaveOccurred())
+		appRun(app, netns)
 	})
 
 	It("sets up local pod flows", func() {
@@ -457,8 +514,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			return nil
 		}
-
-		err := app.Run([]string{app.Name})
-		Expect(err).NotTo(HaveOccurred())
+		appRun(app, netns)
 	})
 })
