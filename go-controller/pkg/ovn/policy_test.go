@@ -1244,21 +1244,39 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 	})
 })
 
-func makeIPv4Match(names ...string) string {
-	hashedNames := make([]string, 0, len(names))
-	for _, name := range names {
-		hashedNames = append(hashedNames, hashedAddressSet(name))
+func asMatch(addressSets []string) string {
+	hashedNames := make([]string, 0, len(addressSets))
+	for _, as := range addressSets {
+		hashedNames = append(hashedNames, hashedAddressSet(as))
 	}
 	sort.Strings(hashedNames)
-
-	match := "ip4.src == {"
+	var match string
 	for i, n := range hashedNames {
 		if i > 0 {
 			match += ", "
 		}
 		match += fmt.Sprintf("$%s", n)
 	}
-	return match + "}"
+	return match
+}
+
+func addExpectedGressCmds(fExec *ovntest.FakeExec, gp *gressPolicy, oldAS, newAS []string) []string {
+	const uuid string = "94407fe0-2c15-4a63-baea-ab4af0ea5bb8"
+
+	oldMatch := asMatch(oldAS)
+	newMatch := asMatch(newAS)
+
+	gpDirection := string(knet.PolicyTypeIngress)
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd: fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {%s} && outport == @%s\" external-ids:namespace=%s external-ids:policy=%s external-ids:%s_num=%d external-ids:policy_type=%s",
+			oldMatch, gp.portGroupName, gp.namespace, gp.name, gpDirection, gp.idx, gpDirection),
+		Output: uuid,
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s match=\"ip4.src == {%s} && outport == @%s\"",
+			uuid, newMatch, gp.portGroupName),
+	})
+	return newAS
 }
 
 var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
@@ -1275,6 +1293,11 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 	})
 
 	It("computes match strings from address sets correctly", func() {
+		const (
+			pgUUID string = "pg-uuid"
+			pgName string = "pg-name"
+		)
+
 		policy := &knet.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
 				UID:       types.UID("testing"),
@@ -1287,10 +1310,10 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		direction := strings.ToLower(string(knet.PolicyTypeIngress))
 		asName := npTest.addNamespaceSelectorCmdsForGress(fExec, policy, direction, 0)
 
-		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name)
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name, pgUUID, pgName)
 		err := gp.ensurePeerAddressSet()
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		one := fmt.Sprintf("testing.policy.ingress.1")
 		two := fmt.Sprintf("testing.policy.ingress.2")
@@ -1299,89 +1322,71 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		five := fmt.Sprintf("testing.policy.ingress.5")
 		six := fmt.Sprintf("testing.policy.ingress.6")
 
-		oldMatch, newMatch, changed := gp.addNamespaceAddressSet(one)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, one)))
-		Expect(changed).To(BeTrue())
+		cur := addExpectedGressCmds(fExec, gp, []string{asName}, []string{asName, one})
+		gp.addNamespaceAddressSet(one)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.addNamespaceAddressSet(two)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, one)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, one, two)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, one, two})
+		gp.addNamespaceAddressSet(two)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// address sets should be alphabetized
-		oldMatch, newMatch, changed = gp.addNamespaceAddressSet(three)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, one, two)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, one, two, three)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, one, two, three})
+		gp.addNamespaceAddressSet(three)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// re-adding an existing set is a no-op
-		oldMatch, newMatch, changed = gp.addNamespaceAddressSet(one)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		gp.addNamespaceAddressSet(one)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.addNamespaceAddressSet(four)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, one, two, three)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, one, two, three, four)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, one, two, three, four})
+		gp.addNamespaceAddressSet(four)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// now delete a set
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(one)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, one, two, three, four)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, two, three, four)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, two, three, four})
+		gp.delNamespaceAddressSet(one)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is a no-op
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(one)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		gp.delNamespaceAddressSet(one)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// add and delete some more...
-		oldMatch, newMatch, changed = gp.addNamespaceAddressSet(five)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, two, three, four)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, two, three, four, five)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, two, three, four, five})
+		gp.addNamespaceAddressSet(five)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(three)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, two, three, four, five)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, two, four, five)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, two, four, five})
+		gp.delNamespaceAddressSet(three)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(one)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		// deleting again is no-op
+		gp.delNamespaceAddressSet(one)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.addNamespaceAddressSet(six)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, two, four, five)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, two, four, five, six)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, two, four, five, six})
+		gp.addNamespaceAddressSet(six)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(two)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, two, four, five, six)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, four, five, six)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, four, five, six})
+		gp.delNamespaceAddressSet(two)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(five)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, four, five, six)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, four, six)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, four, six})
+		gp.delNamespaceAddressSet(five)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(six)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, four, six)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName, four)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName, four})
+		gp.delNamespaceAddressSet(six)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(four)
-		Expect(oldMatch).To(Equal(makeIPv4Match(asName, four)))
-		Expect(newMatch).To(Equal(makeIPv4Match(asName)))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, cur, []string{asName})
+		gp.delNamespaceAddressSet(four)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delNamespaceAddressSet(four)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		// deleting again is no-op
+		gp.delNamespaceAddressSet(four)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 	})
 })
