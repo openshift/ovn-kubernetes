@@ -26,6 +26,9 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+# create openshift user so uid/gid matches what is used in rhcos
+RUN groupadd -g 801 -r openvswitch && useradd -u 800 -r -g openvswitch openvswitch
+
 # install needed rpms - openvswitch must be 2.10.4 or higher
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
