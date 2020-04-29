@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"reflect"
 	"strings"
 	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -20,7 +18,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
 
@@ -37,12 +34,12 @@ type NodeController struct {
 	drMAC       string
 }
 
-// NewNode returns a node handler that listens for node events
+// newNodeController returns a node handler that listens for node events
 // so that Add/Update/Delete events are appropriately handled.
 // It initializes the node it is currently running on. On Linux, this means:
 //  1. Setting up a VXLAN gateway and hooking to the OVN gateway
 //  2. Setting back annotations about its VTEP and gateway MAC address to its own object
-func NewNode(kube kube.Interface, nodeName string) (*NodeController, error) {
+func newNodeController(kube kube.Interface, nodeName string) (nodeController, error) {
 	node := &NodeController{
 		kube:     kube,
 		nodeName: nodeName,
@@ -57,11 +54,12 @@ func podToCookie(pod *kapi.Pod) string {
 	return nameToCookie(pod.Namespace + "_" + pod.Name)
 }
 
-func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
+// AddPod handles the pod add event
+func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	podIPs, podMAC, err := getPodDetails(pod, n.nodeName)
 	if err != nil {
 		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
-		return n.deletePod(pod)
+		return n.DeletePod(pod)
 	}
 
 	cookie := podToCookie(pod)
@@ -75,7 +73,8 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
 	return nil
 }
 
-func (n *NodeController) deletePod(pod *kapi.Pod) error {
+// DeletePod handles the pod delete event
+func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 	if pod.Spec.NodeName == n.nodeName {
 		if err := deleteFlowsByCookie(10, podToCookie(pod)); err != nil {
 			return fmt.Errorf("failed to delete flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -96,30 +95,10 @@ func getPodDetails(pod *kapi.Pod, nodeName string) ([]*net.IPNet, net.HardwareAd
 	return podInfo.IPs, podInfo.MAC, nil
 }
 
-// podChanged returns true if any relevant pod attributes changed
-func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
-	podIPs1, mac1, _ := getPodDetails(pod1, nodeName)
-	podIPs2, mac2, _ := getPodDetails(pod2, nodeName)
-
-	if len(podIPs1) != len(podIPs2) || !reflect.DeepEqual(mac1, mac2) {
-		return true
-	}
-	for i := range podIPs1 {
-		if podIPs1[i].String() != podIPs2[i].String() {
-			return true
-		}
-	}
-	return false
-}
-
-func (n *NodeController) syncPods(pods []interface{}) {
+// RemoveStalePods handles the removal of stale pods on startup
+func (n *NodeController) RemoveStalePods(pods []*kapi.Pod) {
 	kubePods := make(map[string]bool)
-	for _, tmp := range pods {
-		pod, ok := tmp.(*kapi.Pod)
-		if !ok {
-			klog.Errorf("Spurious object in syncPods: %v", tmp)
-			continue
-		}
+	for _, pod := range pods {
 		kubePods[podToCookie(pod)] = true
 	}
 
@@ -160,46 +139,6 @@ func (n *NodeController) syncPods(pods []interface{}) {
 	}
 }
 
-// Start is the top level function to run hybrid-sdn in node mode
-func (n *NodeController) Start(wf *factory.WatchFactory) error {
-	if err := n.startNodeWatch(wf); err != nil {
-		return err
-	}
-
-	return n.startPodWatch(wf)
-}
-
-func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
-	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			if err := n.addOrUpdatePod(pod); err != nil {
-				klog.Warningf("failed to handle pod %v addition: %v", pod, err)
-			}
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			podNew := newer.(*kapi.Pod)
-			podOld := old.(*kapi.Pod)
-			if podChanged(podOld, podNew, n.nodeName) {
-				if err := n.addOrUpdatePod(podNew); err != nil {
-					klog.Warningf("failed to handle pod %v update: %v", podNew, err)
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			if err := n.deletePod(pod); err != nil {
-				klog.Warningf("failed to handle pod %v deletion: %v", pod, err)
-			}
-		},
-	}, n.syncPods)
-	return err
-}
-
-func (n *NodeController) startNodeWatch(wf *factory.WatchFactory) error {
-	return houtil.StartNodeWatch(n, wf)
-}
-
 func nameToCookie(nodeName string) string {
 	hash := sha256.Sum256([]byte(nodeName))
 	return fmt.Sprintf("%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3])
@@ -215,8 +154,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
 		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
-		n.Delete(node)
-		return nil
+		return n.DeleteNode(node)
 	}
 
 	klog.Infof("setting up hybrid overlay tunnel to node %s", node.Name)
@@ -261,8 +199,8 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	return nil
 }
 
-// Add handles node additions and updates
-func (n *NodeController) Add(node *kapi.Node) {
+// AddNode handles node additions and updates
+func (n *NodeController) AddNode(node *kapi.Node) error {
 	var err error
 	if node.Name == n.nodeName {
 		// Retry hybrid overlay initialization if the master was
@@ -271,18 +209,7 @@ func (n *NodeController) Add(node *kapi.Node) {
 	} else {
 		err = n.hybridOverlayNodeUpdate(node)
 	}
-
-	if err != nil {
-		klog.Warning(err)
-	}
-}
-
-// Update handles node updates
-func (n *NodeController) Update(oldNode, newNode *kapi.Node) {
-	if nodeChanged(oldNode, newNode) {
-		n.Delete(newNode)
-		n.Add(newNode)
-	}
+	return err
 }
 
 func deleteFlowsByCookie(table int, cookie string) error {
@@ -293,19 +220,16 @@ func deleteFlowsByCookie(table int, cookie string) error {
 	return nil
 }
 
-// Delete handles node deletions
-func (n *NodeController) Delete(node *kapi.Node) {
+// DeleteNode handles node deletions
+func (n *NodeController) DeleteNode(node *kapi.Node) error {
 	if node.Name == n.nodeName || !houtil.IsHybridOverlayNode(node) {
-		return
+		return nil
 	}
-
-	if err := deleteFlowsByCookie(0, nameToCookie(node.Name)); err != nil {
-		klog.Errorf(err.Error())
-	}
+	return deleteFlowsByCookie(0, nameToCookie(node.Name))
 }
 
-// Sync handles local node initialization and removing stale nodes on startup
-func (n *NodeController) Sync(nodes []*kapi.Node) {
+// RemoveStaleNodes handles removing stale nodes on startup
+func (n *NodeController) RemoveStaleNodes(nodes []*kapi.Node) {
 	hybridOverlayNodes := make(map[string]bool)
 	for _, node := range nodes {
 		if houtil.IsHybridOverlayNode(node) {

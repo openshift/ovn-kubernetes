@@ -6,14 +6,15 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v2"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -182,7 +183,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fexec = ovntest.NewFakeExec()
+		fexec = ovntest.NewLooseCompareFakeExec()
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -221,22 +222,31 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				// Assume fresh OVS bridge
 				Output: "",
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-ofctl dump-flows br-ext table=10",
+				// Assume fresh OVS bridge
+				Output: "",
+			})
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go n.Run(stopChan)
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 		appRun(app, netns)
@@ -269,22 +279,31 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				// Assume fresh OVS bridge
 				Output: "",
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-ofctl dump-flows br-ext table=10",
+				// Assume fresh OVS bridge
+				Output: "",
+			})
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go n.Run(stopChan)
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			validateNetlinkState(node1Subnet)
 			return nil
 		}
@@ -310,22 +329,31 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				// Assume fresh OVS bridge
 				Output: "",
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-ofctl dump-flows br-ext table=10",
+				// Assume fresh OVS bridge
+				Output: "",
+			})
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go n.Run(stopChan)
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 		appRun(app, netns)
@@ -355,6 +383,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			addNodeSetupCmds(fexec, thisNode)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-ofctl dump-flows br-ext table=0",
+				"ovs-ofctl dump-flows br-ext table=10",
 				// Adds flows for existing node1
 				"ovs-ofctl add-flow br-ext cookie=0xca12f31b,table=0,priority=100,arp,in_port=ext,arp_tpa=" + node1Subnet + ",actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + node1DrMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],load:0x" + node1DrMACRaw + "->NXM_NX_ARP_SHA[],move:NXM_OF_ARP_TPA[]->NXM_NX_REG0[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],move:NXM_NX_REG0[]->NXM_OF_ARP_SPA[],IN_PORT",
 				"ovs-ofctl add-flow br-ext cookie=0xca12f31b,table=0,priority=100,ip,nw_dst=5.6.7.0/24,actions=load:4097->NXM_NX_TUN_ID[0..31],set_field:10.0.0.2->tun_dst,set_field:22:33:44:55:66:77->eth_dst,output:ext-vxlan",
@@ -364,17 +393,21 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go n.Run(stopChan)
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			validateNetlinkState(node1Subnet)
 			return nil
 		}
@@ -403,6 +436,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
  cookie=0x0, duration=61107.658s, table=0, n_packets=50, n_bytes=3576, priority=0 actions=drop`,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-ofctl dump-flows br-ext table=10",
 				// Deletes flows for stale node in OVS
 				"ovs-ofctl del-flows br-ext table=0,cookie=0x1f40e27c/0xffffffff",
 			})
@@ -411,18 +445,21 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go n.Run(stopChan)
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 		appRun(app, netns)
@@ -445,6 +482,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
  cookie=0x0, duration=29398.687s, table=10, n_packets=0, n_bytes=0, priority=0 actions=drop`,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-ofctl dump-flows br-ext table=0",
 				// Deletes flows for pod in OVS that is not in Kube
 				"ovs-ofctl del-flows br-ext table=10,cookie=0xaabbccdd/0xffffffff",
 			})
@@ -453,18 +491,21 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startPodWatch(f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go n.Run(stopChan)
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 		appRun(app, netns)
@@ -492,6 +533,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
  cookie=0x0, duration=29398.687s, table=10, n_packets=0, n_bytes=0, priority=0 actions=drop`,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-ofctl dump-flows br-ext table=0",
+				"ovs-ofctl del-flows br-ext table=10,cookie=0x7fdcde17/0xffffffff",
 				// Refreshes flows for pod that is in OVS and in Kube
 				"ovs-ofctl add-flow br-ext table=10,cookie=0x7fdcde17,priority=100,ip,nw_dst=" + pod1IP + ",actions=set_field:" + hybMAC + "->eth_src,set_field:" + pod1MAC + "->eth_dst,output:ext",
 			})
@@ -500,19 +543,21 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
-			n.drMAC = hybMAC
 
-			err = n.startPodWatch(f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go n.Run(stopChan)
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 		appRun(app, netns)

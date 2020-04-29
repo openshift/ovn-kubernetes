@@ -7,29 +7,129 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
 
-// StartNode creates and starts the hybrid overlay node controller
-func StartNode(nodeName string, kube kube.Interface, wf *factory.WatchFactory) error {
-	klog.Infof("Starting hybrid overlay node...")
-	node, err := NewNode(kube, nodeName)
+// The nodeController interface is implemented by the os-specific code
+type nodeController interface {
+	AddPod(*kapi.Pod) error
+	DeletePod(*kapi.Pod) error
+	AddNode(*kapi.Node) error
+	DeleteNode(*kapi.Node) error
+	RemoveStaleNodes([]*kapi.Node)
+	RemoveStalePods([]*kapi.Pod)
+}
+
+// Node is a node controller and it's informers
+type Node struct {
+	controller       nodeController
+	nodeEventHandler informer.EventHandler
+	podEventHandler  informer.EventHandler
+}
+
+func nodeChanged(old, new interface{}) bool {
+	oldNode := old.(*kapi.Node)
+	newNode := new.(*kapi.Node)
+
+	oldCidr, oldNodeIP, oldDrMAC, _ := getNodeDetails(oldNode)
+	newCidr, newNodeIP, newDrMAC, _ := getNodeDetails(newNode)
+	return !reflect.DeepEqual(oldCidr, newCidr) || !reflect.DeepEqual(oldNodeIP, newNodeIP) || !reflect.DeepEqual(oldDrMAC, newDrMAC)
+}
+
+// NewNode Returns a new Node
+func NewNode(
+	kube kube.Interface,
+	nodeName string,
+	nodeInformer cache.SharedIndexInformer,
+	podInformer cache.SharedIndexInformer,
+) (*Node, error) {
+	controller, err := newNodeController(kube, nodeName)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{controller: controller}
+	n.nodeEventHandler = informer.NewDefaultEventHandler("node", nodeInformer,
+		func(obj interface{}) error {
+			node, ok := obj.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return n.controller.AddNode(node)
+		},
+		func(obj interface{}) error {
+			node, ok := obj.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return n.controller.DeleteNode(node)
+		},
+		nodeChanged,
+	)
+	n.podEventHandler = informer.NewDefaultEventHandler("pod", podInformer,
+		func(obj interface{}) error {
+			pod, ok := obj.(*kapi.Pod)
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			return n.controller.AddPod(pod)
+		},
+		func(obj interface{}) error {
+			pod, ok := obj.(*kapi.Pod)
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			return n.controller.DeletePod(pod)
+		},
+		informer.DefaultUpdatePredicateFunction,
+	)
+	return n, nil
+}
+
+// Run starts the controller
+func (n *Node) Run(stopCh <-chan struct{}) error {
+	defer utilruntime.HandleCrash()
+	klog.Info("Starting Hybrid Overlay Node Controller")
+
+	klog.Info("Starting workers")
+	go func() {
+		err := n.nodeEventHandler.Run(informer.DefaultNodeInformerThreadiness, stopCh)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
+	go func() {
+		err := n.podEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
+
+	nodeLister := listers.NewNodeLister(n.nodeEventHandler.GetIndexer())
+	nodes, err := nodeLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
-	return node.Start(wf)
-}
+	go n.controller.RemoveStaleNodes(nodes)
 
-// nodeChanged returns true if any relevant node attributes changed
-func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
-	cidr1, nodeIP1, drMAC1, _ := getNodeDetails(node1)
-	cidr2, nodeIP2, drMAC2, _ := getNodeDetails(node2)
-	return !reflect.DeepEqual(cidr1, cidr2) || !reflect.DeepEqual(nodeIP1, nodeIP2) || !reflect.DeepEqual(drMAC1, drMAC2)
+	podLister := listers.NewPodLister(n.podEventHandler.GetIndexer())
+	pods, err := podLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	go n.controller.RemoveStalePods(pods)
+
+	klog.Info("Started workers")
+	<-stopCh
+	klog.Info("Shutting down workers")
+	return nil
 }
 
 // getNodeSubnetAndIP returns the node's hybrid overlay subnet and the node's

@@ -6,13 +6,14 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v2"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -92,21 +93,38 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
+
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
 			// Windows node should be allocated a subnet
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
-			_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
-			Expect(err).To(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 
-			Expect(fexec.CalledMatchesExpected()).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(func() error {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
+				return err
+			}, 2).Should(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
+
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -143,18 +161,25 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
 
 			// Test that deleting the node cleans up the OVN objects
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -202,12 +227,17 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
-			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
+
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
 			k := &kube.Kube{KClient: fakeClient}
 			updatedNode, err := k.GetNode(nodeName)
@@ -218,11 +248,15 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err = k.GetNode(nodeName)
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).ShouldNot(HaveKey(types.HybridOverlayDRMAC))
 
-			updatedNode, err = k.GetNode(nodeName)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).NotTo(HaveKey(types.HybridOverlayDRMAC))
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 

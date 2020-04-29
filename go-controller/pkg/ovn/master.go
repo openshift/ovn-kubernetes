@@ -165,10 +165,15 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 
 	if config.HybridOverlay.Enabled {
-		if err := homaster.StartMaster(oc.kube, oc.watchFactory); err != nil {
-			klog.Errorf("Failed to set up hybrid overlay master: %v", err)
-			return err
+		factory := oc.watchFactory.GetFactory()
+		nodeMaster, err := homaster.NewMaster(
+			oc.kube,
+			factory.Core().V1().Nodes().Informer(),
+		)
+		if err != nil {
+			return fmt.Errorf("Failed to set up hybrid overlay master: %v", err)
 		}
+		go nodeMaster.Run(oc.stopChan)
 	}
 
 	return nil

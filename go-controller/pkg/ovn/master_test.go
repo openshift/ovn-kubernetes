@@ -234,7 +234,6 @@ var _ = Describe("Master Operations", func() {
 
 			fexec, tcpLBUUID, udpLBUUID, sctpLBUUID := defaultFakeExec(nodeSubnet, nodeName, true)
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
-			addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
 
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
@@ -308,7 +307,7 @@ var _ = Describe("Master Operations", func() {
 
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName    string = "node1"
+				nodeName    string = "sctp-test-node"
 				nodeSubnet  string = "10.1.0.0/24"
 				clusterCIDR string = "10.1.0.0/16"
 				nextHop     string = "10.1.0.2"
@@ -319,7 +318,6 @@ var _ = Describe("Master Operations", func() {
 
 			fexec, tcpLBUUID, udpLBUUID, _ := defaultFakeExec(nodeSubnet, nodeName, false)
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
-			addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
 
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
