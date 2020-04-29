@@ -32,6 +32,7 @@ type namespacePolicy struct {
 }
 
 func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
+
 	np := &namespacePolicy{
 		name:            policy.Name,
 		namespace:       policy.Namespace,
