@@ -40,8 +40,11 @@ RUN INSTALL_PKGS=" \
 	tcpdump \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 >= 2.13.0-21" ovn2.13-central ovn2.13-host ovn2.13-vtep && \
 	yum clean all && rm -rf /var/cache/*
+
+COPY ovn2.13* .
+
+RUN yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False ./ovn2.13*.rpm 
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
