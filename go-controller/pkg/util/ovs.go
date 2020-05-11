@@ -371,7 +371,6 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 		envVar, err := getNbctlSocketPath()
 		if err == nil {
 			envVars := []string{envVar}
-			klog.V(5).Infof("using ovn-nbctl daemon mode at %s", envVars)
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 			cmdArgs = append(cmdArgs, args...)
 			return cmdArgs, envVars
@@ -581,6 +580,18 @@ func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
 
 	stdin := &bytes.Buffer{}
 	stdin.Write([]byte("table=0,priority=0,actions=NORMAL\n"))
+
+	cmd := runner.exec.Command(runner.ofctlPath, args...)
+	cmd.SetStdin(stdin)
+	stdout, stderr, err := runCmd(cmd, runner.ofctlPath, args...)
+	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
+
+// ReplaceOFFlows replaces flows in the bridge with a slice of flows
+func ReplaceOFFlows(bridgeName string, flows []string) (string, string, error) {
+	args := []string{"-O", "OpenFlow13", "--bundle", "replace-flows", bridgeName, "-"}
+	stdin := &bytes.Buffer{}
+	stdin.Write([]byte(strings.Join(flows, "\n")))
 
 	cmd := runner.exec.Command(runner.ofctlPath, args...)
 	cmd.SetStdin(stdin)
