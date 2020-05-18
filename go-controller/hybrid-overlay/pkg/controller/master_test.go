@@ -70,7 +70,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
-
 	It("allocates and assigns a hybrid-overlay subnet to a Windows node that doesn't have one", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
@@ -95,10 +94,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
+			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Windows node should be allocated a subnet
@@ -149,10 +145,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
+			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -211,10 +204,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
+			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
 
 			k := &kube.Kube{KClient: fakeClient}
