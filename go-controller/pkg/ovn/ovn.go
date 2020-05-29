@@ -387,33 +387,25 @@ func (oc *Controller) WatchPods() error {
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if !podWantsNetwork(pod) {
+			if !oc.shouldProcessPod(pod) {
 				return
 			}
-
-			if podScheduled(pod) {
-				if err := oc.addLogicalPort(pod); err != nil {
-					klog.Errorf(err.Error())
-					retryPods.Store(pod.UID, true)
-				}
-			} else {
-				// Handle unscheduled pods later in UpdateFunc
+			if err := oc.addLogicalPort(pod); err != nil {
+				klog.Errorf(err.Error())
 				retryPods.Store(pod.UID, true)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
-			if !podWantsNetwork(pod) {
+			_, retry := retryPods.Load(pod.UID)
+			if !retry && !oc.shouldProcessPod(pod) {
 				return
 			}
 
-			_, retry := retryPods.Load(pod.UID)
-			if podScheduled(pod) && retry {
-				if err := oc.addLogicalPort(pod); err != nil {
-					klog.Errorf(err.Error())
-				} else {
-					retryPods.Delete(pod.UID)
-				}
+			if err := oc.addLogicalPort(pod); err != nil {
+				klog.Errorf(err.Error())
+			} else {
+				retryPods.Delete(pod.UID)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {

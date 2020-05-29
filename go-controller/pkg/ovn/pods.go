@@ -378,3 +378,47 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	return nil
 }
+
+// shouldProcessPod is a gating function in the informer that checks to see if
+// a pod update should be sent to addLogicalPort
+// we can skip a pod if
+// - it is not scheduled
+// - it is host-network
+// - it is set up:
+//   - it has annotations set, and
+//   - it is in the logical port cache, and
+//   - the lpcache matches the annotations
+//
+// otherwise we must process it.
+func (oc *Controller) shouldProcessPod(pod *kapi.Pod) bool {
+	podDesc := pod.Namespace + "/" + pod.Name
+	if !podScheduled(pod) {
+		klog.V(5).Infof("skipping pod %s - not scheduled", podDesc)
+		return false
+	}
+
+	if !podWantsNetwork(pod) {
+		klog.V(5).Infof("skipping pod %s - host network", podDesc)
+		return false
+	}
+
+	portName := podLogicalPortName(pod)
+	lpInfo, _ := oc.logicalPortCache.get(portName)
+	if lpInfo == nil {
+		klog.V(5).Infof("pod %s not in port cache - processing", podDesc)
+		return true
+	}
+
+	annotation, _ := util.UnmarshalPodAnnotation(pod.Annotations)
+	if annotation == nil {
+		klog.V(5).Infof("pod %s has no annotations - processing", podDesc)
+		return true
+	}
+
+	if len(annotation.IPs) > 0 && annotation.IPs[0].IP.Equal(lpInfo.ip) {
+		klog.V(5).Infof("pod %s annotations match lpInfo - skipping", podDesc)
+		return false
+	}
+	klog.V(5).Infof("pod %s annotations don't match lpInfo - processing", podDesc)
+	return true
+}
