@@ -133,7 +133,7 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
-	klog.V(5).Infof("Adding namespace: %s", ns.Name)
+	klog.V(2).Infof("Adding namespace: %s", ns.Name)
 	nsInfo := oc.createNamespaceLocked(ns.Name)
 	defer nsInfo.Unlock()
 
@@ -211,7 +211,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
-	klog.V(5).Infof("Deleting namespace: %s", ns.Name)
+	klog.V(2).Infof("Deleting namespace: %s", ns.Name)
 
 	nsInfo := oc.deleteNamespaceLocked(ns.Name)
 	if nsInfo == nil {
