@@ -86,7 +86,7 @@ func removeFromAddressSet(hashName string, address string) {
 
 func createAddressSet(name string, hashName string,
 	addresses []string) {
-	klog.V(2).Infof("createAddressSet with %s and %s", name, addresses)
+	klog.V(2).Infof("createAddressSet with %s (%s) and %s", name, hashName, addresses)
 	addressSet, stderr, err := util.RunOVNNbctl("--data=bare",
 		"--no-heading", "--columns=_uuid", "find", "address_set",
 		fmt.Sprintf("name=%s", hashName))
