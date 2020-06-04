@@ -93,7 +93,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown(stopChan)
 
 			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
@@ -144,7 +144,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown(stopChan)
 
 			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
@@ -203,7 +203,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown(stopChan)
 
 			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())

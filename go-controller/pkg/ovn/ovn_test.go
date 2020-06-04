@@ -49,7 +49,7 @@ func (o *FakeOVN) restart() {
 }
 
 func (o *FakeOVN) shutdown() {
-	close(o.stopChan)
+	o.watcher.Shutdown(o.stopChan)
 }
 
 func (o *FakeOVN) init() {

@@ -261,7 +261,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan)
 			Expect(clusterController).NotTo(BeNil())
@@ -346,7 +346,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan)
 			Expect(clusterController).NotTo(BeNil())
@@ -432,7 +432,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan)
 			Expect(clusterController).NotTo(BeNil())
@@ -615,7 +615,7 @@ subnet=%s
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan)
 			Expect(clusterController).NotTo(BeNil())
@@ -812,7 +812,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stop)
+			defer wf.Shutdown(stop)
 
 			clusterController := NewOvnController(fakeClient, wf, stop)
 			Expect(clusterController).NotTo(BeNil())
@@ -1006,7 +1006,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stop)
+			defer wf.Shutdown(stop)
 
 			clusterController := NewOvnController(fakeClient, wf, stop)
 			Expect(clusterController).NotTo(BeNil())
