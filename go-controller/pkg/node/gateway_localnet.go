@@ -85,6 +85,7 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 				strings.Join(r.args, " "), err)
 		}
 	}
+	klog.Infof("deleted iptables rules")
 }
 
 func generateGatewayNATRules(ifname string, ip net.IP) []iptRule {
