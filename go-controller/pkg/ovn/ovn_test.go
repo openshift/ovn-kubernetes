@@ -6,7 +6,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -50,13 +50,14 @@ func (o *FakeOVN) restart() {
 
 func (o *FakeOVN) shutdown() {
 	close(o.stopChan)
+	o.watcher.Shutdown()
 }
 
 func (o *FakeOVN) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.stopChan)
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.controller = NewOvnController(o.fakeClient, o.watcher, o.stopChan)

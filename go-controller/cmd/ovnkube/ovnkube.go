@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,7 +17,7 @@ import (
 
 	"k8s.io/klog"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -100,7 +101,31 @@ func main() {
 		return runOvnKube(c)
 	}
 
-	if err := c.Run(os.Args); err != nil {
+	ctx := context.Background()
+
+	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
+	// cancel the context
+	ctx, cancel := context.WithCancel(ctx)
+	exitCh := make(chan os.Signal, 1)
+	signal.Notify(exitCh,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+	defer func() {
+		signal.Stop(exitCh)
+		cancel()
+	}()
+	go func() {
+		select {
+		case s := <-exitCh:
+			klog.Infof("Received signal %s. Shutting down", s)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	if err := c.RunContext(ctx, os.Args); err != nil {
 		klog.Exit(err)
 	}
 }
@@ -116,14 +141,6 @@ func delPidfile(pidfile string) {
 }
 
 func setupPIDFile(pidfile string) error {
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		delPidfile(pidfile)
-		os.Exit(1)
-	}()
-
 	// need to test if already there
 	_, err := os.Stat(pidfile)
 
@@ -177,8 +194,7 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	// create factory and start the controllers asked for
-	stopChan := make(chan struct{})
-	factory, err := factory.NewWatchFactory(clientset, stopChan)
+	factory, err := factory.NewWatchFactory(clientset)
 	if err != nil {
 		return err
 	}
@@ -207,6 +223,8 @@ func runOvnKube(ctx *cli.Context) error {
 	if err := watchForChanges(configFile); err != nil {
 		return fmt.Errorf("unable to setup configuration watch: %v", err)
 	}
+
+	stopChan := make(chan struct{})
 
 	if master != "" {
 		if runtime.GOOS == "windows" {
@@ -243,8 +261,11 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
 	}
 
-	// run forever
-	select {}
+	// run until cancelled
+	<-ctx.Context.Done()
+	close(stopChan)
+	factory.Shutdown()
+	return nil
 }
 
 // watchForChanges exits if the configuration file changed.
