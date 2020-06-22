@@ -408,6 +408,7 @@ func (oc *Controller) WatchPods() error {
 			}
 
 			if podScheduled(pod) {
+				//no-op
 				if err := oc.addLogicalPort(pod); err != nil {
 					klog.Errorf(err.Error())
 					retryPods.Store(pod.UID, true)
