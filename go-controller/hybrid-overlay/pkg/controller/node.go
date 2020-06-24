@@ -55,8 +55,10 @@ func podChanged(old, new interface{}) bool {
 	newIPs, newMAC, _ := getPodDetails(newPod)
 	oldExGw := oldPod.Annotations[hotypes.HybridOverlayExternalGw]
 	oldVTEP := oldPod.Annotations[hotypes.HybridOverlayVTEP]
+	oldOVNA := oldPod.Annotations[util.OvnPodAnnotationName]
 	newExGw := newPod.Annotations[hotypes.HybridOverlayExternalGw]
 	newVTEP := newPod.Annotations[hotypes.HybridOverlayVTEP]
+	newOVNA := newPod.Annotations[util.OvnPodAnnotationName]
 
 	if len(oldIPs) != len(newIPs) || !reflect.DeepEqual(oldMAC, newMAC) || !reflect.DeepEqual(oldExGw, newExGw) || !reflect.DeepEqual(oldVTEP, newVTEP) {
 		return true
@@ -65,6 +67,13 @@ func podChanged(old, new interface{}) bool {
 		if oldIPs[i].String() != newIPs[i].String() {
 			return true
 		}
+	}
+	if !reflect.DeepEqual(oldOVNA, newOVNA) {
+		klog.Errorf("KEYWORD: the annotation was updated but we fell through anyway for pod %s", newPod.Name)
+		klog.Errorf("KEYWORD: oldIPs %s, newIPs: %s", oldIPs, newIPs)
+		klog.Errorf("KEYWORD: oldMAC %s, newMAC: %s", oldMAC, newMAC)
+		klog.Errorf("KEYWORD OVN ANNOTATIONS: \noldOVNA: %s\nnewOVNA: %s\n", oldOVNA, newOVNA)
+		//return true
 	}
 	return false
 }
