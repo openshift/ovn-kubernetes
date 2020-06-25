@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -12,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -212,7 +214,24 @@ func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr, erro
 	return cidr, ip, drMAC, nil
 }
 
+func waitForPod(pod *kapi.Pod) error {
+	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
+	if err := wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
+		if _, ok := pod.Annotations[util.OvnPodAnnotationName]; ok {
+			return true, nil
+		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("failed to get OVN pod annotation for pod %s: %v", pod.Name, err)
+	}
+	return nil
+
+}
+
 func getPodDetails(pod *kapi.Pod) ([]*net.IPNet, net.HardwareAddr, error) {
+	if err := waitForPod(pod); err != nil {
+		return nil, nil, err
+	}
 	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return nil, nil, err
