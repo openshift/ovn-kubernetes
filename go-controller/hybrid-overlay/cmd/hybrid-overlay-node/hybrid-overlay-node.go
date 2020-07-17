@@ -21,10 +21,17 @@ import (
 )
 
 var nodeName string
+// OCP HACK: Windows service enablement https://github.com/openshift/ovn-kubernetes/pull/219
+var runAsWindowsService bool
+
+const appName = "hybrid-overlay-node"
+// END OCP HACK
 
 func main() {
 	c := cli.NewApp()
-	c.Name = "hybrid-overlay-node"
+	// OCP HACK: Windows service enablement https://github.com/openshift/ovn-kubernetes/pull/219
+	c.Name = appName
+	// END OCP HACK
 	c.Usage = "a node controller to integrate disparate networks with VXLAN tunnels"
 	c.Version = config.Version
 	c.Flags = config.GetFlags([]cli.Flag{
@@ -32,6 +39,13 @@ func main() {
 			Name:        "node",
 			Usage:       "The name of this node in the Kubernetes cluster.",
 			Destination: &nodeName,
+			// OCP HACK: Windows service enablement https://github.com/openshift/ovn-kubernetes/pull/219
+		},
+		&cli.BoolFlag{
+			Name:        "windows-service",
+			Usage:       "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
+			Destination: &runAsWindowsService,
+			// END OCP HACK
 		}})
 	c.Action = func(c *cli.Context) error {
 		if err := runHybridOverlay(c); err != nil {
@@ -82,6 +96,12 @@ func runHybridOverlay(ctx *cli.Context) error {
 	if nodeName == "" {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
 	}
+
+	// OCP HACK: Windows service enablement https://github.com/openshift/ovn-kubernetes/pull/219
+	if err := initForOS(runAsWindowsService); err != nil {
+		klog.Infof("Error initializing Windows service: %v", err)
+	}
+	// END OCP HACK
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
