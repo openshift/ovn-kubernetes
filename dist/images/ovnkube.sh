@@ -55,6 +55,9 @@ fi
 # OVN_LOGLEVEL_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOGLEVEL_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOGLEVEL_NBCTLD - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
+# OVNKUBE_LOGFILE_MAXSIZE - log file max size in MB(default 100 MB)
+# OVNKUBE_LOGFILE_MAXBACKUPS - log file max backups (default 5)
+# OVNKUBE_LOGFILE_MAXAGE - log file max age in days (default 5 days)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 # OVN_NB_RAFT_PORT - ovn north db raft port (default 6643)
@@ -77,6 +80,11 @@ ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
+
+# logfile rotation parameters
+ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
+ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
+ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
 ovnkube_version="3"
@@ -772,6 +780,9 @@ ovn-master() {
     --gateway-mode=${ovn_gateway_mode} \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
+    --logfile-maxsize=${ovnkube_logfile_maxsize} \
+    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
+    --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
@@ -884,6 +895,10 @@ ovn-node() {
     --mtu=${mtu} \
     ${OVN_ENCAP_IP} \
     --loglevel=${ovnkube_loglevel} \
+    --loglevel=${ovnkube_loglevel} \
+    --logfile-maxsize=${ovnkube_logfile_maxsize} \
+    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
+    --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
@@ -950,6 +965,23 @@ run-nbctld() {
 
   process_healthy ovn-nbctl ${nbctl_tail_pid}
   echo "=============== run_ovn_nbctl ========== terminated"
+}
+
+# v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+ovs-metrics() {
+  check_ovn_daemonset_version "3"
+
+  echo "=============== ovs-metrics - (wait for ovs_ready)"
+  wait_for_event ovs_ready
+
+  ovs_exporter_bind_address=${OVS_EXPORTER_BIND_ADDRESS:-"0.0.0.0:9310"}
+  /usr/bin/ovn-kube-util \
+    --loglevel=${ovnkube_loglevel} \
+    ovs-exporter \
+    --metrics-bind-address ${ovs_exporter_bind_address}
+
+  echo "=============== ovs-metrics with pid ${?} terminated ========== "
+  exit 1
 }
 
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
@@ -1025,6 +1057,9 @@ case ${cmd} in
   ;;
 "db-raft-metrics")
   db-raft-metrics
+  ;;
+"ovs-metrics")
+  ovs-metrics
   ;;
 *)
   echo "invalid command ${cmd}"
