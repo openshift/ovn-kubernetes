@@ -266,11 +266,11 @@ func (le *LeaderElector) renew(ctx context.Context) {
 		err := wait.PollImmediateUntil(le.config.RetryPeriod, func() (bool, error) {
 			return le.tryAcquireOrRenew(timeoutCtx), nil
 		}, timeoutCtx.Done())
-		klog.Info("TROZET DONE with trying to renew")
+		klog.Info("TROZET DONE with trying to renew, err: %v", err)
 		le.maybeReportTransition()
 		desc := le.config.Lock.Describe()
 		if err == nil {
-			klog.V(5).Infof("successfully renewed lease %v", desc)
+			klog.Infof("successfully renewed lease %v", desc)
 			return
 		}
 		le.config.Lock.RecordEvent("stopped leading")
@@ -327,6 +327,7 @@ func (le *LeaderElector) tryAcquireOrRenew(ctx context.Context) bool {
 		}
 		le.observedRecord = leaderElectionRecord
 		le.observedTime = le.clock.Now()
+		klog.Info("TROZET lock acquired in 1")
 		return true
 	}
 
@@ -339,7 +340,7 @@ func (le *LeaderElector) tryAcquireOrRenew(ctx context.Context) bool {
 	if len(oldLeaderElectionRecord.HolderIdentity) > 0 &&
 		le.observedTime.Add(le.config.LeaseDuration).After(now.Time) &&
 		!le.IsLeader() {
-		klog.V(4).Infof("lock is held by %v and has not yet expired", oldLeaderElectionRecord.HolderIdentity)
+		klog.Infof("lock is held by %v and has not yet expired", oldLeaderElectionRecord.HolderIdentity)
 		return false
 	}
 
@@ -360,6 +361,7 @@ func (le *LeaderElector) tryAcquireOrRenew(ctx context.Context) bool {
 
 	le.observedRecord = leaderElectionRecord
 	le.observedTime = le.clock.Now()
+	klog.Info("TROZET DEFAULT return true")
 	return true
 }
 
