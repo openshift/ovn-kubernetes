@@ -260,12 +260,13 @@ func (le *LeaderElector) renew(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	wait.Until(func() {
+		klog.Info("TROZET running renew wait function")
 		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, le.config.RenewDeadline)
 		defer timeoutCancel()
 		err := wait.PollImmediateUntil(le.config.RetryPeriod, func() (bool, error) {
 			return le.tryAcquireOrRenew(timeoutCtx), nil
 		}, timeoutCtx.Done())
-
+		klog.Info("TROZET DONE with trying to renew")
 		le.maybeReportTransition()
 		desc := le.config.Lock.Describe()
 		if err == nil {
@@ -312,7 +313,7 @@ func (le *LeaderElector) tryAcquireOrRenew(ctx context.Context) bool {
 		RenewTime:            now,
 		AcquireTime:          now,
 	}
-
+	klog.Info("TROZET attempting to acquire election record and lock")
 	// 1. obtain or create the ElectionRecord
 	oldLeaderElectionRecord, oldLeaderElectionRawRecord, err := le.config.Lock.Get(ctx)
 	if err != nil {
