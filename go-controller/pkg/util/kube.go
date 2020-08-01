@@ -41,6 +41,7 @@ func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egres
 		kconfig = &rest.Config{
 			Host:        conf.APIServer,
 			BearerToken: conf.Token,
+			Timeout: 4,
 		}
 		if conf.CACert != "" {
 			if _, err := cert.NewPool(conf.CACert); err != nil {
