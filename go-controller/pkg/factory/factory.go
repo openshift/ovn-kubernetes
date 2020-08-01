@@ -474,15 +474,17 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 		iFactory:    informerfactory.NewSharedInformerFactory(c, resyncInterval),
 		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(eip, resyncInterval),
 		efClientset: ec,
-		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(crd, resyncInterval),
 		informers:   make(map[reflect.Type]*informer),
 		stopChan:    make(chan struct{}),
 	}
 	var err error
 
-	err = apiextensionsapi.AddToScheme(apiextensionsscheme.Scheme)
-	if err != nil {
-		return nil, err
+	if crd != nil {
+		wf.crdFactory = apiextensionsinformerfactory.NewSharedInformerFactory(crd, resyncInterval)
+		err = apiextensionsapi.AddToScheme(apiextensionsscheme.Scheme)
+		if err != nil {
+			return nil, err
+		}
 	}
 	err = egressipapi.AddToScheme(egressipscheme.Scheme)
 	if err != nil {
@@ -510,9 +512,11 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1beta1().CustomResourceDefinitions().Informer())
-	if err != nil {
-		return nil, err
+	if wf.crdFactory != nil {
+		wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1beta1().CustomResourceDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
 	}
 	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
 	if err != nil {
@@ -523,10 +527,12 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 		return nil, err
 	}
 
-	wf.crdFactory.Start(wf.stopChan)
-	for oType, synced := range wf.crdFactory.WaitForCacheSync(wf.stopChan) {
-		if !synced {
-			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+	if wf.crdFactory != nil {
+		wf.crdFactory.Start(wf.stopChan)
+		for oType, synced := range wf.crdFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
 		}
 	}
 	wf.iFactory.Start(wf.stopChan)
@@ -576,7 +582,9 @@ func (wf *WatchFactory) Shutdown() {
 
 	// Remove all informer handlers
 	for _, inf := range wf.informers {
-		inf.shutdown()
+		if inf != nil {
+			inf.shutdown()
+		}
 	}
 }
 

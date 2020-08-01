@@ -193,14 +193,19 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
+	master := ctx.String("init-master")
+	node := ctx.String("init-node")
+
 	// create factory and start the controllers asked for
+	if master == "" && node != "" {
+		// HACK: egressfirewall and CRD not required for node
+		egressFirewallClientset = nil
+		crdClientset = nil
+	}
 	factory, err := factory.NewWatchFactory(clientset, egressIPClientset, egressFirewallClientset, crdClientset)
 	if err != nil {
 		return err
 	}
-
-	master := ctx.String("init-master")
-	node := ctx.String("init-node")
 
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
