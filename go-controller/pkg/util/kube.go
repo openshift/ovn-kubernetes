@@ -41,6 +41,46 @@ func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egres
 		kconfig = &rest.Config{
 			Host:        conf.APIServer,
 			BearerToken: conf.Token,
+		}
+		if conf.CACert != "" {
+			if _, err := cert.NewPool(conf.CACert); err != nil {
+				return nil, err
+			}
+			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
+		}
+	} else if strings.HasPrefix(conf.APIServer, "http") {
+		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")
+	} else {
+		// Assume we are running from a container managed by kubernetes
+		// and read the apiserver address and tokens from the
+		// container's environment.
+		kconfig, err = rest.InClusterConfig()
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
+	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
+
+	return kubernetes.NewForConfig(kconfig)
+}
+
+func NewClientset2(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) {
+	var kconfig *rest.Config
+	var err error
+
+	if conf.Kubeconfig != "" {
+		// uses the current context in kubeconfig
+		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
+	} else if strings.HasPrefix(conf.APIServer, "https") {
+		// TODO: Looks like the check conf.APIServer is redundant and can be removed
+		if conf.APIServer == "" || conf.Token == "" {
+			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
+		}
+		kconfig = &rest.Config{
+			Host:        conf.APIServer,
+			BearerToken: conf.Token,
 			Timeout: 10,
 		}
 		if conf.CACert != "" {

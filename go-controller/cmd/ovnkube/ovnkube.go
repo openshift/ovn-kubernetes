@@ -193,6 +193,11 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
+	leaderClient, err := util.NewClientset2(&config.Kubernetes)
+	if err != nil {
+		return err
+	}
+
 	// create factory and start the controllers asked for
 	factory, err := factory.NewWatchFactory(clientset, egressIPClientset, egressFirewallClientset, crdClientset)
 	if err != nil {
@@ -244,7 +249,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
 		ovnController := ovn.NewOvnController(clientset, egressIPClientset, egressFirewallClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(clientset))
-		if err := ovnController.Start(clientset, master); err != nil {
+		if err := ovnController.Start(clientset, master, leaderClient); err != nil {
 			return err
 		}
 
