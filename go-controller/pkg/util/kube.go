@@ -26,7 +26,7 @@ import (
 
 // NewClientsets creates a Kubernetes clientset from either a kubeconfig,
 // TLS properties, or an apiserver URL
-func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egressipclientset.Clientset, *egressfirewallclientset.Clientset, *apiextensionsclientset.Clientset, error) {
+func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egressipclientset.Clientset, *egressfirewallclientset.Clientset, *apiextensionsclientset.Clientset, *kubernetes.Clientset, error) {
 	var kconfig *rest.Config
 	var err error
 
@@ -36,7 +36,7 @@ func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egres
 	} else if strings.HasPrefix(conf.APIServer, "https") {
 		// TODO: Looks like the check conf.APIServer is redundant and can be removed
 		if conf.APIServer == "" || conf.Token == "" {
-			return nil, nil, nil, nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
+			return nil, nil, nil, nil, nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
 		}
 		kconfig = &rest.Config{
 			Host:        conf.APIServer,
@@ -44,7 +44,7 @@ func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egres
 		}
 		if conf.CACert != "" {
 			if _, err := cert.NewPool(conf.CACert); err != nil {
-				return nil, err
+				return nil, nil, nil, nil, nil, err
 			}
 			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
 		}
@@ -57,64 +57,23 @@ func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egres
 		kconfig, err = rest.InClusterConfig()
 	}
 	if err != nil {
-		return nil, err
-	}
-
-	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
-	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
-
-	return kubernetes.NewForConfig(kconfig)
-}
-
-func NewClientset2(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) {
-	var kconfig *rest.Config
-	var err error
-
-	if conf.Kubeconfig != "" {
-		// uses the current context in kubeconfig
-		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
-	} else if strings.HasPrefix(conf.APIServer, "https") {
-		// TODO: Looks like the check conf.APIServer is redundant and can be removed
-		if conf.APIServer == "" || conf.Token == "" {
-			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
-		}
-		kconfig = &rest.Config{
-			Host:        conf.APIServer,
-			BearerToken: conf.Token,
-			Timeout: 10,
-		}
-		if conf.CACert != "" {
-			if _, err := cert.NewPool(conf.CACert); err != nil {
-				return nil, nil, nil, nil, err
-			}
-			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
-		}
-	} else if strings.HasPrefix(conf.APIServer, "http") {
-		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")
-	} else {
-		// Assume we are running from a container managed by kubernetes
-		// and read the apiserver address and tokens from the
-		// container's environment.
-		kconfig, err = rest.InClusterConfig()
-	}
-	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	crdClientset, err := apiextensionsclientset.NewForConfig(kconfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	// CRDS are not protobuf serializable, only JSON. So don't use that config for CRD clientsets
 	egressFirewallClientset, err := egressfirewallclientset.NewForConfig(kconfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	egressIPClientset, err := egressipclientset.NewForConfig(kconfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
@@ -122,10 +81,15 @@ func NewClientset2(conf *config.KubernetesConfig) (*kubernetes.Clientset, error)
 
 	kClientset, err := kubernetes.NewForConfig(kconfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
+	}
+	kconfig.Timeout = 10
+	leaderClientset, err := kubernetes.NewForConfig(kconfig)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
 	}
 
-	return kClientset, egressIPClientset, egressFirewallClientset, crdClientset, nil
+	return kClientset, egressIPClientset, egressFirewallClientset, crdClientset, leaderClientset, nil
 }
 
 // IsClusterIPSet checks if the service is an headless service or not

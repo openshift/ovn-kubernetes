@@ -62,7 +62,7 @@ func TestNewClientsets(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, eIPRes, egressFirewall, crd, e := NewClientsets(&tc.inpConfig)
+			res, eIPRes, egressFirewall, crd,_, e := NewClientsets(&tc.inpConfig)
 			t.Log(res, e)
 			if tc.errExpected {
 				assert.Error(t, e)

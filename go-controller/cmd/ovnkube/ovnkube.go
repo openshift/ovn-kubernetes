@@ -188,12 +188,7 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
-	clientset, egressIPClientset, egressFirewallClientset, crdClientset, err := util.NewClientsets(&config.Kubernetes)
-	if err != nil {
-		return err
-	}
-
-	leaderClient, err := util.NewClientset2(&config.Kubernetes)
+	clientset, egressIPClientset, egressFirewallClientset, crdClientset, leaderClientset, err := util.NewClientsets(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
@@ -249,7 +244,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
 		ovnController := ovn.NewOvnController(clientset, egressIPClientset, egressFirewallClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(clientset))
-		if err := ovnController.Start(clientset, master, leaderClient); err != nil {
+		if err := ovnController.Start(clientset, master, leaderClientset); err != nil {
 			return err
 		}
 
