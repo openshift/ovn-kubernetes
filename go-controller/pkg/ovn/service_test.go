@@ -204,7 +204,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.clusterPortGroupUUID = ovnClusterPortGroupUUID
 				fakeOvn.controller.WatchServices()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -243,16 +243,16 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.clusterPortGroupUUID = ovnClusterPortGroupUUID
 				fakeOvn.controller.WatchServices()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				test.delCmds(fExec, service)
-				err = fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Delete(context.TODO(), service.Name, *metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(context.TODO(), service.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				s, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+				s, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).To(HaveOccurred())
 				Expect(s).To(BeNil())
 
