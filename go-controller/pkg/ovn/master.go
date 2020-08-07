@@ -8,11 +8,13 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -20,7 +22,7 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
-	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -30,7 +32,9 @@ import (
 const (
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
-	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
+	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
+	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
+	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -50,7 +54,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error {
+func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string, wg *sync.WaitGroup) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
@@ -84,7 +88,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(); err != nil {
+				if err := oc.Run(wg); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -205,7 +209,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 	if config.HybridOverlay.Enabled {
 		factory := oc.watchFactory.GetFactory()
-		nodeMaster, err := homaster.NewMaster(
+		oc.hoMaster, err = hocontroller.NewMaster(
 			oc.kube,
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Namespaces().Informer(),
@@ -216,7 +220,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
 		}
-		go nodeMaster.Run(oc.stopChan)
 	}
 
 	return nil
@@ -648,7 +651,18 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
 			node.Name, util.JoinIPNets(hostSubnets, ","))
 	}
-	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+	// FIXME: the real solution is to reconcile the node object. Once we have a work-queue based
+	// implementation where we can add the item back to the work queue when it fails to
+	// reconcile, we can get rid of the PollImmediate.
+	err = utilwait.PollImmediate(OvnNodeAnnotationRetryInterval, OvnNodeAnnotationRetryTimeout, func() (bool, error) {
+		err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+		if err != nil {
+			klog.Warningf("Failed to set node annotation, will retry for: %v",
+				OvnNodeAnnotationRetryTimeout)
+		}
+		return err == nil, nil
+	},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to set node-subnets annotation on node %s: %v",
 			node.Name, err)
