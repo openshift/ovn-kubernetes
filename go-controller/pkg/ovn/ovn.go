@@ -27,6 +27,10 @@ import (
 	"k8s.io/klog"
 )
 
+const (
+	clusterPortGroupName string = "clusterPortGroup"
+)
+
 // ServiceVIPKey is used for looking up service namespace information for a
 // particular load balancer
 type ServiceVIPKey struct {
@@ -102,6 +106,9 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	// Port group for all cluster logical switch ports
+	clusterPortGroupUUID string
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -195,6 +202,10 @@ func (oc *Controller) Run() error {
 			return err
 		}
 	}
+
+	// Remove old multicastDefaultDeny port group now that all ports
+	// have been added to the clusterPortGroup by WatchPods()
+	deletePortGroup("mcastPortGroupDeny")
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		go oc.ovnControllerEventChecker()

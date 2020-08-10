@@ -432,7 +432,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn.start(ctx,
@@ -532,7 +532,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
 				fakeOvn.start(ctx,
@@ -627,7 +627,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace2)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, nPodTest)
 
@@ -819,7 +819,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn.start(ctx,
@@ -849,7 +849,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				nPodTest.delCmds(fExec)
+				nPodTest.delCmds(fExec, true)
 				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
 				npTest.delPodCmds(fExec, networkPolicy, true, nPodTest.podIP)
 
@@ -927,7 +927,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
 				fakeOvn.start(ctx,
@@ -958,7 +958,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				nPodTest.delCmds(fExec)
+				nPodTest.delCmds(fExec, true)
 				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
 				npTest.delPodCmds(fExec, networkPolicy, false, nPodTest.podIP)
 
@@ -1024,7 +1024,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn.start(ctx,
@@ -1133,7 +1133,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -1215,7 +1215,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				nTest.addPodCmds(fExec, nPodTest, namespace1, false)
 
 				// The pod should be added to the multicast allow group.
@@ -1230,9 +1230,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				mcastPolicy.delPodCmds(fExec, namespace1.Name)
 				// The pod should be removed from the multicasts default deny
 				// group and from the multicast allow group.
-				nPodTest.delPodDenyMcast(fExec)
 				nTest.delPodCmds(fExec, nPodTest, namespace1, false)
-				nPodTest.delCmds(fExec)
+				nPodTest.delCmds(fExec, true)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(
 					nPodTest.podName, metav1.NewDeleteOptions(0))
