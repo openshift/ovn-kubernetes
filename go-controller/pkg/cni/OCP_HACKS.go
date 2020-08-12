@@ -87,11 +87,11 @@ func ofctlExec(args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		stderrStr := string(stderr.Bytes())
-		klog.Errorf("exec: ovs-ofctl %s : stderr: %q",cmdStr, stderrStr)
+		stderrStr := stderr.String()
+		klog.Errorf("exec: ovs-ofctl %s : stderr: %q", cmdStr, stderrStr)
 		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", cmdStr, err, stderrStr)
 	}
-	stdoutStr := string(stdout.Bytes())
+	stdoutStr := stdout.String()
 	klog.V(5).Infof("exec: ovs-ofctl %s: stdout: %q", cmdStr, stdoutStr)
 
 	trimmed := strings.TrimSpace(stdoutStr)
@@ -105,7 +105,7 @@ func ofctlExec(args ...string) (string, error) {
 func waitForPodFlows(mac string) error {
 	return wait.PollImmediate(200*time.Millisecond, 20*time.Second, func() (bool, error) {
 		// Query the flows by mac address
-		query := fmt.Sprintf("table=9,dl_src=%s",mac)
+		query := fmt.Sprintf("table=9,dl_src=%s", mac)
 		// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
 		stdout, err := ofctlExec("dump-flows", "br-int", query)
 		if err != nil {
