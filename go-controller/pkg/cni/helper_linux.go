@@ -360,7 +360,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 
 	// OCP HACK: wait for OVN to fully process the new pod
 	if err = waitForPodFlows(ifInfo.MAC.String()); err != nil {
-		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
+		return nil, fmt.Errorf("timed out waiting for pod flows for pod: %s, error: %v", podName, err)
 	}
 	// END OCP HACK
 

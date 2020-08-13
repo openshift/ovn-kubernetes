@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -301,7 +302,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var cmds []*goovn.OvnCommand
 	var addresses []string
 	var cmd *goovn.OvnCommand
-	var releaseIPs, clearAddressesFromNB bool
+	var releaseIPs bool
+	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
@@ -339,28 +341,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
 			}
 		}
-		if clearAddressesFromNB && err != nil {
-			var rollBackCmds []*goovn.OvnCommand
-			rollBackCmd, rollBackErr := oc.ovnNBClient.LSPSetAddress(portName, "")
-			if rollBackErr != nil {
-				klog.Errorf("Unable to create LSPSetAddress command for "+
-					"rolling back addresses on port: %s, switch :%s",
-					portName, logicalSwitch)
-			}
-			rollBackCmds = append(rollBackCmds, rollBackCmd)
-			rollBackCmd, rollBackErr = oc.ovnNBClient.LSPSetPortSecurity(portName, "")
-			if rollBackErr != nil {
-				klog.Errorf("Unable to create LSPSetPortSecurity command for "+
-					"rolling back port security addresses on port: %s, switch: %s",
-					portName, logicalSwitch)
-			}
-			rollBackCmds = append(rollBackCmds, rollBackCmd)
-			rollBackErr = oc.ovnNBClient.Execute(rollBackCmds...)
-			if rollBackErr != nil {
-				klog.Errorf("Error executing roll back commands for port: %s on switch: %s",
-					portName, logicalSwitch)
-			}
-		}
 	}()
 
 	if err == nil {
@@ -374,28 +354,39 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("unable to create LSPSetDynamicAddresses command for port: %s", portName)
 		}
 		cmds = append(cmds, cmd)
-	} else {
+
+		// ensure we have reserved the IPs in the annotation
+		if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+			return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
+				pod.Name, util.JoinIPNetIPs(podIfAddrs, " "), err)
+		} else {
+			needsIP = false
+		}
+	}
+
+	if needsIP {
+		// try to get the IP from existing port in OVN first
 		podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, portName)
 		if err != nil {
 			return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
 				portName, logicalSwitch, err)
 		}
-		if podMac == nil || podIfAddrs == nil {
+		needsNewAllocation := false
+		// ensure we have reserved the IPs found in OVN
+		if len(podIfAddrs) == 0 {
+			needsNewAllocation = true
+		} else if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+			klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on node: %s"+
+				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, logicalSwitch, err)
+
+			needsNewAllocation = true
+		}
+		if needsNewAllocation {
+			// Previous attempts to use already configured IPs failed, need to assign new
 			podMac, podIfAddrs, err = oc.assignPodAddresses(logicalSwitch)
 			if err != nil {
 				return fmt.Errorf("failed to assign pod addresses for pod %s on node: %s, err: %v",
 					portName, logicalSwitch, err)
-			}
-			releaseIPs = true
-		} else {
-			if len(podIfAddrs) > 0 {
-				if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil {
-					klog.Warningf("Failed to block off already allocated IPs: %s for pod %s on node: %s"+
-						" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName,
-						logicalSwitch, err)
-				}
-				// this should also be treated as an allocation for purposes of error handling
-				releaseIPs = true
 			}
 		}
 
@@ -421,7 +412,31 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					networks[0].MacRequest, pod.Name, err)
 			}
 		}
+		podAnnotation := util.PodAnnotation{
+			IPs: podIfAddrs,
+			MAC: podMac,
+		}
+		var nodeSubnets []*net.IPNet
+		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
+			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
+				pod.Name, logicalSwitch)
+		}
+		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
+		if err != nil {
+			return err
+		}
+		var marshalledAnnotation map[string]string
+		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
+		if err != nil {
+			return fmt.Errorf("error creating pod network annotation: %v", err)
+		}
 
+		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
+			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
+		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
+			releaseIPs = true
+			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+		}
 	}
 
 	// set addresses on the port
@@ -445,20 +460,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	cmds = append(cmds, cmd)
 
-	// add port security addresses
-	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
 	// execute all the commands together.
 	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
 		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
-	clearAddressesFromNB = true
+
 	lsp, err = oc.ovnNBClient.LSPGet(portName)
 	if err != nil || lsp == nil {
 		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
@@ -466,6 +474,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+
+	// Wait for namespace to exist, no calls after this should ever use waitForNamespaceLocked
+	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
+		return err
+	}
 
 	// Enforce the default deny multicast policy
 	if oc.multicastSupport {
@@ -536,40 +549,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
 
-	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
-		return err
+	// CNI depends on the flows from port security, delay setting it until end
+	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
 
-	if annotation == nil {
-		podAnnotation := util.PodAnnotation{
-			IPs: podIfAddrs,
-			MAC: podMac,
-		}
-		var nodeSubnets []*net.IPNet
-		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
-			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
-				pod.Name, logicalSwitch)
-		}
-		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
-		if err != nil {
-			return err
-		}
-		var marshalledAnnotation map[string]string
-		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
-		if err != nil {
-			return fmt.Errorf("error creating pod network annotation: %v", err)
-		}
-
-		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
-			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
-		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
-			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
-		}
-
-		// observe the pod creation latency metric.
-		metrics.RecordPodCreated(pod)
+	err = oc.ovnNBClient.Execute(cmd)
+	if err != nil {
+		return fmt.Errorf("error while setting port security on port: %s error: %v",
+			portName, err)
 	}
 
+	// observe the pod creation latency metric.
+	metrics.RecordPodCreated(pod)
 	return nil
 }
 
