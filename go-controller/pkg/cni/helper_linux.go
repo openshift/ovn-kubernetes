@@ -363,7 +363,6 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		return nil, fmt.Errorf("timed out waiting for pod flows for pod: %s, error: %v", podName, err)
 	}
 	// END OCP HACK
-
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
