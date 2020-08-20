@@ -510,6 +510,16 @@ var _ = Describe("Gateway Init Operations", func() {
 	})
 
 	AfterEach(func() {
+		var err error
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			ovntest.DelLink("br-local")
+			ovntest.DelLink(localnetGatewayNextHopPort)
+
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
 		Expect(testNS.Close()).To(Succeed())
 	})
 

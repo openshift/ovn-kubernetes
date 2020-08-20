@@ -79,6 +79,13 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 	if err := util.LinkAddrFlush(link); err != nil {
 		return err
 	}
+	// set localnet bridge gateway port mac
+	gwMacAddress, _ := net.ParseMAC(localnetGatewayMac)
+	if err := util.LinkSetHardwareAddr(link, gwMacAddress); err != nil {
+		klog.Errorf("Error in setting MAC address %s on %s: %v", gwMacAddress, localnetGatewayNextHopPort, err)
+		return err
+	}
+	klog.Infof("Set MAC address %s on %s", gwMacAddress, localnetGatewayNextHopPort)
 
 	var gatewayIfAddrs []*net.IPNet
 	var nextHops []net.IP
@@ -102,6 +109,7 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 		if err = util.LinkAddrAdd(link, gatewayNextHopIfAddr); err != nil {
 			return err
 		}
+
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 			// MAC binding for the gateway IP address for now - need to debug this further
@@ -122,8 +130,6 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 	if err != nil {
 		return err
 	}
-
-	gwMacAddress, _ := net.ParseMAC(localnetGatewayMac)
 
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 		Mode:           config.GatewayModeLocal,

@@ -160,6 +160,15 @@ func LinkAddrFlush(link netlink.Link) error {
 	return nil
 }
 
+// LinkSetHardwareAddr sets hardware addresses on the given link
+func LinkSetHardwareAddr(link netlink.Link, macAddress net.HardwareAddr) error {
+	err := netLinkOps.LinkSetHardwareAddr(link, macAddress)
+	if err != nil {
+		return fmt.Errorf("failed to add address %s on link %s: %v", macAddress.String(), link.Attrs().Name, err)
+	}
+	return nil
+}
+
 // LinkAddrExist returns true if the given address is present on the link
 func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 	addrs, err := netLinkOps.AddrList(link, getFamily(address.IP))
