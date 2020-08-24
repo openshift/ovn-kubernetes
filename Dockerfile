@@ -32,6 +32,8 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
+COPY ovn2.13-20.09.0-7.el8fdn.x86_64.rpm ovn2.13-central-20.09.0-7.el8fdn.x86_64.rpm ovn2.13-host-20.09.0-7.el8fdn.x86_64.rpm ovn2.13-vtep-20.09.0-7.el8fdn.x86_64.rpm /root/
+
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute strace \
@@ -44,6 +46,7 @@ RUN INSTALL_PKGS=" \
 	# openvswitch2.13-2.13.0-57.el8fdp
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == 2.13.0-57.el8fdp" "openvswitch2.13-devel == 2.13.0-57.el8fdp" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == 20.06.2-11.el8fdp" "ovn2.13-central == 20.06.2-11.el8fdp" "ovn2.13-host == 20.06.2-11.el8fdp" "ovn2.13-vtep == 20.06.2-11.el8fdp" && \
+	rpm -Uhv --force --nodeps /root/ovn2.13*.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
