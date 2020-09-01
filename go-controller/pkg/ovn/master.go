@@ -880,6 +880,7 @@ func (oc *Controller) syncNodesPeriodic() {
 
 	for nodeName, chassisName := range chassisMap {
 		if chassisName != "" {
+			klog.Infof("Deleting stale chassis %s (%s)", nodeName, chassisName)
 			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
 			if err != nil {
 				klog.Errorf("Failed to delete chassis with name %s for node %s: stderr: %s, error: %v",
