@@ -129,6 +129,18 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string, wg *s
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
+	go func() {
+		utilwait.PollImmediate(time.Second, 280*time.Second, func() (bool, error) {
+			_, _, err := util.RunOVNSBAppCtl("--timeout=5", "vlog/set", "dbg")
+			_, _, err2 := util.RunOVNNBAppCtl("--timeout=5", "vlog/set", "dbg")
+			_, _, err3 := util.RunOVNNorthAppCtl("--timeout=5", "vlog/set", "dbg")
+			if err != nil || err2 != nil || err3 != nil {
+				return false, err
+			}
+			return true, nil
+		})
+	}()
+
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
 	if config.IPv4Mode {
@@ -872,21 +884,15 @@ func (oc *Controller) syncNodesPeriodic() {
 		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v: %s", err, chassisData)
 		return
 	}
+	klog.Warningf("#### syncNodesPeriodic() nodes: %v", nodeNames)
+	klog.Warningf("#### syncNodesPeriodic() chassis map: %v", chassisMap)
 
 	//delete existing nodes from the chassis map.
 	for _, nodeName := range nodeNames {
 		delete(chassisMap, nodeName)
 	}
 
-	for nodeName, chassisName := range chassisMap {
-		if chassisName != "" {
-			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-			if err != nil {
-				klog.Errorf("Failed to delete chassis with name %s for node %s: stderr: %s, error: %v",
-					chassisName, nodeName, stderr, err)
-			}
-		}
-	}
+	klog.Warningf("#### syncNodesPeriodic() would remove chassis: %v", chassisMap)
 }
 
 func (oc *Controller) syncNodes(nodes []interface{}) {
