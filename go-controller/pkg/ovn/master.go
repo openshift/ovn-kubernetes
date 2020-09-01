@@ -790,6 +790,20 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	}
 }
 
+// delete chassis of the given nodeName/chassisName map
+func deleteChassis(chassisMap map[string]string) {
+	for nodeName, chassisName := range chassisMap {
+		if chassisName != "" {
+			klog.Infof("Deleting stale chassis %s (%s)", nodeName, chassisName)
+			_, stderr, err := util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
+			if err != nil {
+				klog.Errorf("Failed to delete chassis with name %s for node %s: stderr: %s, error: %v",
+					chassisName, nodeName, stderr, err)
+			}
+		}
+	}
+}
+
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
@@ -825,15 +839,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		delete(chassisMap, nodeName)
 	}
 
-	for nodeName, chassisName := range chassisMap {
-		if chassisName != "" {
-			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-			if err != nil {
-				klog.Errorf("Failed to delete chassis with name %s for node %s: stderr: %s, error: %v",
-					chassisName, nodeName, stderr, err)
-			}
-		}
-	}
+	deleteChassis(chassisMap)
 }
 
 func (oc *Controller) syncNodes(nodes []interface{}) {
@@ -944,15 +950,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		delete(chassisMap, nodeName)
 	}
 
-	for nodeName, chassisName := range chassisMap {
-		if chassisName != "" {
-			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-			if err != nil {
-				klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
-					chassisName, nodeName, stderr, err)
-			}
-		}
-	}
+	deleteChassis(chassisMap)
 }
 
 func (oc *Controller) unmarshalChassisDataIntoMap(chData []byte) (map[string]string, error) {
