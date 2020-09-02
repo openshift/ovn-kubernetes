@@ -493,6 +493,67 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 	nFlows++
 
+	// table 1, unknown L4 traffic go to host
+	// we have already CT'ed this ip traffic, so we know it did not belong to OVN backed k8s service
+	// and we have no match so we know it must not be for OVN
+	if config.IPv4Mode {
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1, tcp, actions=LOCAL", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+
+		nFlows++
+
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1, udp, actions=LOCAL", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+
+		nFlows++
+
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1, sctp, actions=LOCAL", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+
+		nFlows++
+	}
+
+	if config.IPv6Mode {
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1, tcp6, actions=LOCAL", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+
+		nFlows++
+
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1, udp6, actions=LOCAL", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+
+		nFlows++
+
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1, sctp6, actions=LOCAL", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+
+		nFlows++
+	}
+
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:FLOOD", defaultOpenFlowCookie))
