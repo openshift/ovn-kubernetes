@@ -40,7 +40,13 @@ RUN INSTALL_PKGS=" \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 >= 2.13.0-29.el7fdp" openvswitch2.13-devel && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 >= 2.13.0-31" ovn2.13-central ovn2.13-host ovn2.13-vtep && \
+	# OVN-Kubernetes 4.5.7 comes shipped with these OVN versions. Since we can't support SB/NB DB upgrades for now, pin the version so that we don't block 4.5.8 upgrades 
+	#======== 4.5.7 ========
+	#ovn2.13-2.13.0-39.el7fdp.x86_64
+	#ovn2.13-central-2.13.0-39.el7fdp.x86_64
+	#ovn2.13-host-2.13.0-39.el7fdp.x86_64
+	#ovn2.13-vtep-2.13.0-39.el7fdp.x86_64
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == 2.13.0-39.el7fdp" "ovn2.13-central == 2.13.0-39.el7fdp" "ovn2.13-host == 2.13.0-39.el7fdp" "ovn2.13-vtep == 2.13.0-39.el7fdp" && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
