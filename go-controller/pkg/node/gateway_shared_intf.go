@@ -418,11 +418,13 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 			gwIntf, stderr, err)
 	}
 
-	// replace the left over OpenFlow flows with the FLOOD action flow
-	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
+	// replace the left over OpenFlow flows with the NORMAL action flow
+	_, stderr, err = util.AddNormalActionOFFlow(gwBridge)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
+
+	hostConntrackZone := config.Default.ConntrackZone + 1
 
 	nFlows := 0
 	if config.IPv4Mode {
@@ -448,6 +450,19 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
+
+		// table 0, packets coming from host headed externally. Commit connections
+		// so that reverse direction goes back to host.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, ip, "+
+				"actions=ct(commit, zone=%d), output:%s",
+				defaultOpenFlowCookie, hostConntrackZone, ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
 	}
 	if config.IPv6Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -472,7 +487,39 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
+
+		// table 0, packets coming from host headed externally. Commit connections
+		// so that reverse direction goes back to host.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, ipv6, "+
+				"actions=ct(commit, zone=%d), output:%s",
+				defaultOpenFlowCookie, hostConntrackZone, ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
 	}
+
+	// table 0, packets coming from host should go out physical port
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=99, in_port=LOCAL, actions=output:%s",
+			defaultOpenFlowCookie, ofportPhys))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+
+	nFlows++
+
+	// table 0, packets coming from OVN that are not IP should go out of the host
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=99, in_port=%s, actions=output:%s",
+			defaultOpenFlowCookie, ofportPatch, ofportPhys))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+
+	nFlows++
 
 	// table 1, established and related connections go to pod
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
@@ -493,18 +540,71 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 	nFlows++
 
-	// table 1, all other connections do normal processing
+	if config.IPv6Mode {
+		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
+		// must flood icmpv6 traffic as it fails to create a CT entry
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// all other ipv6 traffic check if it is host, goto table 3
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=0, table=1, ipv6, "+
+				"actions=ct(zone=%d, table=3)", defaultOpenFlowCookie, hostConntrackZone))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+
+	if config.IPv4Mode {
+		// table 1 all other ipv traffic check if it is host, goto table 3
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=0, table=1, ip, "+
+				"actions=ct(zone=%d, table=3)", defaultOpenFlowCookie, hostConntrackZone))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+
+	// table 2, return traffic to go to out of the host from nodePort or load balancer access
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:FLOOD", defaultOpenFlowCookie))
+		fmt.Sprintf("cookie=%s, priority=0, table=2, actions=output:%s", defaultOpenFlowCookie, ofportPhys))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
 
-	// table 2, return traffic to go to out of the host from nodePort or load balancer access
+	// table 3 flows for est,rel trk goto host
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=0, table=2, actions=output:%s", defaultOpenFlowCookie, ofportPhys))
+		fmt.Sprintf("cookie=%s, priority=100, table=3, ct_state=+trk+est, "+
+			"actions=LOCAL", defaultOpenFlowCookie))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=100, table=3, ct_state=+trk+rel, "+
+			"actions=LOCAL", defaultOpenFlowCookie))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	// table 3 no match for ip/ipv6 traffic in CT for host or OVN, so just do normal action
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=0, table=3, actions=output:NORMAL", defaultOpenFlowCookie))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -637,7 +737,7 @@ func cleanupSharedGateway() error {
 		return nil
 	}
 
-	_, stderr, err = util.AddFloodActionOFFlow(bridgeName)
+	_, stderr, err = util.AddNormalActionOFFlow(bridgeName)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
