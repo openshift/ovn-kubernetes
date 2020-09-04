@@ -430,8 +430,20 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		// so that reverse direction goes back to the pods.
 		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
-				"actions=ct(commit, zone=%d), output:%s",
+				"actions=ct(commit, zone=%d, exec(load:0x1->NXM_NX_CT_LABEL)), output:%s",
 				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 0, packets coming from host headed externally. Commit connections
+		// so that reverse direction goes back to the pods.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, ip, "+
+				"actions=ct(commit, zone=%d, exec(load:0x2->NXM_NX_CT_LABEL)), output:%s",
+				defaultOpenFlowCookie, config.Default.ConntrackZone, ofportPhys))
 		if err != nil {
 			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
@@ -454,8 +466,20 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		// so that reverse direction goes back to the pods.
 		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ipv6, "+
-				"actions=ct(commit, zone=%d), output:%s",
+				"actions=ct(commit, zone=%d, exec(load:0x1->NXM_NX_CT_LABEL)), output:%s",
 				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 0, packets coming from host headed externally. Commit connections
+		// so that reverse direction goes back to the pods.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, ip6, "+
+				"actions=ct(commit, zone=%d, exec(load:0x2->NXM_NX_CT_LABEL)), output:%s",
+				defaultOpenFlowCookie, config.Default.ConntrackZone, ofportPhys))
 		if err != nil {
 			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
@@ -476,7 +500,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 
 	// table 0, packets coming from host should go out physical port
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, actions=output:%s",
+		fmt.Sprintf("cookie=%s, priority=99, in_port=LOCAL, actions=output:%s",
 			defaultOpenFlowCookie, ofportPhys))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
@@ -494,9 +518,9 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 
 	nFlows++
 
-	// table 1, established and related connections go to pod
+	// table 1, known connections with ct_label 1 go to pod
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+est, "+
+		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_label=0x1, "+
 			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
@@ -504,9 +528,10 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 	nFlows++
 
+	// table 1, known connections with ct_label 2 go to host
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+rel, "+
-			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
+		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_label=0x2, "+
+			"actions=LOCAL", defaultOpenFlowCookie))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
