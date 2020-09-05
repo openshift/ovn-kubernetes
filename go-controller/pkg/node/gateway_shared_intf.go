@@ -397,7 +397,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
+func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, nodeIPs []*net.IPNet, stopChan chan struct{}) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	localnetLpName := gwBridge + "_" + nodeName
@@ -550,6 +550,38 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		nFlows++
 	}
 
+	for _, ip := range nodeIPs {
+		var proto, l3dst string
+		if utilnet.IsIPv6(ip.IP) {
+			proto = "tcp6"
+			l3dst = "ipv6_dst"
+		} else {
+			proto = "tcp"
+			l3dst = "ip_dst"
+		}
+		// table 1, send kapi server traffic to host
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=2, table=1, %s, %s=%s, tp_dst=6443, actions=LOCAL",
+				defaultOpenFlowCookie, proto, l3dst, ip.IP.String()))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 1, send etcd server traffic to host
+		for _, etcdPort := range []string{"2379", "2380"} {
+			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("cookie=%s, priority=2, table=1, %s, %s=%s, tp_dst=%s, actions=output:LOCAL",
+					defaultOpenFlowCookie, proto, l3dst, ip.IP.String(), etcdPort))
+			if err != nil {
+				return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+					"error: %v", gwBridge, stderr, err)
+			}
+			nFlows++
+		}
+	}
+
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
@@ -644,7 +676,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 	return func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
-		if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
+		if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, ips, n.stopChan); err != nil {
 			return err
 		}
 
