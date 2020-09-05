@@ -148,8 +148,7 @@ type DefaultConfig struct {
 	MTU int `gcfg:"mtu"`
 	// ConntrackZone affects only the gateway nodes, This value is used to track connections
 	// that are initiated from the pods so that the reverse connections go back to the pods.
-	// This represents the conntrack zone used for the conntrack flow rules. The number of zones used
-	// are n+1, so 64000 would reserve 64000 and 640001
+	// This represents the conntrack zone used for the conntrack flow rules.
 	ConntrackZone int `gcfg:"conntrack-zone"`
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
@@ -479,9 +478,8 @@ var CommonFlags = []cli.Flag{
 		Value:       Default.MTU,
 	},
 	&cli.IntFlag{
-		Name: "conntrack-zone",
-		Usage: "For gateway nodes, the starting conntrack zone used for conntrack flow rules (default: 64000)" +
-			"Zones consumed are n+1 (default: 64000, 640001)",
+		Name:        "conntrack-zone",
+		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)",
 		Destination: &cliConfig.Default.ConntrackZone,
 		Value:       Default.ConntrackZone,
 	},
