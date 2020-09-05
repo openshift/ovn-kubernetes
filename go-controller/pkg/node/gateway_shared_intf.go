@@ -89,7 +89,7 @@ func addService(service *kapi.Service, inport, outport, gwBridge string, nodeIP 
 				// Send to CT from external net with DNAT, eventually will land in table 1 (traffic to pods)
 				flows = append(flows,
 					fmt.Sprintf("cookie=%s,priority=101,in_port=%s,ct_state=-trk,%s,%s=%s,tp_dst=%d,"+
-						"actions=ct(commit,table=0,zone=%d,nat(dst=%s)",
+						"actions=ct(commit,table=0,zone=%d,exec(load:0x1->NXM_NX_CT_LABEL), nat(dst=%s)",
 						cookie, inport, flowProtocol, nw_dst, ing.IP, svcPort.Port, config.Default.ConntrackZone,
 						util.JoinHostPortInt32(nodeIP.IP.String(), svcPort.NodePort)))
 				// Incoming return traffic from pods, send to CT, unDNAT, goto table 2
