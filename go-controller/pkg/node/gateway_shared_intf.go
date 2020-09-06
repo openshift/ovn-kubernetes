@@ -568,6 +568,11 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 	nFlows++
 
+	_, stderr, err = util.RunOVSAppctl("fdb/flush", gwBridge)
+	if err != nil {
+		return fmt.Errorf("failed to flush breth0 fdb")
+	}
+
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	go checkDefaultConntrackRules(gwBridge, gwIntf, patchPort, ofportPhys, ofportPatch, nFlows, stopChan)
 	return nil
