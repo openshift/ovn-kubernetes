@@ -32,6 +32,8 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
+COPY ovn2.13-host-20.06.2-4.1.el8fdp.x86_64.rpm ovn2.13-central-20.06.2-4.1.el8fdp.x86_64.rpm ovn2.13-20.06.2-4.1.el8fdp.x86_64.rpm /root/
+
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute strace \
@@ -40,8 +42,9 @@ RUN INSTALL_PKGS=" \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 >= 2.13.0-52.el8fdp" openvswitch2.13-devel && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 >= 20.06.2-3.el8fdp" ovn2.13-central ovn2.13-host ovn2.13-vtep && \
 	yum clean all && rm -rf /var/cache/*
+
+RUN yum install -y /root/ovn*.rpm
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
@@ -58,6 +61,8 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=cli /usr/bin/oc /usr/bin/
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
 RUN stat /usr/bin/oc
+
+RUN rm -f /root/ovn*.rpm
 
 # copy git commit number into image
 COPY .git/HEAD /root/.git/HEAD
