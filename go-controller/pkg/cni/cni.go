@@ -127,6 +127,7 @@ func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal pod request response: %v", err)
 	}
 
+	time.Sleep(20*time.Second)
 	return responseBytes, nil
 }
 

@@ -500,6 +500,8 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	if err != nil {
 		klog.Errorf("Failed to add logicalPort %s to portGroup %s "+
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
+	} else {
+	    klog.Infof("Added logicalPort %s to portGroup %s ", logicalPort, np.portGroupUUID)
 	}
 
 	np.localPods[logicalPort] = portInfo
@@ -549,7 +551,10 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	if err != nil {
 		klog.Errorf("Failed to delete logicalPort %s from portGroup %s "+
 			"stderr: %q (%v)", portInfo.uuid, np.portGroupUUID, stderr, err)
+	} else {
+	    klog.Infof("Deleted logicalPort %s from portGroup %s ", portInfo.uuid, np.portGroupUUID)
 	}
+
 }
 
 func (oc *Controller) handleLocalPodSelector(
@@ -598,6 +603,8 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	}
 	_, alreadyExists := nsInfo.networkPolicies[policy.Name]
 	if alreadyExists {
+	    klog.Infof("Network policy %s in namespace %s already exists", policy.Name,
+			policy.Namespace)
 		nsInfo.Unlock()
 		return
 	}
@@ -617,6 +624,9 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		klog.Errorf("Failed to create port_group for network policy %s in "+
 			"namespace %s", policy.Name, policy.Namespace)
 		return
+	} else {
+	    klog.Infof("Created port_group for network policy %s in "+
+		"namespace %s", policy.Name, policy.Namespace)
 	}
 
 	type policyHandler struct {

@@ -75,7 +75,7 @@ var (
 	Logging = LoggingConfig{
 		File:              "", // do not log to a file by default
 		CNIFile:           "",
-		Level:             4,
+		Level:             5,
 		LogFileMaxSize:    100, // Size in Megabytes
 		LogFileMaxBackups: 5,
 		LogFileMaxAge:     5, //days
