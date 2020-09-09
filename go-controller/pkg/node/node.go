@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
+	kexec "k8s.io/utils/exec"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -272,6 +274,42 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	// start the cni server
 	cniServer := cni.NewCNIServer("", kclient.KClient)
 	err = cniServer.Start(cni.HandleCNIRequest)
+
+	exec := kexec.New()
+	path, err := exec.LookPath("ovs-tcpdump")
+	if err != nil {
+		klog.Warningf("Failed to find ovs-tcpdump: %v", err)
+	} else {
+		patchPort := fmt.Sprintf("patch-br-int-to-br-ex_%s", node.Name)
+		cmd := exec.Command(path, "-w", "/host/tmp/brint.pcap", "-i", patchPort)
+		var cmdBuf bytes.Buffer
+		cmd.SetStdout(&cmdBuf)
+		cmd.SetStderr(&cmdBuf)
+		if err := cmd.Start(); err != nil {
+			klog.Warningf("#### br-ex: failed to start: %v", err)
+		}
+		time.Sleep(time.Second * 10)
+
+		patchPort = fmt.Sprintf("patch-br-ex_%s-to-br-int", node.Name)
+		cmd2 := exec.Command(path, "-w", "/host/tmp/brex.pcap", "-i", patchPort)
+		var cmd2Buf bytes.Buffer
+		cmd2.SetStdout(&cmd2Buf)
+		cmd2.SetStderr(&cmd2Buf)
+		if err := cmd2.Start(); err != nil {
+			klog.Warningf("#### patch: failed to start: %v", err)
+		}
+
+		go func() {
+			if err := cmd.Wait(); err != nil {
+				klog.Warningf("#### br-ex: failed to run: %v ----- %s", err, string(cmdBuf.Bytes()))
+			}
+		}()
+		go func() {
+			if err := cmd2.Wait(); err != nil {
+				klog.Warningf("#### patch: failed to run: %v ----- %s", err, string(cmd2Buf.Bytes()))
+			}
+		}()
+	}
 
 	return err
 }

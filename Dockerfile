@@ -38,10 +38,11 @@ RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute strace \
 	containernetworking-plugins \
-	tcpdump iputils \
+	tcpdump iputils conntrack-tools \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 >= 2.13.0-52.el8fdp" openvswitch2.13-devel && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False openvswitch2.13-test python3-netifaces && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN yum install -y /root/ovn*.rpm
