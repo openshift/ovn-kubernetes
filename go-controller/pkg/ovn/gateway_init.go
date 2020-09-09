@@ -345,7 +345,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			// 169.55.22.0/24 so need to get proper ipMask
 			ipMask := addr.IP.Mask(addr.Mask)
 			netMask, _ := addr.Mask.Size()
-			matchStr := fmt.Sprintf(`inport == "rtoj-%s" && %s.dst == %s/%d`, nodeName, l3Prefix, ipMask, netMask)
+			matchStr := fmt.Sprintf(`inport == "rtoj-%s" && %s.dst == %s/%d`, gatewayRouter, l3Prefix, ipMask, netMask)
 			_, stderr, err := util.RunOVNNbctl("lr-policy-add", gatewayRouter,
 				"1001", matchStr, "reroute", localNextHop)
 			if err != nil {
