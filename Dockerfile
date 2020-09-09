@@ -36,13 +36,13 @@ RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute strace \
 	containernetworking-plugins \
-	tcpdump iputils \
+	tcpdump iputils conntrack-tools \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	#======== 4.6.0-0.nightly-2020-09-25-070943 Version ========
 	# ovn2.13-20.06.2-11.el8fdp.x86_64
 	# openvswitch2.13-2.13.0-57.el8fdp
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == 2.13.0-57.el8fdp" "openvswitch2.13-devel == 2.13.0-57.el8fdp" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == 2.13.0-57.el8fdp" "openvswitch2.13-devel == 2.13.0-57.el8fdp" openvswitch2.13-test && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == 20.06.2-11.el8fdp" "ovn2.13-central == 20.06.2-11.el8fdp" "ovn2.13-host == 20.06.2-11.el8fdp" "ovn2.13-vtep == 20.06.2-11.el8fdp" && \
 	yum clean all && rm -rf /var/cache/*
 
