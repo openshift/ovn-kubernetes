@@ -204,6 +204,8 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// those default NAT rules are present
 	if !config.Gateway.DisableSNATMultipleGWs {
 		waiter.AddWait(gatewayReady, prFn)
+	} else {
+		waiter.AddWait(func() (bool, error){ return true, nil}, prFn)
 	}
 	return nil
 }
