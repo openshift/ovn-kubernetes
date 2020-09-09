@@ -877,7 +877,10 @@ func (oc *Controller) WatchNamespaces() {
 }
 
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	var l3GatewayConfig *util.L3GatewayConfig
+	var err error
+
+	l3GatewayConfig, err = util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
 	}
