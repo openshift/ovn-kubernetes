@@ -304,6 +304,10 @@ func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.I
 			pair := strings.Split(key, "_")
 			protocol, port := pair[0], pair[1]
 			if externalIP == "" {
+				// Check if this is a host port flow 6443, 2379, 2380
+				if port == "6443" || port == "2379" || port == "2380" {
+					continue
+				}
 				// Check if this is a known cloud load balancer flow
 				for cookie := range ingressCookies {
 					if strings.Contains(flow, cookie) {
@@ -551,29 +555,52 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, nodeIPs []*net.
 	}
 
 	for _, ip := range nodeIPs {
-		var proto, l3dst string
+		var proto, l3dst, l3src string
 		if utilnet.IsIPv6(ip.IP) {
 			proto = "tcp6"
 			l3dst = "ipv6_dst"
+			l3src = "ipv6_src"
 		} else {
 			proto = "tcp"
 			l3dst = "ip_dst"
+			l3src = "ip_src"
 		}
-		// table 1, send kapi server traffic to host
+		// table 0, send ingress kapi server traffic to host
 		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-			fmt.Sprintf("cookie=%s, priority=2, table=1, %s, %s=%s, tp_dst=6443, actions=LOCAL",
-				defaultOpenFlowCookie, proto, l3dst, ip.IP.String()))
+			fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=%s, %s, %s=%s, tp_dst=6443, actions=LOCAL",
+				defaultOpenFlowCookie, ofportPhys, proto, l3dst, ip.IP.String()))
 		if err != nil {
 			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
 
-		// table 1, send etcd server traffic to host
+		// table 0, send egress kapi server traffic out of host
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=LOCAL, %s, %s=%s, tp_src=6443, actions=output:%s",
+				defaultOpenFlowCookie, proto, l3src, ip.IP.String(), ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 0, send etcd server traffic
 		for _, etcdPort := range []string{"2379", "2380"} {
+			// ingress etcd server traffic to host
 			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-				fmt.Sprintf("cookie=%s, priority=2, table=1, %s, %s=%s, tp_dst=%s, actions=output:LOCAL",
-					defaultOpenFlowCookie, proto, l3dst, ip.IP.String(), etcdPort))
+				fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=%s, %s, %s=%s, tp_dst=%s, actions=LOCAL",
+					defaultOpenFlowCookie, ofportPhys, proto, l3dst, ip.IP.String(), etcdPort))
+			if err != nil {
+				return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+					"error: %v", gwBridge, stderr, err)
+			}
+			nFlows++
+
+			// egress etcd server traffic out of host
+			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=LOCAL, %s, %s=%s, tp_src=%s, actions=output:%s",
+					defaultOpenFlowCookie, proto, l3src, ip.IP.String(), etcdPort, ofportPhys))
 			if err != nil {
 				return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 					"error: %v", gwBridge, stderr, err)
@@ -602,7 +629,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, nodeIPs []*net.
 
 	_, stderr, err = util.RunOVSAppctl("fdb/flush", gwBridge)
 	if err != nil {
-		return fmt.Errorf("failed to flush breth0 fdb")
+		return fmt.Errorf("failed to flush breth0 bridge fdb, %s, %v", stderr, err)
 	}
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
