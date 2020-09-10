@@ -37,6 +37,7 @@ const (
 	// translates to the br-nexthop's IP address
 	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
 	iptableNodePortChain      = "OVN-KUBE-NODEPORT"
+	localnetGatewayMac        = "00:00:a9:fe:21:02"
 )
 
 type iptRule struct {
@@ -183,11 +184,13 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 		return err
 	}
 
+	gwMacAddress, _ := net.ParseMAC(localnetGatewayMac)
+
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 		Mode:           config.GatewayModeLocal,
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
-		MACAddress:     macAddress,
+		MACAddress:     gwMacAddress,
 		IPAddresses:    []*net.IPNet{gatewayIPCIDR},
 		NextHops:       []net.IP{gatewayNextHop},
 		NodePortEnable: config.Gateway.NodeportEnable,
