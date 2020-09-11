@@ -445,6 +445,7 @@ var _ = Describe("EgressIP Operations", func() {
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
+						"POSTROUTING": []string{"-j OVN-KUBE-EGRESSIP"},
 						"OVN-KUBE-EGRESSIP": []string{
 							fmt.Sprintf("-s %s -m mark --mark %s -j SNAT --to-source %s", gatewayIP, fmt.Sprintf("0x%x", util.IPToUint32(egressIP)), egressIP),
 						},
@@ -523,6 +524,7 @@ var _ = Describe("EgressIP Operations", func() {
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
+						"POSTROUTING": []string{"-j OVN-KUBE-EGRESSIP"},
 						"OVN-KUBE-EGRESSIP": []string{
 							fmt.Sprintf("-s %s -m mark --mark %s -j SNAT --to-source %s", gatewayIP, fmt.Sprintf("0x%x", util.IPToUint32(egressIP)), egressIP),
 						},
@@ -551,6 +553,7 @@ var _ = Describe("EgressIP Operations", func() {
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
+						"POSTROUTING":       []string{"-j OVN-KUBE-EGRESSIP"},
 						"OVN-KUBE-EGRESSIP": []string{},
 					},
 					"filter": {

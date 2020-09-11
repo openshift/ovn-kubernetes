@@ -150,6 +150,9 @@ func (e *egressIPLocal) cleanupEgressIP(eIPStatus egressipv1.EgressIPStatusItem)
 }
 
 func (e *egressIPLocal) syncEgressIPs(eIPs []interface{}) {
+	if err := initGatewayIPTables([]string{iptableEgressIPChain}, getInitEgressIPTRule); err != nil {
+		klog.Errorf("Unable to initialize egress IP table rules, err: %v", err)
+	}
 	validEgressIPs := make(map[string]bool)
 	for _, eIP := range eIPs {
 		eIP, ok := eIP.(*egressipv1.EgressIP)

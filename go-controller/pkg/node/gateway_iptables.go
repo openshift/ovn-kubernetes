@@ -124,6 +124,17 @@ func getLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	}
 }
 
+func getInitEgressIPTRule(chain string, proto iptables.Protocol) []iptRule {
+	return []iptRule{
+		{
+			table:    "nat",
+			chain:    "POSTROUTING",
+			args:     []string{"-j", chain},
+			protocol: proto,
+		},
+	}
+}
+
 func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP string, targetPort int32) []iptRule {
 	var protocol iptables.Protocol
 	if utilnet.IsIPv6String(targetIP) {
@@ -302,9 +313,9 @@ func initLocalGatewayNATRules(ifname string, ip net.IP) error {
 	return addIptRules(getLocalGatewayNATRules(ifname, ip))
 }
 
-func initGatewayIPTables(genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
+func initGatewayIPTables(chains []string, genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
 	rules := make([]iptRule, 0)
-	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
+	for _, chain := range chains {
 		for _, proto := range clusterIPTablesProtocols() {
 			ipt, err := util.GetIPTablesHelper(proto)
 			if err != nil {
@@ -326,14 +337,14 @@ func initGatewayIPTables(genGatewayChainRules func(chain string, proto iptables.
 }
 
 func initSharedGatewayIPTables() error {
-	if err := initGatewayIPTables(getSharedGatewayInitRules); err != nil {
+	if err := initGatewayIPTables([]string{iptableNodePortChain, iptableExternalIPChain}, getSharedGatewayInitRules); err != nil {
 		return err
 	}
 	return nil
 }
 
 func initLocalGatewayIPTables() error {
-	if err := initGatewayIPTables(getLocalGatewayInitRules); err != nil {
+	if err := initGatewayIPTables([]string{iptableNodePortChain, iptableExternalIPChain}, getLocalGatewayInitRules); err != nil {
 		return err
 	}
 	return nil

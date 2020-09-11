@@ -444,9 +444,11 @@ func expectedIPTablesRules(gatewayIP string) map[string]util.FakeTable {
 			},
 			"OVN-KUBE-NODEPORT":   []string{},
 			"OVN-KUBE-EXTERNALIP": []string{},
+			"OVN-KUBE-EGRESSIP":   []string{},
 		},
 		"nat": {
 			"POSTROUTING": []string{
+				"-j OVN-KUBE-EGRESSIP",
 				"-s " + gatewayIP + " -j MASQUERADE",
 			},
 			"PREROUTING": []string{
@@ -459,6 +461,7 @@ func expectedIPTablesRules(gatewayIP string) map[string]util.FakeTable {
 			},
 			"OVN-KUBE-NODEPORT":   []string{},
 			"OVN-KUBE-EXTERNALIP": []string{},
+			"OVN-KUBE-EGRESSIP":   []string{},
 		},
 	}
 
