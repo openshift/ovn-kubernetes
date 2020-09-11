@@ -50,7 +50,7 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(n.name, localnetBridgeName, localnetBridgeName,
+	ifaceID, _, err := bridgedGatewayNodeSetup(n.name, localnetBridgeName, localnetBridgeName,
 		util.PhysicalNetworkName, true)
 	if err != nil {
 		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
@@ -80,6 +80,14 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 		return err
 	}
 
+	// bounce interface to get link local address back for ipv6
+	if _, err = util.LinkSetDown(localnetGatewayNextHopPort); err != nil {
+		return err
+	}
+	if _, err = util.LinkSetUp(localnetGatewayNextHopPort); err != nil {
+		return err
+	}
+
 	var gatewayIfAddrs []*net.IPNet
 	var nextHops []net.IP
 	for _, hostSubnet := range hostSubnets {
@@ -101,18 +109,6 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 
 		if err = util.LinkAddrAdd(link, gatewayNextHopIfAddr); err != nil {
 			return err
-		}
-		if utilnet.IsIPv6CIDR(hostSubnet) {
-			// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
-			// MAC binding for the gateway IP address for now - need to debug this further
-			if exists, _ := util.LinkNeighExists(link, gatewayIP, macAddress); !exists {
-				err = util.LinkNeighAdd(link, gatewayIP, macAddress)
-				if err == nil {
-					klog.Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
-				} else {
-					klog.Errorf("Error in adding MAC binding for %s on %s: %v", gatewayIP, localnetGatewayNextHopPort, err)
-				}
-			}
 		}
 	}
 
@@ -151,7 +147,7 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 			return err
 		}
 		err = n.watchLocalPorts(
-			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet),
+			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet, nil),
 		)
 		if err != nil {
 			return err
@@ -192,16 +188,23 @@ type localPortWatcherData struct {
 	gatewayIPv4  string
 	gatewayIPv6  string
 	localAddrSet map[string]net.IPNet
+	nodeIP       *net.IPNet
 }
 
-func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet, nodeIP []*net.IPNet) *localPortWatcherData {
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
-	return &localPortWatcherData{
+
+	lpw := &localPortWatcherData{
 		gatewayIPv4:  gatewayIPv4,
 		gatewayIPv6:  gatewayIPv6,
 		recorder:     recorder,
 		localAddrSet: localAddrSet,
 	}
+
+	if len(nodeIP) > 0 {
+		lpw.nodeIP = nodeIP[0]
+	}
+	return lpw
 }
 
 func getLocalAddrs() (map[string]net.IPNet, error) {
@@ -249,6 +252,9 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 				// dest address as the load-balancer ingress IP and port
 				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				if config.Gateway.Mode == config.GatewayModeHybrid {
+					iptRules = append(iptRules, getHybridNodePortIPTRules(port, npw.nodeIP, svc.Spec.ClusterIP)...)
+				}
 				klog.V(5).Infof("Will add iptables rule for NodePort and Cloud load balancers: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			} else {
@@ -314,6 +320,9 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 				// dest address as the load-balancer ingress IP and port
 				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				if config.Gateway.Mode == config.GatewayModeHybrid {
+					iptRules = append(iptRules, getHybridNodePortIPTRules(port, npw.nodeIP, svc.Spec.ClusterIP)...)
+				}
 				klog.V(5).Infof("Will delete iptables rule for NodePort and cloud load balancers: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			}

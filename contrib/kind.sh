@@ -53,7 +53,7 @@ usage()
     echo "-sw | --allow-system-writes       Allow script to update system. Intended to allow"
     echo "                                  github CI to be updated with IPv6 settings."
     echo "                                  DEFAULT: Don't allow."
-    echo "-gm | --gateway-mode              Enable 'shared' or 'local' gateway mode."
+    echo "-gm | --gateway-mode              Enable 'shared', 'hybrid, or 'local' gateway mode."
     echo "                                  DEFAULT: local."
     echo "-ov | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build."
     echo "--delete                     	    Delete current cluster"
@@ -99,7 +99,7 @@ parse_args()
             -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
                                                 ;;
             -gm | --gateway-mode )              shift
-                                                if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
+                                                if [ "$1" != "local" ] && [ "$1" != "shared" ] && [ "$1" != "hybrid" ]; then
                                                     echo "Invalid gateway mode: $1"
                                                     usage
                                                     exit 1
@@ -160,7 +160,11 @@ KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
-OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+if [ "$OVN_GATEWAY_MODE" = hybrid ]; then
+  OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-true}
+else
+  OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+fi
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
 OVN_IMAGE=${OVN_IMAGE:-local}
