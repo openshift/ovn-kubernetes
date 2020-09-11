@@ -25,7 +25,7 @@ func (e *egressIPShared) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod)
 		e.podRetry.Delete(getPodKey(pod))
 	}
 	for _, status := range eIP.Status.Items {
-		if err := e.createEgressPolicy(podIPs, status, 0, eIP.Name); err != nil {
+		if err := e.createEgressReroutePolicy(podIPs, status, eIP.Name); err != nil {
 			return fmt.Errorf("unable to create logical router policy for status: %v, err: %v", status, err)
 		}
 		if err := createNATRule(podIPs, status, eIP.Name); err != nil {
@@ -41,7 +41,7 @@ func (e *egressIPShared) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.P
 		return nil
 	}
 	for _, status := range eIP.Status.Items {
-		if err := e.deleteEgressPolicy(podIPs, status, eIP.Name); err != nil {
+		if err := e.deleteEgressReroutePolicy(podIPs, status, eIP.Name); err != nil {
 			return fmt.Errorf("unable to delete logical router policy for status: %v, err: %v", status, err)
 		}
 		if err := deleteNATRule(podIPs, status, eIP.Name); err != nil {

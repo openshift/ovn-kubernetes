@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	policyID = "policy_id"
-	natID    = "nat_id"
+	reroutePolicyID    = "reroute_policy_id"
+	packetMarkPolicyID = "packet_mark_policy_id"
+	natID              = "nat_id"
 )
 
 var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
@@ -374,12 +375,12 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s nexthop=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name, nodeLogicalRouterIPv6),
-						Output: policyID,
+						Output: reroutePolicyID,
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, policyID),
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, reroutePolicyID),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmd(
@@ -697,12 +698,12 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s nexthop=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name, nodeLogicalRouterIPv6),
-						Output: policyID,
+						Output: reroutePolicyID,
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, policyID),
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, reroutePolicyID),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmd(
@@ -874,12 +875,12 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s nexthop=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name, nodeLogicalRouterIPv6),
-						Output: policyID,
+						Output: reroutePolicyID,
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, policyID),
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, reroutePolicyID),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmd(

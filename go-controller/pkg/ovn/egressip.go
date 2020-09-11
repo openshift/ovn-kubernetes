@@ -414,11 +414,10 @@ func (e *egressIPMode) needsRetry(pod *kapi.Pod) bool {
 	return retry
 }
 
-// createEgressPolicy uses logical router policies to force egress traffic to the egress node, for that we need
+// createEgressReroutePolicy uses logical router policies to force egress traffic to the egress node, for that we need
 // to retrive the internal gateway router IP attached to the egress node. This method handles both the shared and
-// local gateway mode case, and in the local case (i.e: packetMark != 0) uses the optional packetMark field
-// on the logical router policy to properly L3 SNAT on the node side.
-func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, packetMark uint32, egressIPName string) error {
+// local gateway mode case
+func (e *egressIPMode) createEgressReroutePolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
 	if err != nil {
@@ -432,47 +431,27 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 		} else if !isEgressIPv6 && !utilnet.IsIPv6(podIP) {
 			filterOption = fmt.Sprintf("ip4.src == %s", podIP.String())
 		}
-		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName, gatewayRouterIP)
+		policyIDs, err := findReroutePolicyIDs(filterOption, egressIPName, gatewayRouterIP)
 		if err != nil {
 			return err
 		}
 		if policyIDs == nil {
-			if packetMark != 0 {
-				_, stderr, err = util.RunOVNNbctl(
-					"--id=@lr-policy",
-					"create",
-					"logical_router_policy",
-					"action=reroute",
-					fmt.Sprintf("match=\"%s\"", filterOption),
-					fmt.Sprintf("priority=%v", egressIPReroutePriority),
-					fmt.Sprintf("nexthop=%s", gatewayRouterIP),
-					fmt.Sprintf("external_ids:name=%s", egressIPName),
-					fmt.Sprintf("options:pkt_mark=%v", packetMark),
-					"--",
-					"add",
-					"logical_router",
-					ovnClusterRouter,
-					"policies",
-					"@lr-policy",
-				)
-			} else {
-				_, stderr, err = util.RunOVNNbctl(
-					"--id=@lr-policy",
-					"create",
-					"logical_router_policy",
-					"action=reroute",
-					fmt.Sprintf("match=\"%s\"", filterOption),
-					fmt.Sprintf("priority=%v", egressIPReroutePriority),
-					fmt.Sprintf("nexthop=%s", gatewayRouterIP),
-					fmt.Sprintf("external_ids:name=%s", egressIPName),
-					"--",
-					"add",
-					"logical_router",
-					ovnClusterRouter,
-					"policies",
-					"@lr-policy",
-				)
-			}
+			_, stderr, err = util.RunOVNNbctl(
+				"--id=@lr-policy",
+				"create",
+				"logical_router_policy",
+				"action=reroute",
+				fmt.Sprintf("match=\"%s\"", filterOption),
+				fmt.Sprintf("priority=%v", egressIPReroutePriority),
+				fmt.Sprintf("nexthop=%s", gatewayRouterIP),
+				fmt.Sprintf("external_ids:name=%s", egressIPName),
+				"--",
+				"add",
+				"logical_router",
+				ovnClusterRouter,
+				"policies",
+				"@lr-policy",
+			)
 			if err != nil {
 				return fmt.Errorf("unable to create logical router policy: %s, stderr: %s, err: %v", status.EgressIP, stderr, err)
 			}
@@ -481,7 +460,7 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 	return nil
 }
 
-func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
+func (e *egressIPMode) deleteEgressReroutePolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
 	if err != nil {
@@ -494,7 +473,7 @@ func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.Egr
 		} else if !utilnet.IsIPv6(podIP) && !utilnet.IsIPv6String(status.EgressIP) {
 			filterOption = fmt.Sprintf("ip4.src == %s", podIP.String())
 		}
-		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName, gatewayRouterIP)
+		policyIDs, err := findReroutePolicyIDs(filterOption, egressIPName, gatewayRouterIP)
 		if err != nil {
 			return err
 		}
@@ -514,7 +493,7 @@ func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.Egr
 	return nil
 }
 
-func findLRPolicyIDs(filterOption, egressIPName string, gatewayRouterIP net.IP) ([]string, error) {
+func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net.IP) ([]string, error) {
 	policyIDs, stderr, err := util.RunOVNNbctl(
 		"--format=csv",
 		"--data=bare",
