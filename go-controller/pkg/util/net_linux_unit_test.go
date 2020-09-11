@@ -41,6 +41,42 @@ func TestGetFamily(t *testing.T) {
 	}
 }
 
+func TestIPToUint32(t *testing.T) {
+	tests := []struct {
+		desc   string
+		input  string
+		outExp uint32
+	}{
+		{
+			desc:   "valid IPv4 input",
+			input:  "172.20.0.20",
+			outExp: 2886991892,
+		},
+		{
+			desc:   "invalid IPv4 input",
+			input:  "172.20.990.20",
+			outExp: 0,
+		},
+		{
+			desc:   "valid IPv6 input",
+			input:  "0:0:0:0:0:feff:c0a8:8e0d",
+			outExp: 2440863029,
+		},
+		{
+			desc:   "invalid IPv6 input",
+			input:  "0:0:0:0:0:feff:c0a8:8e0:d",
+			outExp: 0,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := IPToUint32(tc.input)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
+
 func TestLinkSetUp(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)

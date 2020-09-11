@@ -33,14 +33,11 @@ func intToIP(i *big.Int) net.IP {
 // IPToUint32 returns a uint32 of an IPv4/IPv6 string
 func IPToUint32(egressIP string) uint32 {
 	ip := net.ParseIP(egressIP)
-	if utilnet.IsIPv6(ip) {
-		// This can obviously not be done for IPv6. But the logic here is:
-		// "allow users to create IPv6 egress IP addresses with a 1/(2^32)
-		// probability that they might collide. Or just use shared gateway
-		// mode, and live without this risk."
-		return binary.BigEndian.Uint32(ip[12:16])
+	if ip == nil {
+		return 0
 	}
-	return binary.BigEndian.Uint32(ip)
+	ip4Octets := ipTo4Octets(ip)
+	return binary.BigEndian.Uint32([]byte{ip4Octets[0], ip4Octets[1], ip4Octets[2], ip4Octets[3]})
 }
 
 // GetNodeLogicalRouterIP returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
@@ -162,19 +159,24 @@ func JoinHostPortInt32(host string, port int32) string {
 	return net.JoinHostPort(host, strconv.Itoa(int(port)))
 }
 
-// IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
-// a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, create a hash from the IPv6 string and use that for MAC Address.
+// IPAddrToHWAddr takes the four octets of an IP address and uses them in creating
+// a MAC address (0A:58:AA:BB:CC:DD).
 // Assumption: the caller will ensure that an empty net.IP{} will NOT be passed.
 func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
+	ip4Octets := ipTo4Octets(ip)
+	// safe to use private MAC prefix: 0A:58
+	return net.HardwareAddr{0x0A, 0x58, ip4Octets[0], ip4Octets[1], ip4Octets[2], ip4Octets[3]}
+}
+
+func ipTo4Octets(ip net.IP) [4]byte {
 	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
 	ip4 := ip.To4()
 	if ip4 != nil {
-		// safe to use private MAC prefix: 0A:58
-		return net.HardwareAddr{0x0A, 0x58, ip4[0], ip4[1], ip4[2], ip4[3]}
+		return [4]byte{ip4[0], ip4[1], ip4[2], ip4[3]}
 	}
-
+	// For IPv6, create a hash from the IPv6 string to avoid collision
 	hash := sha256.Sum256([]byte(ip.String()))
-	return net.HardwareAddr{0x0A, 0x58, hash[0], hash[1], hash[2], hash[3]}
+	return [4]byte{hash[0], hash[1], hash[2], hash[3]}
 }
 
 // JoinIPs joins the string forms of an array of net.IP, as with strings.Join
