@@ -475,7 +475,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		for _, ipNets := range routingPodGWs {
 			routingGWs = append(routingGWs, ipNets...)
 		}
-		err = oc.addGWRoutesForPod(routingGWs, podIfAddrs, pod.Namespace, pod.Spec.NodeName)
+		gr := "GR_" + pod.Spec.NodeName
+		err = oc.addGWRoutesForPod(routingGWs, podIfAddrs, pod.Namespace, gr)
 		if err != nil {
 			return err
 		}

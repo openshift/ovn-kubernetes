@@ -585,22 +585,17 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 	}
 
 	return func() error {
+		// Program cluster.GatewayIntf to let non-pod traffic to go to host
+		// stack
+		if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
+			return err
+		}
+
 		if config.Gateway.NodeportEnable {
-			if config.Gateway.Mode == config.GatewayModeLocal {
-				if err := addDefaultConntrackRulesLocal(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
-					return err
-				}
-			} else {
-				// Program cluster.GatewayIntf to let non-pod traffic to go to host
-				// stack
-				if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
-					return err
-				}
-				// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-				if err := nodePortWatcher(n.name, bridgeName, uplinkName, ips,
-					n.watchFactory); err != nil {
-					return err
-				}
+			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
+			if err := nodePortWatcher(n.name, bridgeName, uplinkName, ips,
+				n.watchFactory); err != nil {
+				return err
 			}
 		}
 		return nil

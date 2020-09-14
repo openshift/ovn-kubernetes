@@ -256,25 +256,25 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet, stopChan chan struct{}) (*managementPortConfig, error) {
+func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet, stopChan chan struct{}) error {
 	var cfg *managementPortConfig
 	var err error
 
 	if cfg, err = newManagementPortConfig(interfaceName, localSubnets); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err = tearDownManagementPortConfig(cfg); err != nil {
-		return nil, err
+		return err
 	}
 
 	if _, err = setupManagementPortConfig(cfg); err != nil {
-		return nil, err
+		return err
 	}
 
 	// start the management port health check
 	go checkManagementPortHealth(cfg, stopChan)
-	return cfg, nil
+	return nil
 }
 
 //DelMgtPortIptRules delete all the iptable rules for the management port.
