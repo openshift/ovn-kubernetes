@@ -495,8 +495,13 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		ipMask := hostIfAddr.IP.Mask(hostIfAddr.Mask)
-		hostNet := &net.IPNet{IP: ipMask, Mask: hostIfAddr.Mask}
+		// FIXME: this is assuming all of the nodes are on the same subnet
+		mask := hostIfAddr.Mask
+		if utilnet.IsIPv6(hostIfAddr.IP) {
+			mask = net.CIDRMask(64, 128)
+		}
+		ipMask := hostIfAddr.IP.Mask(mask)
+		hostNet := &net.IPNet{IP: ipMask, Mask: mask}
 		// Local gw mode needs to use DGP to do hostA -> service -> hostB
 		matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* inter-%s */",
 			l3Prefix, mgmtPortIP, l3Prefix, hostNet.String(), nodeName)
