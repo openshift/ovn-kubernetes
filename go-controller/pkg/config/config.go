@@ -93,9 +93,7 @@ var (
 	}
 
 	// HybridOverlay holds hybrid overlay feature config options.
-	HybridOverlay = HybridOverlayConfig{
-		RawClusterSubnets: "10.132.0.0/14/23",
-	}
+	HybridOverlay HybridOverlayConfig
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
 	NbctlDaemonMode bool
@@ -1040,12 +1038,14 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *c
 
 	if HybridOverlay.Enabled {
 		var err error
-		HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
-		if err != nil {
-			return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
-		}
-		for _, subnet := range HybridOverlay.ClusterSubnets {
-			allSubnets.append(configSubnetHybrid, subnet.CIDR)
+		if len(HybridOverlay.RawClusterSubnets) > 0 {
+			HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
+			if err != nil {
+				return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
+			}
+			for _, subnet := range HybridOverlay.ClusterSubnets {
+				allSubnets.append(configSubnetHybrid, subnet.CIDR)
+			}
 		}
 	}
 
