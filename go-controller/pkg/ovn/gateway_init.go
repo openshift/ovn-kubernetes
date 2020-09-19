@@ -495,11 +495,13 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		ipMask := hostIfAddr.IP.Mask(hostIfAddr.Mask)
-		hostNet := &net.IPNet{IP: ipMask, Mask: hostIfAddr.Mask}
+		var matchDst string
 		// Local gw mode needs to use DGP to do hostA -> service -> hostB
-		matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* inter-%s */",
-			l3Prefix, mgmtPortIP, l3Prefix, hostNet.String(), nodeName)
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
+		}
+		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
+			l3Prefix, mgmtPortIP, matchDst, nodeName)
 		_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, interNodePolicyPriority, matchStr,
 			"reroute", natSubnetNextHop)
 		if err != nil {
