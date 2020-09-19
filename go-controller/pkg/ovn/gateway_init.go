@@ -460,7 +460,8 @@ func addDistributedGWPort() error {
 func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) error {
 	var l3Prefix string
 	var natSubnetNextHop string
-	if utilnet.IsIPv6(hostIfAddr.IP) {
+	isIPv6 := utilnet.IsIPv6(hostIfAddr.IP)
+	if isIPv6 {
 		l3Prefix = "ip6"
 		natSubnetNextHop = util.V6NodeLocalNatSubnetNextHop
 	} else {
@@ -498,7 +499,9 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 		var matchDst string
 		// Local gw mode needs to use DGP to do hostA -> service -> hostB
 		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
+			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) == isIPv6 {
+				matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
+			}
 		}
 		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
 			l3Prefix, mgmtPortIP, matchDst, nodeName)
