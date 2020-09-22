@@ -1113,6 +1113,9 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	// HACK force local gateway mode
 	Gateway.Mode = GatewayModeLocal
 
+	// HACK force gateway interface none
+	Gateway.Interface = "none"
+
 	return nil
 }
 
