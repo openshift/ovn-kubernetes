@@ -522,7 +522,41 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 	var brCreated bool
 	var err error
 
-	if bridgeName, _, err = util.RunOVSVsctl("--", "port-to-br", gwIntf); err == nil {
+	// OCP HACK
+	if gwIntf == "none" {
+		err = setupLocalNodeAccessBridge(n.name, subnets)
+		if err != nil {
+			return nil, err
+		}
+		chassisID, err := util.GetNodeChassisID()
+		if err != nil {
+			return nil, err
+		}
+		// get the real default interface
+		defaultGatewayIntf, _, err := getDefaultGatewayInterfaceDetails()
+		if err != nil {
+			return nil, err
+		}
+		ips, err := getNetworkInterfaceIPAddresses(defaultGatewayIntf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get interface details for %s (%v)",
+				gwIntf, err)
+		}
+		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+			ChassisID:      chassisID,
+			Mode:           config.GatewayModeLocal,
+			IPAddresses:    ips,
+			MACAddress:     util.IPAddrToHWAddr(ips[0].IP),
+			NextHops:       gwNextHops,
+			NodePortEnable: config.Gateway.NodeportEnable,
+		})
+		if err != nil {
+			return nil, err
+		} else {
+			return func() error { return nil }, nil
+		}
+		// END OCP HACK
+	} else if bridgeName, _, err = util.RunOVSVsctl("--", "port-to-br", gwIntf); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err = util.GetNicName(bridgeName)
 		if err != nil {
@@ -586,7 +620,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 
 	return func() error {
 		if config.Gateway.NodeportEnable {
-			if config.Gateway.Mode == config.GatewayModeLocal {
+			if config.Gateway.Mode == config.GatewayModeLocal && gwIntf != "None" {
 				if err := addDefaultConntrackRulesLocal(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
 					return err
 				}
