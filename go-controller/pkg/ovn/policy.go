@@ -1138,16 +1138,16 @@ func (oc *Controller) destroyNamespacePolicy(np *namespacePolicy) {
 	// Go through each ingress rule.  For each ingress rule, delete the
 	// addressSet for the local peer pods.
 	for i := range np.ingressPolicies {
-		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
-			policy.Name, "ingress", i)
+		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", np.namespace,
+			np.name, "ingress", i)
 		hashedAddressSet := hashedAddressSet(localPeerPods)
 		deleteAddressSet(hashedAddressSet)
 	}
 	// Go through each egress rule.  For each egress rule, delete the
 	// addressSet for the local peer pods.
 	for i := range np.egressPolicies {
-		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
-			policy.Name, "egress", i)
+		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", np.namespace,
+			np.name, "egress", i)
 		hashedAddressSet := hashedAddressSet(localPeerPods)
 		deleteAddressSet(hashedAddressSet)
 	}
