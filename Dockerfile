@@ -25,6 +25,9 @@ FROM openshift/origin-base
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
+#====== 4.4.Z Versions ========
+ENV OVN_PIN 20.06.2-4.el7fdp
+ENV OVS_PIN 2.13.0-62.el7fdp
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 # install selinux-policy first to avoid a race
@@ -39,12 +42,8 @@ RUN INSTALL_PKGS=" \
 	tcpdump \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 >= 2.13.0-29.el7fdp" openvswitch2.13-devel && \
-	# OVN-Kubernetes 4.4.24 comes shipped with these OVN versions.
-	#======== 4.4.24 version ========
-	# ovn2.13-20.06.2-4.el7fdp.x86_64
-	# We need to pin to the 4.4.24 version
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == 20.06.2-4.el7fdp" "ovn2.13-central == 20.06.2-4.el7fdp" "ovn2.13-host == 20.06.2-4.el7fdp" "ovn2.13-vtep == 20.06.2-4.el7fdp" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == ${OVS_PIN}" "openvswitch2.13-devel == ${OVS_PIN}" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == ${OVN_PIN}" "ovn2.13-central == ${OVN_PIN}" "ovn2.13-host == ${OVN_PIN}" "ovn2.13-vtep == ${OVN_PIN}" && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
