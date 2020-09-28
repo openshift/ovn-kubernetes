@@ -52,7 +52,7 @@ func ensureOvnDBState(db string, stopCh <-chan struct{}) {
 			if ee.ExitCode() != 2 {
 				klog.Fatalf("Can't determine if the db is clustered/stand-alone" +
 					" restarting the checker")
-				os.Exit(1)
+				//os.Exit(1)
 			}
 		}
 	}
