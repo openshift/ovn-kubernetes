@@ -25,6 +25,8 @@ FROM registry.svc.ci.openshift.org/ocp/4.6:base
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
+ENV OVN_PIN 20.09.0-1.el8fdp
+ENV OVS_PIN 2.13.0-57.el8fdp
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 # install selinux-policy first to avoid a race
@@ -39,11 +41,8 @@ RUN INSTALL_PKGS=" \
 	tcpdump iputils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	#======== 4.6.0-0.nightly-2020-09-25-070943 Version ========
-	# ovn2.13-20.06.2-11.el8fdp.x86_64
-	# openvswitch2.13-2.13.0-57.el8fdp
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == 2.13.0-57.el8fdp" "openvswitch2.13-devel == 2.13.0-57.el8fdp" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == 20.06.2-11.el8fdp" "ovn2.13-central == 20.06.2-11.el8fdp" "ovn2.13-host == 20.06.2-11.el8fdp" "ovn2.13-vtep == 20.06.2-11.el8fdp" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == ${OVS_PIN}" "openvswitch2.13-devel == ${OVS_PIN}" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == ${OVN_PIN}" "ovn2.13-central == ${OVN_PIN}" "ovn2.13-host == ${OVN_PIN}" "ovn2.13-vtep == ${OVN_PIN}" && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
