@@ -40,10 +40,7 @@ RUN INSTALL_PKGS=" \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 >= 2.13.0-29.el7fdp" openvswitch2.13-devel && \
-	#======== 4.4.24 Version ========
-	# ovn2.13-20.06.2-4.el7fdp.x86_64
-        # Pin to that
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == 20.06.2-4.el7fdp" "ovn2.13-central == 20.06.2-4.el7fdp" "ovn2.13-host == 20.06.2-4.el7fdp" "ovn2.13-vtep == 20.06.2-4.el7fdp" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 >= 2.13.0-31" ovn2.13-central ovn2.13-host ovn2.13-vtep && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
