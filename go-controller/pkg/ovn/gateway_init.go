@@ -212,6 +212,10 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
 	}
 
+	// OCP HACK - clean up old local gateway port that might still be in DB
+	cleanOldLocalGWPort(nodeName)
+	// END OCP HACK
+
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.

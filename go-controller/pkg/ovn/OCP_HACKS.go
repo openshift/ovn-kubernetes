@@ -5,6 +5,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog"
 	"strings"
 )
 
@@ -94,4 +95,27 @@ func gatewayInitMinimal(nodeName string, l3GatewayConfig *util.L3GatewayConfig, 
 		}
 	}
 	return nil
+}
+
+// cleanOldLocalGWPort handles removing old "br-local" ports on external switches leftover from old local gw mode
+func cleanOldLocalGWPort(nodeName string) {
+	oldLocalBridgeName := "br-local"
+	ifaceID := oldLocalBridgeName + "_" + nodeName
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-headings", "--columns=_uuid", "find",
+		"logical_switch_port", fmt.Sprintf("name=%s", ifaceID))
+	if err != nil {
+		klog.Errorf("Unable to query for old local gateway port: stderr: %s, error: %v", stderr, err)
+		return
+	}
+	if len(stdout) == 0 {
+		return
+	}
+	klog.Infof("Found old local gateway interface to remove. Name: %s, ID: %s", ifaceID, stdout)
+	_, stderr, err = util.RunOVNNbctl("lsp-del", ifaceID)
+	if err != nil {
+		klog.Errorf("Unable to delete old local gateway interface: %s, stderr: %s, error: %v", ifaceID, stderr,
+			err)
+	} else {
+		klog.Infof("Old Local Gateway interface successfully removed: %s", ifaceID)
+	}
 }
