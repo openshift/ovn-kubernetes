@@ -161,7 +161,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 	r, _ := regexp.Compile(`([a-z0-9]{4}) at ((ssl|tcp):\[?[a-z0-9.:]+\]?)`)
 	members := r.FindAllStringSubmatch(out, -1)
 	kickedMembersCount := 0
-	dbAppLabel := map[string]string{"app": "ovnkube-db"}
+	dbAppLabel := map[string]string{"db-pod": "true"}
 	dbPods, err := kclient.GetPods(config.Kubernetes.OVNConfigNamespace,
 		metav1.LabelSelector{
 			MatchLabels: dbAppLabel,
