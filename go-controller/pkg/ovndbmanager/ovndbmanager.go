@@ -189,9 +189,13 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		}
 		if !memberFound {
 			for _, dbPod := range dbPods.Items {
+				klog.Infof("Checking for matching IP: %s for pod: %s - %v", matchedServer[1],
+					dbPod.Name, dbPod.Status.PodIPs)
 				for _, ip := range dbPod.Status.PodIPs {
 					if ip.IP == matchedServer[1] {
 						memberFound = true
+						klog.Infof("Matching IP: %s found pod: %s - %s", matchedServer[1],
+							dbPod.Name, ip.IP)
 						break
 					}
 				}
