@@ -332,14 +332,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		klog.Warningf("failed to settle addresses: %q", err)
 	}
 
-	err = wait.PollImmediate(100*time.Millisecond, 20*time.Second, func() (bool, error) {
-		stdout, err := ofctlExec("dump-flows", "br-int")
-		if err != nil {
-			return false, nil
-		}
-		return strings.Contains(stdout, ifInfo.IPs[0].IP.String()), nil
-	})
-	if err != nil {
+	if err = waitForPodFlows(ifInfo.MAC.String()); err != nil {
 		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
 	}
 
@@ -372,6 +365,26 @@ func (pr *PodRequest) deletePodConntrack() {
 		}
 	}
 }
+
+// OCP HACK: wait for OVN to fully process the new pod
+func waitForPodFlows(mac string) error {
+
+	return wait.PollImmediate(200*time.Millisecond, 20*time.Second, func() (bool, error) {
+		// Query the flows by mac address
+		query := fmt.Sprintf("table=9,dl_src=%s",mac)
+		// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
+		stdout, err := ofctlExec("dump-flows", "br-int", query)
+		if err != nil {
+			return false, nil
+		}
+		if len(stdout) == 0 {
+			return false, nil
+		}
+		return true, nil
+	})
+}
+
+// END OCP HACK
 
 // PlatformSpecificCleanup deletes the OVS port
 func (pr *PodRequest) PlatformSpecificCleanup() error {

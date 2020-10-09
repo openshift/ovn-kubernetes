@@ -1,7 +1,9 @@
 package cni
 
 import (
+	"bytes"
 	"fmt"
+	"k8s.io/klog"
 	"strings"
 
 	kexec "k8s.io/utils/exec"
@@ -18,20 +20,33 @@ func setExec(r kexec.Interface) error {
 }
 
 func ofctlExec(args ...string) (string, error) {
-	args = append([]string{"--timeout=30"}, args...)
-	output, err := runner.Command("ovs-ofctl", args...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
-	}
 
-	outStr := string(output)
-	trimmed := strings.TrimSpace(outStr)
+	args = append([]string{"--timeout=30","--no-stats", "--strict"}, args...)
+	var stdout, stderr bytes.Buffer
+	cmd := runner.Command("ovs-ofctl", args...)
+	cmd.SetStdout(&stdout)
+	cmd.SetStderr(&stderr)
+
+	cmdStr := strings.Join(args, " ")
+	klog.V(5).Infof("exec: ovs-ofctl %s", cmdStr)
+
+	err := cmd.Run()
+
+	if err != nil {
+		stderrStr := string(stderr.Bytes())
+		klog.Errorf("exec: ovs-ofctl %s: stderr: %q", cmdStr, stderrStr)
+		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", cmdStr, err, stderrStr)
+	}
+	stdoutStr := string(stdout.Bytes())
+	klog.V(5).Infof("exec: ovs-ofctl %s: stdout: %q",cmdStr, stdoutStr)
+
+	trimmed := strings.TrimSpace(stdoutStr)
 	// If output is a single line, strip the trailing newline
 	if strings.Count(trimmed, "\n") == 0 {
-		outStr = trimmed
+		stdoutStr = trimmed
 	}
 
-	return outStr, nil
+	return stdoutStr, nil
 }
 
 func ovsExec(args ...string) (string, error) {
