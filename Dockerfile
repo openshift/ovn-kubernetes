@@ -26,6 +26,8 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+COPY ovn2.13-20.06.2-3.el8fdp.x86_64.rpm  ovn2.13-central-20.06.2-3.el8fdp.x86_64.rpm  ovn2.13-host-20.06.2-3.el8fdp.x86_64.rpm ovn2.13-vtep-20.06.2-3.el8fdp.x86_64.rpm /root/
+
 # install needed rpms - openvswitch must be 2.10.4 or higher
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
@@ -43,8 +45,9 @@ RUN INSTALL_PKGS=" \
 	# ovn2.13-20.06.2-11.el8fdp.x86_64
 	# openvswitch2.13-2.13.0-57.el8fdp
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == 2.13.0-57.el8fdp" "openvswitch2.13-devel == 2.13.0-57.el8fdp" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == 20.06.2-11.el8fdp" "ovn2.13-central == 20.06.2-11.el8fdp" "ovn2.13-host == 20.06.2-11.el8fdp" "ovn2.13-vtep == 20.06.2-11.el8fdp" && \
 	yum clean all && rm -rf /var/cache/*
+
+RUN yum install -y /root/ovn*.rpm
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
@@ -62,6 +65,8 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=cli /usr/bin/oc /usr/bin/
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
 RUN stat /usr/bin/oc
+
+RUN rm -f /root/ovn*.rpm
 
 # copy git commit number into image
 COPY .git/HEAD /root/.git/HEAD
