@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -197,34 +196,34 @@ func ensureDBHealth(db string) {
 	stdout, stderr, err := util.RunOVSDBTool("check-cluster", db)
 	if err != nil {
 		// backup the db by renaming it and then stop the nb/sb ovsdb process.
-		klog.Fatalf("Error occured during checking of clustered db "+
+		klog.Errorf("Error occured during checking of clustered db "+
 			"db: %s,stdout: %q, stderr: %q, err: %v",
 			db, stdout, stderr, err)
-		dbFile := filepath.Base(db)
-		backupFile := strings.TrimSuffix(dbFile, filepath.Ext(dbFile)) +
-			time.Now().UTC().Format("2006-01-02_150405") + "db_bak"
-		backupDB := filepath.Join(filepath.Dir(db), backupFile)
-		err := os.Rename(db, backupDB)
-		if err != nil {
-			klog.Warningf("Failed to back up the db to backupFile: %s", backupFile)
-		} else {
-			klog.Infof("Backed up the db to backupFile: %s", backupFile)
-			var dbName string
-			var appCtl func(args ...string) (string, string, error)
-			if strings.Contains(db, "ovnnb") {
-				dbName = "OVN_Northbound"
-				appCtl = util.RunOVNNBAppCtl
-			} else {
-				dbName = "OVN_Southbound"
-				appCtl = util.RunOVNSBAppCtl
-			}
-			_, stderr, err := appCtl("exit")
-			if err != nil {
-				klog.Warningf("Unable to restart the ovn db: %s ,"+
-					"stderr: %v, err: %v", dbName, stderr, err)
-			}
-			klog.Infof("Stopped %s db after backing up the db: %s", dbName, backupFile)
-		}
+		// dbFile := filepath.Base(db)
+		// backupFile := strings.TrimSuffix(dbFile, filepath.Ext(dbFile)) +
+		// 	time.Now().UTC().Format("2006-01-02_150405") + "db_bak"
+		// backupDB := filepath.Join(filepath.Dir(db), backupFile)
+		// err := os.Rename(db, backupDB)
+		// if err != nil {
+		// 	klog.Warningf("Failed to back up the db to backupFile: %s", backupFile)
+		// } else {
+		// 	klog.Infof("Backed up the db to backupFile: %s", backupFile)
+		// 	var dbName string
+		// 	var appCtl func(args ...string) (string, string, error)
+		// 	if strings.Contains(db, "ovnnb") {
+		// 		dbName = "OVN_Northbound"
+		// 		appCtl = util.RunOVNNBAppCtl
+		// 	} else {
+		// 		dbName = "OVN_Southbound"
+		// 		appCtl = util.RunOVNSBAppCtl
+		// 	}
+		// 	_, stderr, err := appCtl("exit")
+		// 	if err != nil {
+		// 		klog.Warningf("Unable to restart the ovn db: %s ,"+
+		// 			"stderr: %v, err: %v", dbName, stderr, err)
+		// 	}
+		// 	klog.Infof("Stopped %s db after backing up the db: %s", dbName, backupFile)
+		// }
 	}
 	klog.Infof("check-cluster returned out: %q, stderr: %q", stdout, stderr)
 }
