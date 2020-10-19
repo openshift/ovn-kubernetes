@@ -22,7 +22,7 @@ import (
 	"math/rand"
 	"time"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // Field is a key value pair that provides additional details about the trace.
