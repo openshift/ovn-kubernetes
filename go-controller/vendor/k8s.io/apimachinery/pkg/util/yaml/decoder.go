@@ -26,7 +26,7 @@ import (
 	"strings"
 	"unicode"
 
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 	"sigs.k8s.io/yaml"
 )
 

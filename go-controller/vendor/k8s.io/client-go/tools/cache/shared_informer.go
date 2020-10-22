@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/buffer"
 
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 )
 
 // SharedInformer provides eventually consistent linkage of its

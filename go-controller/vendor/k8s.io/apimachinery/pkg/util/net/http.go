@@ -32,7 +32,7 @@ import (
 	"strings"
 
 	"golang.org/x/net/http2"
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 )
 
 // JoinPreservingTrailingSlash does a path.Join of the specified elements,

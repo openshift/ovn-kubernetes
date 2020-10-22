@@ -23,7 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 )
 
 // NewDeltaFIFO returns a Queue which can be used to process changes to items.

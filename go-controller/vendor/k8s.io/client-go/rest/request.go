@@ -45,7 +45,7 @@ import (
 	restclientwatch "k8s.io/client-go/rest/watch"
 	"k8s.io/client-go/tools/metrics"
 	"k8s.io/client-go/util/flowcontrol"
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 )
 
 var (

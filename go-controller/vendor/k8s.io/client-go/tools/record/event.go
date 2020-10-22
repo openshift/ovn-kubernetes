@@ -31,7 +31,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record/util"
 	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 )
 
 const maxTriesPerEvent = 12

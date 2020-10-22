@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 )
 
 // Requirements is AND of all requirements.
