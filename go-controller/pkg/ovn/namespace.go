@@ -218,7 +218,13 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		return
 	}
 	defer nsInfo.Unlock()
-
+	
+	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
+	for _, np := range nsInfo.networkPolicies {
+		delete(nsInfo.networkPolicies, np.name)
+		oc.destroyNamespacePolicy(np)
+	}
+	
 	deleteAddressSet(hashedAddressSet(ns.Name))
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }

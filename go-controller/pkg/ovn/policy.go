@@ -740,11 +740,11 @@ func (oc *Controller) localPodAddDefaultDeny(
 }
 
 func (oc *Controller) localPodDelDefaultDeny(
-	policy *knet.NetworkPolicy, portInfo *lpInfo) {
+	np *namespacePolicy, portInfo *lpInfo) {
 	oc.lspMutex.Lock()
 	defer oc.lspMutex.Unlock()
 
-	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
+	if !(len(np.ingressPolicies) == 0 && len(np.egressPolicies) > 0) {
 		if oc.lspIngressDenyCache[portInfo.name] > 0 {
 			oc.lspIngressDenyCache[portInfo.name]--
 			if oc.lspIngressDenyCache[portInfo.name] == 0 {
@@ -755,8 +755,8 @@ func (oc *Controller) localPodDelDefaultDeny(
 		}
 	}
 
-	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
-		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
+	if (len(np.ingressPolicies) == 0 && len(np.egressPolicies) > 0) ||
+		len(np.egressPolicies) > 0 || (len(np.egressPolicies) > 0 && len(np.ingressPolicies) > 0) {
 		if oc.lspEgressDenyCache[portInfo.name] > 0 {
 			oc.lspEgressDenyCache[portInfo.name]--
 			if oc.lspEgressDenyCache[portInfo.name] == 0 {
@@ -841,7 +841,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 	delete(np.localPods, logicalPort)
-	oc.localPodDelDefaultDeny(policy, portInfo)
+	oc.localPodDelDefaultDeny(np, portInfo)
 
 	oc.lspMutex.Lock()
 	delete(oc.lspIngressDenyCache, logicalPort)
@@ -1105,9 +1105,7 @@ func (oc *Controller) deleteNetworkPolicyLocked(policy *knet.NetworkPolicy) *nam
 		return nil
 	}
 	np.Lock()
-
 	delete(nsInfo.networkPolicies, policy.Name)
-	np.deleted = true
 	return np
 }
 
@@ -1117,15 +1115,21 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 
 	np := oc.deleteNetworkPolicyLocked(policy)
 	if np == nil {
+		klog.V(5).Infof("Failed to get namespace lock when deleting policy %s in namespace %s",
+			policy.Name, policy.Namespace)
 		return
 	}
 	defer np.Unlock()
 
-	// We should now stop all the handlers go routines.
+	oc.destroyNamespacePolicy(np)
+}
+
+func (oc *Controller) destroyNamespacePolicy(np *namespacePolicy) {
+	np.deleted = true
 	oc.shutdownHandlers(np)
 
 	for _, portInfo := range np.localPods {
-		oc.localPodDelDefaultDeny(policy, portInfo)
+		oc.localPodDelDefaultDeny(np, portInfo)
 	}
 
 	// Delete the port group
@@ -1134,16 +1138,16 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 	// Go through each ingress rule.  For each ingress rule, delete the
 	// addressSet for the local peer pods.
 	for i := range np.ingressPolicies {
-		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
-			policy.Name, "ingress", i)
+		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", np.namespace,
+			np.name, "ingress", i)
 		hashedAddressSet := hashedAddressSet(localPeerPods)
 		deleteAddressSet(hashedAddressSet)
 	}
 	// Go through each egress rule.  For each egress rule, delete the
 	// addressSet for the local peer pods.
 	for i := range np.egressPolicies {
-		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
-			policy.Name, "egress", i)
+		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", np.namespace,
+			np.name, "egress", i)
 		hashedAddressSet := hashedAddressSet(localPeerPods)
 		deleteAddressSet(hashedAddressSet)
 	}
