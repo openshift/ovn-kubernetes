@@ -397,7 +397,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
+func addDefaultConntrackRules(nodeName, macAddress, gwBridge, gwIntf string, stopChan chan struct{}) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	localnetLpName := gwBridge + "_" + nodeName
@@ -419,12 +419,23 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 
 	// replace the left over OpenFlow flows with the FLOOD action flow
-	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
+	_, stderr, err = util.AddNormalActionOFFlow(gwBridge)
+
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
 
 	nFlows := 0
+	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:LOCAL",
+			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
 		// so that reverse direction goes back to the pods.
@@ -493,9 +504,31 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 	nFlows++
 
+	// table 1, we check to see if this dest mac is the shared mac, if so flood to both ports
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:LOCAL",
+			defaultOpenFlowCookie, macAddress))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	if config.IPv6Mode {
+		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
+		// must flood icmpv6 traffic as it fails to create a CT entry
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:FLOOD", defaultOpenFlowCookie))
+		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -599,7 +632,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 			} else {
 				// Program cluster.GatewayIntf to let non-pod traffic to go to host
 				// stack
-				if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
+				if err := addDefaultConntrackRules(n.name, macAddress.String(), bridgeName, uplinkName, n.stopChan); err != nil {
 					return err
 				}
 				// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
@@ -648,7 +681,7 @@ func cleanupSharedGateway() error {
 		return nil
 	}
 
-	_, stderr, err = util.AddFloodActionOFFlow(bridgeName)
+	_, stderr, err = util.AddNormalActionOFFlow(bridgeName)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
