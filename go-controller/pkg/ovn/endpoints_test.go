@@ -123,6 +123,10 @@ func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}%s", k8sTCPLoadBalancerIP),
 				fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}%s", k8sTCPLoadBalancerIP),
+				fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v",
+					k8sTCPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
+				fmt.Sprintf("ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match=\"ip4.dst==%s && tcp "+
+					"&& tcp.dst==%v\" action=reject name=k8s_tcp_load_balancer-%s\\:%v", service.Spec.ClusterIP, sPort.Port, service.Spec.ClusterIP, sPort.Port),
 				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer %s vips:\"%s:%v\"=\"\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
 			})
 		} else if sPort.Protocol == v1.ProtocolUDP {

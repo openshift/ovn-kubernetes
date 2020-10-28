@@ -121,13 +121,21 @@ func (s service) baseCmds(fexec *ovntest.FakeExec, service v1.Service) {
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=sctp_load_balancer_id_1-172.30.0.10\\:53",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}k8s_tcp_load_balancer"),
-		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}k8s_tcp_load_balancer"),
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}%s", k8sTCPLoadBalancerIP),
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}%s", k8sTCPLoadBalancerIP),
 	})
 }
 
 func (s service) addCmds(fexec *ovntest.FakeExec, service v1.Service) {
 	s.baseCmds(fexec, service)
+	for _, port := range service.Spec.Ports {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v",
+				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
+			fmt.Sprintf("ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match=\"ip4.dst==%s && tcp "+
+				"&& tcp.dst==%v\" action=reject name=%s-%s\\:%v", service.Spec.ClusterIP, port.Port, k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
+		})
+	}
 }
 
 func (s service) delCmds(fexec *ovntest.FakeExec, service v1.Service) {
@@ -180,7 +188,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					nil,
 				)
 
-				test.baseCmds(fExec, service)
+				test.addCmds(fExec, service)
 
 				fakeOvn.start(ctx,
 					&v1.ServiceList{
@@ -218,7 +226,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					nil,
 				)
 
-				test.baseCmds(fExec, service)
+				test.addCmds(fExec, service)
 
 				fakeOvn.start(ctx,
 					&v1.ServiceList{
