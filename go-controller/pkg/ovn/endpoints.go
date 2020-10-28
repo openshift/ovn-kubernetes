@@ -112,7 +112,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 }
 
 func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
-	gatewayRouter := gwRouterPrefix + node.Name
+	gatewayRouter := util.GwRouterPrefix + node.Name
 	var physicalIPs []string
 	// OCP HACK - there will not be a GR during local gw + no gw interface mode (upgrade from 4.5->4.6)
 	// See https://github.com/openshift/ovn-kubernetes/pull/281

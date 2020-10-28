@@ -338,7 +338,7 @@ func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.I
 	}
 }
 
-func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf *factory.WatchFactory) error {
+func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf factory.NodeWatchFactory) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	patchPort := "patch-" + gwBridge + "_" + nodeName + "-to-br-int"
@@ -419,7 +419,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 
 	// replace the left over OpenFlow flows with the FLOOD action flow
-	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
+	_, stderr, err = util.AddOFFlowWithSpecificAction(gwBridge, util.FloodAction)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
@@ -648,7 +648,7 @@ func cleanupSharedGateway() error {
 		return nil
 	}
 
-	_, stderr, err = util.AddFloodActionOFFlow(bridgeName)
+	_, stderr, err = util.AddOFFlowWithSpecificAction(bridgeName, util.NormalAction)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}

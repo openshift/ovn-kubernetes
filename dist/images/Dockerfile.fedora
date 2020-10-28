@@ -19,16 +19,16 @@ ENV PYTHONDONTWRITEBYTECODE yes
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
-        ovn ovn-central ovn-host \
+        ovn ovn-central ovn-host python3-openvswitch python3-pyOpenSSL \
 	iptables iproute iputils strace socat \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-# ensure we pick up ovn-20.06.2-3.fc31 for ovn-controller crash fix
+# ensure we pick up ovn-20.09.0-1.fc31 for ovn-northd MLD fixes.
 # This should have no effect in the future once the RPM has propagated
 # to all stable mirrors and can be removed
-RUN dnf install -y --best "ovn >= 20.06.2-3" || exit 1
+RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-cc142bbddb "ovn >= 20.09.0-1" || exit 1
 
 RUN mkdir -p /var/run/openvswitch
 
