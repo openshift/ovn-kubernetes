@@ -332,7 +332,8 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 						if err != nil {
 							return fmt.Errorf("failed to create service ACL: %v", err)
 						}
-						klog.Infof("Service Reject ACL created for gateway router: %s", aclUUID)
+						klog.Infof("Service Reject ACL created for NodePort service: %s, via gateway "+
+							"router: %s:%s:%d, ACL UUID:%s", service.Name, svcPort.Protocol, physicalIP, port, aclUUID)
 					}
 				}
 			}
@@ -358,7 +359,8 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					if err != nil {
 						return fmt.Errorf("failed to create service ACL: %v", err)
 					}
-					klog.Infof("Service Reject ACL created for cluster IP: %s", aclUUID)
+					klog.Infof("Service Reject ACL created for ClusterIP service: %s, via: %s:%s:%d, ACL "+
+						"UUID: %s", service.Name, service.Spec.ClusterIP, svcPort.Protocol, svcPort.Port, aclUUID)
 				}
 				if len(service.Spec.ExternalIPs) > 0 {
 					gateways, _, err := ovn.getOvnGateways()
@@ -381,7 +383,8 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 								if err != nil {
 									return fmt.Errorf("failed to create service ACL for external IP")
 								}
-								klog.Infof("Service Reject ACL created for external IP: %s", aclUUID)
+								klog.Infof("Service Reject ACL created for ExternalIP service: %s, via: %s:%s:%d"+
+									", ACL UUID: %s", service.Name, svcPort.Protocol, extIP, svcPort.Port, aclUUID)
 							}
 						}
 					}
