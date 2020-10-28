@@ -86,7 +86,7 @@ func createNodePortLoadBalancers(gatewayRouter, nodeName string, sctpSupport boo
 // case we do not need any GR or join switch, just nodePort load balancers on the node switch
 // See https://github.com/openshift/ovn-kubernetes/pull/281
 func gatewayInitMinimal(nodeName string, l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool) error {
-	gatewayRouter := gwRouterPrefix + nodeName
+	gatewayRouter := util.GwRouterPrefix + nodeName
 	if l3GatewayConfig.NodePortEnable {
 		err := createNodePortLoadBalancers(gatewayRouter, nodeName, sctpSupport)
 		if err != nil {
