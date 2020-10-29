@@ -32,7 +32,7 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-COPY ovn2.13-20.09.0-7.el8fdn.x86_64.rpm ovn2.13-central-20.09.0-7.el8fdn.x86_64.rpm ovn2.13-host-20.09.0-7.el8fdn.x86_64.rpm ovn2.13-vtep-20.09.0-7.el8fdn.x86_64.rpm /root/
+COPY ovn2.13-20.09.0-8.el8fdn.x86_64.rpm ovn2.13-central-20.09.0-8.el8fdn.x86_64.rpm ovn2.13-host-20.09.0-8.el8fdn.x86_64.rpm ovn2.13-vtep-20.09.0-8.el8fdn.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
