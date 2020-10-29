@@ -27,6 +27,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add",
 		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
 		"options:chassis="+l3GatewayConfig.ChassisID,
+		"options:snat-use-default-ct-zone=true",
 		"external_ids:physical_ip="+physicalIPs[0],
 		"external_ids:physical_ips="+strings.Join(physicalIPs, ","))
 	if err != nil {
