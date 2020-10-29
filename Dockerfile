@@ -43,6 +43,7 @@ RUN INSTALL_PKGS=" \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == $ovsver" "openvswitch2.13-devel == $ovsver" "python3-openvswitch2.13 == $ovsver" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False ovn2.13 && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == $ovnver" "ovn2.13-central == $ovnver" "ovn2.13-host == $ovnver" "ovn2.13-vtep == $ovnver" && \
 	yum clean all && rm -rf /var/cache/*
 
