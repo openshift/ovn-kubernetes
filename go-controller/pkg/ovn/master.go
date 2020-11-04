@@ -659,15 +659,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		return err
 	}
 
-	// Add any service reject ACLs applicable for TCP LB
-	acls := oc.getAllACLsForServiceLB(oc.TCPLoadBalancerUUID)
-	if len(acls) > 0 {
-		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-		if err != nil {
-			klog.Warningf("Unable to add TCP reject ACLs: %s for switch: %s, error: %v", acls, nodeName, err)
-		}
-	}
-
 	if oc.UDPLoadBalancerUUID == "" {
 		return fmt.Errorf("UDP cluster load balancer not created")
 	}
@@ -675,15 +666,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	if err != nil {
 		klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
-	}
-
-	// Add any service reject ACLs applicable for UDP LB
-	acls = oc.getAllACLsForServiceLB(oc.UDPLoadBalancerUUID)
-	if len(acls) > 0 {
-		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-		if err != nil {
-			klog.Warningf("Unable to add UDP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
-		}
 	}
 
 	if oc.SCTPSupport {
@@ -694,15 +676,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		if err != nil {
 			klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 			return err
-		}
-
-		// Add any service reject ACLs applicable for SCTP LB
-		acls = oc.getAllACLsForServiceLB(oc.SCTPLoadBalancerUUID)
-		if len(acls) > 0 {
-			_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-			if err != nil {
-				klog.Warningf("Unable to add SCTP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
-			}
 		}
 	}
 	// Add the node to the logical switch cache
