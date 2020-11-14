@@ -77,8 +77,17 @@ func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 	}).Methods("POST")
 
 	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			klog.Infof("#### ADD POD %s/%s %s", pod.Namespace, pod.Name, pod.Annotations)
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			pod := newer.(*kapi.Pod)
+			klog.Infof("#### UPDATE POD %s/%s %s", pod.Namespace, pod.Name, pod.Annotations)
+		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			klog.Infof("#### DELETE POD %s/%s", pod.Namespace, pod.Name)
 			s.cancelOldestPodAdd(pod)
 		},
 	}, nil)
