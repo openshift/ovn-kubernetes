@@ -593,7 +593,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 	return func() error {
 		if config.Gateway.NodeportEnable {
 			if config.Gateway.Mode == config.GatewayModeLocal {
-				if err := addDefaultConntrackRulesLocal(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
+				if err := addDefaultConntrackRulesLocal(n.name, macAddress.String(), bridgeName, uplinkName, n.stopChan); err != nil {
 					return err
 				}
 			} else {
