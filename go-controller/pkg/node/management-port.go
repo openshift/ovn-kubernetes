@@ -46,7 +46,7 @@ func createManagementPort(nodeNameOriginal string, hostSubnets []*net.IPNet, nod
 	_, stderr, err = util.RunOVSVsctl("set", "interface", types.K8sMgmtIntfName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
 	if err != nil {
-		klog.Errorf("Failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
+		klog.Errorf("Failed to persist MAC addresdddddddds %q for %q: stderr:%s (%v)", macAddress.String(),
 			types.K8sMgmtIntfName, stderr, err)
 		return nil, err
 	}
