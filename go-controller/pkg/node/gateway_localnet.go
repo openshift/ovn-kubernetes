@@ -353,7 +353,7 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
+func addDefaultConntrackRulesLocal(nodeName, macAddress, gwBridge, gwIntf string, stopChan chan struct{}) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	localnetLpName := gwBridge + "_" + nodeName
@@ -375,12 +375,21 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 	}
 
 	// replace the left over OpenFlow flows with the FLOOD action flow
-	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
+	_, stderr, err = util.AddNormalActionOFFlow(gwBridge)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
 
 	nFlows := 0
+	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports (non-IP traffic)
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:LOCAL",
+			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
 		// so that reverse direction goes back to the pods.
@@ -470,14 +479,13 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 		}
 		mask, _ := cidr.Mask.Size()
 		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-			fmt.Sprintf("cookie=%s, priority=3, table=1, %s, %s_dst=%s/%d, actions=output:%s",
+			fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s/%d, actions=output:%s",
 				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr.IP, mask, ofportPatch))
 		if err != nil {
 			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
-
 	}
 
 	if config.IPv6Mode {
@@ -492,9 +500,18 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 		nFlows++
 	}
 
-	// table 1, all other connections go to host
+	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=LOCAL", defaultOpenFlowCookie))
+		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:LOCAL",
+			defaultOpenFlowCookie, macAddress))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	// table 1, all other connections do normal processing
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=NORMAL", defaultOpenFlowCookie))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
