@@ -482,14 +482,17 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 
 	if config.IPv6Mode {
 		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
-		// must flood icmpv6 traffic as it fails to create a CT entry
-		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
-		if err != nil {
-			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
-				"error: %v", gwBridge, stderr, err)
+		// must flood icmpv6 Route Advertisement and Neighbor Advertisement traffic as it fails to create a CT entry
+		for _, icmpType := range []int{134, 136} {
+			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("cookie=%s, priority=14, table=1,icmp6,icmpv6_type=%d actions=FLOOD",
+					defaultOpenFlowCookie, icmpType))
+			if err != nil {
+				return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+					"error: %v", gwBridge, stderr, err)
+			}
+			nFlows++
 		}
-		nFlows++
 	}
 
 	// table 1, all other connections go to host
