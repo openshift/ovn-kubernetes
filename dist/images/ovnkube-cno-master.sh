@@ -2,9 +2,6 @@
 
 cmd=${1:-""}
 
-ovn_log_level_northd=${OVN_LOG_LEVEL_NORTHD:-"info"}
-
-
 bracketify() { case "$1" in *:*) echo "[$1]" ;; *) echo "$1" ;; esac }
 
 run-northd() {
