@@ -3,7 +3,6 @@
 cmd=${1:-""}
 
 ovn_log_level_northd=${OVN_LOG_LEVEL_NORTHD:-"info"}
-#ovn_kube_log_level=${OVN_KUBE_LOG_LEVEL:-"4"}
 
 
 bracketify() { case "$1" in *:*) echo "[$1]" ;; *) echo "$1" ;; esac }
