@@ -204,6 +204,21 @@ func StartOVNMetricsServer(bindAddress string) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
+// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
+func StartOVNMetricsServerOnDifferentPath(bindAddress string) {
+	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
+		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
+	mux := http.NewServeMux()
+	mux.Handle("/ovnmetrics", handler)
+	
+	go utilwait.Until(func() {
+		err := http.ListenAndServe(bindAddress, mux)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+		}
+	}, 5*time.Second, utilwait.NeverStop)
+}
+
 func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	go RegisterOvnDBMetrics(clientset, k8sNodeName)
 	go RegisterOvnControllerMetrics()
