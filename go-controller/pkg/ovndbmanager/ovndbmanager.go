@@ -4,33 +4,34 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func RunDBChecker(stopCh <-chan struct{}) {
+func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	klog.Info("Starting DB Checker to ensure cluster membership and DB consistency")
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ensureOvnDBState(util.OvnNbdbLocation, stopCh)
+		ensureOvnDBState(util.OvnNbdbLocation, kclient, stopCh)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ensureOvnDBState(util.OvnSbdbLocation, stopCh)
+		ensureOvnDBState(util.OvnSbdbLocation, kclient, stopCh)
 	}()
 	<-stopCh
 	klog.Info("Shutting down db checker")
@@ -38,7 +39,7 @@ func RunDBChecker(stopCh <-chan struct{}) {
 	klog.Info("Shut down db checker")
 }
 
-func ensureOvnDBState(db string, stopCh <-chan struct{}) {
+func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(60 * time.Second)
 	klog.Infof("Starting ensure routine for Raft db: %s", db)
 	_, _, err := util.RunOVSDBTool("db-is-standalone", db)
@@ -62,8 +63,7 @@ func ensureOvnDBState(db string, stopCh <-chan struct{}) {
 		case <-ticker.C:
 			klog.V(5).Infof("Ensure routines for Raft db: %s kicked off by ticker", db)
 			ensureLocalRaftServerID(db)
-			ensureClusterRaftMembership(db)
-			ensureDBHealth(db)
+			ensureClusterRaftMembership(db, kclient)
 		case <-stopCh:
 			ticker.Stop()
 			return
@@ -128,7 +128,7 @@ func ensureLocalRaftServerID(db string) {
 }
 
 // ensureClusterRaftMembership ensures there are no unknown members in the current Raft cluster
-func ensureClusterRaftMembership(db string) {
+func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 	var knownMembers, knownServers []string
 
 	var dbName string
@@ -159,6 +159,15 @@ func ensureClusterRaftMembership(db string) {
 	r, _ := regexp.Compile(`([a-z0-9]{4}) at ((ssl|tcp):\[?[a-z0-9.:]+\]?)`)
 	members := r.FindAllStringSubmatch(out, -1)
 	kickedMembersCount := 0
+	dbAppLabel := map[string]string{"ovn-db-pod": "true"}
+	dbPods, err := kclient.GetPods(config.Kubernetes.OVNConfigNamespace,
+		metav1.LabelSelector{
+			MatchLabels: dbAppLabel,
+		})
+	if err != nil {
+		klog.Warningf("Unable to get db pod list from kubeclient: %v", err)
+		return
+	}
 	for _, member := range members {
 		if len(member) < 3 {
 			klog.Warningf("Unable to find parse member: %s", member)
@@ -176,6 +185,16 @@ func ensureClusterRaftMembership(db string) {
 				break
 			}
 		}
+		if !memberFound {
+			for _, dbPod := range dbPods.Items {
+				for _, ip := range dbPod.Status.PodIPs {
+					if ip.IP == matchedServer[1] {
+						memberFound = true
+						break
+					}
+				}
+			}
+		}
 		if !memberFound && (len(members)-kickedMembersCount) > 3 {
 			// unknown member and we have enough members its safe to kick the unknown address
 			klog.Infof("Unknown Raft member found: %s, %s...kicking", member[1], member[2])
@@ -189,42 +208,4 @@ func ensureClusterRaftMembership(db string) {
 			kickedMembersCount = kickedMembersCount + 1
 		}
 	}
-}
-
-// ensureDBHealth ensures that if the db is clustered, it is healthy by calling the cluster-check command
-// if the clustered db is corrupt, the db will be deleted and kube-master pod needs to be started again.
-func ensureDBHealth(db string) {
-	stdout, stderr, err := util.RunOVSDBTool("check-cluster", db)
-	if err != nil {
-		// backup the db by renaming it and then stop the nb/sb ovsdb process.
-		klog.Fatalf("Error occured during checking of clustered db "+
-			"db: %s,stdout: %q, stderr: %q, err: %v",
-			db, stdout, stderr, err)
-		dbFile := filepath.Base(db)
-		backupFile := strings.TrimSuffix(dbFile, filepath.Ext(dbFile)) +
-			time.Now().UTC().Format("2006-01-02_150405") + "db_bak"
-		backupDB := filepath.Join(filepath.Dir(db), backupFile)
-		err := os.Rename(db, backupDB)
-		if err != nil {
-			klog.Warningf("Failed to back up the db to backupFile: %s", backupFile)
-		} else {
-			klog.Infof("Backed up the db to backupFile: %s", backupFile)
-			var dbName string
-			var appCtl func(args ...string) (string, string, error)
-			if strings.Contains(db, "ovnnb") {
-				dbName = "OVN_Northbound"
-				appCtl = util.RunOVNNBAppCtl
-			} else {
-				dbName = "OVN_Southbound"
-				appCtl = util.RunOVNSBAppCtl
-			}
-			_, stderr, err := appCtl("exit")
-			if err != nil {
-				klog.Warningf("Unable to restart the ovn db: %s ,"+
-					"stderr: %v, err: %v", dbName, stderr, err)
-			}
-			klog.Infof("Stopped %s db after backing up the db: %s", dbName, backupFile)
-		}
-	}
-	klog.Infof("check-cluster returned out: %q, stderr: %q", stdout, stderr)
 }
