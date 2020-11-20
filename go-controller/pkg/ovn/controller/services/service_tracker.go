@@ -3,6 +3,7 @@ package services
 import (
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -99,4 +100,15 @@ func (st *serviceTracker) getService(name, namespace string) loadBalancer {
 		return lb
 	}
 	return loadBalancer{}
+}
+
+// updateKubernetesService adds or updates the tracker from a Kubernetes service
+// added for testing purposes
+func (st *serviceTracker) updateKubernetesService(service *v1.Service) {
+	for _, ip := range service.Spec.ClusterIPs {
+		for _, svcPort := range service.Spec.Ports {
+			vip := util.JoinHostPortInt32(ip, svcPort.Port)
+			st.updateService(service.Name, service.Namespace, vip, svcPort.Protocol)
+		}
+	}
 }
