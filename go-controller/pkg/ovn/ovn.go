@@ -186,6 +186,12 @@ type Controller struct {
 
 	// go-ovn southbound client interface
 	ovnSBClient goovn.Client
+
+	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
+	v4HostSubnetsUsed int
+
+	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
+	v6HostSubnetsUsed int
 }
 
 const (

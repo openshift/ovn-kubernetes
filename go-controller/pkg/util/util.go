@@ -139,3 +139,35 @@ func IsAnnotationNotSetError(err error) bool {
 	_, ok := err.(annotationNotSetError)
 	return ok
 }
+
+// CalculateHostSubnetsForClusterEntry calculates the host subnets
+// available in a CIDR entry
+func CalculateHostSubnetsForClusterEntry(cidrEntry config.CIDRNetworkEntry,
+	v4HostSubnetCount, v6HostSubnetCount *int) {
+	prefixLength, _ := cidrEntry.CIDR.Mask.Size()
+	if prefixLength > cidrEntry.HostSubnetLength {
+		klog.Warningf("Invalid cidr entry: %+v found while calculating subnet count",
+			cidrEntry)
+	}
+	if !utilnet.IsIPv6CIDR(cidrEntry.CIDR) {
+		*v4HostSubnetCount = *v4HostSubnetCount + 1<<(cidrEntry.HostSubnetLength-prefixLength)
+	} else {
+		*v6HostSubnetCount = *v6HostSubnetCount + 1<<(cidrEntry.HostSubnetLength-prefixLength)
+
+	}
+}
+
+// UpdateUsedHostSubnetsCount increments the v4/v6 host subnets count based on
+// the subnet being visited
+func UpdateUsedHostSubnetsCount(subnet *net.IPNet,
+	v4SubnetsAllocated, v6SubnetsAllocated *int, isAdd bool) {
+	op := -1
+	if isAdd {
+		op = 1
+	}
+	if !utilnet.IsIPv6CIDR(subnet) {
+		*v4SubnetsAllocated = *v4SubnetsAllocated + 1*op
+	} else {
+		*v6SubnetsAllocated = *v6SubnetsAllocated + 1*op
+	}
+}
