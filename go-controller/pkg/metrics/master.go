@@ -176,6 +176,10 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 			},
 			func() float64 { return 1 },
 		))
+		prometheus.MustRegister(metricV4HostSubnetCount)
+		prometheus.MustRegister(metricV6HostSubnetCount)
+		prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
+		prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
 	})
 }
 
