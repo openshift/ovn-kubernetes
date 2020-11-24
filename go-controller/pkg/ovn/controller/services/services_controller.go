@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1beta1"
@@ -252,9 +254,11 @@ func (c *Controller) syncServices(key string) error {
 			"Error listing Endpoint Slices for Service %s/%s: %v", namespace, name, err)
 		return err
 	}
-	// ClusterIPs
 	for _, ip := range service.Spec.ClusterIPs {
 		for _, svcPort := range service.Spec.Ports {
+			//
+			// ClusterIP
+			//
 			lbID, err := loadbalancer.GetOVNKubeLoadBalancer(svcPort.Protocol)
 			if err != nil {
 				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToGetOVNLoadBalancer",
@@ -281,9 +285,104 @@ func (c *Controller) syncServices(key string) error {
 			if len(eps) == 0 {
 				klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
 			}
+			//
+			// Node Port
+			//
+			if svcPort.NodePort != 0 {
+				gatewayRouters, _, err := gateway.GetOvnGateways()
+				if err != nil {
+					return errors.Wrapf(err, "failed to retrieve OVN gateway routers")
+				}
+				for _, gatewayRouter := range gatewayRouters {
+					lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
+					if err != nil {
+						klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
+							gatewayRouter, err)
+						continue
+					}
+					physicalIPs, err := gateway.GetGatewayPhysicalIPs(gatewayRouter)
+					if err != nil {
+						klog.Warningf("Service Sync: Gateway router %s does not have physical ips: %v",
+							gatewayRouter, err)
+						continue
+					}
+					// With the physical_ip:port as the VIP, add an entry in 'load balancer'.
+					for _, physicalIP := range physicalIPs {
+						vip := util.JoinHostPortInt32(physicalIP, svcPort.NodePort)
+						klog.V(4).Infof("Updating NodePort service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
+						// Reconcile OVN
+						if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
+							c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+								"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+							return err
+						}
+					}
+					// Insert a reject ACL if the service doesn't have endpoints associated
+					if len(eps) == 0 {
+						klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
+					}
+				}
+			}
+			//
+			// ExternalIP
+			//
+			if len(service.Spec.ExternalIPs) > 0 {
+				gatewayRouters, _, err := gateway.GetOvnGateways()
+				if err != nil {
+					return err
+				}
+				for _, extIP := range service.Spec.ExternalIPs {
+					for _, gatewayRouter := range gatewayRouters {
+						lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
+						if err != nil {
+							klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
+								gatewayRouter, err)
+							continue
+						}
+						vip := util.JoinHostPortInt32(extIP, svcPort.Port)
+						// Reconcile OVN
+						klog.V(4).Infof("Updating ExternalIP service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
+						if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
+							c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+								"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+							return err
+						}
+					}
+				}
+
+			}
+			//
+			// LoadBalancer
+			//
+			if len(service.Status.LoadBalancer.Ingress) > 0 {
+				gatewayRouters, _, err := gateway.GetOvnGateways()
+				if err != nil {
+					return err
+				}
+				for _, ingress := range service.Status.LoadBalancer.Ingress {
+					if ingress.IP == "" {
+						continue
+					}
+					for _, gatewayRouter := range gatewayRouters {
+						lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
+						if err != nil {
+							klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
+								gatewayRouter, err)
+							continue
+						}
+						vip := util.JoinHostPortInt32(ingress.IP, svcPort.Port)
+						// Reconcile OVN
+						klog.V(4).Infof("Updating LoadBalacner service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
+						if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
+							c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+								"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+							return err
+						}
+					}
+				}
+			}
 		}
 	}
-
 	return nil
 }
 
