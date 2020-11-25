@@ -14,8 +14,6 @@ func GetACLByName(aclName string) (string, error) {
 		fmt.Sprintf("name=%s", aclName))
 	if err != nil {
 		return "", errors.Wrapf(err, "Error while querying ACLs by name: %s", stderr)
-	} else if len(aclUUID) == 0 {
-		return "", fmt.Errorf("ACL not found: %s", aclName)
 	}
 	return aclUUID, nil
 }
