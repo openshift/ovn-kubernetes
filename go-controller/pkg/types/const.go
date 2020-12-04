@@ -13,6 +13,10 @@ const (
 	// access to local service
 	LocalNetworkName = "locnet"
 
+	// OVNServiceIdledAt is a constant string representing the Service annotation key
+	// whose value indicates the time stamp in RFC3339 format when a Service was idled
+	OVNServiceIdledAt = "k8s.ovn.org/idled-at"
+
 	// types.OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"
 	OVNJoinSwitch    = "join"

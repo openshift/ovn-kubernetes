@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,7 +18,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -220,9 +221,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		return err
 	}
 
-	wg.Add(1)
-	go n.gateway.Run(n.stopChan)
-
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
 	}
@@ -233,6 +231,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
+	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
@@ -285,7 +284,7 @@ func (n *OvnNode) WatchEndpoints() {
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
-			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
+			if apiequality.Semantic.DeepEqual(epNew.Subsets, epOld.Subsets) {
 				return
 			}
 			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
