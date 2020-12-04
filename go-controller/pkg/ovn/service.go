@@ -1,13 +1,13 @@
 package ovn
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"reflect"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -140,71 +140,44 @@ func (ovn *Controller) syncServices(services []interface{}) {
 	}
 
 	// Get OVN's current reject ACLs. Note, currently only services use reject ACLs.
-	type ovnACLData struct {
-		Data [][]interface{}
-	}
-	data, stderr, err := util.RunOVNNbctl("--columns=name,_uuid", "--format=json", "find", "acl", "action=reject")
+	rejectACLs, err := acl.GetRejectACLs()
 	if err != nil {
-		klog.Errorf("Error while querying ACLs with reject action: %s, %v", stderr, err)
-	} else {
-		x := ovnACLData{}
-		if err := json.Unmarshal([]byte(data), &x); err != nil {
-			klog.Errorf("Unable to get current OVN reject ACLs. Unable to sync reject ACLs!: %v", err)
-		} else if len(x.Data) == 0 {
-			klog.Infof("Service Sync: No reject ACLs currently configured in OVN")
-		} else {
-			for _, entry := range x.Data {
-				// ACL entry format is a slice: [<aclName>, ["_uuid", <uuid>]]
-				if len(entry) != 2 {
-					continue
-				}
-				name, ok := entry[0].(string)
-				if !ok {
-					continue
-				}
-				uuidData, ok := entry[1].([]interface{})
-				if !ok || len(uuidData) != 2 {
-					continue
-				}
-				uuid, ok := uuidData[1].(string)
-				if !ok {
-					continue
-				}
-				if svcCacheEntry, ok := svcRejectACLs[name]; ok {
-					for lb, hasEps := range svcCacheEntry {
-						if hasEps {
-							klog.Infof("Service Sync: Removing OVN stale reject ACL: %s", name)
-							ovn.removeACLFromPortGroup(lb, uuid)
-							var foundSwitches []string
-							// For upgrade from a non-port group Reject ACL implementation
-							// Deprecated: remove in the future
-							switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
-							if err != nil {
-								klog.Errorf("Error finding node logical switches for load balancer "+
-									"%s: %v", lb, err)
-							} else {
-								foundSwitches = append(foundSwitches, switches...)
-							}
-							// Look for load balancer on join/external switches
-							grExtSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
-							if err != nil {
-								klog.Errorf("Error finding GR logical switches for load balancer "+
-									"%s: %v", lb, err)
-							} else {
-								// For upgrade from a previous implementation the ACL may also be on join switch
-								if grExtSwitch != "" {
-									routerName := strings.TrimPrefix(grExtSwitch, types.ExternalSwitchPrefix)
-									grJoinSwitch := types.JoinSwitchPrefix + routerName
-									foundSwitches = append(foundSwitches, grExtSwitch, grJoinSwitch)
-								}
-							}
-							if len(foundSwitches) > 0 {
-								klog.V(5).Infof("Service Sync: Removing OVN stale reject ACL (%s) "+
-									"from logical switches that contains load balancer %s, switches: %s", name, lb,
-									foundSwitches)
-								ovn.removeACLFromNodeSwitches(foundSwitches, uuid)
-							}
+		klog.Errorf("Error finding reject ACLs in OVN")
+	}
+	for name, uuid := range rejectACLs {
+		if svcCacheEntry, ok := svcRejectACLs[name]; ok {
+			for lb, hasEps := range svcCacheEntry {
+				if hasEps {
+					klog.Infof("Service Sync: Removing OVN stale reject ACL: %s", name)
+					ovn.removeACLFromPortGroup(lb, uuid)
+					var foundSwitches []string
+					// For upgrade from a non-port group Reject ACL implementation
+					// Deprecated: remove in the future
+					switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
+					if err != nil {
+						klog.Errorf("Error finding node logical switches for load balancer "+
+							"%s: %v", lb, err)
+					} else {
+						foundSwitches = append(foundSwitches, switches...)
+					}
+					// Look for load balancer on join/external switches
+					grExtSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
+					if err != nil {
+						klog.Errorf("Error finding GR logical switches for load balancer "+
+							"%s: %v", lb, err)
+					} else {
+						// For upgrade from a previous implementation the ACL may also be on join switch
+						if grExtSwitch != "" {
+							routerName := strings.TrimPrefix(grExtSwitch, types.ExternalSwitchPrefix)
+							grJoinSwitch := types.JoinSwitchPrefix + routerName
+							foundSwitches = append(foundSwitches, grExtSwitch, grJoinSwitch)
 						}
+					}
+					if len(foundSwitches) > 0 {
+						klog.V(5).Infof("Service Sync: Removing OVN stale reject ACL (%s) "+
+							"from logical switches that contains load balancer %s, switches: %s", name, lb,
+							foundSwitches)
+						ovn.removeACLFromNodeSwitches(foundSwitches, uuid)
 					}
 				}
 			}

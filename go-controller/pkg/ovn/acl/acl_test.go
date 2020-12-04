@@ -2,6 +2,7 @@ package acl
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -108,6 +109,28 @@ func TestRemoveACLFromNodeSwitches(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RemoveACLFromNodeSwitches() error = %v, wantErr %v", err, tt.wantErr)
 				return
+			}
+		})
+	}
+}
+
+func TestGetRejectACLs(t *testing.T) {
+	tests := []struct {
+		name    string
+		want    map[string]string
+		wantErr bool
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetRejectACLs()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetRejectACLs() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetRejectACLs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

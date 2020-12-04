@@ -3,14 +3,14 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -101,23 +101,11 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 
 // getGRLogicalSwitchForLoadBalancer returns the external switch name if the load balancer is on a GR
 func (ovn *Controller) getGRLogicalSwitchForLoadBalancer(lb string) (string, error) {
-	routers, err := loadbalancer.GetLogicalRoutersForLoadBalancer(lb)
+	externalSwitch, err := loadbalancer.GetGRLogicalSwitchForLoadBalancer(lb)
 	if err != nil {
 		return "", err
 	}
-	if len(routers) == 0 {
-		return "", nil
-	}
-
-	// if this is a GR we know the corresponding join and external switches, otherwise this is an unhandled
-	// case
-	for _, r := range routers {
-		if strings.HasPrefix(r, types.GWRouterPrefix) {
-			routerName := strings.TrimPrefix(r, types.GWRouterPrefix)
-			return types.ExternalSwitchPrefix + routerName, nil
-		}
-	}
-	return "", fmt.Errorf("router detected with load balancer that is not a GR")
+	return externalSwitch, nil
 }
 
 func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePort int32, proto kapi.Protocol) (string, error) {
@@ -150,12 +138,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 	if ip == nil {
 		return "", fmt.Errorf("cannot create reject ACL, invalid source IP: %s", sourceIP)
 	}
-	var l3Prefix, aclMatch string
-	if utilnet.IsIPv6(ip) {
-		l3Prefix = "ip6"
-	} else {
-		l3Prefix = "ip4"
-	}
+
 	vip := util.JoinHostPortInt32(sourceIP, sourcePort)
 	// NOTE: doesn't use vip, to avoid having brackets in the name with IPv6
 	aclName := loadbalancer.GenerateACLNameForOVNCommand(lb, sourceIP, sourcePort)
@@ -188,29 +171,27 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 		ovn.removeACLFromNodeSwitches(switches, aclUUID)
 		return aclUUID, nil
 	}
-
-	aclMatch = fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
-		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
-	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=from-lport", "priority=1000", aclMatch, "action=reject",
-		fmt.Sprintf("name=%s", aclName)}
+	errList := []error{}
 	if applyToPortGroup {
-		cmd = append(cmd, "--", "add", "port_group", ovn.clusterPortGroupUUID, "acls", "@reject-acl")
+		aclUUID, err = acl.AddRejectACLToPortGroup(ovn.clusterPortGroupUUID, aclName, sourceIP, int(sourcePort), proto)
+		if err != nil {
+			klog.Errorf("Failed to add LB: %v", err)
+			errList = append(errList, err)
+		}
 	}
 	if len(gwRouterExtSwitch) > 0 {
-		cmd = append(cmd, "--", "add", "logical_switch", gwRouterExtSwitch, "acls", "@reject-acl")
-	}
-	aclUUID, stderr, err := util.RunOVNNbctl(cmd...)
-	if err != nil {
-		klog.Errorf("Failed to add LB: %s ACL: %s, %q, to cluster port group/switches, stderr: %s error: %v",
-			lb, aclUUID, aclName, stderr, err)
-		return "", err
+		aclUUID, err = acl.AddRejectACLToLogicalSwitch(gwRouterExtSwitch, aclName, sourceIP, int(sourcePort), proto)
+		if err != nil {
+			klog.Errorf("Failed to add LB: %v", err)
+			errList = append(errList, err)
+		}
 	}
 
 	// Associate ACL UUID with load balancer and ip+port so we can remove this ACL if
 	// backends are re-added.
 	ovn.setServiceACLToLB(lb, vip, aclUUID)
 
-	return aclUUID, nil
+	return aclUUID, utilerrors.NewAggregate(errList)
 }
 
 func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {

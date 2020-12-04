@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -95,6 +96,27 @@ func GetLogicalRoutersForLoadBalancer(lb string) ([]string, error) {
 		return nil, err
 	}
 	return strings.Fields(out), nil
+}
+
+// GetGRLogicalSwitchForLoadBalancer returns the external switch name if the load balancer is on a GR
+func GetGRLogicalSwitchForLoadBalancer(lb string) (string, error) {
+	routers, err := GetLogicalRoutersForLoadBalancer(lb)
+	if err != nil {
+		return "", err
+	}
+	if len(routers) == 0 {
+		return "", nil
+	}
+
+	// if this is a GR we know the corresponding join and external switches, otherwise this is an unhandled
+	// case
+	for _, r := range routers {
+		if strings.HasPrefix(r, types.GWRouterPrefix) {
+			routerName := strings.TrimPrefix(r, types.GWRouterPrefix)
+			return types.ExternalSwitchPrefix + routerName, nil
+		}
+	}
+	return "", fmt.Errorf("router detected with load balancer that is not a GR")
 }
 
 // GenerateACLName generates a deterministic ACL name based on the load_balancer parameters
