@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -47,6 +48,7 @@ const (
 func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
+	clusterPortGroupUUID string,
 ) *Controller {
 	klog.V(4).Info("Creating event broadcaster")
 	broadcaster := record.NewBroadcaster()
@@ -57,10 +59,11 @@ func NewController(client clientset.Interface,
 	st := newServiceTracker()
 
 	c := &Controller{
-		client:           client,
-		serviceTracker:   st,
-		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
-		workerLoopPeriod: time.Second,
+		client:               client,
+		serviceTracker:       st,
+		queue:                workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
+		workerLoopPeriod:     time.Second,
+		clusterPortGroupUUID: clusterPortGroupUUID,
 	}
 
 	// services
@@ -127,6 +130,9 @@ type Controller struct {
 
 	// repair contains a controller that keeps in sync OVN and Kubernetes services
 	repair *Repair
+
+	// clusterPortGroupUUID contains the UUID of the port groups used for the services rejects ACLs
+	clusterPortGroupUUID string
 }
 
 // Run will not return until stopCh is closed. workers determines how many
@@ -289,9 +295,30 @@ func (c *Controller) syncServices(key string) error {
 				return err
 			}
 			c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
-			// TODO: Insert a reject ACL if the service doesn't have endpoints associated
-			if len(eps) == 0 {
+			// handle reject ACLs for services without endpoints
+			// eventually we have to remove this because it will
+			// be implemented by OVN
+			// https://github.com/ovn-org/ovn-kubernetes/pull/1887
+			rejectACLName := loadbalancer.GenerateACLName(lbID, ip, svcPort.Port)
+			aclID, err := acl.GetACLByName(rejectACLName)
+			if err != nil {
+				klog.Errorf("Error trying to get ACL for Service %s/%s: %v", name, namespace, err)
+			}
+			// if there is no ACL and there is no endpoints we add a new ACL
+			// if there is an ACL and we have endpoints we have to remove the ACL
+			// if there is no ACL and we have endpoints we don´t need to do anything
+			if len(eps) == 0 && len(aclID) == 0 {
 				klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
+				_, err = acl.AddRejectACLToPortGroup(c.clusterPortGroupUUID, rejectACLName, ip, int(svcPort.Port), svcPort.Protocol)
+				if err != nil {
+					klog.Errorf("Error trying to add ACL for Service %s/%s: %v", name, namespace, err)
+				}
+			} else if len(aclID) > 0 {
+				// remove acl
+				err = acl.RemoveACLFromPortGroup(c.clusterPortGroupUUID, aclID)
+				if err != nil {
+					klog.Errorf("Error trying to remove ACL for Service %s/%s: %v", name, namespace, err)
+				}
 			}
 			// Node Port
 			if svcPort.NodePort != 0 {
@@ -299,6 +326,7 @@ func (c *Controller) syncServices(key string) error {
 				if err != nil {
 					return errors.Wrapf(err, "failed to retrieve OVN gateway routers")
 				}
+				// Configure the NodePort in each Node Gateway Router
 				for _, gatewayRouter := range gatewayRouters {
 					lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
 					if err != nil {
@@ -330,9 +358,55 @@ func (c *Controller) syncServices(key string) error {
 						}
 						c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
 					}
-					// TODO: Insert a reject ACL if the service doesn't have endpoints associated
-					if len(eps) == 0 {
+					// handle reject ACLs for services without endpoints
+					// communications from External to NodePort
+					// eventually we have to remove this because it will
+					// be implemented by OVN
+					// https://github.com/ovn-org/ovn-kubernetes/pull/1887
+					// if there is no ACL and there is no endpoints we add a new ACL
+					// if there is an ACL and we have endpoints we have to remove the ACL
+					// if there is no ACL and we have endpoints we don´t need to do anything
+					gwRouterExtSwitch, err := loadbalancer.GetGRLogicalSwitchForLoadBalancer(lbID)
+					if err != nil {
+						klog.Errorf("Unable to query logical switches for GR with load balancer: %s, error: %v", lbID, err)
+						continue
+					}
+					if len(eps) == 0 && len(aclID) == 0 {
 						klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
+						_, err = acl.AddRejectACLToLogicalSwitch(gwRouterExtSwitch, rejectACLName, ip, int(svcPort.Port), svcPort.Protocol)
+						if err != nil {
+							klog.Errorf("Error trying to add ACL for Service %s/%s: %v", name, namespace, err)
+						}
+					} else if len(aclID) > 0 {
+						// remove acl
+						err = acl.RemoveACLFromNodeSwitches([]string{gwRouterExtSwitch}, aclID)
+						if err != nil {
+							klog.Errorf("Error trying to remove ACL for Service %s/%s: %v", name, namespace, err)
+						}
+					}
+				}
+				// handle reject ACLs for services without endpoints
+				// communication from pods to NodePort
+				// eventually we have to remove this because it will
+				// be implemented by OVN
+				// https://github.com/ovn-org/ovn-kubernetes/pull/1887
+				switches, err := loadbalancer.GetLogicalSwitchesForLoadBalancer(lbID)
+				if err != nil {
+					klog.Errorf("Unable to query logical switches for GR with load balancer: %s, error: %v", lbID, err)
+				}
+				if len(eps) == 0 && len(aclID) == 0 {
+					klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
+					for _, sw := range switches {
+						_, err = acl.AddRejectACLToLogicalSwitch(sw, rejectACLName, ip, int(svcPort.Port), svcPort.Protocol)
+						if err != nil {
+							klog.Errorf("Error trying to add ACL for Service %s/%s: %v", name, namespace, err)
+						}
+					}
+				} else if len(aclID) > 0 {
+					// remove acl
+					err = acl.RemoveACLFromNodeSwitches(switches, aclID)
+					if err != nil {
+						klog.Errorf("Error trying to remove ACL for Service %s/%s: %v", name, namespace, err)
 					}
 				}
 			}
