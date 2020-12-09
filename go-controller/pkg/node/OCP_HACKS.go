@@ -43,23 +43,23 @@ func generateBlockMCSRules(rules *[]iptRule, protocol iptables.Protocol) {
 
 // initSharedGatewayNoBridge is used in order to run local gateway mode without moving the NIC to an ovs bridge
 // https://github.com/openshift/ovn-kubernetes/pull/281
-func initSharedGatewayNoBridge(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (postWaitFunc, error) {
+func initSharedGatewayNoBridge(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) error {
 	err := setupLocalNodeAccessBridge(nodeName, subnets)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// get the real default interface
 	defaultGatewayIntf, _, err := getDefaultGatewayInterfaceDetails()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	ips, err := getNetworkInterfaceIPAddresses(defaultGatewayIntf)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get interface details for %s (%v)",
+		return fmt.Errorf("failed to get interface details for %s (%v)",
 			defaultGatewayIntf, err)
 	}
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
@@ -71,8 +71,7 @@ func initSharedGatewayNoBridge(nodeName string, subnets []*net.IPNet, gwNextHops
 		NodePortEnable: config.Gateway.NodeportEnable,
 	})
 	if err != nil {
-		return nil, err
-	} else {
-		return func() error { return nil }, nil
+		return err
 	}
+	return nil
 }

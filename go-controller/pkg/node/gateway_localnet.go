@@ -55,9 +55,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	// Do not configure OVS bridge for local gateway mode with a gateway iface of none
 	// For SDN->OVN migration, see https://github.com/openshift/ovn-kubernetes/pull/281
 	if gwIntf == "none" {
-		var err error
-		gw.initFunc, err = initSharedGatewayNoBridge(nodeName, hostSubnets, gwNextHops, nodeAnnotator)
-		if err != nil {
+		if err := initSharedGatewayNoBridge(nodeName, hostSubnets, gwNextHops, nodeAnnotator); err != nil {
 			return nil, err
 		}
 		// END OCP HACK
@@ -67,12 +65,10 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		if err != nil {
 			return nil, err
 		}
-
-		gw.initFunc = func() error {
-			klog.Info("Creating Local Gateway Openflow Manager")
-			var err error
-			gw.openflowManager, err = newLocalGatewayOpenflowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
-			return err
+		klog.Info("Creating Local Gateway Openflow Manager")
+		gw.openflowManager, err = newLocalGatewayOpenflowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
+		if err != nil {
+			return nil, err
 		}
 	}
 
