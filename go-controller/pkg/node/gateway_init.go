@@ -209,14 +209,8 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	initGw := func() error {
 		return gw.Init(n.watchFactory)
 	}
-	// Wait for gateway resources to be created by the master if DisableSNATMultipleGWs is not set,
-	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
-	// those default NAT rules are present
-	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		waiter.AddWait(gatewayReady, initGw)
-	} else {
-		waiter.AddWait(func() (bool, error) { return true, nil }, initGw)
-	}
+
+	waiter.AddWait(gw.readyFunc, initGw)
 	n.gateway = gw
 	return err
 }
@@ -248,29 +242,4 @@ func CleanupClusterNode(name string) error {
 	DelMgtPortIptRules()
 
 	return nil
-}
-
-// GatewayReady will check to see if we have successfully added SNAT OpenFlow rules in the L3Gateway Routers
-func gatewayReady() (bool, error) {
-	// OpenFlow table 41 performs SNATing of packets that are heading to physical network from
-	// logical network.
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		var cidr, match string
-		cidr = clusterSubnet.CIDR.String()
-		if strings.Contains(cidr, ":") {
-			match = "ipv6,ipv6_src=" + cidr
-		} else {
-			match = "ip,nw_src=" + cidr
-		}
-		stdout, _, err := util.RunOVSOfctl("--no-stats", "--no-names", "dump-flows", "br-int",
-			"table=41,"+match)
-		if err != nil {
-			return false, nil
-		}
-		if !strings.Contains(stdout, cidr) {
-			return false, nil
-		}
-	}
-	klog.Info("Gateway is ready")
-	return true, nil
 }

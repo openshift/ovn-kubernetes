@@ -68,6 +68,19 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			return nil, err
 		}
 
+		gw.readyFunc = func() (bool, error) {
+			// the name of the patch port created by ovn-controller is of the form
+			// patch-<logical_port_name_of_localnet_port>-to-br-int
+			patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
+			// Get ofport of patchPort
+			ofportPatch, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", patchPort, "ofport")
+			if err != nil || len(ofportPatch) == 0 {
+				return false, nil
+			}
+			klog.Info("Gateway is ready")
+			return true, nil
+		}
+
 		gw.initFunc = func() error {
 			klog.Info("Creating Local Gateway Openflow Manager")
 			var err error
@@ -437,8 +450,7 @@ func newLocalGatewayOpenflowManager(nodeName, macAddress, gwBridge, gwIntf strin
 	patchPort := "patch-" + localnetLpName + "-to-br-int"
 	// Get ofport of patchPort, but before that make sure ovn-controller created
 	// one for us (waits for about ovsCommandTimeout seconds)
-	ofportPatch, stderr, err := util.RunOVSVsctl("wait-until", "Interface", patchPort, "ofport>0",
-		"--", "get", "Interface", patchPort, "ofport")
+	ofportPatch, stderr, err := util.RunOVSVsctl("get", "Interface", patchPort, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)

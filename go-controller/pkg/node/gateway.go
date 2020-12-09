@@ -37,6 +37,7 @@ type gateway struct {
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
 	initFunc         func() error
+	readyFunc        func() (bool, error)
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
