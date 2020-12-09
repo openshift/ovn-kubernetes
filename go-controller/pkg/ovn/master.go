@@ -260,6 +260,22 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		klog.Info("SCTP support detected in OVN")
 	}
 
+	// Create a cluster-wide port group that all logical switch ports are part of
+	oc.clusterPortGroupUUID, err = createPortGroup(clusterPortGroupName, clusterPortGroupName)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
+	// Create a cluster-wide port group with all node-to-cluster router
+	// logical switch ports.  Currently the only user is multicast but it might
+	// be used for other features in the future.
+	oc.clusterRtrPortGroupUUID, err = createPortGroup(clusterRtrPortGroupName, clusterRtrPortGroupName)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
@@ -277,6 +293,13 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		if err != nil {
 			klog.Errorf("Failed to create default deny multicast policy, error: %v",
 				err)
+			return err
+		}
+
+		// Allow IP multicast from node switch to cluster router and from
+		// cluster router to node switch.
+		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
 	}
@@ -599,11 +622,24 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
+<<<<<<< HEAD
 	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, switchToRouterPrefix+nodeName,
 		"--", "set", "logical_switch_port", switchToRouterPrefix+nodeName, "type=router",
 		"options:router-port="+routerToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
+=======
+	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
+		"router", nodeLRPMAC.String(), "router-port="+types.RouterToSwitchPrefix+nodeName)
+>>>>>>> 3864f2b6... Add a cluster-wide group with node ls-to-cluster-router ports.
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	if err = addToPortGroup(clusterRtrPortGroupName, &lpInfo{
+		uuid: nodeSwToRtrUUID,
+		name: types.SwitchToRouterPrefix + nodeName,
+	}); err != nil {
+		klog.Errorf(err.Error())
 		return err
 	}
 
