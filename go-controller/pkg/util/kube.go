@@ -251,11 +251,12 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 	}
 	// We only use Slices if > 1.19 since we only need them for Dual Stack
 	sv, _ := kubeClient.Discovery().ServerVersion()
+	klog.Infof("Kubernetes running with version %v", sv)
 	major, _ := strconv.Atoi(sv.Major)
 	minor, _ := strconv.Atoi(sv.Minor)
 	klog.Infof("Kubernetes running with version %d.%d", major, minor)
 	if major <= 1 && minor < 20 || !endpointSlicesEnabled {
-		return false
+		return true
 	}
 	return true
 }
