@@ -35,7 +35,7 @@ RUN yum install -y  \
 ARG ovsver=2.13.0-72.el8fdp
 ARG ovnver=20.09.0-21.el8fdn
 
-COPY ovn2.13-20.09.0-20.el8fdn.x86_64.rpm ovn2.13-central-20.09.0-20.el8fdn.x86_64.rpm ovn2.13-host-20.09.0-20.el8fdn.x86_64.rpm ovn2.13-vtep-20.09.0-20.el8fdn.x86_64.rpm /root/
+COPY ovn2.13-20.12.0-1prerel.el8fdn.x86_64.rpm ovn2.13-central-20.12.0-1prerel.el8fdn.x86_64.rpm ovn2.13-host-20.12.0-1prerel.el8fdn.x86_64.rpm ovn2.13-vtep-20.12.0-1prerel.el8fdn.x86_64.rpm /root/
 COPY openvswitch2.13-2.13.0-74.el8fdp.x86_64.rpm  openvswitch2.13-devel-2.13.0-74.el8fdp.x86_64.rpm  openvswitch2.13-ipsec-2.13.0-74.el8fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
