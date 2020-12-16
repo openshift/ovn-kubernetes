@@ -81,6 +81,8 @@ COPY ./dist/images/iptables-scripts/ip6tables-save /usr/sbin/
 COPY ./dist/images/iptables-scripts/ip6tables-restore /usr/sbin/
 COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
 
+COPY ./ovs-monitor-ipsec /usr/share/openvswitch/scripts/
+
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
       summary="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
