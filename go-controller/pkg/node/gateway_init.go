@@ -11,8 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog"
-	utilnet "k8s.io/utils/net"
 )
 
 // bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up

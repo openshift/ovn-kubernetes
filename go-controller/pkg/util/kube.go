@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/client-go/tools/record"
-	"k8s.io/klog"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
 
