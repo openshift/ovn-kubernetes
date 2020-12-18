@@ -262,6 +262,13 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		klog.Info("SCTP support detected in OVN")
 	}
 
+	// Create a cluster-wide port group that all logical switch ports are part of
+	oc.clusterPortGroupUUID, err = createPortGroup(clusterPortGroupName, clusterPortGroupName)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
@@ -275,10 +282,8 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
-		err = createDefaultDenyMulticastPolicy()
-		if err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v",
-				err)
+		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
 	}
@@ -420,11 +425,34 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	}
 
 	// Create this node's management logical port on the node switch
+	portName := util.K8sPrefix + node.Name
 	stdout, stderr, err := util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", node.Name, util.K8sPrefix+node.Name,
-		"--", "lsp-set-addresses", util.K8sPrefix+node.Name, addresses)
+		"--", "--may-exist", "lsp-add", node.Name, portName,
+		"--", "lsp-set-addresses", portName, addresses)
 	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v",
+			stdout, stderr, err)
+		return err
+	}
+
+	// UUID must be retrieved separately from the lsp-add transaction since
+	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
+	// transaction.
+	uuid, stderr, err := util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
+	if err != nil {
+		klog.Errorf("Error getting UUID for logical port %s "+
+			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
+		return err
+	}
+	if uuid == "" {
+		return fmt.Errorf("invalid logical port %s uuid %q", portName, uuid)
+	}
+
+	if err := addToPortGroup(clusterPortGroupName, &lpInfo{
+		uuid: uuid,
+		name: portName,
+	}); err != nil {
+		klog.Errorf(err.Error())
 		return err
 	}
 
@@ -631,15 +659,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		return err
 	}
 
-	// Add any service reject ACLs applicable for TCP LB
-	acls := oc.getAllACLsForServiceLB(oc.TCPLoadBalancerUUID)
-	if len(acls) > 0 {
-		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-		if err != nil {
-			klog.Warningf("Unable to add TCP reject ACLs: %s for switch: %s, error: %v", acls, nodeName, err)
-		}
-	}
-
 	if oc.UDPLoadBalancerUUID == "" {
 		return fmt.Errorf("UDP cluster load balancer not created")
 	}
@@ -647,15 +666,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	if err != nil {
 		klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
-	}
-
-	// Add any service reject ACLs applicable for UDP LB
-	acls = oc.getAllACLsForServiceLB(oc.UDPLoadBalancerUUID)
-	if len(acls) > 0 {
-		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-		if err != nil {
-			klog.Warningf("Unable to add UDP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
-		}
 	}
 
 	if oc.SCTPSupport {
@@ -666,15 +676,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		if err != nil {
 			klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 			return err
-		}
-
-		// Add any service reject ACLs applicable for SCTP LB
-		acls = oc.getAllACLsForServiceLB(oc.SCTPLoadBalancerUUID)
-		if len(acls) > 0 {
-			_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-			if err != nil {
-				klog.Warningf("Unable to add SCTP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
-			}
 		}
 	}
 	// Add the node to the logical switch cache

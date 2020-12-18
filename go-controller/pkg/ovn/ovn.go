@@ -41,7 +41,8 @@ import (
 )
 
 const (
-	egressfirewallCRD = "egressfirewalls.k8s.ovn.org"
+	egressfirewallCRD    string = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName string = "clusterPortGroup"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -151,6 +152,9 @@ type Controller struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
+
+	// Port group for all cluster logical switch ports
+	clusterPortGroupUUID string
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -1065,23 +1069,6 @@ func (oc *Controller) getServiceLBInfo(lb, vip string) (string, bool) {
 		conf = &loadBalancerConf{}
 	}
 	return conf.rejectACL, len(conf.endpoints) > 0
-}
-
-// getAllACLsForServiceLB retrieves all of the ACLs for a given load balancer
-func (oc *Controller) getAllACLsForServiceLB(lb string) []string {
-	oc.serviceLBLock.Lock()
-	defer oc.serviceLBLock.Unlock()
-	confMap, ok := oc.serviceLBMap[lb]
-	if !ok {
-		return nil
-	}
-	var acls []string
-	for _, v := range confMap {
-		if len(v.rejectACL) > 0 {
-			acls = append(acls, v.rejectACL)
-		}
-	}
-	return acls
 }
 
 // removeServiceLB removes the entire LB entry for a VIP
