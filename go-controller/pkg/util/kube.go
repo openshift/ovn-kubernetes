@@ -59,6 +59,8 @@ func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egres
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	kconfig.QPS = 25
+	kconfig.Burst = 25
 
 	crdClientset, err := apiextensionsclientset.NewForConfig(kconfig)
 	if err != nil {
