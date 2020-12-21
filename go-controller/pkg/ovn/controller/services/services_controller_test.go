@@ -37,7 +37,6 @@ func newController() *serviceController {
 	controller := NewController(client,
 		informerFactory.Core().V1().Services(),
 		informerFactory.Discovery().V1beta1().EndpointSlices(),
-		portGroupUUID,
 	)
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
@@ -120,14 +119,6 @@ func TestSyncServices(t *testing.T) {
 					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"=""`,
 					Output: "",
 				},
-				{
-					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
-					Output: "",
-				},
-				{
-					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
-					Output: "",
-				},
 			},
 		},
 		{
@@ -168,14 +159,6 @@ func TestSyncServices(t *testing.T) {
 					Output: "",
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
-					Output: "",
-				},
-				{
-					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
-					Output: "",
-				},
-				{
 					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null`,
 					Output: gatewayRouter1,
 				},
@@ -187,10 +170,6 @@ func TestSyncServices(t *testing.T) {
 				{
 					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}a08ea426-2288-11eb-a30b-a8a1590cda29`,
 					Output: logicalSwitch1,
-				},
-				{
-					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add logical_switch 17bde5e8-3652-11eb-b53b-a8a1590cda29 acls @reject-acl`,
-					Output: "",
 				},
 			},
 		},
@@ -242,10 +221,6 @@ func TestSyncServices(t *testing.T) {
 				},
 				{
 					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"="10.0.0.2:3456"`,
-					Output: "",
-				},
-				{
-					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
 					Output: "",
 				},
 			},
@@ -300,10 +275,6 @@ func TestSyncServices(t *testing.T) {
 					Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.0.0.2:3456"`,
 					Output: "",
 				},
-				{
-					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
-					Output: "",
-				},
 			},
 		},
 	}
@@ -348,10 +319,6 @@ func TestUpdateServicePorts(t *testing.T) {
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
 		Output: loadbalancerTCP,
 	})
@@ -361,21 +328,12 @@ func TestUpdateServicePorts(t *testing.T) {
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:8888`,
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
 		Output: loadbalancerTCP,
 	})
 	// Remove the old ServicePort
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips "192.168.1.1:80"`,
-		Output: "",
-	})
-	// Remove the ACL if exist
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
 		Output: "",
 	})
 	// Check if there are NodePort LoadBalancers
