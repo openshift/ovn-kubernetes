@@ -2,25 +2,21 @@
 
 package node
 
-func generateBlockMCSRules(rules *[]iptRule) {
-	*rules = append(*rules, iptRule{
-		table: "filter",
-		chain: "FORWARD",
-		args:  []string{"-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-	})
-	*rules = append(*rules, iptRule{
-		table: "filter",
-		chain: "FORWARD",
-		args:  []string{"-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-	})
-	*rules = append(*rules, iptRule{
-		table: "filter",
-		chain: "OUTPUT",
-		args:  []string{"-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-	})
-	*rules = append(*rules, iptRule{
-		table: "filter",
-		chain: "OUTPUT",
-		args:  []string{"-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-	})
+func generateBlockMCSRules() (addRules, delRules []iptRule) {
+	for _, chain := range []string{"FORWARD", "OUTPUT"} {
+		for _, port := range []string{"22623", "22624"} {
+			addRules = append(addRules, iptRule{
+				table:    "filter",
+				chain:    chain,
+				args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "--syn", "-j", "REJECT"},
+			})
+			// Delete the old "--syn"-less rules on upgrade
+			delRules = append(delRules, iptRule{
+				table:    "filter",
+				chain:    chain,
+				args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "-j", "REJECT"},
+			})
+		}
+	}
+	return
 }
