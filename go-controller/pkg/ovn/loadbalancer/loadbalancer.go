@@ -67,7 +67,7 @@ func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
 func UpdateLoadBalancer(lb, vip string, targets []string) error {
 	lbTarget := fmt.Sprintf(`vips:"%s"="%s"`, vip, strings.Join(targets, ","))
 
-	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, lbTarget)
+	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, lbTarget, "options:reject=true")
 	if err != nil {
 		return fmt.Errorf("error in configuring load balancer: %s "+
 			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)

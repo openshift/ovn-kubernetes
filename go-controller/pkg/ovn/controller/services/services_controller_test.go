@@ -116,7 +116,7 @@ func TestSyncServices(t *testing.T) {
 					Output: loadbalancerTCP,
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"=""`,
+					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"="" options:reject=true`,
 					Output: "",
 				},
 			},
@@ -155,7 +155,7 @@ func TestSyncServices(t *testing.T) {
 					Output: loadbalancerTCP,
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"=""`,
+					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"="" options:reject=true`,
 					Output: "",
 				},
 				{
@@ -220,7 +220,7 @@ func TestSyncServices(t *testing.T) {
 					Output: loadbalancerTCP,
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"="10.0.0.2:3456"`,
+					Cmd:    `ovn-nbctl --timeout=15 set load_balancer ` + loadbalancerTCP + ` vips:"192.168.1.1:80"="10.0.0.2:3456" options:reject=true`,
 					Output: "",
 				},
 			},
@@ -272,7 +272,7 @@ func TestSyncServices(t *testing.T) {
 					Output: loadbalancerTCP,
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.0.0.2:3456"`,
+					Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.0.0.2:3456" options:reject=true`,
 					Output: "",
 				},
 			},
@@ -315,7 +315,7 @@ func TestUpdateServicePorts(t *testing.T) {
 	})
 	// Add a new loadbalancer with the Service Port 80
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.0.0.2:3456"`,
+		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.0.0.2:3456" options:reject=true`,
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -324,7 +324,7 @@ func TestUpdateServicePorts(t *testing.T) {
 	})
 	// Add a new loadbalancer with the new Service Port 8888
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:8888"="10.0.0.2:3456"`,
+		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:8888"="10.0.0.2:3456" options:reject=true`,
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
