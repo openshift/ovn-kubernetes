@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	utilnet "k8s.io/utils/net"
 	"net"
 	"strconv"
 	"strings"
@@ -126,6 +125,17 @@ func isIfaceIDSet(ifaceName, ifaceID string) error {
 	return nil
 }
 
+func isIfaceOvnInstalledSet(ifaceName string) error {
+	out, err := ovsGet("Interface", ifaceName, "external-ids", "ovn-installed")
+	if err == nil && out == "true" {
+		klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+		return nil
+	}
+
+	// Try again
+	return fmt.Errorf("still waiting for OVS port %s to have ovn-installed", ifaceName)
+}
+
 // getIfaceOFPort returns the of port number for an interface
 func getIfaceOFPort(ifaceName string) (int, error) {
 	port, err := ovsGet("Interface", ifaceName, "ofport", "")
@@ -140,63 +150,63 @@ func getIfaceOFPort(ifaceName string) (int, error) {
 	return iPort, nil
 }
 
-func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
-	// Function checks for OpenFlow flows to know the pod is ready
-	// TODO(trozet): in the future use a more stable mechanism provided by OVN:
-	// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
+// func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
+// 	// Function checks for OpenFlow flows to know the pod is ready
+// 	// TODO(trozet): in the future use a more stable mechanism provided by OVN:
+// 	// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
 
-	// query represents the match criteria, and different OF tables that this query may match on
-	type query struct {
-		match  string
-		tables []int
-	}
+// 	// query represents the match criteria, and different OF tables that this query may match on
+// 	type query struct {
+// 		match  string
+// 		tables []int
+// 	}
 
-	// Query the flows by mac address for in_port_security and OF port
-	queries := []query{
-		{
-			match:  "dl_src=" + mac,
-			tables: []int{9},
-		},
-		{
-			match:  fmt.Sprintf("in_port=%d", ofPort),
-			tables: []int{0},
-		},
-	}
-	for _, ifAddr := range ifAddrs {
-		var ipMatch string
-		if !utilnet.IsIPv6(ifAddr.IP) {
-			ipMatch = "ip,ip_dst"
-		} else {
-			ipMatch = "ipv6,ipv6_dst"
-		}
-		// add queries for out_port_security
-		// note we need to support table 48 for 20.06 OVN backwards compatibility. Table 49 is now
-		// where out_port_security lives
-		queries = append(queries,
-			query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
-		)
-	}
+// 	// Query the flows by mac address for in_port_security and OF port
+// 	queries := []query{
+// 		{
+// 			match:  "dl_src=" + mac,
+// 			tables: []int{9},
+// 		},
+// 		{
+// 			match:  fmt.Sprintf("in_port=%d", ofPort),
+// 			tables: []int{0},
+// 		},
+// 	}
+// 	for _, ifAddr := range ifAddrs {
+// 		var ipMatch string
+// 		if !utilnet.IsIPv6(ifAddr.IP) {
+// 			ipMatch = "ip,ip_dst"
+// 		} else {
+// 			ipMatch = "ipv6,ipv6_dst"
+// 		}
+// 		// add queries for out_port_security
+// 		// note we need to support table 48 for 20.06 OVN backwards compatibility. Table 49 is now
+// 		// where out_port_security lives
+// 		queries = append(queries,
+// 			query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
+// 		)
+// 	}
 
-	// Must find the right flows in all queries to succeed
-	for _, query := range queries {
-		found := false
-		// Look for a match in any table of this query to be considered success
-		for _, table := range query.tables {
-			queryStr := fmt.Sprintf("table=%d,%s", table, query.match)
-			// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
-			stdout, err := ofctlExec("dump-flows", "br-int", queryStr)
-			if err == nil && len(stdout) > 0 {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
+// 	// Must find the right flows in all queries to succeed
+// 	for _, query := range queries {
+// 		found := false
+// 		// Look for a match in any table of this query to be considered success
+// 		for _, table := range query.tables {
+// 			queryStr := fmt.Sprintf("table=%d,%s", table, query.match)
+// 			// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
+// 			stdout, err := ofctlExec("dump-flows", "br-int", queryStr)
+// 			if err == nil && len(stdout) > 0 {
+// 				found = true
+// 				break
+// 			}
+// 		}
+// 		if !found {
+// 			return false
+// 		}
+// 	}
 
-	return true
-}
+// 	return true
+// }
 
 func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int) error {
 	timeout := time.After(20 * time.Second)
@@ -210,10 +220,15 @@ func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifac
 			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
 				return err
 			}
-			if doPodFlowsExist(mac, ifAddrs, ofPort) {
-				// success
+
+			if err := isIfaceOvnInstalledSet(ifaceName); err == nil {
+				//success
 				return nil
 			}
+			// if doPodFlowsExist(mac, ifAddrs, ofPort) {
+			// 	// success
+			// 	return nil
+			// }
 			// try again later
 			time.Sleep(200 * time.Millisecond)
 		}
