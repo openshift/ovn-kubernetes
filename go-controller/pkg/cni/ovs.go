@@ -53,6 +53,17 @@ func ovsSet(table, record string, values ...string) error {
 	return err
 }
 
+func ovsGet(table, record, column, key string) (string, error) {
+	args := []string{"--if-exists", "get", table, record}
+	if key != "" {
+		args = append(args, fmt.Sprintf("%s:%s", column, key))
+	} else {
+		args = append(args, column)
+	}
+	output, err := ovsExec(args...)
+	return strings.Trim(strings.TrimSpace(string(output)), "\""), err
+}
+
 // Returns the given column of records that match the condition
 func ovsFind(table, column, condition string) ([]string, error) {
 	output, err := ovsExec("--no-heading", "--format=csv", "--data=bare", "--columns="+column, "find", table, condition)
@@ -98,18 +109,23 @@ func ofctlExec(args ...string) (string, error) {
 	return stdoutStr, nil
 }
 
-func waitForPodFlows(mac string) error {
+func isIfaceOvnInstalledSet(ifaceName string) error {
+	out, err := ovsGet("Interface", ifaceName, "external-ids", "ovn-installed")
+	if err == nil && out == "true" {
+		klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+		return nil
+	}
+
+	// Try again
+	return fmt.Errorf("still waiting for OVS port %s to have ovn-installed", ifaceName)
+}
+
+func waitForPodFlows(ifaceName string) error {
 	return wait.PollImmediate(200*time.Millisecond, 20*time.Second, func() (bool, error) {
-		// Query the flows by mac address
-		query := fmt.Sprintf("table=9,dl_src=%s", mac)
-		// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
-		stdout, err := ofctlExec("dump-flows", "br-int", query)
-		if err != nil {
-			return false, nil
+		if err := isIfaceOvnInstalledSet(ifaceName); err == nil {
+			//success
+			return true, nil
 		}
-		if len(stdout) == 0 {
-			return false, nil
-		}
-		return true, nil
+		return false, nil
 	})
 }
