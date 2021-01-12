@@ -95,6 +95,32 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
 	return nil
 }
 
+func (gp *gressPolicy) addPeerSvcVip(service *v1.Service) error {
+	if gp.peerAddressSet == nil {
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
+			service.ObjectMeta.Name, gp.policyName)
+	}
+
+	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding Service VIPs", service.Name)
+	ips := getSvcVips(service)
+
+	klog.V(5).Infof("Adding SVC clusterIP to gressPolicy's Address Set: %v", ips)
+	return gp.peerAddressSet.AddIPs(ips)
+}
+
+func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
+	if gp.peerAddressSet == nil {
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
+			service.ObjectMeta.Name, gp.policyName)
+	}
+
+	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding cluster IPs", service.Name)
+	ips := getSvcVips(service)
+
+	klog.Infof("Deleting service %s, possible VIPs: %v from gressPolicy's %s Address Set", service.Name, ips, gp.policyName)
+	return gp.peerAddressSet.DeleteIPs(ips)
+}
+
 func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
 	ips, err := util.GetAllPodIPs(pod)
 	if err != nil {

@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -22,6 +23,7 @@ type namespacePolicy struct {
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
 	podHandlerList  []*factory.Handler
+	svcHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
 	localPods       map[string]*lpInfo //pods effected by this policy
 	portGroupUUID   string             //uuid for OVN port_group
@@ -36,6 +38,7 @@ func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
+		svcHandlerList:  make([]*factory.Handler, 0),
 		nsHandlerList:   make([]*factory.Handler, 0),
 		localPods:       make(map[string]*lpInfo),
 	}
@@ -638,10 +641,13 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(ingressJSON.From) {
+			klog.V(5).Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
 			if err := ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
 			}
+			// Start service handlers ONLY if there's an ingress Address Set
+			oc.handlePeerService(policy, ingress, np)
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -673,6 +679,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(egressJSON.To) {
+			klog.V(5).Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
 			if err := egress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
@@ -910,5 +917,8 @@ func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
 	}
 	for _, handler := range np.nsHandlerList {
 		oc.watchFactory.RemoveNamespaceHandler(handler)
+	}
+	for _, handler := range np.svcHandlerList {
+		oc.watchFactory.RemoveServiceHandler(handler)
 	}
 }
