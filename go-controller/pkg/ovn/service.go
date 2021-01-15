@@ -6,7 +6,6 @@ import (
 	"reflect"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -343,17 +342,17 @@ func (ovn *Controller) svcQualifiesForReject(service *kapi.Service) bool {
 // or 4.ExternalIP
 // TODO adjust for upstream patch when it lands:
 // https://bugzilla.redhat.com/show_bug.cgi?id=1908540
-func getSvcVips(service *kapi.Service) []net.IP {
+func getSvcVips(service *kapi.Service, oc *Controller) []net.IP {
 	ips := make([]net.IP, 0)
 
 	if util.ServiceTypeHasNodePort(service) {
-		gatewayRouters, _, err := gateway.GetOvnGateways()
+		gatewayRouters, _, err := oc.getOvnGateways()
 		if err != nil {
 			klog.Errorf("Cannot get gateways: %s", err)
 		}
 		for _, gatewayRouter := range gatewayRouters {
 			// VIPs would be the physical IPS of the GRs(IPs of the node) in this case
-			physicalIPs, err := gateway.GetGatewayPhysicalIPs(gatewayRouter)
+			physicalIPs, err := oc.getGatewayPhysicalIPs(gatewayRouter)
 			if err != nil {
 				klog.Errorf("Unable to get gateway router %s physical ip, error: %v", gatewayRouter, err)
 				continue
