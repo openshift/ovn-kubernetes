@@ -10,12 +10,13 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/klog"
 	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"k8s.io/klog"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
@@ -25,7 +26,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
-	"k8s.io/klog/v2"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
