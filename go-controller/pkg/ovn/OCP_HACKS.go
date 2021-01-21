@@ -2,11 +2,12 @@ package ovn
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog"
-	"strings"
+	"k8s.io/klog/v2"
 )
 
 // isGatewayInterfaceNone is used to determine if this is a local gateway mode with a "none" gateway interface
