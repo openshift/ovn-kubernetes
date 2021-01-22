@@ -103,18 +103,6 @@ type namespaceInfo struct {
 	multicastEnabled bool
 }
 
-// eNode is a cache helper used for egress IP assignment
-type eNode struct {
-	v4IP               net.IP
-	v6IP               net.IP
-	v4Subnet           *net.IPNet
-	v6Subnet           *net.IPNet
-	allocations        map[string]bool
-	isEgressAssignable bool
-	tainted            bool
-	name               string
-}
-
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
@@ -179,30 +167,8 @@ type Controller struct {
 	// Supports multicast?
 	multicastSupport bool
 
-	// Interface used for programming OVN for egress IP, based on the mode it's running in.
-	modeEgressIP modeEgressIP
-
-	// Sync used for retrying EgressIP objects which were created before any node existed.
-	egressAssignmentRetry sync.Map
-
-	// Mutex used for syncing the egressIP namespace handlers
-	egressIPNamespaceHandlerMutex *sync.Mutex
-
-	// Cache used for keeping track of EgressIP namespace handlers
-	egressIPNamespaceHandlerCache map[string]factory.Handler
-
-	// Mutex used for syncing the egressIP pod handlers
-	egressIPPodHandlerMutex *sync.Mutex
-
-	// Cache used for keeping track of EgressIP pod handlers
-	egressIPPodHandlerCache map[string]factory.Handler
-
-	// A cache used for egress IP assignments containing data for all cluster nodes
-	// used for egress IP assignments
-	eIPAllocator map[string]*eNode
-
-	// A mutex for eIPAllocator
-	eIPAllocatorMutex *sync.Mutex
+	// Controller used for programming OVN for egress IP
+	eIPC egressIPController
 
 	// Map of load balancers to service namespace
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
@@ -257,43 +223,43 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
-	modeEgressIP := newModeEgressIP()
 	return &Controller{
 		kube: &kube.Kube{
 			KClient:              kubeClient,
 			EIPClient:            egressIPClient,
 			EgressFirewallClient: egressFirewallClient,
 		},
-		watchFactory:                  wf,
-		stopChan:                      stopChan,
-		masterSubnetAllocator:         subnetallocator.NewSubnetAllocator(),
-		nodeLocalNatIPv4Allocator:     &ipallocator.Range{},
-		nodeLocalNatIPv6Allocator:     &ipallocator.Range{},
-		lsManager:                     newLogicalSwitchManager(),
-		joinSubnetAllocator:           subnetallocator.NewSubnetAllocator(),
-		logicalPortCache:              newPortCache(stopChan),
-		namespaces:                    make(map[string]*namespaceInfo),
-		namespacesMutex:               sync.Mutex{},
-		addressSetFactory:             addressSetFactory,
-		lspIngressDenyCache:           make(map[string]int),
-		lspEgressDenyCache:            make(map[string]int),
-		lspMutex:                      &sync.Mutex{},
-		modeEgressIP:                  modeEgressIP,
-		egressIPNamespaceHandlerMutex: &sync.Mutex{},
-		egressIPNamespaceHandlerCache: make(map[string]factory.Handler),
-		egressIPPodHandlerMutex:       &sync.Mutex{},
-		egressIPPodHandlerCache:       make(map[string]factory.Handler),
-		eIPAllocatorMutex:             &sync.Mutex{},
-		eIPAllocator:                  make(map[string]*eNode),
-		loadbalancerClusterCache:      make(map[kapi.Protocol]string),
-		multicastSupport:              config.EnableMulticast,
-		serviceVIPToName:              make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:          sync.Mutex{},
-		serviceLBMap:                  make(map[string]map[string]*loadBalancerConf),
-		serviceLBLock:                 sync.Mutex{},
-		recorder:                      recorder,
-		ovnNBClient:                   ovnNBClient,
-		ovnSBClient:                   ovnSBClient,
+		watchFactory:              wf,
+		stopChan:                  stopChan,
+		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
+		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
+		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
+		lsManager:                 newLogicalSwitchManager(),
+		joinSubnetAllocator:       subnetallocator.NewSubnetAllocator(),
+		logicalPortCache:          newPortCache(stopChan),
+		namespaces:                make(map[string]*namespaceInfo),
+		namespacesMutex:           sync.Mutex{},
+		addressSetFactory:         addressSetFactory,
+		lspIngressDenyCache:       make(map[string]int),
+		lspEgressDenyCache:        make(map[string]int),
+		lspMutex:                  &sync.Mutex{},
+		eIPC: egressIPController{
+			namespaceHandlerMutex: &sync.Mutex{},
+			namespaceHandlerCache: make(map[string]factory.Handler),
+			podHandlerMutex:       &sync.Mutex{},
+			podHandlerCache:       make(map[string]factory.Handler),
+			allocatorMutex:        &sync.Mutex{},
+			allocator:             make(map[string]*egressNode),
+		},
+		loadbalancerClusterCache: make(map[kapi.Protocol]string),
+		multicastSupport:         config.EnableMulticast,
+		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
+		serviceVIPToNameLock:     sync.Mutex{},
+		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
+		serviceLBLock:            sync.Mutex{},
+		recorder:                 recorder,
+		ovnNBClient:              ovnNBClient,
+		ovnSBClient:              ovnSBClient,
 	}
 }
 
@@ -349,10 +315,6 @@ type emptyLBBackendEvent struct {
 	vip      string
 	protocol kapi.Protocol
 	uuid     string
-}
-
-func newModeEgressIP() modeEgressIP {
-	return &egressIPMode{}
 }
 
 func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
@@ -782,7 +744,10 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
+			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) && oc.isEgressNodeReachable(node) {
+				oc.setNodeEgressAssignable(node.Name, true)
+				oc.setNodeEgressReady(node.Name, true)
+				oc.setNodeEgressReachable(node.Name, true)
 				if err := oc.addEgressNode(node); err != nil {
 					klog.Error(err)
 				}
@@ -798,13 +763,45 @@ func (oc *Controller) WatchEgressNodes() {
 			newLabels := newNode.GetLabels()
 			_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
 			_, newHasEgressLabel := newLabels[nodeEgressLabel]
-			if !oldHadEgressLabel && newHasEgressLabel {
-				if err := oc.addEgressNode(newNode); err != nil {
-					klog.Error(err)
-				}
+			if !oldHadEgressLabel && !newHasEgressLabel {
+				return
 			}
 			if oldHadEgressLabel && !newHasEgressLabel {
+				klog.Infof("Node: %s has been un-labelled, deleting it from egress assignment", newNode.Name)
+				oc.setNodeEgressAssignable(oldNode.Name, false)
 				if err := oc.deleteEgressNode(oldNode); err != nil {
+					klog.Error(err)
+				}
+				return
+			}
+			isOldReady := oc.isEgressNodeReady(oldNode)
+			isNewReady := oc.isEgressNodeReady(newNode)
+			isNewReachable := oc.isEgressNodeReachable(newNode)
+			oc.setNodeEgressReady(newNode.Name, isNewReady)
+			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
+			if !oldHadEgressLabel && newHasEgressLabel {
+				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
+				oc.setNodeEgressAssignable(newNode.Name, true)
+				if isNewReady && isNewReachable {
+					if err := oc.addEgressNode(newNode); err != nil {
+						klog.Error(err)
+					}
+				} else {
+					klog.Warningf("Node: %s has been labelled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
+				}
+				return
+			}
+			if isOldReady == isNewReady {
+				return
+			}
+			if !isNewReady {
+				klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
+				if err := oc.deleteEgressNode(newNode); err != nil {
+					klog.Error(err)
+				}
+			} else if isNewReady && isNewReachable {
+				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+				if err := oc.addEgressNode(newNode); err != nil {
 					klog.Error(err)
 				}
 			}
