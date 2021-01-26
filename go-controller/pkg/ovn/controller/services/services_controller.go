@@ -325,7 +325,7 @@ func (c *Controller) syncServices(key string) error {
 				}
 				// Configure the NodePort in each Node Gateway Router
 				for _, gatewayRouter := range gatewayRouters {
-					lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
+					lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol, gateway.OvnGatewayLoadBalancerIds)
 					if err != nil {
 						klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
 							gatewayRouter, err)
@@ -390,7 +390,7 @@ func (c *Controller) syncServices(key string) error {
 						continue
 					}
 					for _, gatewayRouter := range gatewayRouters {
-						lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
+						lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol, gateway.OvnGatewayLoadBalancerIds)
 						if err != nil {
 							klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
 								gatewayRouter, err)
