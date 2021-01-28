@@ -274,6 +274,10 @@ func (as *ovnAddressSets) GetName() string {
 
 func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	var err error
+
+	if len(ips) == 0 {
+		return fmt.Errorf("no IPs to add to addressSet: %s", as.name)
+	}
 	as.Lock()
 	defer as.Unlock()
 
