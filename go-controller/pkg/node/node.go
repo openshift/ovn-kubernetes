@@ -165,6 +165,22 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
+// Starting with v21.03.0 OVN sets OVS.Interface.external-id:ovn-installed
+// and OVNSB.Port_Binding.up when all OVS flows associated to a
+// logical port have been successfully programmed.
+func getOVNIfUpCheckMode() (bool, error) {
+	if _, stderr, err := util.RunOVNSbctl("--columns=up", "list", "Port_Binding"); err != nil {
+		if strings.Contains(stderr, "does not contain a column") {
+			klog.Infof("Falling back to using legacy CNI OVS flow readiness checks")
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check if port_binding is supported in OVN, stderr: %q, error: %v",
+			stderr, err)
+	}
+	klog.Infof("Detected support for port binding with external IDs")
+	return true, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start(wg *sync.WaitGroup) error {
@@ -243,6 +259,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
+	cniPodCheckMode, err := getOVNIfUpCheckMode()
+	if err != nil {
+		return err
+	}
+	cniServer := cni.NewCNIServer("", cniPodCheckMode, n.watchFactory)
+
 	// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
 	// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
 	if config.GatewayModeShared == config.Gateway.Mode {
@@ -264,29 +286,37 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		upgradeController := upgrade.NewController(n.Kube, informerFactory.Core().V1().Nodes())
 		initialTopoVersion := upgradeController.GetInitialTopoVersion()
 		bridgeName := n.gateway.GetGatewayBridgeIface()
+
+		needLegacySvcRoute := true
 		if initialTopoVersion >= types.OvnHostToSvcOFTopoVersion {
-			// We dont need to run any goroutine, can just configure route for svc towards shared gw bridge
+			// Configure route for svc towards shared gw bridge
 			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
 			if err := configureSvcRouteViaBridge(bridgeName); err != nil {
 				return err
 			}
-		} else {
-			klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
-			// add back legacy route for service via mp0
-			link, err := util.LinkSetUp(types.K8sMgmtIntfName)
-			if err != nil {
-				return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
-			}
-			var gwIP net.IP
-			for _, subnet := range config.Kubernetes.ServiceCIDRs {
-				if utilnet.IsIPv4CIDR(subnet) {
-					gwIP = mgmtPortConfig.ipv4.gwIP
-				} else {
-					gwIP = mgmtPortConfig.ipv6.gwIP
+			needLegacySvcRoute = false
+		}
+
+		// Determine if we need to run upgrade checks
+		if initialTopoVersion != types.OvnCurrentTopologyVersion {
+			if needLegacySvcRoute {
+				klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
+				// add back legacy route for service via mp0
+				link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+				if err != nil {
+					return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
 				}
-				err := util.LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet})
-				if err != nil && !os.IsExist(err) {
-					return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
+				var gwIP net.IP
+				for _, subnet := range config.Kubernetes.ServiceCIDRs {
+					if utilnet.IsIPv4CIDR(subnet) {
+						gwIP = mgmtPortConfig.ipv4.gwIP
+					} else {
+						gwIP = mgmtPortConfig.ipv6.gwIP
+					}
+					err := util.LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet})
+					if err != nil && !os.IsExist(err) {
+						return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
+					}
 				}
 			}
 			// need to run upgrade controller
@@ -297,10 +327,15 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 					klog.Fatalf("Error while running upgrade controller: %v", err)
 				}
 				// upgrade complete now see what needs upgrading
+				// migrate service route from ovn-k8s-mp0 to shared gw bridge
 				if initialTopoVersion < types.OvnHostToSvcOFTopoVersion {
 					if err := upgradeServiceRoute(bridgeName); err != nil {
 						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
 					}
+				}
+				// ensure CNI support for port binding built into OVN, as masters have been upgraded
+				if initialTopoVersion < types.OvnPortBindingTopoVersion {
+					cniServer.EnableOVNPortUpSupport()
 				}
 			}()
 		}
@@ -345,7 +380,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	n.WatchEndpoints()
 
-	cniServer := cni.NewCNIServer("", n.watchFactory)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err

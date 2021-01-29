@@ -46,7 +46,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
+func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory) *Server {
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -57,6 +57,7 @@ func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 			Handler: router,
 		},
 		rundir:             rundir,
+		useOVSExternalIDs:  useOVSExternalIDs,
 		podLister:          corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 		runningSandboxAdds: make(map[string]*PodRequest),
 	}
@@ -228,7 +229,9 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	}
 	defer s.finishSandboxRequest(req)
 
-	result, err := s.requestFunc(req, s.podLister)
+	s.servMutex.RLock()
+	defer s.servMutex.RUnlock()
+	result, err := s.requestFunc(req, s.podLister, s.useOVSExternalIDs)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)
@@ -251,5 +254,14 @@ func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte{}); err != nil {
 		klog.Warningf("Error writing %s HTTP response for metrics post", err)
+	}
+}
+
+func (s *Server) EnableOVNPortUpSupport() {
+	if !s.useOVSExternalIDs {
+		s.servMutex.Lock()
+		defer s.servMutex.Unlock()
+		s.useOVSExternalIDs = true
+		klog.Info("OVN Port Binding support now enabled in CNI Server")
 	}
 }
