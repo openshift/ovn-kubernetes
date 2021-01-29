@@ -1130,6 +1130,10 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config, allSubnets *configS
 		return fmt.Errorf("gateway VLAN ID option: %d is supported only in shared gateway mode", Gateway.VLANID)
 	}
 
+	// HACK
+	Gateway.Mode = GatewayModeShared
+	Gateway.DisableSNATMultipleGWs = true
+
 	// Validate v4 and v6 join subnets
 	v4IP, v4JoinCIDR, err := net.ParseCIDR(Gateway.V4JoinSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
