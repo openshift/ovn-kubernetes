@@ -38,7 +38,8 @@ const (
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 	OvnSingleJoinSwitchTopoVersion = 1
-	OvnCurrentTopologyVersion      = OvnSingleJoinSwitchTopoVersion
+	OvnNamespacedDenyPGTopoVersion = 2
+	OvnCurrentTopologyVersion      = OvnNamespacedDenyPGTopoVersion
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -124,6 +125,13 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
 	return nil
 }
 
+// cleanup obsolete *gressDefaultDeny port groups
+func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
+	deletePortGroup("ingressDefaultDeny")
+	deletePortGroup("egressDefaultDeny")
+	return nil
+}
+
 // delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
 // OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
 func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
@@ -206,9 +214,12 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
 	if ver < OvnSingleJoinSwitchTopoVersion {
-		return oc.upgradeToSingleSwitchOVNTopology(existingNodes)
+		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
 	}
-	return nil
+	if err == nil && ver < OvnNamespacedDenyPGTopoVersion {
+		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
+	}
+	return err
 }
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
@@ -222,23 +233,24 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
-	if config.IPv4Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if config.IPv4Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
+		}
+		if config.IPv6Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
+		}
 	}
-	if config.IPv6Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
-	}
-
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -299,6 +311,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
+	if uuid, _, err := util.RunOVNNbctl("--data=bare", "--columns=_uuid", "find", "meter", "name="+types.OvnACLLoggingMeter); err == nil && uuid == "" {
+		dropRate := strconv.Itoa(config.Logging.ACLLoggingRateLimit)
+		if _, _, err := util.RunOVNNbctl("meter-add", types.OvnACLLoggingMeter, "drop", dropRate, "pktps"); err != nil {
+			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created. Disabling ACL logging support")
+			oc.aclLoggingEnabled = false
+		}
+	}
+
 	if err := oc.SetupMaster(masterNodeName); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -334,8 +354,10 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
-	if err := addDistributedGWPort(); err != nil {
-		return err
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if err := addDistributedGWPort(); err != nil {
+			return err
+		}
 	}
 
 	// Determine SCTP support
@@ -602,6 +624,21 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 	}
 
+	// Add cluster load balancers to GR for Host -> Cluster IP Service traffic
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		clusterLBs := []string{oc.TCPLoadBalancerUUID, oc.UDPLoadBalancerUUID}
+		if oc.SCTPSupport {
+			clusterLBs = append(clusterLBs, oc.SCTPLoadBalancerUUID)
+		}
+		for _, clusterLB := range clusterLBs {
+			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", "GR_"+node.Name, clusterLB)
+			if err != nil {
+				return fmt.Errorf("unable to add cluster LB: %s to GR_%s, stderr: %q, error: %v",
+					clusterLB, node.Name, stderr, err)
+			}
+		}
+	}
+
 	// in the case of shared gateway mode, we need to setup
 	// 1. two policy based routes to steer traffic to the k8s node IP
 	// 	  - from the management port via the node_local_switch's localnet port
@@ -625,8 +662,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			return err
 		}
 
-		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
-			return err
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
+				return err
+			}
 		}
 	}
 

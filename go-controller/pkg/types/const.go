@@ -52,7 +52,23 @@ const (
 	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
 
+	V4HostMasqueradeIP = "169.254.169.2"
+	V6HostMasqueradeIP = "fd69::2"
+
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136
+
+	OvnACLLoggingMeter = "acl-logging"
+
+	// LoadBalancer External Names
+	ClusterLBTCP  = "k8s-cluster-lb-tcp"
+	ClusterLBUDP  = "k8s-cluster-lb-udp"
+	ClusterLBSCTP = "k8s-cluster-lb-sctp"
+	WorkerLBTCP   = "k8s-worker-lb-tcp"
+	WorkerLBUDP   = "k8s-worker-lb-udp"
+	WorkerLBSCTP  = "k8s-worker-lb-sctp"
+	GatewayLBTCP  = "TCP_lb_gateway_router"
+	GatewayLBUDP  = "UDP_lb_gateway_router"
+	GatewayLBSCTP = "SCTP_lb_gateway_router"
 )

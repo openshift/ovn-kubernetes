@@ -10,14 +10,15 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 )
 
 var FakeGRs = "GR_1 GR_2"
@@ -55,7 +56,7 @@ func (e endpoints) addNodePortPortCmds(fexec *ovntest.FakeExec, service v1.Servi
 	})
 	for idx, gatewayR := range strings.Fields(gatewayRouters) {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + gatewayR,
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.GatewayLBTCP + "=" + gatewayR,
 			Output: "load_balancer_" + strconv.Itoa(idx),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -65,14 +66,18 @@ func (e endpoints) addNodePortPortCmds(fexec *ovntest.FakeExec, service v1.Servi
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%s vips:\"%s:%v\"=\"%s:%v\"", strconv.Itoa(idx), "169.254.33.2", service.Spec.Ports[0].NodePort, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
 		})
+		workerIdx := idx + 100
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.WorkerLBTCP + "=" + strings.TrimPrefix(gatewayR, "GR_"),
+			Output: "load_balancer_" + strconv.Itoa(workerIdx),
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%s vips:\"%s:%v\"=\"%s:%v\"", strconv.Itoa(workerIdx), "169.254.33.2", service.Spec.Ports[0].NodePort, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		})
 	}
 }
 
 func (e endpoints) delNodePortPortCmds(fexec *ovntest.FakeExec, service v1.Service, gatewayR string, idx int) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_router " + gatewayR + " external_ids:physical_ips",
-		Output: "169.254.33.2",
-	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}load_balancer_%d", idx),
 		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}load_balancer_%d", idx),
@@ -85,8 +90,34 @@ func (e endpoints) addCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
 		Output: k8sTCPLoadBalancerIP,
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: FakeGRs,
+	})
+	for idx, gatewayR := range strings.Fields(FakeGRs) {
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.GatewayLBTCP + "=" + gatewayR,
+			Output: fmt.Sprintf("load_balancer_%d", idx),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 get logical_router " + gatewayR + " external_ids:physical_ips",
+			Output: "254.254.254.254",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"%s:%v\"", idx, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		})
+		workerIdx := idx + 100
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.WorkerLBTCP + "=" + strings.TrimPrefix(gatewayR, "GR_"),
+			Output: fmt.Sprintf("load_balancer_%d", workerIdx),
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"%s:%v\"", workerIdx, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		})
+	}
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer %s vips:\"%s:%v\"=\"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove load_balancer %s vips \"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 	})
 }
 
@@ -97,12 +128,26 @@ func (e endpoints) addExternalIPCmds(fexec *ovntest.FakeExec, loadBalancerIPs []
 	})
 	for idx, gatewayR := range strings.Fields(FakeGRs) {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + gatewayR,
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.GatewayLBTCP + "=" + gatewayR,
 			Output: fmt.Sprintf("load_balancer_%d", idx),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 get logical_router " + gatewayR + " external_ids:physical_ips",
+			Output: "254.254.254.254",
 		})
 		for _, loadBalancerIP := range loadBalancerIPs {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"%s:%v\"", idx, loadBalancerIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+			})
+		}
+		workerIdx := idx + 100
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.WorkerLBTCP + "=" + strings.TrimPrefix(gatewayR, "GR_"),
+			Output: fmt.Sprintf("load_balancer_%d", workerIdx),
+		})
+		for _, loadBalancerIP := range loadBalancerIPs {
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"%s:%v\"", workerIdx, loadBalancerIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
 			})
 		}
 	}
@@ -122,12 +167,33 @@ func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, isNodePo
 			})
 			for idx, gatewayR := range strings.Fields(FakeGRs) {
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + gatewayR,
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.GatewayLBTCP + "=" + gatewayR,
 					Output: fmt.Sprintf("load_balancer_%d", idx),
 				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}load_balancer_%d", idx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}load_balancer_%d", idx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"\"", idx, service.Spec.ClusterIP, sPort.Port),
+				})
+				workerIdx := idx + 100
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.WorkerLBTCP + "=" + strings.TrimPrefix(gatewayR, "GR_"),
+					Output: fmt.Sprintf("load_balancer_%d", workerIdx),
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}load_balancer_%d", workerIdx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}load_balancer_%d", workerIdx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"\"", workerIdx, service.Spec.ClusterIP, sPort.Port),
+				})
 				if isNodePort {
+					fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd:    "ovn-nbctl --timeout=15 get logical_router " + gatewayR + " external_ids:physical_ips",
+						Output: "169.254.33.2",
+					})
 					e.delNodePortPortCmds(fexec, service, gatewayR, idx)
+					e.delNodePortPortCmds(fexec, service, strings.TrimPrefix(gatewayR, "GR_"), workerIdx)
 				}
+
 			}
 		} else if sPort.Protocol == v1.ProtocolUDP {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -137,17 +203,17 @@ func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, isNodePo
 	}
 }
 
-var _ = Describe("OVN Namespace Operations", func() {
+var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
 		tExec   *ovntest.FakeExec
 	)
 
-	BeforeEach(func() {
+	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
-
+		config.Gateway.Mode = config.GatewayModeShared
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -156,13 +222,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 		fakeOvn = NewFakeOVN(tExec)
 	})
 
-	AfterEach(func() {
+	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
 	})
 
-	Context("on startup", func() {
+	ginkgo.Context("on startup", func() {
 
-		It("reconciles existing endpoints", func() {
+		ginkgo.It("reconciles existing endpoints", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				testE := endpoints{}
@@ -210,17 +276,17 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchEndpoints()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(tExec.CalledMatchesExpected()).To(gomega.BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles existing endpoints with ExternalIP", func() {
+		ginkgo.It("reconciles existing endpoints with ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				testE := endpoints{}
@@ -272,17 +338,17 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchEndpoints()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(tExec.CalledMatchesExpected()).To(gomega.BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles existing endpoints with NodePort", func() {
+		ginkgo.It("reconciles existing endpoints with NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				testE := endpoints{}
@@ -332,17 +398,17 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchEndpoints()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(tExec.CalledMatchesExpected()).To(gomega.BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles deleted endpoints", func() {
+		ginkgo.It("reconciles deleted endpoints", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				testE := endpoints{}
@@ -389,24 +455,24 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchEndpoints()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(tExec.CalledMatchesExpected).Should(gomega.BeTrue(), tExec.ErrorDesc)
 
 				// Delete the endpoint
 				testE.delCmds(tExec, serviceT, false)
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(tExec.CalledMatchesExpected).Should(gomega.BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles deleted NodePort endpoints", func() {
+		ginkgo.It("reconciles deleted NodePort endpoints", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				testE := endpoints{}
@@ -454,21 +520,21 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchEndpoints()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(tExec.CalledMatchesExpected).Should(gomega.BeTrue(), tExec.ErrorDesc)
 
 				// Delete the endpoint
 				testE.delCmds(tExec, serviceT, true)
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(tExec.CalledMatchesExpected).Should(gomega.BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
 })

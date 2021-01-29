@@ -485,7 +485,7 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 }
 
 // RunOVNSbctlUnix runs command via ovn-sbctl, with ovn-sbctl using the unix
-// domain sockets to connect to the ovsdb-server backing the OVN NB database.
+// domain sockets to connect to the ovsdb-server backing the OVN SB database.
 func RunOVNSbctlUnix(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
 	cmdArgs = append(cmdArgs, args...)
@@ -765,4 +765,15 @@ func DetectSCTPSupport() (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Finds any OVN Load Balancer based on external ID and value
+func FindOVNLoadBalancer(externalID, externalValue string) (string, string, error) {
+	out, stderr, err := RunOVNNbctl("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "load_balancer",
+		"external_ids:"+externalID+"="+externalValue)
+	if err != nil {
+		return "", stderr, err
+	}
+	return out, "", nil
 }

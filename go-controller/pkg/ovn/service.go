@@ -186,13 +186,13 @@ func (ovn *Controller) syncServices(services []interface{}) {
 								foundSwitches = append(foundSwitches, switches...)
 							}
 							// Look for load balancer on join/external switches
-							grExtSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
+							grExtSwitches, err := ovn.getGRLogicalSwitchesForLoadBalancer(lb)
 							if err != nil {
 								klog.Errorf("Error finding GR logical switches for load balancer "+
 									"%s: %v", lb, err)
 							} else {
 								// For upgrade from a previous implementation the ACL may also be on join switch
-								if grExtSwitch != "" {
+								for _, grExtSwitch := range grExtSwitches {
 									routerName := strings.TrimPrefix(grExtSwitch, types.ExternalSwitchPrefix)
 									grJoinSwitch := types.JoinSwitchPrefix + routerName
 									foundSwitches = append(foundSwitches, grExtSwitch, grJoinSwitch)
@@ -350,11 +350,13 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
 						klog.V(5).Infof("Load balancer already configured for %s, %s", loadBalancer, vip)
 					} else if ep != nil {
-						if err := ovn.AddEndpoints(ep); err != nil {
+						if err := ovn.AddEndpoints(ep, true); err != nil {
 							return err
 						}
 					} else if svcQualifiesForReject(service) {
-						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port, svcPort.Protocol)
+						aclDenyLogging := ovn.GetNetworkPolicyACLLogging(service.Namespace).Deny
+						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port,
+							svcPort.Protocol, aclDenyLogging)
 						if err != nil {
 							return fmt.Errorf("failed to create service ACL: %v", err)
 						}
@@ -381,12 +383,13 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 				if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
 					klog.V(5).Infof("Load balancer already configured for %s, %s", loadBalancer, vip)
 				} else if ep != nil {
-					if err := ovn.AddEndpoints(ep); err != nil {
+					if err := ovn.AddEndpoints(ep, true); err != nil {
 						return err
 					}
 				} else {
+					aclDenyLogging := ovn.GetNetworkPolicyACLLogging(service.Namespace).Deny
 					aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, service.Spec.ClusterIP,
-						svcPort.Port, svcPort.Protocol)
+						svcPort.Port, svcPort.Protocol, aclDenyLogging)
 					if err != nil {
 						return fmt.Errorf("failed to create service ACL: %v", err)
 					}
@@ -404,7 +407,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 								klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
 								continue
 							}
-							aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
+							aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol, aclDenyLogging)
 							if err != nil {
 								klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
 									ing.IP, loadBalancer, err)
@@ -428,7 +431,9 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 							if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
 								klog.V(5).Infof("Load Balancer already configured for %s, %s", loadBalancer, vip)
 							} else {
-								aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, extIP, svcPort.Port, svcPort.Protocol)
+								aclDenyLogging := ovn.GetNetworkPolicyACLLogging(service.Namespace).Deny
+								aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, extIP, svcPort.Port,
+									svcPort.Protocol, aclDenyLogging)
 								if err != nil {
 									return fmt.Errorf("failed to create service ACL for external IP")
 								}
@@ -482,7 +487,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 
 		if util.ServiceTypeHasNodePort(service) {
 			// Delete the 'NodePort' service from a load balancer instantiated in gateways.
-			ovn.deleteGatewayVIPs(svcPort.Protocol, port)
+			ovn.deleteNodeVIPs(nil, svcPort.Protocol, port)
 		}
 		if util.ServiceTypeHasClusterIP(service) {
 			loadBalancer, err := ovn.getLoadBalancer(svcPort.Protocol)
@@ -494,6 +499,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			if err := ovn.deleteLoadBalancerVIP(loadBalancer, vip); err != nil {
 				klog.Error(err)
 			}
+			ovn.deleteNodeVIPs([]string{service.Spec.ClusterIP}, svcPort.Protocol, svcPort.Port)
 			// Cloud load balancers
 			if err := ovn.deleteIngressVIPs(service, svcPort); err != nil {
 				klog.Error(err)
