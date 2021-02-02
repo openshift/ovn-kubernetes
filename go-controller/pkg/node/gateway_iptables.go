@@ -129,33 +129,18 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP s
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
-	var natArgs, filterArgs []string
-	if nodeIP != nil {
-		natArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"-d", nodeIP.IP.String(),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "DNAT",
-			"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
-		}
-		filterArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"-d", nodeIP.IP.String(),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "ACCEPT",
-		}
-	} else {
-		natArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "DNAT",
-			"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
-		}
-		filterArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "ACCEPT",
-		}
+	natArgs := []string{
+		"-p", string(svcPort.Protocol),
+		"-d", nodeIP.IP.String(),
+		"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+		"-j", "DNAT",
+		"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
+	}
+	filterArgs := []string{
+		"-p", string(svcPort.Protocol),
+		"-d", nodeIP.IP.String(),
+		"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+		"-j", "ACCEPT",
 	}
 
 	return []iptRule{

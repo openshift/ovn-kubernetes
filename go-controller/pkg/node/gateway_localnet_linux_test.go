@@ -34,6 +34,11 @@ func getFakeLocalAddrs() map[string]net.IPNet {
 	return localAddrSet
 }
 
+func getFakeNodeIP() *net.IPNet {
+	_, nodeIPNet, _ := net.ParseCIDR("10.10.10.11/24")
+	return nodeIPNet
+}
+
 func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcher {
 	initIPTable := map[string]util.FakeTable{
 		"filter": {},
@@ -52,6 +57,7 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 		recorder:     fakeOvnNode.recorder,
 		gatewayIPv4:  v4localnetGatewayIP,
 		localAddrSet: getFakeLocalAddrs(),
+		nodeIP:       getFakeNodeIP(),
 	}
 	return &fNPW
 }
@@ -438,12 +444,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
 				}
@@ -480,12 +486,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables4 := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
 						},
 					},
 				}
@@ -497,12 +503,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables6 := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[1], service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[1], service.Spec.Ports[0].Port),
 						},
 					},
 				}
@@ -744,12 +750,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, nodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, nodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, fNPW.nodeIP.IP, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
 				}
