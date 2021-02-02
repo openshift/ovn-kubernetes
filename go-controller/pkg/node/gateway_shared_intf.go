@@ -30,7 +30,7 @@ type nodePortWatcher struct {
 	ofportPhys  string
 	ofportPatch string
 	gwBridge    string
-	nodeIP      *net.IPNet
+	nodeIPs     []*net.IPNet
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
@@ -119,7 +119,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 		}
 	}
 
-	addSharedGatewayIptRules(service, npw.nodeIP)
+	addSharedGatewayIptRules(service, npw.nodeIPs)
 }
 
 func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
@@ -206,7 +206,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 		}
 	}
 
-	delSharedGatewayIptRules(service, npw.nodeIP)
+	delSharedGatewayIptRules(service, npw.nodeIPs)
 }
 
 func (npw *nodePortWatcher) SyncServices(services []interface{}) {
@@ -250,7 +250,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		}
 	}
 
-	syncSharedGatewayIptRules(services, npw.nodeIP)
+	syncSharedGatewayIptRules(services, npw.nodeIPs)
 
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows",
 		npw.gwBridge)
@@ -525,7 +525,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(patchPort, bridgeName, uplinkName, ips[0])
+			gw.nodePortWatcher, err = newNodePortWatcher(patchPort, bridgeName, uplinkName, ips)
 			if err != nil {
 				return err
 			}
@@ -537,7 +537,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	return gw, nil
 }
 
-func newNodePortWatcher(patchPort, gwBridge, gwIntf string, nodeIP *net.IPNet) (*nodePortWatcher, error) {
+func newNodePortWatcher(patchPort, gwBridge, gwIntf string, nodeIPs []*net.IPNet) (*nodePortWatcher, error) {
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
@@ -567,7 +567,7 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, nodeIP *net.IPNet) (
 		ofportPhys:  ofportPhys,
 		ofportPatch: ofportPatch,
 		gwBridge:    gwBridge,
-		nodeIP:      nodeIP,
+		nodeIPs:     nodeIPs,
 	}
 	return npw, nil
 }

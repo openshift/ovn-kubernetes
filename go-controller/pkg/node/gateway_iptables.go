@@ -122,9 +122,14 @@ func getLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	}
 }
 
-func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP string, targetPort int32) []iptRule {
+func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIPs []*net.IPNet, targetIP string, targetPort int32) ([]iptRule, error) {
 	var protocol iptables.Protocol
-	if utilnet.IsIPv6String(targetIP) {
+	isIPv6Setup := utilnet.IsIPv6String(targetIP)
+	nodeIP, err := util.MatchIPNetFamily(isIPv6Setup, nodeIPs)
+	if err != nil {
+		return nil, fmt.Errorf("unable to setup iptables rules for NodePort service on port: %v, no matching node IP family found, err: %v", svcPort, err)
+	}
+	if isIPv6Setup {
 		protocol = iptables.ProtocolIPv6
 	} else {
 		protocol = iptables.ProtocolIPv4
@@ -156,7 +161,7 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP s
 			args:     filterArgs,
 			protocol: protocol,
 		},
-	}
+	}, nil
 }
 
 func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []iptRule {
@@ -321,7 +326,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
 // only incoming traffic on that IP will be accepted for NodePort rules; otherwise incoming traffic on the NodePort
 // on all IPs will be accepted. If gatewayIP is "", then NodePort traffic will be DNAT'ed to the service port on
 // the service's ClusterIP. Otherwise, it will be DNAT'ed to the NodePort on the gatewayIP.
-func getGatewayIPTRules(service *kapi.Service, gatewayIP string, nodeIP *net.IPNet) []iptRule {
+func getGatewayIPTRules(service *kapi.Service, gatewayIP string, nodeIPs []*net.IPNet) []iptRule {
 	rules := make([]iptRule, 0)
 	for _, svcPort := range service.Spec.Ports {
 		if util.ServiceTypeHasNodePort(service) {
@@ -335,10 +340,16 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIP string, nodeIP *net.IPN
 				klog.Errorf("Skipping service: %s, invalid service port %v", svcPort.Name, err)
 				continue
 			}
+			var targetIP string
 			if gatewayIP == "" {
-				rules = append(rules, getNodePortIPTRules(svcPort, nodeIP, service.Spec.ClusterIP, svcPort.Port)...)
+				targetIP = service.Spec.ClusterIP
 			} else {
-				rules = append(rules, getNodePortIPTRules(svcPort, nodeIP, gatewayIP, svcPort.NodePort)...)
+				targetIP = gatewayIP
+			}
+			if nodePortIPTRules, err := getNodePortIPTRules(svcPort, nodeIPs, targetIP, svcPort.Port); err == nil {
+				rules = append(rules, nodePortIPTRules...)
+			} else {
+				klog.Error(err)
 			}
 		}
 		for _, externalIP := range service.Spec.ExternalIPs {
