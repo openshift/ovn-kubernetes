@@ -88,11 +88,10 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 	}
 }
 
-func generateGatewayNATRules(ifname string, ip net.IP) []iptRule {
+func generateGatewayNATRules(ifname string, ip net.IP) (rules, delRules []iptRule) {
 	// Allow packets to/from the gateway interface in case defaults deny
-	rules := make([]iptRule, 0)
 	// Block MCS
-	generateBlockMCSRules(&rules)
+	rules, delRules = generateBlockMCSRules()
 	rules = append(rules, iptRule{
 		table: "filter",
 		chain: "FORWARD",
@@ -116,12 +115,13 @@ func generateGatewayNATRules(ifname string, ip net.IP) []iptRule {
 		chain: "POSTROUTING",
 		args:  []string{"-s", ip.String(), "-j", "MASQUERADE"},
 	})
-	return rules
+	return
 }
 
 func localnetGatewayNAT(ipt util.IPTablesHelper, ifname string, ip net.IP) error {
-	rules := generateGatewayNATRules(ifname, ip)
-	return addIptRules(ipt, rules)
+	addRules, delRules := generateGatewayNATRules(ifname, ip)
+	delIptRules(ipt, delRules)
+	return addIptRules(ipt, addRules)
 }
 
 func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFactory, nodeAnnotator kube.Annotator) error {
