@@ -21,6 +21,7 @@ Networking IPerf IPv[46]
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Federation\]
 should have ipv4 and ipv6 internal node ip
+should have ipv4 and ipv6 node podCIDRs
 
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
