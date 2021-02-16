@@ -239,6 +239,11 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
 	}
 
+	_, stderr, err := util.RunOVNNbctl("set", "NB_Global", ".", "options:use_logical_dp_groups=true")
+	if err != nil {
+		klog.Warningf("******* error enabling logical datapath groups: %v\n%s", err, stderr)
+	}
+
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
