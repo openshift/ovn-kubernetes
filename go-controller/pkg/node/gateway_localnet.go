@@ -215,7 +215,7 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 
 			if port.NodePort > 0 {
 				if gatewayIP != "" {
-					iptRules = append(iptRules, getNodePortIPTRules(port, nil, ip, port.Port)...)
+					iptRules = append(iptRules, getNodePortIPTRules(port, ip, port.Port)...)
 					klog.V(5).Infof("Will add iptables rule for NodePort: %v and "+
 						"protocol: %v", port.NodePort, port.Protocol)
 				} else {
@@ -283,7 +283,7 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, ip, port.Port)...)
 			if port.NodePort > 0 {
 				if gatewayIP != "" {
-					iptRules = append(iptRules, getNodePortIPTRules(port, nil, ip, port.Port)...)
+					iptRules = append(iptRules, getNodePortIPTRules(port, ip, port.Port)...)
 					klog.V(5).Infof("Will delete iptables rule for NodePort: %v and "+
 						"protocol: %v", port.NodePort, port.Protocol)
 				}
@@ -359,7 +359,7 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 				gatewayIP = l.gatewayIPv6
 			}
 			if gatewayIP != "" {
-				keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP, nil)...)
+				keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP)...)
 			}
 			keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 		}
