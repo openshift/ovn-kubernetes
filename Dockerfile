@@ -36,7 +36,7 @@ ARG ovsver=2.13.0-79.el8fdp
 ARG ovnver=20.09.0-21.el8fdn
 
 COPY openvswitch2.15-2.15.0-1.el8fdp.x86_64.rpm openvswitch2.15-devel-2.15.0-1.el8fdp.x86_64.rpm /root/
-COPY ovn2.13-20.12.0-23.1.el8fdn.x86_64.rpm ovn2.13-central-20.12.0-23.1.el8fdn.x86_64.rpm ovn2.13-host-20.12.0-23.1.el8fdn.x86_64.rpm ovn2.13-vtep-20.12.0-23.1.el8fdn.x86_64.rpm /root/
+COPY ovn2.13-20.12.0-24.el8fdn.x86_64.rpm ovn2.13-central-20.12.0-24.el8fdn.x86_64.rpm ovn2.13-host-20.12.0-24.el8fdn.x86_64.rpm ovn2.13-vtep-20.12.0-24.el8fdn.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
