@@ -421,14 +421,14 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 	err := addACLPortGroup(oc.clusterRtrPortGroupUUID, fromLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress)
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast egress ACL: %v", err)
 	}
 
 	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
 	err = addACLPortGroup(oc.clusterRtrPortGroupUUID, toLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress)
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast ingress ACL: %v", err)
 	}
 	return nil
 }
