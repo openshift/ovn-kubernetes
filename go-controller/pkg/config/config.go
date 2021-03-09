@@ -1125,6 +1125,10 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config, allSubnets *configS
 		}
 	}
 
+	// HACK force shared gw mode
+	Gateway.Mode = GatewayModeShared
+	Gateway.DisableSNATMultipleGWs = true
+
 	if Gateway.Mode != GatewayModeShared && Gateway.VLANID != 0 {
 		return fmt.Errorf("gateway VLAN ID option: %d is supported only in shared gateway mode", Gateway.VLANID)
 	}
