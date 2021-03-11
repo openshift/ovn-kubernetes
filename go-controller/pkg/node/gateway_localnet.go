@@ -366,7 +366,6 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
-		recreateIPTRules("filter", chain, keepIPTRules)
 	}
 	removeStaleRoutes(keepRoutes)
 }
@@ -419,15 +418,6 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 				"-d", ing.IP,
 				"-p", string(svcPort.Protocol), "--dport", ingPort,
 				"-j", "DNAT", "--to-destination", util.JoinHostPortInt32(gatewayIP, targetPort),
-			},
-		})
-		rules = append(rules, iptRule{
-			table: "filter",
-			chain: iptableNodePortChain,
-			args: []string{
-				"-d", ing.IP,
-				"-p", string(svcPort.Protocol), "--dport", ingPort,
-				"-j", "ACCEPT",
 			},
 		})
 	}
