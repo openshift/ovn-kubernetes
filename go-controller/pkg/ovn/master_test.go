@@ -778,8 +778,10 @@ func addPBRandNATRules(fexec *ovntest.FakeExec, nodeName, nodeSubnet, nodeIP, mg
 	matchStr2 := fmt.Sprintf("ip4.src == %s && ip4.dst == %s /* %s */", mgmtPortIP, nodeIP, nodeName)
 
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + mgmtPortIP,
-		"ovn-nbctl --timeout=15 lr-policy-add " + types.OVNClusterRouter + " " + types.MGMTPortPolicyPriority + " " + matchStr2 + " reroute " + types.V4NodeLocalNATSubnetNextHop,
+		"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,match,nexthops find logical_router_policy priority=" + types.NodeSubnetPolicyPriority,
+		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + mgmtPortIP,
+		"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,match find logical_router_policy priority=" + types.MGMTPortPolicyPriority,
+		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.MGMTPortPolicyPriority + " " + matchStr2 + " reroute " + types.V4NodeLocalNATSubnetNextHop,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + types.OVNClusterRouter + " dnat_and_snat " + externalIP})
