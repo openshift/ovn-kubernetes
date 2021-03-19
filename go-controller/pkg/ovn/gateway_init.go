@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -75,7 +76,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		// heading to the logical space with the Gateway router's IP so that
 		// return traffic comes back to the same gateway router.
 		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
-			gatewayRouter, "options:lb_force_snat_ip="+util.JoinIPs(gwLRPIPs, " "))
+			gatewayRouter, "options:lb_force_snat_ip=router_ip")
 		if err != nil {
 			return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
 				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
@@ -127,26 +128,36 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
+	var k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP string
+	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err = getGatewayLoadBalancers(gatewayRouter)
+	if err != nil {
+		return err
+	}
+	gatewayProtoLBMap := map[kapi.Protocol]string{
+		kapi.ProtocolTCP:  k8sNSLbTCP,
+		kapi.ProtocolUDP:  k8sNSLbUDP,
+		kapi.ProtocolSCTP: k8sNSLbSCTP,
+	}
+	workerK8sNSLbTCP, workerK8sNSLbUDP, workerK8sNSLbSCTP, err := loadbalancer.GetWorkerLoadBalancers(nodeName)
+	if err != nil {
+		return err
+	}
+	workerProtoLBMap := map[kapi.Protocol]string{
+		kapi.ProtocolTCP:  workerK8sNSLbTCP,
+		kapi.ProtocolUDP:  workerK8sNSLbUDP,
+		kapi.ProtocolSCTP: workerK8sNSLbSCTP,
+	}
+	enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
+	if sctpSupport {
+		enabledProtos = append(enabledProtos, kapi.ProtocolSCTP)
+	}
+
 	if l3GatewayConfig.NodePortEnable {
 		// Create 3 load-balancers for north-south traffic for each gateway
 		// router: UDP, TCP, SCTP
-		var k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP string
-		k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err = getGatewayLoadBalancers(gatewayRouter)
-		if err != nil {
-			return err
-		}
-		protoLBMap := map[kapi.Protocol]string{
-			kapi.ProtocolTCP:  k8sNSLbTCP,
-			kapi.ProtocolUDP:  k8sNSLbUDP,
-			kapi.ProtocolSCTP: k8sNSLbSCTP,
-		}
-		enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
-		if sctpSupport {
-			enabledProtos = append(enabledProtos, kapi.ProtocolSCTP)
-		}
 		for _, proto := range enabledProtos {
-			if protoLBMap[proto] == "" {
-				protoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
+			if gatewayProtoLBMap[proto] == "" {
+				gatewayProtoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
 					"load_balancer",
 					fmt.Sprintf("external_ids:%s_lb_gateway_router=%s", proto, gatewayRouter),
 					fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
@@ -160,9 +171,9 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		// Local gateway mode does not use GR for ingress node port traffic, it uses mp0 instead
 		if config.Gateway.Mode != config.GatewayModeLocal {
 			// Add north-south load-balancers to the gateway router.
-			lbString := fmt.Sprintf("%s,%s", protoLBMap[kapi.ProtocolTCP], protoLBMap[kapi.ProtocolUDP])
+			lbString := fmt.Sprintf("%s,%s", gatewayProtoLBMap[kapi.ProtocolTCP], gatewayProtoLBMap[kapi.ProtocolUDP])
 			if sctpSupport {
-				lbString = lbString + "," + protoLBMap[kapi.ProtocolSCTP]
+				lbString = lbString + "," + gatewayProtoLBMap[kapi.ProtocolSCTP]
 			}
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", gatewayRouter, "load_balancer="+lbString)
 			if err != nil {
@@ -170,20 +181,67 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 					"gateway router %s, stdout: %q, stderr: %q, error: %v",
 					gatewayRouter, stdout, stderr, err)
 			}
+		} else {
+			// Also add north-south load-balancers to local switches for pod -> nodePort traffic
+			stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
+			if err != nil {
+				return fmt.Errorf("failed to get load-balancers on the node switch %s, stdout: %q, "+
+					"stderr: %q, error: %v", nodeName, stdout, stderr, err)
+			}
+			for _, proto := range enabledProtos {
+				if !strings.Contains(stdout, gatewayProtoLBMap[proto]) {
+					stdout, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, gatewayProtoLBMap[proto])
+					if err != nil {
+						return fmt.Errorf("failed to add north-south load-balancer %s to the "+
+							"node switch %s, stdout: %q, stderr: %q, error: %v",
+							gatewayProtoLBMap[proto], nodeName, stdout, stderr, err)
+					}
+				}
+			}
 		}
-		// Also add north-south load-balancers to local switches for pod -> nodePort traffic
+	}
+
+	// Create load balancers for workers (to be applied to GR and node switch)
+	for _, proto := range enabledProtos {
+		if workerProtoLBMap[proto] == "" {
+			workerProtoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
+				"load_balancer",
+				fmt.Sprintf("external_ids:%s-%s=%s", types.WorkerLBPrefix, strings.ToLower(string(proto)), nodeName),
+				fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
+			if err != nil {
+				return fmt.Errorf("failed to create load balancer for worker node %s for protocol %s: "+
+					"stderr: %q, error: %v", nodeName, proto, stderr, err)
+			}
+		}
+	}
+
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		// Ensure north-south load-balancers are not on local switches for pod -> nodePort traffic
+		// For upgrade path REMOVEME later
 		stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
 		if err != nil {
 			return fmt.Errorf("failed to get load-balancers on the node switch %s, stdout: %q, "+
 				"stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		}
 		for _, proto := range enabledProtos {
-			if !strings.Contains(stdout, protoLBMap[proto]) {
-				stdout, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, protoLBMap[proto])
+			if strings.Contains(stdout, gatewayProtoLBMap[proto]) {
+				_, stderr, err = util.RunOVNNbctl("ls-lb-del", nodeName, gatewayProtoLBMap[proto])
 				if err != nil {
-					return fmt.Errorf("failed to add north-south load-balancer %s to the "+
-						"node switch %s, stdout: %q, stderr: %q, error: %v",
-						protoLBMap[proto], nodeName, stdout, stderr, err)
+					return fmt.Errorf("failed to remove north-south load-balancer %s to the "+
+						"node switch %s, stderr: %q, error: %v",
+						gatewayProtoLBMap[proto], nodeName, stderr, err)
+				}
+			}
+		}
+
+		// Add per worker switch specific load-balancers
+		for _, proto := range enabledProtos {
+			if !strings.Contains(stdout, workerProtoLBMap[proto]) {
+				_, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, workerProtoLBMap[proto])
+				if err != nil {
+					return fmt.Errorf("failed to add worker load-balancer %s to the "+
+						"node switch %s, stderr: %q, error: %v",
+						workerProtoLBMap[proto], nodeName, stderr, err)
 				}
 			}
 		}
@@ -325,14 +383,9 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			// delete the existing lr-nat rule first otherwise gateway init fails
-			// if the external ip has changed, but the logical ip has stayed the same
-			stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
-				gatewayRouter, "snat", entry.String(), "--", "lr-nat-add",
-				gatewayRouter, "snat", externalIP[0].String(), entry.String())
-			if err != nil {
-				return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
-					"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+			if err := util.UpdateRouterSNAT(gatewayRouter, externalIP[0], entry); err != nil {
+				return fmt.Errorf("failed to update NAT entry for pod subnet: %s, GR: %s, error: %v",
+					entry.String(), gatewayRouter, err)
 			}
 		}
 	}
@@ -507,19 +560,19 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 		}
 	}
 
-	// policy to allow host -> service -> hairpin back to host
-	matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
-		l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
-	_, stderr, err = util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.MGMTPortPolicyPriority, matchStr,
-		"reroute", natSubnetNextHop)
-	if err != nil {
-		if !strings.Contains(stderr, "already existed") {
-			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
-				"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
-		}
-	}
-
 	if config.Gateway.Mode == config.GatewayModeLocal {
+		// policy to allow host -> service -> hairpin back to host
+		matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
+			l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
+		_, stderr, err = util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.MGMTPortPolicyPriority, matchStr,
+			"reroute", natSubnetNextHop)
+		if err != nil {
+			if !strings.Contains(stderr, "already existed") {
+				return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
+					"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
+			}
+		}
+
 		var matchDst string
 		// Local gw mode needs to use DGP to do hostA -> service -> hostB
 		var clusterL3Prefix string
@@ -544,6 +597,9 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 					"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
 			}
 		}
+	} else if config.Gateway.Mode == config.GatewayModeShared {
+		// if we are upgrading from Local to Shared gateway mode, we need to ensure the inter-node LRP is removed
+		removeLRPolicies(nodeName, []string{types.InterNodePolicyPriority})
 	}
 
 	return nil
