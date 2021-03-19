@@ -477,6 +477,26 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 			}
 			nFlows++
 		}
+
+		// We send BFD traffic both on the host and in ovn
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp6, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+		if err != nil {
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+	}
+
+	if config.IPv4Mode {
+		// We send BFD traffic both on the host and in ovn
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+		if err != nil {
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
 	}
 
 	// table 1, all other connections do normal processing

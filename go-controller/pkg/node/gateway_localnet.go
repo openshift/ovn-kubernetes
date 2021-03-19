@@ -572,6 +572,28 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 			}
 			nFlows++
 		}
+
+		// We send BFD traffic both on the host and in ovn
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp6, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+		if err != nil {
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+
+	if config.IPv4Mode {
+		// We send BFD traffic both on the host and in ovn
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+		if err != nil {
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
 	}
 
 	// table 1, we check to see if this dest mac is the shared mac, if so send to host
