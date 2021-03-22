@@ -210,6 +210,22 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 			eNode.tainted = false
 		}
 	}
+	policyIDs, err := findLegacyReroutePolicyIDs()
+	if err != nil {
+		klog.Errorf("Unable to clean up legacy egress IP setup, err: %v", err)
+	}
+	for _, policyID := range policyIDs {
+		_, stderr, err := util.RunOVNNbctl(
+			"remove",
+			"logical_router",
+			types.OVNClusterRouter,
+			"policies",
+			policyID,
+		)
+		if err != nil {
+			klog.Errorf("Unable to delete legacy logical router policy: %s, stderr: %s, err: %v", policyID, stderr, err)
+		}
+	}
 
 	// This part will take of syncing stale data which we might have in OVN if
 	// there's no ovnkube-master running for a while, while there are changes to
@@ -988,6 +1004,26 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 		}
 	}
 	return nil
+}
+
+func findLegacyReroutePolicyIDs() ([]string, error) {
+	policyIDs, stderr, err := util.RunOVNNbctl(
+		"--format=csv",
+		"--data=bare",
+		"--no-heading",
+		"--columns=_uuid",
+		"find",
+		"logical_router_policy",
+		fmt.Sprintf("priority=%v", types.EgressIPReroutePriority),
+		"nexthop!=[]",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find legacy logical router policies, stderr: %s, err: %v", stderr, err)
+	}
+	if policyIDs == "" {
+		return nil, nil
+	}
+	return strings.Split(policyIDs, "\n"), nil
 }
 
 func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIPs []net.IP) ([]string, error) {
