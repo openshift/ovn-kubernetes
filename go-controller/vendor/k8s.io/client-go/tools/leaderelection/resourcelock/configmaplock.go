@@ -113,7 +113,12 @@ func (cml *ConfigMapLock) RecordEvent(s string) {
 // Describe is used to convert details on current resource lock
 // into a string
 func (cml *ConfigMapLock) Describe() string {
-	return fmt.Sprintf("%v/%v", cml.ConfigMapMeta.Namespace, cml.ConfigMapMeta.Name)
+	var ns, name string
+	if cml.cm != nil {
+		ns = cml.cm.Namespace
+		name = cml.cm.Name
+	}
+	return fmt.Sprintf("[%v/%v %v/%v]", cml.ConfigMapMeta.Namespace, cml.ConfigMapMeta.Name, ns, name)
 }
 
 // Identity returns the Identity of the lock

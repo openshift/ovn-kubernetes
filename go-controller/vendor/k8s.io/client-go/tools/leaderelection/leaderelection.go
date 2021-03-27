@@ -290,6 +290,7 @@ func (le *LeaderElector) release() bool {
 	if !le.IsLeader() {
 		return true
 	}
+	klog.Infof("###### releasing cm %+v %s", le.config.Lock, le.config.Lock.Describe())
 	now := metav1.Now()
 	leaderElectionRecord := rl.LeaderElectionRecord{
 		LeaderTransitions:    le.observedRecord.LeaderTransitions,
