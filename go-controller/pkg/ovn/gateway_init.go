@@ -338,6 +338,16 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 					"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 			}
 		}
+	} else {
+		// ensure we do not have any leftover SNAT entries after an upgrade
+		for _, logicalSubnet := range clusterIPSubnet {
+			_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-nat-del", gatewayRouter, "snat",
+				logicalSubnet.String())
+			if err != nil {
+				return fmt.Errorf("failed to delete GW SNAT rule for pod on router %s, for subnet: %s, "+
+					"stderr: %q, error: %v", gatewayRouter, logicalSubnet, stderr, err)
+			}
+		}
 	}
 	return nil
 }
