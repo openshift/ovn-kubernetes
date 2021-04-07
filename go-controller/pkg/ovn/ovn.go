@@ -671,10 +671,11 @@ func (oc *Controller) WatchCRD() {
 				}
 
 				oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
-				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				if err != nil {
 					klog.Errorf("Error Creating EgressFirewallDNS: %v", err)
+					return
 				}
+				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 			}
 		},
@@ -751,12 +752,16 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) && oc.isEgressNodeReachable(node) {
+			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
 				oc.setNodeEgressAssignable(node.Name, true)
-				oc.setNodeEgressReady(node.Name, true)
-				oc.setNodeEgressReachable(node.Name, true)
-				if err := oc.addEgressNode(node); err != nil {
-					klog.Error(err)
+				if oc.isEgressNodeReady(node) {
+					oc.setNodeEgressReady(node.Name, true)
+					if oc.isEgressNodeReachable(node) {
+						oc.setNodeEgressReachable(node.Name, true)
+						if err := oc.addEgressNode(node); err != nil {
+							klog.Error(err)
+						}
+					}
 				}
 			}
 		},
@@ -1001,7 +1006,7 @@ func (oc *Controller) WatchNodes() {
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) {
+			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1114,11 +1119,6 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-
-	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
-		return false
-	}
-
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
 
