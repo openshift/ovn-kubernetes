@@ -40,6 +40,27 @@ const (
 	V4NodeLocalNatSubnetPrefix     = 20
 	V4NodeLocalNatSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGwPortIP = "169.254.0.2"
+	OVNClusterRouter               = "ovn_cluster_router"
+	GWRouterPrefix                 = "GR_"
+	OVNJoinSwitch                  = "join"
+	JoinSwitchToGWRouterPrefix     = "jtor-"
+	GWRouterToJoinSwitchPrefix     = "rtoj-"
+	ExternalSwitchPrefix           = "ext_"
+	GWRouterToExtSwitchPrefix      = "rtoe-"
+	EXTSwitchToGWRouterPrefix      = "etor-"
+	// LoadBalancer External Names
+	ClusterLBTCP          = "k8s-cluster-lb-tcp"
+	ClusterLBUDP          = "k8s-cluster-lb-udp"
+	ClusterLBSCTP         = "k8s-cluster-lb-sctp"
+	ClusterLBPrefix       = "k8s-cluster-lb"
+	ClusterIdlingLBPrefix = "k8s-idling-lb"
+	WorkerLBPrefix        = "k8s-worker-lb"
+	WorkerLBTCP           = WorkerLBPrefix + "-tcp"
+	WorkerLBUDP           = WorkerLBPrefix + "-udp"
+	WorkerLBSCTP          = WorkerLBPrefix + "-sctp"
+	GatewayLBTCP          = "TCP_lb_gateway_router"
+	GatewayLBUDP          = "UDP_lb_gateway_router"
+	GatewayLBSCTP         = "SCTP_lb_gateway_router"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty

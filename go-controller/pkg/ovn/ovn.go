@@ -42,10 +42,9 @@ import (
 )
 
 const (
-	egressfirewallCRD                string        = "egressfirewalls.k8s.ovn.org"
-	clusterPortGroupName             string        = "clusterPortGroup"
-	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
-	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
+	egressfirewallCRD       string = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName    string = "clusterPortGroup"
+	clusterRtrPortGroupName string = "clusterRtrPortGroup"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a

@@ -94,6 +94,7 @@ func (o *FakeOVN) init() {
 
 	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.fakeEgressIPClient, o.fakeEgressClient, o.fakeCRDClient)
+	Expect(err).NotTo(HaveOccurred())
 	if o.fakeEgressClient != nil {
 		o.watcher.InitializeEgressFirewallWatchFactory()
 	}

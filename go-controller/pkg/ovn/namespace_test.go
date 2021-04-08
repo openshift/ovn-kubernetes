@@ -7,11 +7,18 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -50,9 +57,11 @@ func newNamespace(namespace string) *v1.Namespace {
 
 var _ = Describe("OVN Namespace Operations", func() {
 	const (
-		namespaceName    = "namespace1"
-		v4AddressSetName = namespaceName + ipv4AddressSetSuffix
-		v6AddressSetName = namespaceName + ipv6AddressSetSuffix
+		namespaceName           = "namespace1"
+		v4AddressSetName        = namespaceName + ipv4AddressSetSuffix
+		v6AddressSetName        = namespaceName + ipv6AddressSetSuffix
+		clusterIPNet     string = "10.1.0.0"
+		clusterCIDR      string = clusterIPNet + "/16"
 	)
 	var (
 		app     *cli.App
@@ -124,7 +133,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
-						*newNamespace("namespace1"),
+						*newNamespace(namespaceName),
 					},
 				})
 				fakeOvn.controller.WatchNamespaces()
@@ -140,6 +149,146 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("creates an address set for existing nodes when the host network traffic namespace is created", func() {
+			app.Action = func(ctx *cli.Context) error {
+				node1 := tNode{
+					Name:                 "node1",
+					NodeIP:               "1.2.3.4",
+					NodeLRPMAC:           "0a:58:0a:01:01:01",
+					LrpMAC:               "0a:58:64:40:00:02",
+					DrLrpMAC:             "0a:58:64:40:00:01",
+					JoinSubnet:           "100.64.0.0/29",
+					LrpIP:                "100.64.0.2",
+					LrpIPv6:              "fd98::2",
+					DrLrpIP:              "100.64.0.1",
+					PhysicalBridgeMAC:    "11:22:33:44:55:66",
+					SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+					TCPLBUUID:            "d2e858b2-cb5a-441b-a670-ed450f79a91f",
+					UDPLBUUID:            "12832f14-eb0f-44d4-b8db-4cccbc73c792",
+					SCTPLBUUID:           "0514c521-a120-4756-aec6-883fe5db7139",
+					NodeSubnet:           "10.1.1.0/24",
+					GWRouter:             util.GWRouterPrefix + "node1",
+					GatewayRouterIPMask:  "172.16.16.2/24",
+					GatewayRouterIP:      "172.16.16.2",
+					GatewayRouterNextHop: "172.16.16.1",
+					PhysicalBridgeName:   "br-eth0",
+					NodeGWIP:             "10.1.1.1/24",
+					NodeMgmtPortIP:       "10.1.1.2",
+					NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
+					DnatSnatIP:           "169.254.0.1",
+				}
+				// create a test node and annotate it with host subnet
+				testNode := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1.Name,
+					},
+					Status: kapi.NodeStatus{
+						Addresses: []kapi.NodeAddress{
+							{
+								Type:    kapi.NodeExternalIP,
+								Address: node1.NodeIP,
+							},
+						},
+					},
+				}
+
+				hostNetworkNamespace := "test-host-network-ns"
+				config.Kubernetes.HostNetworkNamespace = hostNetworkNamespace
+				hostNetworkNs := *newNamespace(hostNetworkNamespace)
+
+				fakeClient := fake.NewSimpleClientset(
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							hostNetworkNs,
+						},
+					},
+				)
+				egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+				egressIPFakeClient := &egressipfake.Clientset{}
+				crdFakeClient := &apiextensionsfake.Clientset{}
+
+				_, err := fakeClient.CoreV1().Nodes().Create(context.TODO(), &testNode, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
+
+				ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
+				vlanID := uint(1024)
+				err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+					Mode:           config.GatewayModeShared,
+					ChassisID:      node1.SystemID,
+					InterfaceID:    ifaceID,
+					MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
+					IPAddresses:    ovntest.MustParseIPNets(node1.GatewayRouterIPMask),
+					NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
+					NodePortEnable: true,
+					VLANID:         &vlanID,
+				})
+				err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+				Expect(err).NotTo(HaveOccurred())
+				err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
+				Expect(err).NotTo(HaveOccurred())
+				err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.JoinSubnet))
+
+				Expect(err).NotTo(HaveOccurred())
+				err = util.SetNodeLocalNatAnnotation(nodeAnnotator, []net.IP{ovntest.MustParseIP(node1.DnatSnatIP)})
+				Expect(err).NotTo(HaveOccurred())
+				err = nodeAnnotator.Run()
+				Expect(err).NotTo(HaveOccurred())
+
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(nodeHostSubnetAnnotations[0].String()).Should(Equal(node1.NodeSubnet))
+				_, err = config.InitConfig(ctx, fakeOvn.fakeExec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				fakeOvn.fakeClient = fakeClient
+				fakeOvn.fakeEgressIPClient = egressIPFakeClient
+				fakeOvn.fakeEgressClient = egressFirewallFakeClient
+				fakeOvn.fakeCRDClient = crdFakeClient
+				fakeOvn.init()
+
+				fakeOvn.controller.multicastSupport = false
+				fakeOvn.controller.TCPLoadBalancerUUID = node1.TCPLBUUID
+				fakeOvn.controller.UDPLoadBalancerUUID = node1.UDPLBUUID
+				fakeOvn.controller.SCTPLoadBalancerUUID = node1.SCTPLBUUID
+
+				_, clusterNetwork, err := net.ParseCIDR(clusterCIDR)
+				Expect(err).NotTo(HaveOccurred())
+
+				fakeOvn.controller.masterSubnetAllocator.AddNetworkRange(clusterNetwork, 24)
+
+				fakeOvn.controller.SCTPSupport = true
+
+				fexec := fakeOvn.fakeExec
+				addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, false)
+
+				fakeOvn.controller.WatchNamespaces()
+				hostnsAddrSet4 := hostNetworkNamespace + "_v4"
+				fakeOvn.asf.EventuallyExpectEmptyAddressSet(hostnsAddrSet4)
+				fakeOvn.controller.WatchNodes()
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+
+				// check the namespace again and ensure the address set
+				// being created with the right set of IPs in it.
+				allowIPs := []string{node1.NodeMgmtPortIP}
+				fakeOvn.asf.ExpectAddressSetWithIPs(hostnsAddrSet4, allowIPs)
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+				"--init-gateways",
+				"--nodeport",
+			})
+			Expect(err).NotTo(HaveOccurred())
+
 		})
 	})
 
