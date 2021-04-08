@@ -109,9 +109,11 @@ parse_args()
             -ov | --ovn-image )           	shift
                                           	OVN_IMAGE=$1
                                           	;;
-            --delete )                    	delete
-                                          	exit
-                                          	;;
+            -hns | --host-network-namespace )   OVN_HOST_NETWORK_NAMESPACE=$1
+                                                ;;
+            --delete )                          delete
+                                                exit
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -139,6 +141,7 @@ print_params()
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo ""
 }
 
@@ -164,7 +167,6 @@ OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
 OVN_IMAGE=${OVN_IMAGE:-local}
-
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
 # NOTE: KIND NET_CIDR_IPV6 default use a /64 but OVN have a /64 per host
@@ -183,6 +185,7 @@ if [ "$OVN_HA" == true ]; then
 else
   KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
 fi
+OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
 print_params
 
