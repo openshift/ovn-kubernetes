@@ -328,14 +328,10 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			// delete the existing lr-nat rule first otherwise gateway init fails
-			// if the external ip has changed, but the logical ip has stayed the same
-			stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
-				gatewayRouter, "snat", entry.String(), "--", "lr-nat-add",
-				gatewayRouter, "snat", externalIP.String(), entry.String())
-			if err != nil {
-				return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
-					"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+
+			if err := util.UpdateRouterSNAT(gatewayRouter, externalIP, entry); err != nil {
+				return fmt.Errorf("failed to update NAT entry for pod subnet: %s, GR: %s, error: %v",
+					entry.String(), gatewayRouter, err)
 			}
 		}
 	}
@@ -576,8 +572,12 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 
 	mgmtPortName := util.K8sPrefix + node.Name
 	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del", ovnClusterRouter,
-		"dnat_and_snat", externalIP.String(), "--",
-		"lr-nat-add", ovnClusterRouter, "dnat_and_snat",
+		"dnat_and_snat", externalIP.String())
+	if err != nil {
+		return fmt.Errorf("failed to delete dnat_and_snat entry for the management port on node %s, "+
+			"stdout: %s, stderr: %q, error: %v", node.Name, stdout, stderr, err)
+	}
+	stdout, stderr, err = util.RunOVNNbctl("lr-nat-add", ovnClusterRouter, "dnat_and_snat",
 		externalIP.String(), mgmtPortIfAddr.IP.String(), mgmtPortName, mgmtPortMAC)
 	if err != nil {
 		return fmt.Errorf("failed to add dnat_and_snat entry for the management port on node %s, "+
