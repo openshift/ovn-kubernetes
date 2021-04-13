@@ -1,6 +1,8 @@
 package node
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -15,6 +17,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	apimachinerytypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -22,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/util/taints"
 	utilnet "k8s.io/utils/net"
 
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
@@ -464,6 +469,19 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			err = config.WriteCNIConfig()
 			if err != nil {
 				return err
+			}
+		}
+	}
+
+	// remove the NoSchedule Taint from the node, now that networking setup is done.
+	if nodeObjJson, err := json.Marshal(node); err == nil {
+		if taintedNodeObj, _, err := taints.RemoveTaint(node, &kapi.Taint{Key: "k8s.ovn.org/network-unavailable", Value: "NoSchedule", Effect: "NoSchedule"}); err == nil {
+			if taintedNodeObjJson, err := json.Marshal(taintedNodeObj); err == nil {
+				if patchBytes, err := strategicpatch.CreateTwoWayMergePatch(nodeObjJson, taintedNodeObjJson, kapi.Node{}); err == nil {
+					if _, err = n.client.CoreV1().Nodes().Patch(context.TODO(), n.name, apimachinerytypes.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}); err == nil {
+						klog.Infof("Successfully removed NoSchedule taint on node %v", n.name)
+					}
+				}
 			}
 		}
 	}

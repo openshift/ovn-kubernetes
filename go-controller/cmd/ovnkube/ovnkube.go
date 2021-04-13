@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,7 +15,12 @@ import (
 	"text/template"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apimachinerytypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/util/taints"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
@@ -98,7 +104,13 @@ func main() {
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
 	c.Flags = config.GetFlags(nil)
 
+	var node string
+
 	c.Action = func(c *cli.Context) error {
+		// save the nodename to use it to taint the node later on
+		// when the ovnkube pod gets deleted so that no new pods
+		// get scheduled on this node when networking is down.
+		node = c.String("init-node")
 		return runOvnKube(c)
 	}
 
@@ -121,6 +133,26 @@ func main() {
 		select {
 		case s := <-exitCh:
 			klog.Infof("Received signal %s. Shutting down", s)
+			if s == syscall.SIGTERM {
+				// Add the NoSchedule taint so that during upgrades and also in general when the ovnkube-node
+				// pod is down, i.e networking is unavailable, we don't assign pods to this node.
+				klog.Infof("Adding taint NoSchedule on node %v", node)
+				if ovnkclient, err := util.NewOVNClientset(&config.Kubernetes); err == nil {
+					if nodeObj, err := ovnkclient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node, metav1.GetOptions{}); err == nil {
+						if nodeObjJson, err := json.Marshal(nodeObj); err == nil {
+							if taintedNodeObj, _, err := taints.AddOrUpdateTaint(nodeObj, &corev1.Taint{Key: "k8s.ovn.org/network-unavailable", Value: "NoSchedule", Effect: "NoSchedule"}); err == nil {
+								if taintedNodeObjJson, err := json.Marshal(taintedNodeObj); err == nil {
+									if patchBytes, err := strategicpatch.CreateTwoWayMergePatch(nodeObjJson, taintedNodeObjJson, corev1.Node{}); err == nil {
+										if _, err = ovnkclient.KubeClient.CoreV1().Nodes().Patch(context.TODO(), node, apimachinerytypes.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}); err == nil {
+											klog.Infof("Successfully added NoSchedule taint on node %v", node)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 			cancel()
 		case <-ctx.Done():
 		}
