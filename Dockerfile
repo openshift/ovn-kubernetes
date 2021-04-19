@@ -35,6 +35,8 @@ RUN yum install -y  \
 ARG ovsver=2.15.0-9.el8fdp
 ARG ovnver=20.12.0-25.el8fdp
 
+COPY ovn2.13-20.12.0-108bz1946420_dbg_20210422_0.el8fdp.x86_64.rpm ovn2.13-central-20.12.0-108bz1946420_dbg_20210422_0.el8fdp.x86_64.rpm ovn2.13-host-20.12.0-108bz1946420_dbg_20210422_0.el8fdp.x86_64.rpm ovn2.13-vtep-20.12.0-108bz1946420_dbg_20210422_0.el8fdp.x86_64.rpm /root
+
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
@@ -46,6 +48,7 @@ RUN INSTALL_PKGS=" \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 = $ovnver" "ovn2.13-central = $ovnver" "ovn2.13-host = $ovnver" "ovn2.13-vtep = $ovnver" && \
+    rpm -Uhv --force --nodeps /root/ovn2.13*.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
