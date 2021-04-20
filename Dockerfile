@@ -35,6 +35,18 @@ RUN yum install -y  \
 ARG ovsver=2.15.0-9.el8fdp
 ARG ovnver=20.12.0-25.el8fdp
 
+#https://bugzilla.redhat.com/show_bug.cgi?id=1945415 - ARP lflow optimization
+COPY ovn2.13-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-central-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-host-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-vtep-20.12.0-99.el8fdp.x86_64.rpm /root
+
+
+
+# https://bugzilla.redhat.com/show_bug.cgi?id=1943631 - leadership transfer before snapshotting, and Anton's patch to limit time ovsdb processes db requests to % of election timer
+# http://brew-task-repos.usersys.redhat.com/repos/scratch/imaximet/openvswitch2.15/2.15.0/2.bz1943631.2.3.el8fdp/x86_64/
+# COPY openvswitch2.15-devel-2.15.0-4.el8fdp.x86_64.rpm python3-openvswitch2.15-2.15.0-4.el8fdp.x86_64.rpm openvswitch2.15-ipsec-2.15.0-4.el8fdp.x86_64.rpm /root
+COPY openvswitch2.15-2.15.0-2.bz1943631.2.3.el8fdp.x86_64.rpm openvswitch2.15-devel-2.15.0-2.bz1943631.2.3.el8fdp.x86_64.rpm python3-openvswitch2.15-2.15.0-2.bz1943631.2.3.el8fdp.x86_64.rpm openvswitch2.15-ipsec-2.15.0-2.bz1943631.2.3.el8fdp.x86_64.rpm /root
+
+
+
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
@@ -46,6 +58,9 @@ RUN INSTALL_PKGS=" \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 = $ovnver" "ovn2.13-central = $ovnver" "ovn2.13-host = $ovnver" "ovn2.13-vtep = $ovnver" && \
+	rpm -Uhv --force --nodeps /root/ovn2.13*.rpm && \
+	rpm -Uhv --force --nodeps /root/openvswitch2.15*.rpm && \
+	rpm -Uhv --force --nodeps /root/python3-openvswitch2.15*.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
