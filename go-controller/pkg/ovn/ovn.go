@@ -87,6 +87,9 @@ type namespaceInfo struct {
 	// defines the namespaces egressFirewallPolicy
 	egressFirewallPolicy *egressFirewall
 
+	hybridOverlayExternalGW net.IP
+	hybridOverlayVTEP       net.IP
+
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
 	routingExternalGWs gatewayInfo
