@@ -73,3 +73,5 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn
 
 NOTE: You don't need kube-proxy for OVN to work. You can delete that from your
 cluster.
+
+.
