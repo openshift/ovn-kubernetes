@@ -35,6 +35,8 @@ RUN yum install -y  \
 ARG ovsver=2.15.0-9.el8fdp
 ARG ovnver=20.12.0-25.el8fdp
 
+COPY ovn-21.03.90-1.el8.x86_64.rpm ovn-central-21.03.90-1.el8.x86_64.rpm ovn-host-21.03.90-1.el8.x86_64.rpm ovn-vtep-21.03.90-1.el8.x86_64.rpm /root/
+
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
@@ -42,18 +44,20 @@ RUN INSTALL_PKGS=" \
 	tcpdump iputils \
 	libreswan \
 	ethtool conntrack-tools \
+	unbound-libs \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 = $ovnver" "ovn2.13-central = $ovnver" "ovn2.13-host = $ovnver" "ovn2.13-vtep = $ovnver" && \
+	rpm -Uhv --force --nodeps /root/*.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
-    mkdir -p /var/run/ovn && \
-    mkdir -p /etc/cni/net.d && \
-    mkdir -p /opt/cni/bin && \
-    mkdir -p /usr/libexec/cni/ && \
-    mkdir -p /root/windows/
+	mkdir -p /var/run/ovn && \
+	mkdir -p /etc/cni/net.d && \
+	mkdir -p /opt/cni/bin && \
+	mkdir -p /usr/libexec/cni/ && \
+	mkdir -p /root/windows/
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
@@ -84,10 +88,10 @@ COPY ./dist/images/iptables-scripts/ip6tables-restore /usr/sbin/
 COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
 
 LABEL io.k8s.display-name="ovn kubernetes" \
-      io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
-      summary="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
-      io.openshift.tags="openshift" \
-      maintainer="Tim Rozet <trozet@redhat.com>"
+	io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
+	summary="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
+	io.openshift.tags="openshift" \
+	maintainer="Tim Rozet <trozet@redhat.com>"
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
