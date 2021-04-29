@@ -72,9 +72,10 @@ var _ = Describe("OVN EgressFirewall Operations for local gateway mode", func() 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
 				})
 
 				namespace1 := *newNamespace("namespace1")
@@ -130,9 +131,10 @@ var _ = Describe("OVN EgressFirewall Operations for local gateway mode", func() 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
 				})
 
 				namespace1 := *newNamespace("namespace1")
@@ -189,9 +191,10 @@ var _ = Describe("OVN EgressFirewall Operations for local gateway mode", func() 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
 				})
 				namespace1 := *newNamespace("namespace1")
 				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
@@ -249,12 +252,13 @@ var _ = Describe("OVN EgressFirewall Operations for local gateway mode", func() 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.5/23) && " +
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.5/23) && " +
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.5/23) && " +
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.5/23) && " +
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.5/23) && " +
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node2Name + " acls @acl",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -329,11 +333,12 @@ var _ = Describe("OVN EgressFirewall Operations for local gateway mode", func() 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1-blockAll",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=10000 direction=from-lport match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1-blockAll -- add logical_switch " + node1Name + " acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=10000 direction=to-lport match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1-blockAll -- add logical_switch " + node1Name + " acls @acl",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=namespace1",
@@ -342,7 +347,7 @@ var _ = Describe("OVN EgressFirewall Operations for local gateway mode", func() 
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					"ovn-nbctl --timeout=15 remove logical_switch " + node1Name + " acls " + fmt.Sprintf("%s", fakeUUID),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=namespace1-blockAll",
@@ -447,9 +452,10 @@ var _ = Describe("OVN EgressFirewall Operations for shared gateway mode", func()
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
 				})
 
 				namespace1 := *newNamespace("namespace1")
@@ -506,9 +512,10 @@ var _ = Describe("OVN EgressFirewall Operations for shared gateway mode", func()
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
 				})
 
 				namespace1 := *newNamespace("namespace1")
@@ -566,9 +573,10 @@ var _ = Describe("OVN EgressFirewall Operations for shared gateway mode", func()
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
 				})
 				namespace1 := *newNamespace("namespace1")
 				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
@@ -627,10 +635,11 @@ var _ = Describe("OVN EgressFirewall Operations for shared gateway mode", func()
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.5/23) && " +
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.5/23) && " +
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.5/23) && " +
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -699,11 +708,12 @@ var _ = Describe("OVN EgressFirewall Operations for shared gateway mode", func()
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, fromLport),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1-blockAll",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=10000 direction=from-lport match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1-blockAll -- add logical_switch join acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=10000 direction=to-lport match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1-blockAll -- add logical_switch join acls @acl",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=namespace1",
@@ -712,7 +722,7 @@ var _ = Describe("OVN EgressFirewall Operations for shared gateway mode", func()
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					"ovn-nbctl --timeout=15 remove logical_switch join acls " + fmt.Sprintf("%s", fakeUUID),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=to-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=namespace1-blockAll",
