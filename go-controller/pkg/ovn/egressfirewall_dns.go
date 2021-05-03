@@ -193,3 +193,16 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 func (e *EgressDNS) Shutdown() {
 	close(e.stopChan)
 }
+
+// function only used for testing
+// TODO when address_set gets moved to its own package remove this function and move
+// egress_firewall_dns_test into the same package as egressfirewall_dns
+func (e *EgressDNS) GetDNSEntry(dnsName string) (map[string]struct{}, []net.IP, addressset.AddressSet) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	if dnsEntry, exists := e.dnsEntries[dnsName]; exists {
+		return dnsEntry.namespaces, dnsEntry.dnsResolves, dnsEntry.dnsAddressSet
+	}
+
+	return nil, nil, nil
+}
