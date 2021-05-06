@@ -142,6 +142,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+est, actions=output:5",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+rel, actions=output:5",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=10, table=1, dl_dst=" + eth0MAC + ", actions=output:LOCAL",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=13, table=1, in_port=7, udp, tp_dst=3784, actions=output:5,output:LOCAL",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=1, actions=output:NORMAL",
 		})
 		// nodePortWatcher()
