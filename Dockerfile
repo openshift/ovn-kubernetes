@@ -36,8 +36,9 @@ ARG ovsver=2.15.0-9.el8fdp
 ARG ovnver=20.12.0-25.el8fdp
 
 #https://bugzilla.redhat.com/show_bug.cgi?id=1945415 - ARP lflow optimization
-COPY ovn2.13-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-central-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-host-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-vtep-20.12.0-99.el8fdp.x86_64.rpm /root
-
+#COPY ovn2.13-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-central-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-host-20.12.0-99.el8fdp.x86_64.rpm ovn2.13-vtep-20.12.0-99.el8fdp.x86_64.rpm /root
+# fix for ovn-installed plus above
+COPY ovn2.13-20.12.0-117.el8fdp.x86_64.rpm ovn2.13-central-20.12.0-117.el8fdp.x86_64.rpm ovn2.13-host-20.12.0-117.el8fdp.x86_64.rpm ovn2.13-vtep-20.12.0-117.el8fdp.x86_64.rpm /root
 
 
 # https://bugzilla.redhat.com/show_bug.cgi?id=1943631 - leadership transfer before snapshotting, and Anton's patch to limit time ovsdb processes db requests to % of election timer
