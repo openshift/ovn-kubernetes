@@ -240,7 +240,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet, 
 	} else {
 		queries = getLegacyFlowQueries(mac, ifAddrs, ofPort)
 	}
-	timeout := time.After(20 * time.Second)
+	timeout := time.After(45 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
