@@ -48,10 +48,12 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	nsInfo, err := oc.waitForNamespaceLocked(ns)
+	if nsInfo != nil {
+		defer nsInfo.Unlock()
+	}
 	if err != nil {
 		return err
 	}
-	defer nsInfo.Unlock()
 
 	if nsInfo.addressSet == nil {
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
@@ -341,7 +343,6 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 // with its mutex locked.
 func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 	oc.namespacesMutex.Lock()
-	defer oc.namespacesMutex.Unlock()
 
 	nsInfo := &namespaceInfo{
 		networkPolicies:       make(map[string]*namespacePolicy),
@@ -349,9 +350,10 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 		multicastEnabled:      false,
 		routingExternalPodGWs: make(map[string][]net.IP),
 	}
-	nsInfo.Lock()
 	oc.namespaces[ns] = nsInfo
+	oc.namespacesMutex.Unlock()
 
+	nsInfo.Lock()
 	return nsInfo
 }
 
