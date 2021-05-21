@@ -23,8 +23,10 @@ require (
 	github.com/miekg/dns v1.1.31
 	github.com/onsi/ginkgo v1.15.0
 	github.com/onsi/gomega v1.10.1
+	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
+	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/spf13/afero v1.4.1
 	github.com/stretchr/testify v1.6.1
 	github.com/urfave/cli/v2 v2.2.0

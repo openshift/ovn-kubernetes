@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
+	"github.com/sasha-s/go-deadlock"
 	"net"
 	"reflect"
 	"strconv"
@@ -74,7 +74,7 @@ type ACLLoggingLevels struct {
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
 // manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
 type namespaceInfo struct {
-	sync.Mutex
+	deadlock.Mutex
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
@@ -154,7 +154,7 @@ type Controller struct {
 	// or oc.deleteNamespaceLocked() to modify it. namespacesMutex is only held
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
-	namespacesMutex sync.Mutex
+	namespacesMutex deadlock.Mutex
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
@@ -191,7 +191,7 @@ type Controller struct {
 	// Map of load balancers, each containing a map of VIP to OVN LB Config
 	serviceLBMap map[string]map[string]*loadBalancerConf
 
-	serviceLBLock sync.Mutex
+	serviceLBLock deadlock.Mutex
 
 	joinSwIPManager *joinSwitchIPManager
 
@@ -267,7 +267,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		lsManager:                 newLogicalSwitchManager(),
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
-		namespacesMutex:           sync.Mutex{},
+		namespacesMutex:           deadlock.Mutex{},
 		addressSetFactory:         addressSetFactory,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
@@ -286,7 +286,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		multicastSupport:         config.EnableMulticast,
 		aclLoggingEnabled:        true,
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
-		serviceLBLock:            sync.Mutex{},
+		serviceLBLock:            deadlock.Mutex{},
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]retryEntry),
 		recorder:                 recorder,
