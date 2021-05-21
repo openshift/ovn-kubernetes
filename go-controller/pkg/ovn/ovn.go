@@ -74,7 +74,7 @@ type ACLLoggingLevels struct {
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
 // manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
 type namespaceInfo struct {
-	deadlock.Mutex
+	sync.Mutex
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
@@ -154,7 +154,7 @@ type Controller struct {
 	// or oc.deleteNamespaceLocked() to modify it. namespacesMutex is only held
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
-	namespacesMutex deadlock.Mutex
+	namespacesMutex sync.Mutex
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
@@ -267,7 +267,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		lsManager:                 newLogicalSwitchManager(),
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
-		namespacesMutex:           deadlock.Mutex{},
+		namespacesMutex:           sync.Mutex{},
 		addressSetFactory:         addressSetFactory,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
