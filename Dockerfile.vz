@@ -1,0 +1,9 @@
+FROM registry-proxy.engineering.redhat.com/rh-osbs/openshift-ose-ovn-kubernetes@sha256:3917195aa5c2e97b64eefa24ec1983f9890e89f1c0563577f30d804d5e095abf
+
+COPY go-controller/_output/go/bin/ovnkube /usr/bin/
+COPY go-controller/_output/go/bin/ovn-kube-util /usr/bin/
+COPY go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/
+COPY go-controller/_output/go/bin/ovndbchecker /usr/bin/
+
+WORKDIR /root
+ENTRYPOINT /root/ovnkube.sh
