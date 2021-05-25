@@ -128,29 +128,55 @@ func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, networkPolicy *k
 	}
 }
 
-func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, findAgain bool) {
+func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, namespace string) {
 	readableGroupName := n.baseCmds(fexec, networkPolicy)
+	as := []string{}
+	if namespace != "" {
+		as = append(as, namespace)
+	}
+
 	for i := range networkPolicy.Spec.Ingress {
+		ingressAsMatch := asMatch(append(as, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
 		})
-		if findAgain {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-			})
-		}
 	}
 	for i := range networkPolicy.Spec.Egress {
+		egressAsMatch := asMatch(append(as, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=%v external-ids:policy_type=Egress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.dst == {$a17928043879887565554} && inport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
 		})
-		if findAgain {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a17928043879887565554} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
-			})
-		}
+	}
+}
+
+func (n networkPolicy) addNamespaceSelectorCmdsExistingAcl(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, namespace string) {
+	for i := range networkPolicy.Spec.Ingress {
+		ingressAsMatch := asMatch([]string{
+			namespace,
+			getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", networkPolicy.Namespace, networkPolicy.Name, i),
+			Output: fakeUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a14195333570786048679\" priority=1001 direction=to-lport action=allow-related",
+		})
+	}
+	for i := range networkPolicy.Spec.Egress {
+		egressAsMatch := asMatch([]string{
+			namespace,
+			getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=%v external-ids:policy_type=Egress", networkPolicy.Namespace, networkPolicy.Name, i),
+			Output: fakeUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a14195333570786048679\" priority=1001 direction=to-lport action=allow-related",
+		})
 	}
 }
 
@@ -634,7 +660,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, namespace2.Name)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -716,7 +742,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
 				fakeOvn.start(ctx,
@@ -813,7 +839,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -990,7 +1016,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, namespace2.Name)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
 				fakeOvn.start(ctx,
@@ -1021,16 +1047,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a3128014386057836746, $a4615334824109672969} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-					Output: fakeUUID,
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\"",
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a17928043879887565554, $a4615334824109672969} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
-				})
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -1080,7 +1097,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, namespace2.Name)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1103,16 +1120,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a3128014386057836746, $a4615334824109672969} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-					Output: fakeUUID,
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\"",
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a17928043879887565554, $a4615334824109672969} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
-				})
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -1171,7 +1179,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
 				fakeOvn.start(ctx,
@@ -1276,7 +1284,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1381,7 +1389,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1478,7 +1486,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
 				fakeOvn.start(ctx,
@@ -1544,18 +1552,16 @@ func asMatch(addressSets []string) string {
 func addExpectedGressCmds(fExec *ovntest.FakeExec, gp *gressPolicy, pgName string, oldAS, newAS []string) []string {
 	const uuid string = "94407fe0-2c15-4a63-baea-ab4af0ea5bb8"
 
-	oldMatch := asMatch(oldAS)
 	newMatch := asMatch(newAS)
 
 	gpDirection := string(knet.PolicyTypeIngress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {%s} && outport == @%s\" external-ids:namespace=%s external-ids:policy=%s external-ids:%s_num=%d external-ids:policy_type=%s",
-			oldMatch, pgName, gp.policyNamespace, gp.policyName, gpDirection, gp.idx, gpDirection),
+		Cmd: fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:%s_num=%d external-ids:policy_type=%s",
+			gp.policyNamespace, gp.policyName, gpDirection, gp.idx, gpDirection),
 		Output: uuid,
 	})
 	fExec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s match=\"ip4.src == {%s} && outport == @%s\"",
-			uuid, newMatch, pgName),
+		fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s match=\"ip4.src == {%s} && outport == @%s\" priority=1001 direction=to-lport action=allow-related", uuid, newMatch, pgName),
 	})
 	return newAS
 }
@@ -1606,70 +1612,80 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		six := fmt.Sprintf("testing.policy.ingress.6")
 
 		cur := addExpectedGressCmds(fExec, gp, pgName, []string{asName}, []string{asName, one})
-		gp.addNamespaceAddressSet(one, pgName)
+		Expect(gp.addNamespaceAddressSet(one)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two})
-		gp.addNamespaceAddressSet(two, pgName)
+		Expect(gp.addNamespaceAddressSet(two)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// address sets should be alphabetized
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three})
-		gp.addNamespaceAddressSet(three, pgName)
+		Expect(gp.addNamespaceAddressSet(three)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// re-adding an existing set is a no-op
-		gp.addNamespaceAddressSet(one, pgName)
-		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+		gp.addNamespaceAddressSet(one)
+		Expect(gp.addNamespaceAddressSet(three)).To(BeFalse())
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three, four})
-		gp.addNamespaceAddressSet(four, pgName)
+		Expect(gp.addNamespaceAddressSet(four)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// now delete a set
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four})
-		gp.delNamespaceAddressSet(one, pgName)
+		Expect(gp.delNamespaceAddressSet(one)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is a no-op
-		gp.delNamespaceAddressSet(one, pgName)
+		Expect(gp.delNamespaceAddressSet(one)).To(BeFalse())
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// add and delete some more...
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four, five})
-		gp.addNamespaceAddressSet(five, pgName)
+		Expect(gp.addNamespaceAddressSet(five)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five})
-		gp.delNamespaceAddressSet(three, pgName)
+		Expect(gp.delNamespaceAddressSet(three)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is no-op
-		gp.delNamespaceAddressSet(one, pgName)
-		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+		Expect(gp.delNamespaceAddressSet(one)).To(BeFalse())
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five, six})
-		gp.addNamespaceAddressSet(six, pgName)
+		Expect(gp.addNamespaceAddressSet(six)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, five, six})
-		gp.delNamespaceAddressSet(two, pgName)
+		Expect(gp.delNamespaceAddressSet(two)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, six})
-		gp.delNamespaceAddressSet(five, pgName)
+		Expect(gp.delNamespaceAddressSet(five)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four})
-		gp.delNamespaceAddressSet(six, pgName)
+		Expect(gp.delNamespaceAddressSet(six)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName})
-		gp.delNamespaceAddressSet(four, pgName)
+		Expect(gp.delNamespaceAddressSet(four)).To(BeTrue())
+		gp.localPodSetACL(pgName, pgUUID)
 		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is no-op
-		gp.delNamespaceAddressSet(four, pgName)
-		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+		Expect(gp.delNamespaceAddressSet(four)).To(BeFalse())
 	})
 })

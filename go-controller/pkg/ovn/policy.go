@@ -727,7 +727,6 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 				podSelector:       fromJSON.PodSelector,
 			})
 		}
-		ingress.localPodAddACL(np.portGroupName, np.portGroupUUID)
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
 	}
 
@@ -763,7 +762,6 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 				podSelector:       toJSON.PodSelector,
 			})
 		}
-		egress.localPodAddACL(np.portGroupName, np.portGroupUUID)
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
 	np.Unlock()
@@ -790,6 +788,22 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			// populates the addressSet
 			oc.handlePeerPodSelector(policy, handler.podSelector,
 				handler.gress, np)
+		}
+	}
+
+	// Finally, make sure that all ACLs are set
+	oc.addNetworkPolicyACL(np)
+}
+
+func (oc *Controller) addNetworkPolicyACL(np *namespacePolicy) {
+	np.Lock()
+	defer np.Unlock()
+	if !np.deleted {
+		for _, gp := range np.ingressPolicies {
+			gp.localPodSetACL(np.portGroupName, np.portGroupUUID)
+		}
+		for _, gp := range np.egressPolicies {
+			gp.localPodSetACL(np.portGroupName, np.portGroupUUID)
 		}
 	}
 }
@@ -1008,6 +1022,15 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
 }
 
+func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(np *namespacePolicy, gp *gressPolicy, doUpdate func() bool) {
+	np.Lock()
+	defer np.Unlock()
+	// This needs to be a write lock because there's no locking around 'gress policies
+	if !np.deleted && doUpdate() {
+		gp.localPodSetACL(np.portGroupName, np.portGroupUUID)
+	}
+}
+
 func (oc *Controller) handlePeerNamespaceSelector(
 	policy *knet.NetworkPolicy,
 	namespaceSelector *metav1.LabelSelector,
@@ -1020,23 +1043,33 @@ func (oc *Controller) handlePeerNamespaceSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.Lock()
-				defer np.Unlock()
-				if !np.deleted {
-					gress.addNamespaceAddressSet(namespace.Name, np.portGroupName)
-				}
+				// Update the ACL ...
+				oc.handlePeerNamespaceSelectorOnUpdate(np, gress, func() bool {
+					// ... on condition that the added address set was not already in the 'gress policy
+					return gress.addNamespaceAddressSet(namespace.Name)
+				})
 			},
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.Lock()
-				defer np.Unlock()
-				if !np.deleted {
-					gress.delNamespaceAddressSet(namespace.Name, np.portGroupName)
-				}
+				// Update the ACL ...
+				oc.handlePeerNamespaceSelectorOnUpdate(np, gress, func() bool {
+					// ... on condition that the removed address set was in the 'gress policy
+					return gress.delNamespaceAddressSet(namespace.Name)
+				})
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},
-		}, nil)
+		}, func(i []interface{}) {
+			// This needs to be a write lock because there's no locking around 'gress policies
+			np.Lock()
+			defer np.Unlock()
+			// We load the existing address set into the 'gress policy.
+			// Notice that this will make the AddFunc for this initial
+			// address set a noop.
+			// The ACL must be set explicitly after setting up this handler
+			// for the address set to be considered.
+			gress.addNamespaceAddressSets(i)
+		})
 	np.nsHandlerList = append(np.nsHandlerList, h)
 }
 
