@@ -33,7 +33,7 @@ RUN yum install -y  \
 	yum clean all
 
 ARG ovsver=2.13.0-72.el8fdp
-ARG ovnver=20.06.2-11.el8fdp
+ARG ovnver=20.12.0-24.el8fdp
 
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
@@ -42,9 +42,6 @@ RUN INSTALL_PKGS=" \
 	tcpdump iputils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	#======== 4.6.0-0.nightly-2020-09-25-070943 Version ========
-	# ovn2.13-20.06.2-11.el8fdp.x86_64
-	# openvswitch2.13-2.13.0-57.el8fdp
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == $ovsver" "openvswitch2.13-devel == $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 == $ovnver" "ovn2.13-central == $ovnver" "ovn2.13-host == $ovnver" "ovn2.13-vtep == $ovnver" && \
 	yum clean all && rm -rf /var/cache/*
