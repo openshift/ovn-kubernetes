@@ -68,6 +68,7 @@ fi
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
+# OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -155,6 +156,8 @@ mtu=${OVN_MTU:-1400}
 metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
+# namespace used for classifying host network traffic
+ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
 # host on which ovnkube-db POD is running and this POD contains both
 # OVN NB and SB DB running in their own container.
@@ -482,6 +485,7 @@ display_env() {
   echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
   echo ovnkube.sh version ${ovnkube_version}
+  echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
 }
 
 ovn_debug() {
@@ -887,7 +891,9 @@ ovn-master() {
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} &
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --host-network-namespace ${ovn_host_network_namespace} &
+
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
 
@@ -1031,7 +1037,8 @@ ovn-node() {
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-    --metrics-bind-address ${ovnkube_node_metrics_bind_address} &
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
+    --host-network-namespace ${ovn_host_network_namespace} &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni
