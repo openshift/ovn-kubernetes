@@ -383,6 +383,13 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 		}()
 	}
 
+	// Final step to cleanup after resource handlers have synced
+	err := oc.ovnTopologyCleanup()
+	if err != nil {
+		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", OvnCurrentTopologyVersion, err)
+		return err
+	}
+
 	return nil
 }
 
@@ -490,6 +497,19 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 	}
 
 	return events, nil
+}
+
+func (oc *Controller) ovnTopologyCleanup() error {
+	ver, err := util.DetermineOVNTopoVersionFromOVN()
+	if err != nil {
+		return err
+	}
+
+	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
+	if ver <= OvnSingleJoinSwitchTopoVersion {
+		err = addressset.NonDualStackAddressSetCleanup()
+	}
+	return err
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
