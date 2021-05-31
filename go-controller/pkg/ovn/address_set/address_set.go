@@ -74,10 +74,7 @@ func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addre
 	return res, nil
 }
 
-// ForEachAddressSet will pass the unhashed address set name, namespace name
-// and the first suffix in the name to the 'iteratorFn' for every address_set in
-// OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
-func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
+func forEachAddressSet(do func(string)) error {
 	output, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-heading",
 		"--columns=external_ids", "find", "address_set")
 	if err != nil {
@@ -85,32 +82,43 @@ func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc
 			"stdout: %q, stderr: %q err: %v", output, stderr, err)
 	}
 
-	processedAddressSets := sets.String{}
 	for _, line := range strings.Split(output, "\n") {
 		for _, externalID := range strings.Split(line, ",") {
 			if !strings.HasPrefix(externalID, "name=") {
 				continue
 			}
-			// Remove the suffix from the address set name and normalize
-			addrSetName := truncateSuffixFromAddressSet(externalID[5:])
-			if processedAddressSets.Has(addrSetName) {
-				// We have already processed the address set. In case of dual stack we will have _v4 and _v6
-				// suffixes for address sets. Since we are normalizing these two address sets through this API
-				// we will process only one normalized address set name.
-				break
-			}
-			processedAddressSets.Insert(addrSetName)
-			names := strings.Split(addrSetName, ".")
-			addrSetNamespace := names[0]
-			nameSuffix := ""
-			if len(names) >= 2 {
-				nameSuffix = names[1]
-			}
-			iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
-			break
+			name := externalID[5:]
+			do(name)
 		}
 	}
 	return nil
+}
+
+// ForEachAddressSet will pass the unhashed address set name, namespace name
+// and the first suffix in the name to the 'iteratorFn' for every address_set in
+// OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
+func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
+	processedAddressSets := sets.String{}
+	err := forEachAddressSet(func(name string) {
+		// Remove the suffix from the address set name and normalize
+		addrSetName := truncateSuffixFromAddressSet(name)
+		if processedAddressSets.Has(addrSetName) {
+			// We have already processed the address set. In case of dual stack we will have _v4 and _v6
+			// suffixes for address sets. Since we are normalizing these two address sets through this API
+			// we will process only one normalized address set name.
+			return
+		}
+		processedAddressSets.Insert(addrSetName)
+		names := strings.Split(addrSetName, ".")
+		addrSetNamespace := names[0]
+		nameSuffix := ""
+		if len(names) >= 2 {
+			nameSuffix = names[1]
+		}
+		iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
+	})
+
+	return err
 }
 
 func truncateSuffixFromAddressSet(asName string) string {
