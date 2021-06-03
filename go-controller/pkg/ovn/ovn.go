@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
+	"github.com/sasha-s/go-deadlock"
 	"net"
 	"reflect"
 	"strconv"
@@ -189,7 +189,7 @@ type Controller struct {
 	// Map of load balancers, each containing a map of VIP to OVN LB Config
 	serviceLBMap map[string]map[string]*loadBalancerConf
 
-	serviceLBLock sync.Mutex
+	serviceLBLock deadlock.Mutex
 
 	joinSwIPManager *joinSwitchIPManager
 
@@ -284,7 +284,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		multicastSupport:         config.EnableMulticast,
 		aclLoggingEnabled:        true,
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
-		serviceLBLock:            sync.Mutex{},
+		serviceLBLock:            deadlock.Mutex{},
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]retryEntry),
 		recorder:                 recorder,
