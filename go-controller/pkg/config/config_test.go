@@ -137,6 +137,8 @@ func writeTestConfigFile(path string, overrides ...string) error {
 mtu=1500
 conntrack-zone=64321
 cluster-subnets=10.132.0.0/14/23
+lflow-cache-limit=1000
+lflow-cache-limit-kb=100000
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
@@ -239,6 +241,9 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1400))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(64000))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(0)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(0)))
 			gomega.Expect(Logging.File).To(gomega.Equal(""))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal(""))
@@ -488,6 +493,9 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1500))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(64321))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(1000)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(100000)))
 			gomega.Expect(Logging.File).To(gomega.Equal("/var/log/ovnkube.log"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
 			gomega.Expect(Logging.ACLLoggingRateLimit).To(gomega.Equal(20))
@@ -559,6 +567,9 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1234))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(5555))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(500)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(50000)))
 			gomega.Expect(Logging.File).To(gomega.Equal("/some/logfile"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(3))
 			gomega.Expect(Logging.ACLLoggingRateLimit).To(gomega.Equal(30))
@@ -605,6 +616,8 @@ var _ = Describe("Config Operations", func() {
 			"-config-file=" + cfgFile.Name(),
 			"-mtu=1234",
 			"-conntrack-zone=5555",
+			"-lflow-cache-limit=500",
+			"-lflow-cache-limit-kb=50000",
 			"-loglevel=3",
 			"-logfile=/some/logfile",
 			"-acl-logging-rate-limit=30",
@@ -874,6 +887,9 @@ mode=shared
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1234))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(5555))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(500)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(50000)))
 			gomega.Expect(Logging.File).To(gomega.Equal("/some/logfile"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(3))
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
@@ -912,6 +928,8 @@ mode=shared
 			"-config-file=" + cfgFile.Name(),
 			"-mtu=1234",
 			"-conntrack-zone=5555",
+			"-lflow-cache-limit=500",
+			"-lflow-cache-limit-kb=50000",
 			"-loglevel=3",
 			"-logfile=/some/logfile",
 			"-netflow-targets=2.2.2.2:2055",
@@ -959,6 +977,9 @@ mode=shared
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1500))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(64321))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(1000)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(100000)))
 			gomega.Expect(Default.RawClusterSubnets).To(gomega.Equal("10.132.0.0/14/23"))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
