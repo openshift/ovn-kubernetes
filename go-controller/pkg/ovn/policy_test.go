@@ -132,8 +132,8 @@ func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, network
 	readableGroupName := n.baseCmds(fexec, networkPolicy)
 	for i := range networkPolicy.Spec.Ingress {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=0 external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", networkPolicy.Namespace, networkPolicy.Name, i),
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
 		})
 		if findAgain {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -143,8 +143,8 @@ func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, network
 	}
 	for i := range networkPolicy.Spec.Egress {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=%v external-ids:policy_type=Egress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.dst == {$a17928043879887565554} && inport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=0 external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=%v external-ids:policy_type=Egress", networkPolicy.Namespace, networkPolicy.Name, i),
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.dst == {$a17928043879887565554} && inport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
 		})
 		if findAgain {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -907,10 +907,10 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				readableGroupName := fmt.Sprintf("%s_%s", networkPolicy.Namespace, networkPolicy.Name)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", portNum, networkPolicy.Namespace, networkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && tcp && tcp.dst==%d && outport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", portNum, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress", portNum, networkPolicy.Namespace, networkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && tcp && tcp.dst==%d && inport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", portNum, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", portNum, networkPolicy.Namespace, networkPolicy.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && tcp && tcp.dst==%d && outport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", portNum, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress", portNum, networkPolicy.Namespace, networkPolicy.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && tcp && tcp.dst==%d && inport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", portNum, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
 				})
 
 				fakeOvn.start(ctx,
