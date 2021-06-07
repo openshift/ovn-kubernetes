@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
@@ -136,7 +137,7 @@ func (f *fakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
 		defer f.RUnlock()
 		_, ok := f.sets[name]
 		return ok
-	}).Should(BeFalse())
+	}, 25*time.Second).Should(BeFalse())
 }
 
 type removeFunc func(string)
@@ -226,6 +227,11 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
+	// NOOP
 	return nil
 }
 
