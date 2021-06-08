@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -46,7 +47,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
+func NewCNIServer(rundir string, factory factory.NodeWatchFactory, kclient kubernetes.Interface) *Server {
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -57,6 +58,7 @@ func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 			Handler: router,
 		},
 		rundir:             rundir,
+		kclient:            kclient,
 		podLister:          corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 		runningSandboxAdds: make(map[string]*PodRequest),
 	}
@@ -228,7 +230,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	}
 	defer s.finishSandboxRequest(req)
 
-	result, err := s.requestFunc(req, s.podLister)
+	result, err := s.requestFunc(req, s.podLister, s.kclient)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)

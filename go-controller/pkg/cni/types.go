@@ -9,6 +9,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
@@ -88,7 +89,7 @@ type PodRequest struct {
 	cancel context.CancelFunc
 }
 
-type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error)
+type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, kclient kubernetes.Interface) ([]byte, error)
 
 // Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
@@ -96,6 +97,7 @@ type Server struct {
 	http.Server
 	requestFunc cniRequestFunc
 	rundir      string
+	kclient     kubernetes.Interface
 	podLister   corev1listers.PodLister
 
 	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
