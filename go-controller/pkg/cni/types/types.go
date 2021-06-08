@@ -23,6 +23,9 @@ type NetConf struct {
 	// LogFileMaxAge represents the maximum number
 	// of days to retain old log files
 	LogFileMaxAge int `json:"logfile-maxage"`
+
+	// Kubeconfig is the path to a kubeconfig
+	Kubeconfig string `json:"kubeconfig,omitempty"`
 }
 
 // NetworkSelectionElement represents one element of the JSON format
