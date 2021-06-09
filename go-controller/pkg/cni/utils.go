@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"runtime/pprof"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/klog/v2"
 )
 
 // wait on a certain pod annotation related condition
@@ -59,6 +64,30 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, n
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
+}
+
+func GetPodAnnotationsFallback(ctx context.Context, podLister corev1listers.PodLister, namespace, name string, annotCond podAnnotWaitCond, kclient kubernetes.Interface) (map[string]string, error) {
+	annotations, err := GetPodAnnotations(ctx, podLister, namespace, name, annotCond)
+	if err != nil {
+		klog.Warningf("Getting annotations for pod %s/%s via the SharedInformer failed, falling back to a direct request: %v", namespace, name, err)
+		pod, err2 := kclient.CoreV1().Pods(namespace).Get(ctx, name, v1.GetOptions{})
+		if err2 != nil {
+			klog.Warningf("Fallback failed when getting annotations for pod %s/%s: %v", namespace, name, err2)
+			return nil, err // return original error
+		}
+
+		annotations = pod.ObjectMeta.Annotations
+		if annotCond(annotations) {
+			klog.Warningf("Fallback succeded for fetching annotations for pod %s/%s -- possible informer hang? Dumping stack.", namespace, name)
+			pprof.Lookup("goroutine").WriteTo(os.Stderr, 2)
+
+			return annotations, nil
+		}
+
+		// Fallback succeded, but annotations don't meet condition, return original error
+		return nil, err
+	}
+	return annotations, nil
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes

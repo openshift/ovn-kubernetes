@@ -97,7 +97,7 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	}
 	// Get the IP address and MAC address of the pod
 	// for Smart-Nic, ensure connection-details is present
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, namespace, podName, annotCondFn)
+	annotations, err := GetPodAnnotationsFallback(pr.ctx, podLister, namespace, podName, annotCondFn, kclient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
