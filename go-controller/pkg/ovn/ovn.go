@@ -85,8 +85,8 @@ type namespaceInfo struct {
 	// the policy itself.
 	networkPolicies map[string]*namespacePolicy
 
-	// defines the namespaces egressFirewall
-	egressFirewall *egressFirewall
+	// defines the namespaces egressFirewallPolicy
+	egressFirewallPolicy *egressFirewall
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
