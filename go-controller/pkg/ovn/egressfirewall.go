@@ -126,7 +126,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	}
 
 	ipv4HashedAS, ipv6HashedAS := nsInfo.addressSet.GetASHashNames()
-	err = oc.addEgressFirewallRules(ipv4HashedAS, ipv6HashedAS, egressFirewall.Namespace, egressFirewallStartPriorityInt)
+	err = oc.addLogicalRouterPolicyToClusterRouter(ipv4HashedAS, ipv6HashedAS, egressFirewall.Namespace, egressFirewallStartPriorityInt)
 	if err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 		[]egressfirewallapi.EgressFirewallPort{},
 	)
 
-	err = createEgressFirewallRules(priority, match, "drop", newEgressFirewall.Namespace+"-blockAll")
+	err = createLogicalRouterPolicy(priority, match, "drop", newEgressFirewall.Namespace+"-blockAll")
 	if err != nil {
 		return fmt.Errorf("cannot update egressfirewall in %s:%v", newEgressFirewall.Namespace, err)
 	}
@@ -164,10 +164,19 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 	// add the new egressfirewall
 
 	updateErrors = errors.Wrapf(updateErrors, "%v", oc.addEgressFirewall(newEgressFirewall))
-	// delete rules blocking all external traffic
-	err = deleteEgressFirewallRules(newEgressFirewall.Namespace + "-blockAll")
+	// delete policy blocking all external traffic
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find",
+		"logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s-blockAll", newEgressFirewall.Namespace))
 	if err != nil {
-		updateErrors = errors.Wrapf(updateErrors, "%v", err)
+		updateErrors = errors.Wrapf(updateErrors,
+			"error deleting blockAll policy for namespace %s, cannot get logical router policies from LR %s - %s:%s",
+			newEgressFirewall.Namespace, types.OVNClusterRouter, err, stderr)
+	}
+	_, stderr, err = util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, stdout)
+	if err != nil {
+		updateErrors = errors.Wrapf(updateErrors, "failed to delete the blockAll rule for "+
+			"egressFirewall in namespace %s on logical switch %s during update, stderr: %q (%v)",
+			newEgressFirewall.Namespace, types.OVNClusterRouter, stderr, err)
 	}
 	return updateErrors
 }
@@ -191,8 +200,22 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 	if deleteDNS {
 		oc.egressFirewallDNS.Delete(egressFirewall.Namespace)
 	}
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
+	if err != nil {
+		return fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get logical router policies from LR %s - %s:%s",
+			egressFirewall.Namespace, types.OVNClusterRouter, err, stderr)
+	}
+	var deletionErrors error
 
-	return deleteEgressFirewallRules(egressFirewall.Namespace)
+	uuids := strings.Fields(stdout)
+	for _, uuid := range uuids {
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, uuid)
+		if err != nil {
+			deletionErrors = errors.Wrapf(deletionErrors, "failed to delete the rules for "+
+				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, types.OVNClusterRouter, stderr, err)
+		}
+	}
+	return deletionErrors
 }
 
 func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
@@ -201,8 +224,7 @@ func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewa
 	})
 }
 
-func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, namespace string, efStartPriority int) error {
-	var err error
+func (oc *Controller) addLogicalRouterPolicyToClusterRouter(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, namespace string, efStartPriority int) error {
 	ef := oc.namespaces[namespace].egressFirewallPolicy
 	for _, rule := range ef.egressRules {
 		var action string
@@ -233,7 +255,7 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 			}
 		}
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
-		err = createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace)
+		err := createLogicalRouterPolicy(efStartPriority-rule.id, match, action, ef.namespace)
 		if err != nil {
 			return err
 		}
@@ -241,90 +263,22 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 	return nil
 }
 
-// createEgressFirewallRules uses the previously generated elements and creates the
-// logical_router_policy/join_switch_acl for a specific egressFirewallRouter
-func createEgressFirewallRules(priority int, match, action, externalID string) error {
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
-			fmt.Sprintf("priority=%d", priority),
-			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
-			"--", "add", "logical_router", types.OVNClusterRouter, "policies", "@logical_router_policy")
-		if err != nil {
-			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
-			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
-			if !strings.Contains(stderr, "already existed") {
-				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", match, types.OVNClusterRouter, stderr, err)
-			}
-		}
-	} else {
-		uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "ACL", match, "action="+action,
-			fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
-		if err != nil {
-			return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
-		}
-		if uuid == "" {
-			_, stderr, err := util.RunOVNNbctl("--id=@acl", "create", "acl",
-				fmt.Sprintf("priority=%d", priority),
-				fmt.Sprintf("direction=%s", fromLport), match, "action="+action,
-				fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
-				"--", "add", "logical_switch", types.OVNJoinSwitch,
-				"acls", "@acl")
-			if err != nil {
-				return fmt.Errorf("error executing create ACL command, stderr: %q, %+v", stderr, err)
-			}
-		} else {
-			_, stderr, err := util.RunOVNNbctl("add", "logical_switch", types.OVNJoinSwitch, "acls", uuid)
-			if err != nil {
-				return fmt.Errorf("error adding ACL to joinsSwitch %s failed, stderr: %q, %+v",
-					types.OVNJoinSwitch, stderr, err)
-			}
+// createLogicalRouterPolicy uses the previously generated elements and creates the logical_router_policy
+// for a specific egressFirewallRouter
+func createLogicalRouterPolicy(priority int, match, action, namespace string) error {
+	_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
+		fmt.Sprintf("priority=%d", priority),
+		match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", namespace),
+		"--", "add", "logical_router", types.OVNClusterRouter, "policies", "@logical_router_policy")
+	if err != nil {
+		// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
+		// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
+		if !strings.Contains(stderr, "already existed") {
+			return fmt.Errorf("failed to add policy route '%s' to %s "+
+				"stderr: %s, error: %v", match, types.OVNClusterRouter, stderr, err)
 		}
 	}
 	return nil
-}
-
-// deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
-func deleteEgressFirewallRules(externalID string) error {
-	var deletionErrors error
-
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find",
-			"logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
-		if err != nil {
-			return fmt.Errorf("error deleting egressFirewall with external-ids %s, cannot get logical router policies from LR %s - %s:%s",
-				externalID, types.OVNClusterRouter, err, stderr)
-		}
-
-		uuids := strings.Fields(stdout)
-		for _, uuid := range uuids {
-			_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, uuid)
-			if err != nil {
-				deletionErrors = errors.Wrapf(deletionErrors, "failed to delete the rules for "+
-					"egressFirewall with external-ids %s on logical router %s, stderr: %q (%v)", externalID,
-					types.OVNClusterRouter, stderr, err)
-			}
-		}
-	} else {
-		stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "ACL",
-			fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
-		if err != nil {
-			return fmt.Errorf("error deleting egressFirewall with external-ids %s, cannot get ACL policies - %s:%s",
-				externalID, err, stderr)
-		}
-
-		uuids := strings.Fields(stdout)
-		for _, uuid := range uuids {
-			_, stderr, err := util.RunOVNNbctl("remove", "logical_switch", types.OVNJoinSwitch, "acls", uuid)
-			if err != nil {
-				deletionErrors = errors.Wrapf(deletionErrors, "failed to delete the ACL rules for "+
-					"egressFirewall with external-ids %s on logical switch %s, stderr: %q (%v)", externalID,
-					types.OVNJoinSwitch, stderr, err)
-			}
-		}
-	}
-	return deletionErrors
 }
 
 type matchTarget struct {
@@ -368,7 +322,6 @@ func (m *matchTarget) toExpr() (string, error) {
 func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, dstPorts []egressfirewallapi.EgressFirewallPort) string {
 	var src string
 	var dst string
-	var extraMatch string
 	switch {
 	case len(ipv4Source) > 0 && len(ipv6Source) > 0:
 		src = fmt.Sprintf("(ip4.src == $%s || ip6.src == $%s)", ipv4Source, ipv6Source)
@@ -399,12 +352,7 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 		match = fmt.Sprintf("%s && %s", match, egressGetL4Match(dstPorts))
 	}
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		extraMatch = getClusterSubnetsExclusion()
-	} else {
-		extraMatch = fmt.Sprintf("inport == \\\"%s%s\\\"", types.JoinSwitchToGWRouterPrefix, types.OVNClusterRouter)
-	}
-	return fmt.Sprintf("%s && %s\"", match, extraMatch)
+	return fmt.Sprintf("%s && %s\"", match, getClusterSubnetsExclusion())
 }
 
 // egressGetL4Match generates the rules for when ports are specified in an egressFirewall Rule
