@@ -27,7 +27,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -467,7 +466,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	}
 
 	// Create this node's management logical port on the node switch
-	portName := types.K8sPrefix + node.Name
+	portName := util.K8sPrefix + node.Name
 	uuid, err := addNodeLogicalSwitchPort(node.Name, portName, "", addresses, "")
 	if err != nil {
 		return err
@@ -666,8 +665,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
-	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
-		"router", nodeLRPMAC.String(), "router-port="+types.RouterToSwitchPrefix+nodeName)
+	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, util.SwitchToRouterPrefix+nodeName,
+		"router", nodeLRPMAC.String(), "router-port="+util.RouterToSwitchPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -675,7 +674,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 
 	if err = addToPortGroup(clusterRtrPortGroupName, &lpInfo{
 		uuid: nodeSwToRtrUUID,
-		name: types.SwitchToRouterPrefix + nodeName,
+		name: util.SwitchToRouterPrefix + nodeName,
 	}); err != nil {
 		klog.Errorf(err.Error())
 		return err
