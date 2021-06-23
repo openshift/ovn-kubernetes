@@ -23,6 +23,10 @@ const (
 	// access to physical/external network
 	PhysicalNetworkName = "physnet"
 
+	// Constants for Multicast ACLs
+	SwitchToRouterPrefix = "stor-"
+	RouterToSwitchPrefix = "rtos-"
+
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
 	LocalNetworkName = "locnet"

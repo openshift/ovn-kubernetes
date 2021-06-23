@@ -269,6 +269,15 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
+	// Create a cluster-wide port group with all node-to-cluster router
+	// logical switch ports.  Currently the only user is multicast but it might
+	// be used for other features in the future.
+	oc.clusterRtrPortGroupUUID, err = createPortGroup(clusterRtrPortGroupName, clusterRtrPortGroupName)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
@@ -283,6 +292,13 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
 		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+
+		// Allow IP multicast from node switch to cluster router and from
+		// cluster router to node switch.
+		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
 			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
@@ -385,6 +401,31 @@ func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) e
 	return nil
 }
 
+func addNodeLogicalSwitchPort(logicalSwitch, portName, portType, addresses, options string) (string, error) {
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lsp-add", logicalSwitch, portName,
+		"--", "lsp-set-type", portName, portType,
+		"--", "lsp-set-options", portName, options,
+		"--", "lsp-set-addresses", portName, addresses)
+	if err != nil {
+		klog.Errorf("Failed to add logical port %s to switch %s, stdout: %q, stderr: %q, error: %v", portName, logicalSwitch, stdout, stderr, err)
+		return "", err
+	}
+
+	// UUID must be retrieved separately from the lsp-add transaction since
+	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
+	// transaction.
+	uuid, stderr, err := util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
+	if err != nil {
+		klog.Errorf("Error getting UUID for logical port %s "+
+			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
+		return "", err
+	}
+	if uuid == "" {
+		return uuid, fmt.Errorf("invalid logical port %s uuid", portName)
+	}
+	return uuid, nil
+}
+
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
@@ -426,26 +467,9 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 	// Create this node's management logical port on the node switch
 	portName := util.K8sPrefix + node.Name
-	stdout, stderr, err := util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", node.Name, portName,
-		"--", "lsp-set-addresses", portName, addresses)
+	uuid, err := addNodeLogicalSwitchPort(node.Name, portName, "", addresses, "")
 	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
 		return err
-	}
-
-	// UUID must be retrieved separately from the lsp-add transaction since
-	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
-	// transaction.
-	uuid, stderr, err := util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
-	if err != nil {
-		klog.Errorf("Error getting UUID for logical port %s "+
-			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
-		return err
-	}
-	if uuid == "" {
-		return fmt.Errorf("invalid logical port %s uuid %q", portName, uuid)
 	}
 
 	if err := addToPortGroup(clusterPortGroupName, &lpInfo{
@@ -641,11 +665,18 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, switchToRouterPrefix+nodeName,
-		"--", "set", "logical_switch_port", switchToRouterPrefix+nodeName, "type=router",
-		"options:router-port="+routerToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
+	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, util.SwitchToRouterPrefix+nodeName,
+		"router", nodeLRPMAC.String(), "router-port="+util.RouterToSwitchPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	if err = addToPortGroup(clusterRtrPortGroupName, &lpInfo{
+		uuid: nodeSwToRtrUUID,
+		name: util.SwitchToRouterPrefix + nodeName,
+	}); err != nil {
+		klog.Errorf(err.Error())
 		return err
 	}
 
