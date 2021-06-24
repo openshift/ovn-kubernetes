@@ -35,6 +35,8 @@ RUN yum install -y  \
 ARG ovsver=2.15.0-28.el8fdp
 ARG ovnver=21.09.0-12.el8fdp
 
+COPY openvswitch2.15-2.15.0-23.bz1941615.0.20.el8fdp.x86_64.rpm openvswitch2.15-devel-2.15.0-23.bz1941615.0.20.el8fdp.x86_64.rpm openvswitch2.15-ipsec-2.15.0-23.bz1941615.0.20.el8fdp.x86_64.rpm python3-openvswitch2.15-2.15.0-23.bz1941615.0.20.el8fdp.x86_64.rpm /root/
+
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
@@ -44,7 +46,7 @@ RUN INSTALL_PKGS=" \
 	ethtool conntrack-tools \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
+	dnf localinstall -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False /root/*.rpm && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn21.09 = $ovnver" "ovn21.09-central = $ovnver" "ovn21.09-host = $ovnver" "ovn21.09-vtep = $ovnver" && \
 	yum clean all && rm -rf /var/cache/*
 
