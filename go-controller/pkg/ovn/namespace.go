@@ -52,30 +52,39 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
+	start := time.Now()
+	now := start
 	nsInfo, err := oc.waitForNamespaceLocked(ns)
 	if err != nil {
 		return err
 	}
+	klog.Infof("[%s/%s] addPodToNamespace(1) waitForNamespaceLocked() took %v (since start %v)", ns, portInfo.name, time.Since(now), time.Since(start))
 	defer nsInfo.Unlock()
 
 	if nsInfo.addressSet == nil {
+		now = time.Now()
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
 			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
 				"error: %v", ns, err)
 		}
+		klog.Infof("[%s/%s] addPodToNamespace(2) createNamespaceAddrSetAllPods() took %v (since start %v)", ns, portInfo.name, time.Since(now), time.Since(start))
 	}
 
+	now = time.Now()
 	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(portInfo.ips)); err != nil {
 		return err
 	}
+	klog.Infof("[%s/%s] addPodToNamespace(3) addressSet.AddIPs took %v (since start %v)", ns, portInfo.name, time.Since(now), time.Since(start))
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {
+		now = time.Now()
 		if err := podAddAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
 			return err
 		}
+		klog.Infof("[%s/%s] addPodToNamespace(4) podAddAllowMulticastPolicy took %v (since start %v)", ns, portInfo.name, time.Since(now), time.Since(start))
 	}
 
 	return nil
