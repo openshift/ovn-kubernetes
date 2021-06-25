@@ -496,25 +496,34 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	cmds = append(cmds, cmd)
 
 	// execute all the commands together.
+	now := time.Now()
 	err = oc.ovnNBClient.Execute(cmds...)
+	klog.Infof("[%s/%s] addLogicalPort(1) lsp Execute took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 	if err != nil {
 		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
 
+	now = time.Now()
 	lsp, err = oc.ovnNBClient.LSPGet(portName)
+	klog.Infof("[%s/%s] addLogicalPort(2) LSPGet took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 	if err != nil || lsp == nil {
 		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
 	}
 
+	now = time.Now()
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+	klog.Infof("[%s/%s] addLogicalPort(3) port cache add took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 
 	// Wait for namespace to exist, no calls after this should ever use waitForNamespaceLocked
+	now = time.Now()
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
 		return err
 	}
+	klog.Infof("[%s/%s] addLogicalPort(3) namespace add took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 
+	now = time.Now()
 	// add src-ip routes to GR if external gw annotation is set
 	routingExternalGWs := oc.getRoutingExternalGWs(pod.Namespace)
 	routingPodGWs := oc.getRoutingPodGWs(pod.Namespace)
@@ -545,12 +554,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+	klog.Infof("[%s/%s] addLogicalPort(3) routing GW setup took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 
 	// check if this pod is serving as an external GW
+	now = time.Now()
 	err = oc.addPodExternalGW(pod)
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
+	klog.Infof("[%s/%s] addLogicalPort(3) addExternalGW took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 
 	// CNI depends on the flows from port security, delay setting it until end
 	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
@@ -558,7 +570,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
 
+	now = time.Now()
 	err = oc.ovnNBClient.Execute(cmd)
+	klog.Infof("[%s/%s] addLogicalPort port-security Execute took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 	if err != nil {
 		return fmt.Errorf("error while setting port security on port: %s error: %v",
 			portName, err)
