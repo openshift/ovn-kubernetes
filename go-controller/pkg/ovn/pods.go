@@ -302,8 +302,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
 
+	now := start
 	logicalSwitch := pod.Spec.NodeName
 	err = oc.waitForNodeLogicalSwitch(logicalSwitch)
+	klog.Infof("[%s/%s] addLogicalPort(1) waitForNodeLogicalSwitch took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 	if err != nil {
 		return err
 	}
@@ -319,15 +321,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var releaseIPs bool
 	needsIP := true
 
+	now = time.Now()
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
 	// will still have the old UUID.
 	lsp, err := oc.ovnNBClient.LSPGet(portName)
+	klog.Infof("[%s/%s] addLogicalPort(1) LSPGet took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 	if err != nil && err != goovn.ErrorNotFound && err != goovn.ErrorSchema {
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
 	}
 
+	now = time.Now()
 	if lsp == nil {
 		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
 		if err != nil {
@@ -337,7 +342,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	} else {
 		klog.Infof("LSP already exists for port: %s", portName)
 	}
+	klog.Infof("[%s/%s] addLogicalPort(1) LSPAdd took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 
+	now = time.Now()
 	// Bind the port to the node's chassis; prevents ping-ponging between
 	// chassis if ovnkube-node isn't running correctly and hasn't cleared
 	// out iface-id for an old instance of this pod, and the pod got
@@ -355,6 +362,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
 	}
 	cmds = append(cmds, cmd)
+	klog.Infof("[%s/%s] addLogicalPort(1) LSPSetOptions took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 
@@ -399,6 +407,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	if needsIP {
+		now = time.Now()
 		// try to get the IP from existing port in OVN first
 		podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, portName)
 		if err != nil {
@@ -423,6 +432,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					portName, logicalSwitch, err)
 			}
 		}
+		klog.Infof("[%s/%s] addLogicalPort(1) assign addresses took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 
 		releaseIPs = true
 		var networks []*types.NetworkSelectionElement
@@ -452,11 +462,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			MAC: podMac,
 		}
 		var nodeSubnets []*net.IPNet
+		now = time.Now()
 		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
 				pod.Name, logicalSwitch)
 		}
+		klog.Infof("[%s/%s] addLogicalPort(1) GetSwitchSubnets took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
+
+		now = time.Now()
 		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
+		klog.Infof("[%s/%s] addLogicalPort(1) addROutesGatewayIP took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 		if err != nil {
 			return err
 		}
@@ -466,11 +481,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
 
+		now = time.Now()
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
+		klog.Infof("[%s/%s] addLogicalPort(1) SetAnnotationsOnPod took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 		releaseIPs = false
 	}
 
@@ -496,7 +513,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	cmds = append(cmds, cmd)
 
 	// execute all the commands together.
-	now := time.Now()
+	now = time.Now()
 	err = oc.ovnNBClient.Execute(cmds...)
 	klog.Infof("[%s/%s] addLogicalPort(1) lsp Execute took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
 	if err != nil {
