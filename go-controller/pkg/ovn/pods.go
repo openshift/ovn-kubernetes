@@ -299,7 +299,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
+		klog.Infof("[%s/%s %s] addLogicalPort took %v", pod.Namespace, pod.Name, pod.UID, time.Since(start))
 	}()
 
 	now := start
@@ -482,8 +482,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 
 		now = time.Now()
-		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
-			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
+		klog.Infof("[%s/%s %s] setting ip=%v mac=%s gw=%s\nAnnotation=%s",
+			pod.Namespace, pod.Name, pod.UID, podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}

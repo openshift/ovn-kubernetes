@@ -201,9 +201,12 @@ func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
-	klog.V(5).Infof("Adding namespace: %s", ns.Name)
+	klog.Infof("Adding namespace: %s", ns.Name)
+	start := time.Now()
+	now := start
 	nsInfo := oc.createNamespaceLocked(ns.Name)
 	defer nsInfo.Unlock()
+	klog.Infof("[%s] created namespace after %v (since start %v)", ns.Name, time.Since(now), time.Since(start))
 
 	var err error
 	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
@@ -242,7 +245,9 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
 		}
 	}
+	now = time.Now()
 	nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns.Name)
+	klog.Infof("[%s] created namespace address set after %v (since start %v)", ns.Name, time.Since(now), time.Since(start))
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -252,7 +257,9 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	// For now it is required that a pod serving as a gateway for a namespace is added AFTER the serving namespace is
 	// created
 
+	now = time.Now()
 	oc.multicastUpdateNamespace(ns, nsInfo)
+	klog.Infof("[%s] updated namespace multicast after %v (since start %v)", ns.Name, time.Since(now), time.Since(start))
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
@@ -384,6 +391,8 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 func (oc *Controller) waitForNamespaceLocked(namespace string) (*namespaceInfo, error) {
 	var nsInfo *namespaceInfo
 
+	start := time.Now()
+
 	err := utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
 		func() (bool, error) {
 			nsInfo = oc.getNamespaceLocked(namespace)
@@ -391,7 +400,7 @@ func (oc *Controller) waitForNamespaceLocked(namespace string) (*namespaceInfo, 
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("timeout waiting for namespace event")
+		return nil, fmt.Errorf("timeout waiting for namespace event after %v", time.Since(start))
 	}
 	return nsInfo, nil
 }
@@ -403,17 +412,25 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 	// we drop namespacesMutex while trying to claim nsInfo.Mutex, because something
 	// else might have locked the nsInfo and be doing something slow with it, and we
 	// don't want to block all access to oc.namespaces while that's happening.
+
+	start := time.Now()
 	oc.namespacesMutex.Lock()
+	klog.Infof("[%s] namespace map locked after %v", ns, time.Since(start))
 	nsInfo := oc.namespaces[ns]
 	oc.namespacesMutex.Unlock()
 
 	if nsInfo == nil {
+		klog.Infof("[%s] namespace not found after %v", ns, time.Since(start))
 		return nil
 	}
+	start = time.Now()
 	nsInfo.Lock()
+	klog.Infof("[%s] namespace locked after %v", ns, time.Since(start))
 
 	// Check that the namespace wasn't deleted while we were waiting for the lock
+	start = time.Now()
 	oc.namespacesMutex.Lock()
+	klog.Infof("[%s] namespace map RE-locked after %v", ns, time.Since(start))
 	defer oc.namespacesMutex.Unlock()
 	if nsInfo != oc.namespaces[ns] {
 		nsInfo.Unlock()

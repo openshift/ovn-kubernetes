@@ -15,6 +15,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var (
@@ -112,6 +113,8 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
+	annot, _ := util.UnmarshalPodAnnotation(annotations)
+	klog.Infof("[%s/%s %s uid %s] got annotations %v", namespace, podName, pr.SandboxID, pr.PodUID, annot)
 	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
 		return nil, err
 	}
