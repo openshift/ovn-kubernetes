@@ -310,6 +310,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return err
 	}
 
+	// HACK: ensure the pod's namespace actually exists before trying to
+	// handle the pod; otherwise nodes will start sandboxes and time them
+	// out long before the master has set up the logical port
+	now = time.Now()
+	nsInfo, err := oc.waitForNamespaceLocked(pod.Namespace)
+	klog.Infof("[%s/%s] addLogicalPort(x) waitForNamespaceLocked took %v (since start %v)", pod.Namespace, pod.Name, time.Since(now), time.Since(start))
+	if err != nil {
+		return err
+	}
+	nsInfo.Unlock()
+
 	portName := podLogicalPortName(pod)
 	klog.V(5).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
 

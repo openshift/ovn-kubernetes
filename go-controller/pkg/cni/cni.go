@@ -114,10 +114,10 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
 	annot, _ := util.UnmarshalPodAnnotation(annotations)
-	klog.Infof("[%s/%s %s uid %s] got annotations %v", namespace, podName, pr.SandboxID, pr.PodUID, annot)
 	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
 		return nil, err
 	}
+	klog.Infof("[%s/%s %s uid %s] got annotations %v", namespace, podName, pr.SandboxID, pr.PodUID, annot)
 
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC)
 	if err != nil {

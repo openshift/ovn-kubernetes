@@ -246,6 +246,11 @@ func doPodFlowsExist(queries []openflowQuery) bool {
 func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient kubernetes.Interface,
 	namespace, name, initialPodUID string) error {
 	pod, err := getPod(podLister, kclient, namespace, name)
+	if pod != nil {
+		klog.Infof("[%s/%s uid %s] got pod uid %s annot %v", namespace, name, initialPodUID, pod.UID, pod.Annotations)
+	} else {
+		klog.Infof("[%s/%s uid %s] nil pod %v %v", namespace, name, initialPodUID, podLister, kclient)
+	}
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("pod deleted")
@@ -268,7 +273,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 
 	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
-		return fmt.Errorf("pod OVN annotations deleted")
+		return fmt.Errorf("pod OVN annotations deleted or invalid")
 	}
 
 	// Pod OVN annotation changed and this sandbox should
@@ -291,6 +296,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	} else {
 		queries = getLegacyFlowQueries(mac, ifAddrs, ofPort)
 	}
+	klog.Infof("[%s/%s uid %s] starting 20s wait", namespace, name, initialPodUID)
 	timeout := time.After(20 * time.Second)
 	for {
 		select {
