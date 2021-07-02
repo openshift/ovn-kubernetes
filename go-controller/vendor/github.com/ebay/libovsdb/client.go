@@ -11,9 +11,12 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cenkalti/rpc2"
 	"github.com/cenkalti/rpc2/jsonrpc"
+
+	"k8s.io/klog/v2"
 )
 
 // OvsdbClient is an OVSDB client
@@ -256,8 +259,15 @@ func (ovs OvsdbClient) Transact(database string, operation ...Operation) ([]Oper
 		return nil, errors.New("Validation failed for the operation")
 	}
 
+	ops := make([]string, 0, len(operation))
+	for _, o := range operation {
+		ops = append(ops, fmt.Sprintf("%v/%v", o.Op, o.Table))
+	}
+
+	start := time.Now()
 	args := NewTransactArgs(database, operation...)
 	err := ovs.rpcClient.Call("transact", args, &reply)
+	klog.Infof("#### OVN Transact(%s) took %v", strings.Join(ops, ","), time.Since(start))
 	if err != nil {
 		return nil, err
 	}

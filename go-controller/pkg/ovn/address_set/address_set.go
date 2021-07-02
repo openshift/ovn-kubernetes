@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -235,6 +236,7 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 		}
 
 		// ovnAddressSet has not been created yet. Create it.
+		start := time.Now()
 		cmd, err := nb.ASAdd(as.hashName, ipsToStringArray(ips), map[string]string{"name": name})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address set %q: %v", name, err)
@@ -242,6 +244,7 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 		if err := nb.Execute(cmd); err != nil {
 			return nil, fmt.Errorf("failed to create address set %q: %v", asDetail(as), err)
 		}
+		klog.Info("#### newOvnAddressSet() ASAdd(%s) took %v", name, time.Since(start))
 	} else {
 		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
 		// ovnAddressSet already exists in the database; just update IPs
@@ -356,6 +359,7 @@ func (as *ovnAddressSets) Destroy() error {
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 	newIPs := ipsToStringArray(ips)
+	start := time.Now()
 	cmd, err := as.nb.ASUpdate(as.hashName, newIPs, map[string]string{"name": as.name})
 	if err != nil {
 		return fmt.Errorf("failed to create update for address set %q: %v", asDetail(as), err)
@@ -363,6 +367,7 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 	if err := as.nb.Execute(cmd); err != nil {
 		return fmt.Errorf("failed to execute update for address set %q: %v", asDetail(as), err)
 	}
+	klog.Info("#### setIPs() ASUpdate(%s) took %v", as.name, time.Since(start))
 
 	as.ips = make(map[string]net.IP, len(ips))
 	for _, ip := range ips {
