@@ -10,6 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 )
@@ -233,20 +238,72 @@ func doPodFlowsExist(queries []openflowQuery) bool {
 	return true
 }
 
-func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int, checkExternalIDs bool) error {
+// checkCancelSandbox checks that this sandbox is still valid for the current
+// instance of the pod in the apiserver. Sandbox requests and pod instances
+// have a 1:1 relationship determined by pod UID. If we detect that the pod
+// has changed either UID or MAC terminate this sandbox request early instead
+// of waiting for OVN to set up flows that will never exist.
+func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient kubernetes.Interface,
+	namespace, name, initialPodUID string) error {
+	pod, err := getPod(podLister, kclient, namespace, name)
+	if pod != nil {
+		klog.Infof("[%s/%s uid %s] got pod uid %s annot %v", namespace, name, initialPodUID, pod.UID, pod.Annotations)
+	} else {
+		klog.Infof("[%s/%s uid %s] nil pod %v %v", namespace, name, initialPodUID, podLister, kclient)
+	}
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("pod deleted")
+		}
+		klog.Warningf("[%s/%s] failed to get pod while waiting for OVS port binding: %v", namespace, name, err)
+		return nil
+	}
+
+	if pod == nil {
+		// Not all node CNI modes can pass non-nil podLister or kclient in which
+		// case pod will be nil
+		return nil
+	}
+
+	if string(pod.UID) != initialPodUID {
+		// Pod UID changed and this sandbox should be canceled
+		// so the new pod sandbox can run
+		return fmt.Errorf("canceled old pod sandbox")
+	}
+
+	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	if err != nil {
+		return fmt.Errorf("pod OVN annotations deleted or invalid")
+	}
+
+	// Pod OVN annotation changed and this sandbox should
+	// be canceled so the new pod sandbox can run with the
+	// updated MAC/IP
+	if mac != ovnAnnot.MAC.String() {
+		return fmt.Errorf("pod OVN annotations changed")
+	}
+
+	return nil
+}
+
+func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
+	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
+	podLister corev1listers.PodLister, kclient kubernetes.Interface,
+	namespace, name, initialPodUID string) error {
 	var queries []openflowQuery
 	if checkExternalIDs {
 		queries = getMinimalFlowQueries(mac, ofPort)
 	} else {
 		queries = getLegacyFlowQueries(mac, ifAddrs, ofPort)
 	}
+	klog.Infof("[%s/%s uid %s] starting 20s wait", namespace, name, initialPodUID)
 	timeout := time.After(20 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("canceled while waiting for OVS port binding")
+			return fmt.Errorf("canceled while waiting for OVS port binding for %s %v", mac, ifAddrs)
 		case <-timeout:
-			return fmt.Errorf("timed out while waiting for OVS port binding")
+			return fmt.Errorf("timed out while waiting for OVS port binding for %s %v", mac, ifAddrs)
 		default:
 			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
 				return err
@@ -259,6 +316,10 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet, 
 				} else {
 					return nil
 				}
+			}
+
+			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, initialPodUID); err != nil {
+				return fmt.Errorf("%v while waiting for OVS port binding for %s %v", err, mac, ifAddrs)
 			}
 
 			// try again later
