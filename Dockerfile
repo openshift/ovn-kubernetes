@@ -47,7 +47,7 @@ RUN INSTALL_PKGS=" \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
         rpm -Uhv --nodeps --force /root/*openvswitch*.rpm && \
-        rpm -Uhv --nodeps --force /root/ovn-pre-*-21.09*.rpm && \
+        rpm -Uhv --nodeps --force /root/ovn-pre-*21.09*.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
