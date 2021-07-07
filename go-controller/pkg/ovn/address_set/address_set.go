@@ -242,6 +242,8 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 		joinedIPs := joinIPs(as.allIPs())
 		if len(joinedIPs) > 0 {
 			args = append(args, "addresses="+joinedIPs)
+		} else {
+			args = append(args, "addresses="+fallbackIP())
 		}
 		as.uuid, stderr, err = util.RunOVNNbctl(args...)
 		if err != nil {
@@ -360,8 +362,9 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 	if len(ips) > 0 {
 		_, stderr, err = util.RunOVNNbctl("set", "address_set", as.uuid, "addresses="+joinIPs(ips))
 	} else {
+		_, stderr, err = util.RunOVNNbctl("set", "address_set", as.uuid, "addresses="+fallbackIP())
 		// cannot set an address_set to the empty set, must use clear
-		_, stderr, err = util.RunOVNNbctl("clear", "address_set", as.uuid, "addresses")
+//		_, stderr, err = util.RunOVNNbctl("clear", "address_set", as.uuid, "addresses")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to set address set %q, stderr: %q (%v)",
@@ -388,6 +391,10 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 
 	if len(uniqIPs) == 0 {
 		return nil
+	}
+
+	if len(as.ips) == 0 {
+		_, _, _ = util.RunOVNNbctl("--if-exists", "remove", "address_set", as.uuid, "addresses", `"169.254.254.254"`)
 	}
 
 	ipStr := joinIPs(uniqIPs)
@@ -422,6 +429,9 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
 
 	ipStr := joinIPs(uniqIPs)
 	klog.V(5).Infof("(%s) deleting IP %s from address set", asDetail(as), ipStr)
+	if len(as.ips) - len(uniqIPs) == 0 {
+		ipStr = fallbackIP()
+	}
 
 	_, stderr, err := util.RunOVNNbctl("remove", "address_set", as.uuid, "addresses", ipStr)
 	if err != nil {
@@ -466,6 +476,10 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 		}
 	}
 	return
+}
+
+func fallbackIP() string {
+	return `"169.254.254.254"`
 }
 
 func joinIPs(ips []net.IP) string {
