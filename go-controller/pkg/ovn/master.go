@@ -640,10 +640,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	// See https://github.com/openshift/ovn-kubernetes/pull/281
 	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(types.OVNClusterRouter)
 	if l3GatewayConfig.Mode == config.GatewayModeLocal {
-		err = gatewayInitMinimal(node.Name, l3GatewayConfig, oc.SCTPSupport)
-		if err != nil {
-			return fmt.Errorf("failed to init local gateway with no OVS bridge: %v", err)
-		}
+		// do nothing now that we no longer have shared load balancers
 		// END OCP HACK
 	} else {
 		err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
