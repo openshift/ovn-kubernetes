@@ -85,8 +85,8 @@ type namespaceInfo struct {
 	// the policy itself.
 	networkPolicies map[string]*namespacePolicy
 
-	// defines the namespaces egressFirewallPolicy
-	egressFirewallPolicy *egressFirewall
+	// defines the namespaces egressFirewall
+	egressFirewall *egressFirewall
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
@@ -865,7 +865,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				klog.Error(deleteErrors)
 			}
 		},
-	}, nil)
+	}, oc.syncEgressFirewall)
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
