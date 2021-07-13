@@ -340,6 +340,9 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 
 	}
 
+	//
+	oc.WatchRelays()
+
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
 	if config.Kubernetes.OVNEmptyLbEvents {
@@ -623,6 +626,41 @@ func (oc *Controller) WatchPods() {
 		},
 	}, oc.syncPods)
 	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
+}
+
+func (oc *Controller) syncRelays(relays []interface{}) {
+	klog.Infof("MCC sync Relays")
+}
+
+// WatchRelays starts the watching of ovsdb-relay resource and calls back the appropriate handler logic
+func (oc *Controller) WatchRelays() {
+	start := time.Now()
+	oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Add Func OVN MCC %s", epNew.Name)
+			} else {
+				klog.Infof("Add Func OVN MCC ignore name %s", epNew.Name)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			epOld := old.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Update Func OVN MCC %s", epOld.Name)
+			} else {
+				klog.Infof("Update Func OVN MCC ignore name %s", epNew.Name)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			if ep.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Delete Func OVN MCC %s", ep.Name)
+			}
+		},
+	}, oc.syncRelays)
+	klog.Infof("Bootstrapping existing relays and cleaning stale relays took %v", time.Since(start))
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls

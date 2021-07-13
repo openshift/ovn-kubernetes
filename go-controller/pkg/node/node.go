@@ -471,6 +471,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		// start management port health check
 		go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
 		n.WatchEndpoints()
+
+		// start ovnkube-ovsdb-relay endpoints
+		n.WatchOvsdbRelayEndpoints()
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
@@ -558,6 +561,78 @@ func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
 			return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
 		})
 	}
+}
+
+func (n *OvnNode) WatchOvsdbRelayEndpoints() {
+	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				err := n.updateOvsdbRelayEndpoints()
+				if err != nil {
+					klog.Errorf("Failed to add ovn-remote for %s: %v", epNew.Name, err)
+				}
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				err := n.updateOvsdbRelayEndpoints()
+				if err != nil {
+					klog.Errorf("Failed to add ovn-remote for %s: %v", epNew.Name, err)
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			if ep.Name == "ovnkube-sbdb-relay" {
+				err := n.updateOvsdbRelayEndpoints()
+				if err != nil {
+					klog.Errorf("Failed to add ovn-remote for %s: %v", ep.Name, err)
+				}
+			}
+		},
+	}, nil)
+}
+
+func (n *OvnNode) updateOvsdbRelayEndpoints() error {
+
+	for _, auth := range []config.OvnAuthConfig{config.OvnSouth} {
+
+		svcName := "ovnkube-sbdb-relay"
+		namespace := "openshift-ovn-kubernetes"
+		ep, err := n.Kube.GetEndpoint(namespace, svcName)
+		if err != nil {
+			klog.Infof("Endpoints for service %s in namespace %s not found\n", svcName, namespace)
+			break
+		}
+		klog.Infof("==>Got Endpoint %v for service %s in namespace %s\n", ep, svcName, namespace)
+
+		epAddrStr := ""
+
+		for _, subset := range ep.Subsets {
+			klog.Infof("==>Got subset %v for service %s in namespace %s\n", subset, svcName, namespace)
+			for _, epAddress := range subset.Addresses {
+				klog.Infof("==>Got Address %v for service %s in namespace %s\n", epAddress, svcName, namespace)
+
+				for _, port := range subset.Ports {
+					klog.Infof("==>Got Port %v for service %s in namespace %s\n", port, svcName, namespace)
+					epAddrStr += "ssl:" + epAddress.IP + ":" + strconv.Itoa(int(port.Port)) + ","
+				}
+			}
+		}
+
+		// if ovnkube-sbdb-relay endpoint does not exist yet, don't touch anything
+		if epAddrStr != "" {
+			auth.Address = strings.TrimSuffix(epAddrStr, ",")
+			if err := auth.SetDBAuth(); err != nil {
+				return err
+			}
+		}
+
+	}
+
+	return nil
 }
 
 type epAddressItem struct {
