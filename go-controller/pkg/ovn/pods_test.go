@@ -405,7 +405,7 @@ var _ = Describe("OVN Pod Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("retries a failed pod Add when namespace doesn't yet exist", func() {
+		It("pod Add should succeed even when namespace doesn't yet exist", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := newNamespace("namespace1")
@@ -433,13 +433,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(podJSON))
 
-				fakeOvn.asf.ExpectNoAddressSet(t.namespace)
-
-				// Now add the namespace
-				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), namespaceT, metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-
-				// Pod creation should be retried on Update event
+				// Add Pod logical port should succeed even without namespace
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(MatchJSON(podJSON))
 
