@@ -52,13 +52,11 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
-	nsInfo, err := oc.waitForNamespaceLocked(ns)
-	if err != nil {
-		return err
-	}
+	nsInfo := oc.ensureNamespaceLocked(ns)
 	defer nsInfo.Unlock()
 
 	if nsInfo.addressSet == nil {
+		var err error
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
 			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
@@ -199,7 +197,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()
 
-	nsInfo := oc.createNamespaceLocked(ns.Name)
+	nsInfo := oc.ensureNamespaceLocked(ns.Name)
 	defer nsInfo.Unlock()
 
 	var err error
@@ -222,9 +220,15 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		}
 	}
 	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
-		nsInfo.routingExternalGWs.gws, err = parseRoutingExternalGWAnnotation(annotation)
+		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
 			klog.Errorf(err.Error())
+		} else {
+			_, bfdEnabled := ns.Annotations[bfdAnnotation]
+			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
+			if err != nil {
+				klog.Error(err.Error())
+			}
 		}
 		if _, ok := ns.Annotations[bfdAnnotation]; ok {
 			nsInfo.routingExternalGWs.bfdEnabled = true
@@ -249,6 +253,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	// For now it is required that a pod serving as a gateway for a namespace is added AFTER the serving namespace is
 	// created
 
+	// If multicast enabled, adds all current pods in the namespace to the allow policy
 	oc.multicastUpdateNamespace(ns, nsInfo)
 }
 
@@ -419,18 +424,23 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 	return nsInfo
 }
 
-// createNamespaceLocked locks namespacesMutex, creates an entry for ns, and returns it
+// ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, and returns it
 // with its mutex locked.
-func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
+func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
 	oc.namespacesMutex.Lock()
 	defer oc.namespacesMutex.Unlock()
 
-	nsInfo := &namespaceInfo{
-		networkPolicies:       make(map[string]*networkPolicy),
-		podExternalRoutes:     make(map[string]map[string]string),
-		multicastEnabled:      false,
-		routingExternalPodGWs: make(map[string]gatewayInfo),
+	nsInfo := oc.namespaces[ns]
+
+	if nsInfo == nil {
+		nsInfo = &namespaceInfo{
+			networkPolicies:       make(map[string]*networkPolicy),
+			podExternalRoutes:     make(map[string]map[string]string),
+			multicastEnabled:      false,
+			routingExternalPodGWs: make(map[string]gatewayInfo),
+		}
 	}
+
 	nsInfo.Lock()
 	oc.namespaces[ns] = nsInfo
 
