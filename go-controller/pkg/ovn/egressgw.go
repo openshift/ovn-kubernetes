@@ -89,10 +89,7 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 
 // addPodExternalGWForNamespace handles adding routes to all pods in that namespace for a pod GW
 func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.Pod, egress gatewayInfo) error {
-	nsInfo, err := oc.waitForNamespaceLocked(namespace)
-	if err != nil {
-		return err
-	}
+	nsInfo := oc.ensureNamespaceLocked(namespace)
 	defer nsInfo.Unlock()
 	nsInfo.routingExternalPodGWs[pod.Name] = egress
 	return oc.addGWRoutesForNamespace(namespace, egress, nsInfo)
@@ -121,6 +118,11 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 		for _, gw := range egress.gws {
 			for _, podIP := range pod.Status.PodIPs {
 				if utilnet.IsIPv6(gw) != utilnet.IsIPv6String(podIP.IP) {
+					continue
+				}
+
+				// if route was already programmed, skip it
+				if foundGR, ok := nsInfo.podExternalRoutes[podIP.IP][gw.String()]; ok && foundGR == gr {
 					continue
 				}
 
@@ -283,10 +285,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
 func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*net.IPNet, namespace, node string) error {
-	nsInfo, err := oc.waitForNamespaceLocked(namespace)
-	if err != nil {
-		return err
-	}
+	nsInfo := oc.getNamespaceLocked(namespace)
 	defer nsInfo.Unlock()
 	gr := util.GetGatewayRouterFromNode(node)
 	for _, podIPNet := range podIfAddrs {
@@ -299,6 +298,10 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 				podIP := podIPNet.IP.String()
 				for _, gw := range gws {
 					gwStr := gw.String()
+					// if route was already programmed, skip it
+					if foundGR, ok := nsInfo.podExternalRoutes[podIP][gwStr]; ok && foundGR == gr {
+						continue
+					}
 					mask := GetIPFullMask(podIP)
 					nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
 						"lr-route-add", gr, podIP + mask, gw.String()}
