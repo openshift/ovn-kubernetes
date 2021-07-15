@@ -463,6 +463,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
+	klog.Infof("MCC: Initialize stuff")
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
 		// start health check to ensure there are no stale OVS internal ports
 		go checkForStaleOVSInterfaces(n.stopChan, n.name, n.watchFactory.(*factory.WatchFactory))
@@ -470,7 +471,69 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		// start management port health check
 		go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
 		n.WatchEndpoints()
+
+		klog.Infof("MCC: Start hack setup relay informers")
+		kubeInformerFactory := informers.NewSharedInformerFactory(n.client, time.Second*30)
+		svcInformer := kubeInformerFactory.Core().V1().Services().Informer()
+		endInformer := kubeInformerFactory.Core().V1().Endpoints().Informer()
+
+		svcInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc: func(new interface{}) {
+				epNew := new.(*kapi.Endpoints)
+				fmt.Printf("MCC service added: %s \n", new)
+				if epNew.Name == "ovnkube-sbdb-relay" {
+					klog.Infof("Add Func svc MCC %s", epNew.Name)
+				}
+			},
+			UpdateFunc: func(old, new interface{}) {
+				epNew := new.(*kapi.Endpoints)
+				epOld := old.(*kapi.Endpoints)
+				fmt.Printf("MCC service updated: %s \n", new)
+				if epNew.Name == "ovnkube-sbdb-relay" {
+					klog.Infof("Update Func svc MCC %s", epOld.Name)
+				}
+			},
+			DeleteFunc: func(obj interface{}) {
+				ep := obj.(*kapi.Endpoints)
+				fmt.Printf("MCC service deleted: %s \n", obj)
+				if ep.Name == "ovnkube-sbdb-relay" {
+					klog.Infof("Delete Func svc MCC %s", ep.Name)
+				}
+			},
+		})
+
+		endInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc: func(new interface{}) {
+				epNew := new.(*kapi.Endpoints)
+				fmt.Printf("MCC endpoint added: %s \n", new)
+				if epNew.Name == "ovnkube-sbdb-relay" {
+					klog.Infof("Add Func EP MCC %s", epNew.Name)
+				}
+			},
+			UpdateFunc: func(old, new interface{}) {
+				epNew := new.(*kapi.Endpoints)
+				epOld := old.(*kapi.Endpoints)
+				fmt.Printf("MCC endpoint updated: %s \n", new)
+				if epNew.Name == "ovnkube-sbdb-relay" {
+					klog.Infof("Update Func EP MCC %s", epOld.Name)
+				}
+			},
+			DeleteFunc: func(obj interface{}) {
+				ep := obj.(*kapi.Endpoints)
+				fmt.Printf("MCC endpoint deleted: %s \n", obj)
+				if ep.Name == "ovnkube-sbdb-relay" {
+					klog.Infof("Delete Func EP MCC %s", ep.Name)
+				}
+			},
+		})
+		klog.Infof("MCC: Done hack setup relay informers")
+
+		// start ovnkube-ovsdb-relay endpoints
+		klog.Infof("MCC: Calling Watch Relay")
+		n.WatchOvsdbRelayEndpoints()
+		klog.Infof("MCC: Returned from Watch Relay")
 	}
+	klog.Infof("MCC: Stuff should be Initialized")
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
 		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
@@ -495,9 +558,18 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 func (n *OvnNode) WatchEndpoints() {
 	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Add Func MCC orig %s", epNew.Name)
+			}
+		},
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Update Func MCC orig  %s", epNew.Name)
+			}
 			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
 			for item := range buildEndpointAddressMap(epOld.Subsets) {
 				if _, ok := newEpAddressMap[item]; !ok {
@@ -516,6 +588,30 @@ func (n *OvnNode) WatchEndpoints() {
 					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 				}
 
+			}
+		},
+	}, nil)
+}
+
+func (n *OvnNode) WatchOvsdbRelayEndpoints() {
+	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Add Func Node MCC %s", epNew.Name)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			epOld := old.(*kapi.Endpoints)
+			if epNew.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Update Func Node MCC %s", epOld.Name)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			if ep.Name == "ovnkube-sbdb-relay" {
+				klog.Infof("Delete Func Node MCC %s", ep.Name)
 			}
 		},
 	}, nil)
