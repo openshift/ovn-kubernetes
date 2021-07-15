@@ -13,6 +13,7 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -125,9 +126,7 @@ type Controller struct {
 
 	hoMaster *hocontroller.MasterController
 
-	// All the uuid related to global load balancers
-	clusterLBsUUIDs []string
-	SCTPSupport     bool
+	SCTPSupport bool
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
@@ -192,6 +191,12 @@ type Controller struct {
 	// go-ovn southbound client interface
 	ovnSBClient goovn.Client
 
+	// libovsdb northbound client interface
+	nbClient libovsdbclient.Client
+
+	// libovsdb southbound client interface
+	sbClient libovsdbclient.Client
+
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -235,8 +240,9 @@ func GetIPFullMask(ip string) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
+	ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
+	recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory()
 	}
@@ -269,6 +275,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 			podHandlerCache:       make(map[string]factory.Handler),
 			allocatorMutex:        &sync.Mutex{},
 			allocator:             make(map[string]*egressNode),
+			nbClient:              libovsdbOvnNBClient,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -278,7 +285,9 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
-		clusterLBsUUIDs:          make([]string, 0),
+		nbClient:                 libovsdbOvnNBClient,
+		sbClient:                 libovsdbOvnSBClient,
+		svcController:            newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, stopChan),
 	}
 }
 
@@ -292,15 +301,15 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	// dependencies, and WatchNodes() depends on it
 	oc.WatchNamespaces()
 
-	// Services must be started before nodes for handling new node's service sync
-	if err := oc.StartServiceController(wg, true); err != nil {
-		return err
-	}
-
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	oc.WatchNodes()
+
+	// Services should be started after nodes to prevent LB churn
+	if err := oc.StartServiceController(wg, true); err != nil {
+		return err
+	}
 
 	oc.WatchPods()
 
@@ -330,6 +339,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		unidlingController := unidling.NewController(
 			oc.recorder,
 			oc.watchFactory.ServiceInformer(),
+			oc.sbClient,
 		)
 		wg.Add(1)
 		go func() {
@@ -772,6 +782,7 @@ func (oc *Controller) WatchNamespaces() {
 	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
 }
 
+// syncNodeGateway ensures a node's gateway router is configured
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
@@ -1022,48 +1033,48 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func (oc *Controller) newServiceFactory() (informers.SharedInformerFactory, error) {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	labelSelector := labels.NewSelector()
 	labelSelector = labelSelector.Add(*noProxyName, *noHeadlessEndpoints)
 
-	return informers.NewSharedInformerFactoryWithOptions(oc.client, 0,
+	svcFactory := informers.NewSharedInformerFactoryWithOptions(client, 0,
 		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 			options.LabelSelector = labelSelector.String()
-		})), nil
+		}))
+
+	controller := svccontroller.NewController(
+		client,
+		nbClient,
+		svcFactory.Core().V1().Services(),
+		svcFactory.Discovery().V1beta1().EndpointSlices(),
+		svcFactory.Core().V1().Nodes(),
+	)
+
+	svcFactory.Start(stopChan)
+
+	return controller
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
 	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
-	svcFactory, err := oc.newServiceFactory()
-	if err != nil {
-		return err
-	}
-
-	oc.svcController = svccontroller.NewController(
-		oc.client,
-		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1beta1().EndpointSlices(),
-		oc.clusterPortGroupUUID,
-	)
-	svcFactory.Start(oc.stopChan)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair)
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, oc.clusterPortGroupUUID)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}
