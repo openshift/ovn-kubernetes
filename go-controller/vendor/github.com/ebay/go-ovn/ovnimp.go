@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/ebay/libovsdb"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -193,10 +195,12 @@ func (odbi *ovndb) executeR(cmds ...*OvnCommand) ([]string, error) {
 		}
 	}
 
+	now := time.Now()
 	results, err := odbi.transact(odbi.db, ops...)
 	if err != nil {
 		return nil, err
 	}
+	klog.Infof("### executeR(%v) took %v", cmds, time.Since(now))
 
 	// The total number of UUIDs will be <= number of results returned.
 	UUIDs := make([]string, 0, len(results))

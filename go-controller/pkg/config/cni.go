@@ -26,6 +26,7 @@ func WriteCNIConfig() error {
 		LogFileMaxSize:    Logging.LogFileMaxSize,
 		LogFileMaxBackups: Logging.LogFileMaxBackups,
 		LogFileMaxAge:     Logging.LogFileMaxAge,
+		Kubeconfig:        Kubernetes.Kubeconfig,
 	}
 
 	bytes, err := json.Marshal(netConf)

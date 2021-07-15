@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -348,19 +349,27 @@ func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 		return nil
 	}
 
+	start := time.Now()
+	now := start
+
 	as.Lock()
 	defer as.Unlock()
+	klog.Infof("[%s] AddIPs(1) Lock() took %v (since start %v)", as.name, time.Since(now), time.Since(start))
 
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
+		now = time.Now()
 		if err := as.ipv6.addIPs(v6ips); err != nil {
 			return fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
 		}
+		klog.Infof("[%s] AddIPs(2) v6.addIPs() took %v (since start %v)", as.name, time.Since(now), time.Since(start))
 	}
 	if as.ipv4 != nil {
+		now = time.Now()
 		if err := as.ipv4.addIPs(v4ips); err != nil {
 			return fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
 		}
+		klog.Infof("[%s] AddIPs(2) v4.addIPs() took %v (since start %v)", as.name, time.Since(now), time.Since(start))
 	}
 
 	return nil
@@ -435,6 +444,8 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 // addIPs appends the set of IPs to the existing address_set.
 func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 	// dedup
+	start := time.Now()
+	now := start
 	uniqIPs := make([]net.IP, 0, len(ips))
 	for _, ip := range ips {
 		if _, ok := as.ips[ip.String()]; ok {
@@ -442,23 +453,30 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 		}
 		uniqIPs = append(uniqIPs, ip)
 	}
+	klog.Infof("[%s] addIPs(1) dedup took %v (since start %v)", as.name, time.Since(now), time.Since(start))
 
 	if len(uniqIPs) == 0 {
 		return nil
 	}
 
+	now = time.Now()
 	ipStr := joinIPs(uniqIPs)
+	klog.Infof("[%s] addIPs(2) joinIPs() took %v (since start %v)", as.name, time.Since(now), time.Since(start))
 
+	now = time.Now()
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), ipStr)
 	_, stderr, err := util.RunOVNNbctl("add", "address_set", as.uuid, "addresses", ipStr)
+	klog.Infof("[%s] addIPs(3) ovn-nbctl took %v (since start %v)", as.name, time.Since(now), time.Since(start))
 	if err != nil {
 		return fmt.Errorf("failed to add IPs (%q) to address set %q, stderr: %q (%v)",
 			ipStr, asDetail(as), stderr, err)
 	}
 
+	now = time.Now()
 	for _, ip := range ips {
 		as.ips[ip.String()] = ip
 	}
+	klog.Infof("[%s] addIPs(4) map update took %v (since start %v)", as.name, time.Since(now), time.Since(start))
 	return nil
 }
 
