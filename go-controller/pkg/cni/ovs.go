@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 )
@@ -233,7 +236,10 @@ func doPodFlowsExist(queries []openflowQuery) bool {
 	return true
 }
 
-func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int, checkExternalIDs bool) error {
+func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
+	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
+	podLister corev1listers.PodLister, kclient kubernetes.Interface,
+	namespace, name, initialPodUID string) error {
 	var queries []openflowQuery
 	if checkExternalIDs {
 		queries = getMinimalFlowQueries(mac, ofPort)
@@ -259,6 +265,15 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet, 
 				} else {
 					return nil
 				}
+			}
+
+			if pod, err := getPod(podLister, kclient, namespace, name); err != nil {
+				if apierrors.IsNotFound(err) {
+					return fmt.Errorf("pod deleted while waiting for OVS port binding")
+				}
+				klog.Warningf("failed to get pod %s/%s while waiting for OVS port binding: %v", namespace, name, err)
+			} else if pod != nil && string(pod.UID) != initialPodUID {
+				return fmt.Errorf("canceled old pod sandbox while waiting for OVS port binding")
 			}
 
 			// try again later
