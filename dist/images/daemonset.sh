@@ -39,8 +39,6 @@ OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_DISABLE_SNAT_MULTIPLE_GWS=""
 OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
-OVN_V4_JOIN_SUBNET=""
-OVN_V6_JOIN_SUBNET=""
 OVN_HOST_NETWORK_NAMESPACE=""
 
 # Parse parameters given as arguments to this script.
@@ -149,12 +147,6 @@ while [ "$1" != "" ]; do
     ;;
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
-    ;;
-  --v4-join-subnet)
-    OVN_V4_JOIN_SUBNET=$VALUE
-    ;;
-  --v6-join-subnet)
-    OVN_V6_JOIN_SUBNET=$VALUE
     ;;
   --host-network-namespace)
     OVN_HOST_NETWORK_NAMESPACE=$VALUE
