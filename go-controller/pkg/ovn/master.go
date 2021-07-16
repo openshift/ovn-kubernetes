@@ -567,9 +567,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	return err
 }
 
-func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*net.IPNet) error {
+func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
+	nodeName := node.Name
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
@@ -591,6 +592,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	var v4Gateway net.IP
+	var hostNetworkPolicyIPs []net.IP
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		lrpArgs = append(lrpArgs, gwIfAddr.String())
@@ -601,8 +603,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 			)
 		} else {
 			v4Gateway = gwIfAddr.IP
-
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+			hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
 			excludeIPs := mgmtIfAddr.IP.String()
 			if config.HybridOverlay.Enabled {
 				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
@@ -629,7 +631,34 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		return err
 	}
 
-	// If supported, enable IGMP snooping and querier on the node.
+	// add the host network IPs for this node to host network namespace's address set
+	if err = func() error {
+		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
+		if hostNetworkNamespace != "" {
+			nsInfo, err := oc.waitForNamespaceLocked(hostNetworkNamespace)
+			if err != nil {
+				klog.Errorf("Failed to get namespace %s (%v)",
+					hostNetworkNamespace, err)
+				return err
+			}
+			defer nsInfo.Unlock()
+			if nsInfo.addressSet == nil {
+				nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(hostNetworkNamespace)
+				if err != nil {
+					return fmt.Errorf("cannot create address set for namespace: %s,"+
+						"error: %v", hostNetworkNamespace, err)
+				}
+			}
+			if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return err
+	}
+
+	// If supported, enable IGMP/MLD snooping and querier on the node.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 			nodeName, "other-config:mcast_snoop=\"true\"")
@@ -744,7 +773,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 	if hostSubnets != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
-		return hostSubnets, oc.ensureNodeLogicalNetwork(node.Name, hostSubnets)
+		return hostSubnets, oc.ensureNodeLogicalNetwork(node, hostSubnets)
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
@@ -764,7 +793,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	}()
 
 	// Ensure that the node's logical network has been created
-	err = oc.ensureNodeLogicalNetwork(node.Name, hostSubnets)
+	err = oc.ensureNodeLogicalNetwork(node, hostSubnets)
 	if err != nil {
 		return nil, err
 	}

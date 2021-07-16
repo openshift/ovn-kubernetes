@@ -246,6 +246,11 @@ spec:
           value: "{{ ovn_gateway_mode }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: host_network_namespace
       # end of container
 
       volumes:

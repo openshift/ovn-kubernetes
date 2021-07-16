@@ -2,10 +2,11 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -453,9 +454,30 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 }
 
 func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (AddressSet, error) {
-	// Get all the pods in the namespace and append their IP to the
-	// address_set
 	var ips []net.IP
+	// special handling of host network namespace
+	if config.Kubernetes.HostNetworkNamespace != "" &&
+		ns == config.Kubernetes.HostNetworkNamespace {
+		// add the mp0 interface addresses to this namespace.
+		existingNodes, err := oc.watchFactory.GetNodes()
+		if err != nil {
+			klog.Errorf("Failed to get all nodes (%v)", err)
+		} else {
+			ips = make([]net.IP, 0, len(existingNodes))
+			for _, node := range existingNodes {
+				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+				if err != nil {
+					klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
+						node.Name, err)
+				}
+				for _, hostSubnet := range hostSubnets {
+					mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+					ips = append(ips, mgmtIfAddr.IP)
+				}
+			}
+		}
+	}
+	// Get all the pods in the namespace and append their IP to the address_set
 	existingPods, err := oc.watchFactory.GetPods(ns)
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
@@ -472,6 +494,5 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (AddressSet, erro
 			}
 		}
 	}
-
 	return oc.addressSetFactory.NewAddressSet(ns, ips)
 }
