@@ -38,9 +38,9 @@ func TestNewClientset(t *testing.T) {
 			errExpected: true,
 		},
 		{
-			desc: "error: CACert invalid for https config",
+			desc: "error: CAData invalid for https config",
 			inpConfig: config.KubernetesConfig{
-				CACert:    "testCert",
+				CAData:    []byte("testCert"),
 				APIServer: "https",
 				Token:     "testToken",
 			},

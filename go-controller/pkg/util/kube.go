@@ -52,7 +52,8 @@ func adjustNodeName() string {
 }
 
 // newKubernetesRestConfig create a Kubernetes rest config from either a kubeconfig,
-// TLS properties, or an apiserver URL
+// TLS properties, or an apiserver URL. If the CA certificate data is passed in the
+// CAData in the KubernetesConfig, the CACert path is ignored.
 func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error) {
 	var kconfig *rest.Config
 	var err error
@@ -69,11 +70,11 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 			Host:        conf.APIServer,
 			BearerToken: conf.Token,
 		}
-		if conf.CACert != "" {
-			if _, err := cert.NewPool(conf.CACert); err != nil {
+		if len(conf.CAData) > 0 {
+			if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
 				return nil, err
 			}
-			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
+			kconfig.TLSClientConfig = rest.TLSClientConfig{CAData: conf.CAData}
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
 		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")
