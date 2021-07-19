@@ -123,7 +123,6 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 }
 
 func (p pod) baseCmds(fexec *ovntest.FakeExec) {
-
 }
 
 func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
