@@ -7,7 +7,8 @@ const (
 
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
-	PhysicalNetworkName = "physnet"
+	PhysicalNetworkName     = "physnet"
+	PhysicalNetworkExGwName = "exgwphysnet"
 
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
@@ -33,6 +34,7 @@ const (
 	JoinSwitchToDistRouterPrefix = "jtod-"
 	EXTSwitchToGWRouterPrefix    = "etor-"
 	GWRouterToExtSwitchPrefix    = "rtoe-"
+	EgressGWSwitchPrefix         = "exgw-"
 
 	NodeLocalSwitch = "node_local_switch"
 
@@ -107,9 +109,10 @@ const (
 	OvnPortBindingTopoVersion      = 4
 	OvnCurrentTopologyVersion      = OvnPortBindingTopoVersion
 
-	// OVN-K8S annotation constants
-	OvnK8sPrefix   = "k8s.ovn.org"
-	OvnK8sTopoAnno = OvnK8sPrefix + "/" + "topology-version"
+	// OVN-K8S annotation & taint constants
+	OvnK8sPrefix           = "k8s.ovn.org"
+	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
+	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
 
 	// Monitoring constants
 	SFlowAgent = "ovn-k8s-mp0"
