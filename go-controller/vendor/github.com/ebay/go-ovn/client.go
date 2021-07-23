@@ -27,6 +27,13 @@ import (
 	"github.com/ebay/libovsdb"
 )
 
+type EntityType string
+
+const (
+	PORT_GROUP     EntityType = "PORT_GROUP"
+	LOGICAL_SWITCH EntityType = "LOGICAL_SWITCH"
+)
+
 // Client ovnnb/sb client
 // Note: We can create different clients for ovn nb and sb each in future.
 type Client interface {
@@ -55,6 +62,8 @@ type Client interface {
 	LSPSetAddress(lsp string, addresses ...string) (*OvnCommand, error)
 	// Set port security per lport
 	LSPSetPortSecurity(lsp string, security ...string) (*OvnCommand, error)
+	// Set logical switch port type
+	LSPSetType(lsp string, portType string) (*OvnCommand, error)
 	// Get all lport by lswitch
 	LSPList(ls string) ([]*LogicalSwitchPort, error)
 
@@ -65,11 +74,23 @@ type Client interface {
 	// List Load balancers for a LSW
 	LSLBList(ls string) ([]*LoadBalancer, error)
 
-	// Add ACL
+	// Add ACL to entity (PORT_GROUP or LOGICAL_SWITCH)
+	ACLAddEntity(entityType EntityType, entityName, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*OvnCommand, error)
+	// Deprecated in favor of ACLAddEntity(). Add ACL to logical switch.
 	ACLAdd(ls, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*OvnCommand, error)
-	// Delete acl
+	// Set name for ACL
+	ACLSetName(aclUUID, aclName string) (*OvnCommand, error)
+	// Set match criteria for ACL
+	ACLSetMatch(aclUUID, newMatch string) (*OvnCommand, error)
+	// Set logging for ACL
+	ACLSetLogging(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*OvnCommand, error)
+	// Delete acl from entity (PORT_GROUP or LOGICAL_SWITCH)
+	ACLDelEntity(entityType EntityType, entityName, aclUUID string) (*OvnCommand, error)
+	// Deprecated in favor of ACLDelEntity(). Delete acl from logical switch
 	ACLDel(ls, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error)
-	// Get all acl by lswitch
+	// Get all acl by entity
+	ACLListEntity(entityType EntityType, entityName string) ([]*ACL, error)
+	// Deprecated in favor of ACLListEntity(). Get all acl by logical switch
 	ACLList(ls string) ([]*ACL, error)
 
 	// Get AS
@@ -100,13 +121,24 @@ type Client interface {
 	LRPList(lr string) ([]*LogicalRouterPort, error)
 
 	// Add LRSR with given ip_prefix on given lr
-	LRSRAdd(lr string, ip_prefix string, nexthop string, output_port []string, policy []string, external_ids map[string]string) (*OvnCommand, error)
-	// Delete LRSR with given ip_prefix, nexthop, policy and outputPort on given lr
-	LRSRDel(lr string, prefix string, nexthop, policy, outputPort *string) (*OvnCommand, error)
+	LRSRAdd(lr string, ip_prefix string, nexthop string, output_port *string, policy *string, external_ids map[string]string) (*OvnCommand, error)
+	// Delete LRSR with given ip_prefix, nexthop, outputPort and policy on given lr
+	LRSRDel(lr string, prefix string, nexthop, outputPort, policy *string) (*OvnCommand, error)
 	// Delete LRSR by uuid given lr
 	LRSRDelByUUID(lr, uuid string) (*OvnCommand, error)
 	// Get all LRSRs by lr
 	LRSRList(lr string) ([]*LogicalRouterStaticRoute, error)
+
+	// Add LRPolicy
+	LRPolicyAdd(lr string, priority int, match string, action string, nexthop *string, nexthops []string, options map[string]string, external_ids map[string]string) (*OvnCommand, error)
+	// Delete a LR policy by priority and optionally match
+	LRPolicyDel(lr string, priority int, match *string) (*OvnCommand, error)
+	// Delete a LR policy by UUID
+	LRPolicyDelByUUID(lr string, uuid string) (*OvnCommand, error)
+	// Delete all LRPolicies
+	LRPolicyDelAll(lr string) (*OvnCommand, error)
+	// Get all LRPolicies by LR
+	LRPolicyList(lr string) ([]*LogicalRouterPolicy, error)
 
 	// Add LB to LR
 	LRLBAdd(lr string, lb string) (*OvnCommand, error)
@@ -123,6 +155,10 @@ type Client interface {
 	LBDel(name string) (*OvnCommand, error)
 	// Update existing LB
 	LBUpdate(name string, vipPort string, protocol string, addrs []string) (*OvnCommand, error)
+	// Set selection fields for LB session affinity
+	LBSetSelectionFields(name string, selectionFields string) (*OvnCommand, error)
+	// Get LBs
+	LBList() ([]*LoadBalancer, error)
 
 	// Set dhcp4_options uuid on lsp
 	LSPSetDHCPv4Options(lsp string, options string) (*OvnCommand, error)
@@ -178,6 +214,8 @@ type Client interface {
 	MeterBandsList() ([]*MeterBand, error)
 	// Exec command, support mul-commands in one transaction.
 	Execute(cmds ...*OvnCommand) error
+	// Same as Execute, but returns a UUID for each object created.
+	ExecuteR(cmds ...*OvnCommand) ([]string, error)
 
 	// Add chassis with given name
 	ChassisAdd(name string, hostname string, etype []string, ip string, external_ids map[string]string,
@@ -188,6 +226,13 @@ type Client interface {
 	ChassisGet(chname string) ([]*Chassis, error)
 	// List chassis
 	ChassisList() ([]*Chassis, error)
+
+	// Delete Chassis row from Chassis_Private with given name
+	ChassisPrivateDel(chName string) (*OvnCommand, error)
+	// List Chassis rows in chassis_private table
+	ChassisPrivateList() ([]*ChassisPrivate, error)
+	// Get Chassis row in chassis_private table by given name
+	ChassisPrivateGet(chName string) ([]*ChassisPrivate, error)
 
 	// Get encaps by chassis name
 	EncapList(chname string) ([]*Encap, error)
@@ -204,8 +249,30 @@ type Client interface {
 	// Get SB_Global table options
 	SBGlobalGetOptions() (map[string]string, error)
 
+	// Creates a new port group in the Port_Group table named "group" with optional "ports"  and "external_ids".
+	PortGroupAdd(group string, ports []string, external_ids map[string]string) (*OvnCommand, error)
+	// Sets "ports" and/or "external_ids" on the port group named "group". It is an error if group does not exist.
+	PortGroupUpdate(group string, ports []string, external_ids map[string]string) (*OvnCommand, error)
+	// Add port to port group.
+	PortGroupAddPort(group string, port string) (*OvnCommand, error)
+	// Remove port from port group.
+	PortGroupRemovePort(group string, port string) (*OvnCommand, error)
+	// Deletes port group "group". It is an error if "group" does not exist.
+	PortGroupDel(group string) (*OvnCommand, error)
+	// Get PortGroup data structure if it exists
+	PortGroupGet(group string) (*PortGroup, error)
+
 	// Close connection to OVN
 	Close() error
+
+	// GetSchema() returns ovn-db schema
+	GetSchema() libovsdb.DatabaseSchema
+
+	// AuxKeyValSet() sets keys/values for a column of OvsMap type, e.g., 'external_ids', 'other_config'.
+	AuxKeyValSet(table string, rowName string, auxCol string, kv map[string]string) (*OvnCommand, error)
+	// AuxKeyValDel() removes keys/values for a column of OvsMap type, e.g., 'external_ids', 'other_config'.
+	// special value of 'nil' removes the given key regardless of its value
+	AuxKeyValDel(table string, rowName string, auxCol string, kv map[string]*string) (*OvnCommand, error)
 }
 
 var _ Client = &ovndb{}
@@ -236,13 +303,27 @@ func connect(c *ovndb) (err error) {
 			c.client = nil
 		}
 	}()
+
+	// Locking the cache mutex to ensure the cache is filled before
+	// events from the notifier are handled.
+	c.cachemutex.Lock()
+	defer c.cachemutex.Unlock()
+
+	// We register the notifier, events start coming in but the
+	// mutex is locked
+	notifier := ovnNotifier{c}
+	ovsdb.Register(notifier)
+
+	// When we connect we initialize the cache, so any deletions
+	// happened while reconnecting are handled correctly.
+	c.cache = make(map[string]map[string]libovsdb.Row)
 	initial, err := c.MonitorTables("")
 	if err != nil {
 		return err
 	}
+
+	// We do the initial dump and populate the cache, we have the mutex
 	c.populateCache(*initial)
-	notifier := ovnNotifier{c}
-	ovsdb.Register(notifier)
 	return nil
 }
 
@@ -259,7 +340,6 @@ func NewClient(cfg *Config) (Client, error) {
 	}
 
 	ovndb := &ovndb{
-		cache:        make(map[string]map[string]libovsdb.Row),
 		signalCB:     cfg.SignalCB,
 		disconnectCB: cfg.DisconnectCB,
 		db:           db,
@@ -293,21 +373,37 @@ func (c *ovndb) reconnect() {
 				retry++
 				continue
 			}
-			log.Printf("%s reconnected.\n", c.addr)
+			log.Printf("%s reconnected after %d retries.\n", c.addr, retry)
+			ticker.Stop()
 			return
 		}
 	}()
 }
 
-func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
-	// get the table list based on the DB
+// filterTablesFromSchema checks whether tables in
+// NBTablesOrder / SBTablesOrder exists in current ovn-db schema
+func (c *ovndb) filterTablesFromSchema() []string {
 	var tables []string
+
+	// get the table list based on the DB
 	if c.db == DBNB {
 		tables = NBTablesOrder
 	} else {
 		tables = SBTablesOrder
 	}
 
+	dbSchema := c.GetSchema()
+	schemaTables := make([]string, 0)
+	for _, table := range tables {
+		if _, ok := dbSchema.Tables[table]; ok {
+			schemaTables = append(schemaTables, table)
+		}
+	}
+	return schemaTables
+}
+
+func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
+	tables := c.filterTablesFromSchema()
 	// verify whether user specified table and its columns are legit
 	if len(c.tableCols) != 0 {
 		supportedTableMaps := make(map[string]bool)
@@ -353,6 +449,10 @@ func (c *ovndb) Close() error {
 	return nil
 }
 
+func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
+	return c.client.Schema[c.db]
+}
+
 func (c *ovndb) EncapList(chname string) ([]*Encap, error) {
 	return c.encapListImp(chname)
 }
@@ -372,6 +472,22 @@ func (c *ovndb) ChassisAdd(name string, hostname string, etype []string, ip stri
 
 func (c *ovndb) ChassisDel(name string) (*OvnCommand, error) {
 	return c.chassisDelImp(name)
+}
+
+func (c *ovndb) chassisPrivateAdd(name string, external_ids map[string]string) (*OvnCommand, error) {
+	return c.chassisPrivateAddImp(name, external_ids)
+}
+
+func (c *ovndb) ChassisPrivateList() ([]*ChassisPrivate, error) {
+	return c.chassisPrivateListImp()
+}
+
+func (c *ovndb) ChassisPrivateGet(name string) ([]*ChassisPrivate, error) {
+	return c.chassisPrivateGetImp(name)
+}
+
+func (c *ovndb) ChassisPrivateDel(name string) (*OvnCommand, error) {
+	return c.chassisPrivateDelImp(name)
 }
 
 func (c *ovndb) LSAdd(ls string) (*OvnCommand, error) {
@@ -416,6 +532,10 @@ func (c *ovndb) LSPSetAddress(lsp string, addresses ...string) (*OvnCommand, err
 
 func (c *ovndb) LSPSetPortSecurity(lsp string, security ...string) (*OvnCommand, error) {
 	return c.lspSetPortSecurityImp(lsp, security...)
+}
+
+func (c *ovndb) LSPSetType(lsp string, portType string) (*OvnCommand, error) {
+	return c.lspSetTypeImp(lsp, portType)
 }
 
 func (c *ovndb) LSPSetDHCPv4Options(lsp string, options string) (*OvnCommand, error) {
@@ -494,12 +614,12 @@ func (c *ovndb) LRPList(lr string) ([]*LogicalRouterPort, error) {
 	return c.lrpListImp(lr)
 }
 
-func (c *ovndb) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port []string, policy []string, external_ids map[string]string) (*OvnCommand, error) {
+func (c *ovndb) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port *string, policy *string, external_ids map[string]string) (*OvnCommand, error) {
 	return c.lrsrAddImp(lr, ip_prefix, nexthop, output_port, policy, external_ids)
 }
 
-func (c *ovndb) LRSRDel(lr string, prefix string, nexthop, policy, outputPort *string) (*OvnCommand, error) {
-	return c.lrsrDelImp(lr, prefix, nexthop, policy, outputPort)
+func (c *ovndb) LRSRDel(lr string, prefix string, nexthop, outputPort, policy *string) (*OvnCommand, error) {
+	return c.lrsrDelImp(lr, prefix, nexthop, outputPort, policy)
 }
 
 func (c *ovndb) LRSRDelByUUID(lr, uuid string) (*OvnCommand, error) {
@@ -512,6 +632,26 @@ func (c *ovndb) LRSRList(lr string) ([]*LogicalRouterStaticRoute, error) {
 
 func (c *ovndb) LRLBAdd(lr string, lb string) (*OvnCommand, error) {
 	return c.lrlbAddImp(lr, lb)
+}
+
+func (c *ovndb) LRPolicyAdd(lr string, priority int, match string, action string, nexthop *string, nexthops []string, options map[string]string, external_ids map[string]string) (*OvnCommand, error) {
+	return c.lrpolicyAddImp(lr, priority, match, action, nexthop, nexthops, options, external_ids)
+}
+
+func (c *ovndb) LRPolicyDel(lr string, priority int, match *string) (*OvnCommand, error) {
+	return c.lrpolicyDelImp(lr, priority, match)
+}
+
+func (c *ovndb) LRPolicyDelByUUID(lr string, uuid string) (*OvnCommand, error) {
+	return c.lrpolicyDelByUUIDImp(lr, uuid)
+}
+
+func (c *ovndb) LRPolicyDelAll(lr string) (*OvnCommand, error) {
+	return c.lrpolicyDelAllImp(lr)
+}
+
+func (c *ovndb) LRPolicyList(lr string) ([]*LogicalRouterPolicy, error) {
+	return c.lrPolicyListImp(lr)
 }
 
 func (c *ovndb) LRLBDel(lr string, lb string) (*OvnCommand, error) {
@@ -534,12 +674,40 @@ func (c *ovndb) LBDel(name string) (*OvnCommand, error) {
 	return c.lbDelImp(name)
 }
 
+func (c *ovndb) LBSetSelectionFields(name string, selectionFields string) (*OvnCommand, error) {
+	return c.lbSetSelectionFieldsImp(name, selectionFields)
+}
+
+func (c *ovndb) LBList() ([]*LoadBalancer, error) {
+	return c.lbListImp()
+}
+
+func (c *ovndb) ACLAddEntity(entityType EntityType, entityName, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*OvnCommand, error) {
+	return c.aclAddImp(entityType, entityName, aclName, direct, match, action, priority, external_ids, logflag, meter, severity)
+}
+
 func (c *ovndb) ACLAdd(ls, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*OvnCommand, error) {
-	return c.aclAddImp(ls, direct, match, action, priority, external_ids, logflag, meter, severity)
+	return c.aclAddImp(LOGICAL_SWITCH, ls, "", direct, match, action, priority, external_ids, logflag, meter, severity)
+}
+
+func (c *ovndb) ACLSetName(aclUUID, aclName string) (*OvnCommand, error) {
+	return c.aclSetNameImp(aclUUID, aclName)
+}
+
+func (c *ovndb) ACLSetMatch(aclUUID, newMatch string) (*OvnCommand, error) {
+	return c.aclSetMatchImp(aclUUID, newMatch)
+}
+
+func (c *ovndb) ACLSetLogging(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*OvnCommand, error) {
+	return c.aCLSetLoggingImp(aclUUID, newLogflag, newMeter, newSeverity)
+}
+
+func (c *ovndb) ACLDelEntity(entityType EntityType, entityName, aclUUID string) (*OvnCommand, error) {
+	return c.aclDelUUIDImp(entityType, entityName, aclUUID)
 }
 
 func (c *ovndb) ACLDel(ls, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error) {
-	return c.aclDelImp(ls, direct, match, priority, external_ids)
+	return c.aclDelImp(LOGICAL_SWITCH, ls, direct, match, priority, external_ids)
 }
 
 func (c *ovndb) ASAdd(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error) {
@@ -570,6 +738,10 @@ func (c *ovndb) Execute(cmds ...*OvnCommand) error {
 	return c.execute(cmds...)
 }
 
+func (c *ovndb) ExecuteR(cmds ...*OvnCommand) ([]string, error) {
+	return c.executeR(cmds...)
+}
+
 func (c *ovndb) LSGet(ls string) ([]*LogicalSwitch, error) {
 	return c.lsGetImp(ls)
 }
@@ -578,8 +750,12 @@ func (c *ovndb) LSPList(ls string) ([]*LogicalSwitchPort, error) {
 	return c.lspListImp(ls)
 }
 
+func (c *ovndb) ACLListEntity(entityType EntityType, entity string) ([]*ACL, error) {
+	return c.aclListImp(entityType, entity)
+}
+
 func (c *ovndb) ACLList(ls string) ([]*ACL, error) {
-	return c.aclListImp(ls)
+	return c.aclListImp(LOGICAL_SWITCH, ls)
 }
 
 func (c *ovndb) ASList() ([]*AddressSet, error) {
@@ -662,6 +838,30 @@ func (c *ovndb) SBGlobalGetOptions() (map[string]string, error) {
 	return c.sbGlobalGetOptionsImp()
 }
 
+func (c *ovndb) PortGroupAdd(group string, ports []string, external_ids map[string]string) (*OvnCommand, error) {
+	return c.pgAddImp(group, ports, external_ids)
+}
+
+func (c *ovndb) PortGroupUpdate(group string, ports []string, external_ids map[string]string) (*OvnCommand, error) {
+	return c.pgUpdateImp(group, ports, external_ids)
+}
+
+func (c *ovndb) PortGroupAddPort(group string, port string) (*OvnCommand, error) {
+	return c.pgAddPortImp(group, port)
+}
+
+func (c *ovndb) PortGroupRemovePort(group string, port string) (*OvnCommand, error) {
+	return c.pgRemovePortImp(group, port)
+}
+
+func (c *ovndb) PortGroupDel(group string) (*OvnCommand, error) {
+	return c.pgDelImp(group)
+}
+
+func (c *ovndb) PortGroupGet(group string) (*PortGroup, error) {
+	return c.pgGetImp(group)
+}
+
 // these functions are helpers for unit-tests, but not part of the API
 
 func (c *ovndb) nbGlobalAdd(options map[string]string) (*OvnCommand, error) {
@@ -678,4 +878,12 @@ func (c *ovndb) sbGlobalAdd(options map[string]string) (*OvnCommand, error) {
 
 func (c *ovndb) sbGlobalDel() (*OvnCommand, error) {
 	return c.sbGlobalDelImp()
+}
+
+func (c *ovndb) AuxKeyValSet(table string, rowName string, auxCol string, kv map[string]string) (*OvnCommand, error) {
+	return c.auxKeyValSet(table, rowName, auxCol, kv)
+}
+
+func (c *ovndb) AuxKeyValDel(table string, rowName string, auxCol string, kv map[string]*string) (*OvnCommand, error) {
+	return c.auxKeyValDel(table, rowName, auxCol, kv)
 }
