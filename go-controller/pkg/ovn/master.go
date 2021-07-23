@@ -717,8 +717,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	var hostNetworkPolicyIPs []net.IP
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		lrpArgs = append(lrpArgs, gwIfAddr.String())
-
+		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
 
@@ -727,8 +728,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			)
 		} else {
 			v4Gateway = gwIfAddr.IP
-			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-			hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
 			excludeIPs := mgmtIfAddr.IP.String()
 			if config.HybridOverlay.Enabled {
 				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
