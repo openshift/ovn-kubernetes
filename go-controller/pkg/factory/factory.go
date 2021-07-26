@@ -62,7 +62,7 @@ const (
 	resyncInterval        = 0
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
-	numEventQueues int    = 15
+	numEventQueues int    = 150
 )
 
 var (
