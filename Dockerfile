@@ -35,6 +35,8 @@ RUN yum install -y  \
 ARG ovsver=2.15.0-28.el8fdp
 ARG ovnver=21.09.0-8.el8fdp
 
+COPY ovn21.09-21.09.0-9.el8fdp.x86_64.rpm ovn21.09-central-21.09.0-9.el8fdp.x86_64.rpm ovn21.09-host-21.09.0-9.el8fdp.x86_64.rpm ovn21.09-vtep-21.09.0-9.el8fdp.x86_64.rpm /root
+
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
@@ -46,6 +48,7 @@ RUN INSTALL_PKGS=" \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn21.09 = $ovnver" "ovn21.09-central = $ovnver" "ovn21.09-host = $ovnver" "ovn21.09-vtep = $ovnver" && \
+	rpm -Uhv --nodeps --force /root/ovn21.09*.rpm  && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
@@ -73,6 +76,8 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY dist/images/ovnkube.sh /root/
+
+RUN rm -rf /root/ovn*.rpm
 
 # iptables wrappers
 COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
