@@ -62,7 +62,11 @@ const (
 	resyncInterval        = 0
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
-	numEventQueues int    = 15
+	// optimal number of handlers for pods due to contention between ovsdb actions and nsInfo lock
+	// look to increase in the future as handler efficiency increases
+	podNumEventQueues int = 5
+	// namespace and node, less contention than pod handlers so more queues
+	defaultNumEventQueues int = 15
 )
 
 var (
@@ -123,7 +127,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	})
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		podNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -140,11 +145,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
-		wf.stopChan)
+		wf.stopChan, defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
+	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +225,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	})
 
 	var err error
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		podNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
