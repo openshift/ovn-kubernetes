@@ -3,6 +3,7 @@ package cni
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -120,6 +121,7 @@ type Server struct {
 	kclient           kubernetes.Interface
 	podLister         corev1listers.PodLister
 	kubeAuth          *KubeAPIAuth
+	podTracker        sync.Map
 
 	// CNI Server mode
 	mode string

@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -78,7 +81,16 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 			KubeAPIServer: config.Kubernetes.APIServer,
 			KubeAPIToken:  config.Kubernetes.Token,
 		},
+		podTracker: sync.Map{},
 	}
+
+	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			key := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+			s.podTracker.Store(key, time.Now())
+		},
+	}, nil)
 
 	if len(config.Kubernetes.CAData) > 0 {
 		s.kubeAuth.KubeCAData = base64.StdEncoding.EncodeToString(config.Kubernetes.CAData)
@@ -208,6 +220,14 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)
 	}
+
+	podKey := fmt.Sprintf("%s_%s", req.PodNamespace, req.PodName)
+	if podCreateTime, exists := s.podTracker.LoadAndDelete(podKey); exists {
+		klog.Infof("TROZET pod: %s, create time: %s", podKey, time.Since(podCreateTime.(time.Time)))
+	} else {
+		klog.Infof("TROZET pod: %s, never had a create time from informer")
+	}
+
 	return result, nil
 }
 
