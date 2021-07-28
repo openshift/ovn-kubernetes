@@ -369,7 +369,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		queueWg := &sync.WaitGroup{}
 		queueWg.Add(len(adds))
 		for j := range adds {
-			adds[j] = make(chan interface{}, 10)
+			adds[j] = make(chan interface{}, 500)
 			go func(addChan chan interface{}) {
 				defer queueWg.Done()
 				for {
