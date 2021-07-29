@@ -129,7 +129,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	})
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, 15)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
+	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan, 15)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	})
 
 	var err error
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, 15)
 	if err != nil {
 		return nil, err
 	}
