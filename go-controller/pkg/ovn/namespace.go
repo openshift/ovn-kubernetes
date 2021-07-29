@@ -52,9 +52,12 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
+	start := time.Now()
 	nsInfo := oc.ensureNamespaceLocked(ns)
+	ensureLockedTime := time.Since(start)
 	defer nsInfo.Unlock()
 
+	createAddrSetTime := time.Now()
 	if nsInfo.addressSet == nil {
 		var err error
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
@@ -63,10 +66,13 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 				"error: %v", ns, err)
 		}
 	}
+	createAddrSetEnd := time.Since(createAddrSetTime)
 
+	addIPsAddrSetStart := time.Now()
 	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(portInfo.ips)); err != nil {
 		return err
 	}
+	addIpsAddrSetEnd := time.Since(addIPsAddrSetStart)
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
@@ -76,6 +82,8 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 		}
 	}
 
+	klog.Infof("TROZET addPodNamespace: %s, total time: %s, ensureLocked: %s, createAddrSet: %s, addIpsAddrSet: %s",
+		ns, time.Since(start), ensureLockedTime, createAddrSetEnd, addIpsAddrSetEnd)
 	return nil
 }
 

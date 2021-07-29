@@ -5,6 +5,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -160,6 +161,7 @@ func (manager *logicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IP
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given switch
 func (manager *logicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.IPNet) error {
+	start := time.Now()
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
@@ -201,6 +203,7 @@ func (manager *logicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			}
 		}
 	}
+	klog.Infof("TROZET AllocateIPs for %v, took: %s", ipnets, time.Since(start))
 	return nil
 }
 

@@ -593,6 +593,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 // Given a node, gets the next set of addresses (from the IPAM) for each of the node's
 // subnets to assign to the new pod
 func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*net.IPNet, error) {
+	start := time.Now()
 	var (
 		podMAC   net.HardwareAddr
 		podCIDRs []*net.IPNet
@@ -605,6 +606,7 @@ func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*
 	if len(podCIDRs) > 0 {
 		podMAC = util.IPAddrToHWAddr(podCIDRs[0].IP)
 	}
+	klog.Infof("TROZET assignPodAddresses for %v, took: %s", podCIDRs, time.Since(start))
 	return podMAC, podCIDRs, nil
 }
 
