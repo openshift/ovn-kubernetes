@@ -194,7 +194,7 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
 func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
-	nsInfo := oc.getNamespaceLocked(namespace)
+	nsInfo := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
@@ -291,7 +291,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 // deleteGwRoutesForPod handles deleting all routes to gateways for a pod IP on a specific GR
 func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IPNet) {
 	// delete src-ip cached route to GR
-	nsInfo := oc.getNamespaceLocked(namespace)
+	nsInfo := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
@@ -331,7 +331,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
 func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*net.IPNet, namespace, node string) error {
-	nsInfo := oc.getNamespaceLocked(namespace)
+	nsInfo := oc.getNamespaceLocked(namespace, false)
 	defer nsInfo.Unlock()
 	gr := util.GetGatewayRouterFromNode(node)
 

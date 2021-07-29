@@ -907,7 +907,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
-	nsInfo, err := oc.waitForNamespaceLocked(policy.Namespace)
+	nsInfo, err := oc.waitForNamespaceLocked(policy.Namespace, false)
 	if err != nil {
 		klog.Errorf("Failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
@@ -1082,7 +1082,7 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
-	nsInfo := oc.getNamespaceLocked(policy.Namespace)
+	nsInfo := oc.getNamespaceLocked(policy.Namespace, false)
 	if nsInfo == nil {
 		klog.V(5).Infof("Failed to get namespace lock when deleting policy %s in namespace %s",
 			policy.Name, policy.Namespace)

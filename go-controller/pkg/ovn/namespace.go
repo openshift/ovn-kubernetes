@@ -81,11 +81,11 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (bool, erro
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
-	nsInfo := oc.getNamespaceLocked(ns)
+	nsInfo := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil
 	}
-	defer nsInfo.Unlock()
+	defer nsInfo.RUnlock()
 
 	if nsInfo.addressSet != nil {
 		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
@@ -265,7 +265,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	klog.Infof("[%s] updating namespace", old.Name)
 
-	nsInfo := oc.getNamespaceLocked(old.Name)
+	nsInfo := oc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {
 		klog.Warningf("Update event for unknown namespace %q", old.Name)
 		return
@@ -388,12 +388,12 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 // rather than getNamespaceLocked when calling from a thread where you might be processing
 // an event in a namespace before the Namespace factory thread has processed the Namespace
 // addition.
-func (oc *Controller) waitForNamespaceLocked(namespace string) (*namespaceInfo, error) {
+func (oc *Controller) waitForNamespaceLocked(namespace string, readOnly bool) (*namespaceInfo, error) {
 	var nsInfo *namespaceInfo
 
 	err := utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
 		func() (bool, error) {
-			nsInfo = oc.getNamespaceLocked(namespace)
+			nsInfo = oc.getNamespaceLocked(namespace, readOnly)
 			return nsInfo != nil, nil
 		},
 	)
@@ -405,7 +405,7 @@ func (oc *Controller) waitForNamespaceLocked(namespace string) (*namespaceInfo, 
 
 // getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
 // its mutex locked. If ns is not known, nil will be returned
-func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
+func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) *namespaceInfo {
 	// Only hold namespacesMutex while reading/modifying oc.namespaces. In particular,
 	// we drop namespacesMutex while trying to claim nsInfo.Mutex, because something
 	// else might have locked the nsInfo and be doing something slow with it, and we
@@ -417,13 +417,20 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 	if nsInfo == nil {
 		return nil
 	}
-	nsInfo.Lock()
-
+	if readOnly {
+		nsInfo.RLock()
+	} else {
+		nsInfo.Lock()
+	}
 	// Check that the namespace wasn't deleted while we were waiting for the lock
 	oc.namespacesMutex.Lock()
 	defer oc.namespacesMutex.Unlock()
 	if nsInfo != oc.namespaces[ns] {
-		nsInfo.Unlock()
+		if readOnly {
+			nsInfo.RLock()
+		} else {
+			nsInfo.Unlock()
+		}
 		return nil
 	}
 	return nsInfo
@@ -510,9 +517,9 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 			case <-time.After(20 * time.Second):
 				// Check to see if the NS was re-added in the meanwhile. If so,
 				// only delete if the new NS's AddressSet shouldn't exist.
-				nsInfo := oc.getNamespaceLocked(ns)
+				nsInfo := oc.getNamespaceLocked(ns, true)
 				if nsInfo != nil {
-					defer nsInfo.Unlock()
+					defer nsInfo.RUnlock()
 					if nsInfo.addressSet != nil {
 						klog.V(5).Infof("Skipping deferred deletion of AddressSet for NS %s: re-created", ns)
 						return

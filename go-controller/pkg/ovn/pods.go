@@ -250,11 +250,11 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 
 func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
 	res := gatewayInfo{}
-	nsInfo := oc.getNamespaceLocked(ns)
+	nsInfo := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return res
 	}
-	defer nsInfo.Unlock()
+	defer nsInfo.RUnlock()
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
@@ -264,11 +264,11 @@ func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
 }
 
 func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
-	nsInfo := oc.getNamespaceLocked(ns)
+	nsInfo := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil
 	}
-	defer nsInfo.Unlock()
+	defer nsInfo.RUnlock()
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res := make(map[string]gatewayInfo)
@@ -284,11 +284,11 @@ func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
 }
 
 func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
-	nsInfo, err := oc.waitForNamespaceLocked(ns)
+	nsInfo, err := oc.waitForNamespaceLocked(ns, true)
 	if err != nil {
 		return nil, err
 	}
-	defer nsInfo.Unlock()
+	defer nsInfo.RUnlock()
 	return nsInfo.hybridOverlayExternalGW, nil
 }
 
