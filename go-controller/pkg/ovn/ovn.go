@@ -75,7 +75,7 @@ type loadBalancerConf struct {
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
 // manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
 type namespaceInfo struct {
-	sync.Mutex
+	sync.RWMutex
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
