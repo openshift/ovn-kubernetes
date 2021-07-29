@@ -25,6 +25,8 @@ const (
 	// defaultOpenFlowCookie identifies default open flow rules added to the host OVS bridge.
 	// The hex number 0xdeff105, aka defflos, is meant to sound like default flows.
 	defaultOpenFlowCookie = "0xdeff105"
+	// ovsLocalPort is the name of the OVS bridge local port
+	ovsLocalPort = "LOCAL"
 )
 
 // nodePortWatcher manages OpenfLow and iptables rules
@@ -102,9 +104,13 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 			}
 			flowProtocol := protocol
 			nwDst := "nw_dst"
+			addrResDst := nwDst
+			addrResProto := "arp"
 			if utilnet.IsIPv6String(ing.IP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
+				addrResDst = "nd_target"
+				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			key = strings.Join([]string{"Ingress", service.Namespace, service.Name, ingIP.String(), fmt.Sprintf("%d", svcPort.Port)}, "_")
 			if !add {
@@ -113,16 +119,23 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 				npw.ofm.updateFlowCacheEntry(key, []string{
 					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 						"actions=%s",
-						cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, actions)})
+						cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, actions),
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+						"actions=output:%s",
+						cookie, npw.ofportPhys, addrResProto, addrResDst, ing.IP, ovsLocalPort)})
 			}
 		}
 
 		for _, externalIP := range service.Spec.ExternalIPs {
 			flowProtocol := protocol
 			nwDst := "nw_dst"
+			addrResDst := nwDst
+			addrResProto := "arp"
 			if utilnet.IsIPv6String(externalIP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
+				addrResDst = "nd_target"
+				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			cookie, err = svcToCookie(service.Namespace, service.Name, externalIP, svcPort.Port)
 			if err != nil {
@@ -137,7 +150,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 				npw.ofm.updateFlowCacheEntry(key, []string{
 					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 						"actions=%s",
-						cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, actions)})
+						cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, actions),
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+						"actions=output:%s",
+						cookie, npw.ofportPhys, addrResProto, addrResDst, externalIP, ovsLocalPort)})
 			}
 		}
 	}
