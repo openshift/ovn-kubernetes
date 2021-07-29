@@ -488,49 +488,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	ipTimeEnd := time.Since(ipTimeStart)
 
-	// set addresses on the port
-	addresses = make([]string, len(podIfAddrs)+1)
-	addresses[0] = podMac.String()
-	for idx, podIfAddr := range podIfAddrs {
-		addresses[idx+1] = podIfAddr.IP.String()
-	}
-	// LSP addresses in OVN are a single space-separated value
-	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
-	// add external ids
-	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
-	cmd, err = oc.ovnNBClient.LSPSetExternalIds(portName, extIds)
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
-	firstOVNCmdsStart := time.Now()
-	// execute all the commands together.
-	err = oc.ovnNBClient.Execute(cmds...)
-	if err != nil {
-		return fmt.Errorf("error while creating logical port %s error: %v",
-			portName, err)
-	}
-	firstOVNCmdsEnd := time.Since(firstOVNCmdsStart)
-
-	lsp, err = oc.ovnNBClient.LSPGet(portName)
-	if err != nil || lsp == nil {
-		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
-	}
-
-	addPodCacheTimeStart := time.Now()
-	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
-	addPodCacheTimeEnd := time.Since(addPodCacheTimeStart)
-
 	addPodNamespaceStart := time.Now()
 	// Ensure the namespace/nsInfo exists
-	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
+	multicastEnabled, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	if err != nil {
 		return err
 	}
 	addPodNamespaceEnd := time.Since(addPodNamespaceStart)
@@ -576,25 +537,68 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	addPodExgwEnd := time.Since(addPodExgwStart)
 
+	// set addresses on the port
+	addresses = make([]string, len(podIfAddrs)+1)
+	addresses[0] = podMac.String()
+	for idx, podIfAddr := range podIfAddrs {
+		addresses[idx+1] = podIfAddr.IP.String()
+	}
+
+	// LSP addresses in OVN are a single space-separated value
+	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
+	// add external ids
+	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
+	cmd, err = oc.ovnNBClient.LSPSetExternalIds(portName, extIds)
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
 	// CNI depends on the flows from port security, delay setting it until end
 	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
 
-	portSecurityStart := time.Now()
-	err = oc.ovnNBClient.Execute(cmd)
+	cmds = append(cmds, cmd)
+
+	firstOVNCmdsStart := time.Now()
+	// execute all the commands together.
+	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
-		return fmt.Errorf("error while setting port security on port: %s error: %v",
+		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
-	portSecurityEnd := time.Since(portSecurityStart)
+	firstOVNCmdsEnd := time.Since(firstOVNCmdsStart)
+
+	lsp, err = oc.ovnNBClient.LSPGet(portName)
+	if err != nil || lsp == nil {
+		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
+	}
+
+	addPodCacheTimeStart := time.Now()
+	// Add the pod's logical switch port to the port cache
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+	addPodCacheTimeEnd := time.Since(addPodCacheTimeStart)
+
+	// If multicast is allowed and enabled for the namespace, add the port
+	// to the allow policy.
+	if oc.multicastSupport && multicastEnabled {
+		if err := podAddAllowMulticastPolicy(oc.ovnNBClient, pod.Namespace, portInfo); err != nil {
+			return err
+		}
+	}
 
 	klog.Infof("[%s/%s] addLogicalPort took %v, "+
-		"ip allocation took: %s, pod cache took: %s, namespace took: %s, pod exgw took: %s, port security: %s, "+
-		"ovn first cmds: %s, port security: %s, getExgws: %s",
+		"ip allocation took: %s, pod cache took: %s, namespace took: %s, pod exgw took: %s, "+
+		"ovn first cmds: %s, getExgws: %s",
 		pod.Namespace, pod.Name, time.Since(start), ipTimeEnd, addPodCacheTimeEnd, addPodNamespaceEnd, addPodExgwEnd,
-		portSecurityEnd, firstOVNCmdsEnd, portSecurityEnd, getExgwsEnd)
+		firstOVNCmdsEnd, getExgwsEnd)
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
 	return nil

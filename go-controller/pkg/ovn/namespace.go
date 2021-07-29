@@ -51,7 +51,8 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
-func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
+// adds pod to addr set and returns true if namespace supports multicast
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (bool, error) {
 	start := time.Now()
 	nsInfo := oc.ensureNamespaceLocked(ns)
 	ensureLockedTime := time.Since(start)
@@ -62,29 +63,21 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 		var err error
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
-			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
+			return nsInfo.multicastEnabled, fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
 				"error: %v", ns, err)
 		}
 	}
 	createAddrSetEnd := time.Since(createAddrSetTime)
 
 	addIPsAddrSetStart := time.Now()
-	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(portInfo.ips)); err != nil {
-		return err
+	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips)); err != nil {
+		return nsInfo.multicastEnabled, err
 	}
 	addIpsAddrSetEnd := time.Since(addIPsAddrSetStart)
 
-	// If multicast is allowed and enabled for the namespace, add the port
-	// to the allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err := podAddAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
-			return err
-		}
-	}
-
 	klog.Infof("TROZET addPodNamespace: %s, total time: %s, ensureLocked: %s, createAddrSet: %s, addIpsAddrSet: %s",
 		ns, time.Since(start), ensureLockedTime, createAddrSetEnd, addIpsAddrSetEnd)
-	return nil
+	return nsInfo.multicastEnabled, nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
