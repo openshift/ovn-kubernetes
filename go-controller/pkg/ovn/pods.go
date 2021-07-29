@@ -430,6 +430,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		releaseIPs = true
 		var networks []*types.NetworkSelectionElement
 
+		getPodNetStart := time.Now()
 		networks, err = util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
 		// handle error cases separately first to ensure binding to err, otherwise the
 		// defer will fail
@@ -441,6 +442,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 				" for port %q", portName)
 			return err
 		}
+		getPodNetEnd := time.Since(getPodNetStart)
 
 		if networks != nil && networks[0].MacRequest != "" {
 			klog.V(5).Infof("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, networks[0].MacRequest)
@@ -454,11 +456,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			IPs: podIfAddrs,
 			MAC: podMac,
 		}
+		getSwitchStart := time.Now()
 		var nodeSubnets []*net.IPNet
 		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
 				pod.Name, logicalSwitch)
 		}
+		getSwitchEnd := time.Since(getSwitchStart)
+		addRoutesGwStart := time.Now()
 		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
 		if err != nil {
 			return err
@@ -468,12 +473,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
+		addRoutesGwEnd := time.Since(addRoutesGwStart)
 
+		annotatePodStart := time.Now()
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
+		klog.Infof("%s/%s] IPaddLogicalPort took: %s, getPodNetSel: %s, getSwitchSubnets: %s, addRoutesGw: %s,"+
+			"annotatePod: %s", pod.Namespace, pod.Name, time.Since(start), getPodNetEnd, getSwitchEnd, addRoutesGwEnd,
+			time.Since(annotatePodStart))
 		releaseIPs = false
 	}
 	ipTimeEnd := time.Since(ipTimeStart)

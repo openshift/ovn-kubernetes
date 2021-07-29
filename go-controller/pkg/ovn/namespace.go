@@ -439,6 +439,7 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 // ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, and returns it
 // with its mutex locked.
 func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
+	start := time.Now()
 	oc.namespacesMutex.Lock()
 	nsInfo := oc.namespaces[ns]
 	nsInfoExisted := false
@@ -459,9 +460,12 @@ func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
 		// while waiting for nsInfo to Lock
 		oc.namespacesMutex.Unlock()
 	}
-
+	nsMutexEnd := time.Since(start)
+	nsInfoStart := time.Now()
 	nsInfo.Lock()
+	nsInfoEnd := time.Since(nsInfoStart)
 
+	nsInfoExistedStart := time.Now()
 	if nsInfoExisted {
 		// Check that the namespace wasn't deleted while we were waiting for the lock
 		oc.namespacesMutex.Lock()
@@ -471,6 +475,8 @@ func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
 			return nil
 		}
 	}
+	klog.Infof("TROZET inEnsureNSLocked: %s, nsMutexTime: %s, nsInfo Lock: %s, nsInfoExisted: %s",
+		ns, nsMutexEnd, nsInfoEnd, time.Since(nsInfoExistedStart))
 
 	return nsInfo
 }
