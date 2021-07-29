@@ -64,9 +64,9 @@ const (
 	handlerDead    uint32 = 1
 	// optimal number of handlers for pods due to contention between ovsdb actions and nsInfo lock
 	// look to increase in the future as handler efficiency increases
-	podNumEventQueues int = 5
+	podNumEventQueues uint32 = 5
 	// namespace and node, less contention than pod handlers so more queues
-	defaultNumEventQueues int = 15
+	defaultNumEventQueues uint32 = 15
 )
 
 var (
