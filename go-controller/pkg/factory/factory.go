@@ -63,8 +63,8 @@ const (
 	handlerAlive          uint32 = 0
 	handlerDead           uint32 = 1
 	defaultNumEventQueues uint32 = 15
-	medNumEventQueues     uint32 = 75
-	maxNumEventQueues     uint32 = 150
+	//medNumEventQueues     uint32 = 75
+	//maxNumEventQueues     uint32 = 150
 )
 
 var (
@@ -126,7 +126,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-		maxNumEventQueues)
+		5)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
-		wf.stopChan, medNumEventQueues)
+		wf.stopChan, 5)
 	if err != nil {
 		return nil, err
 	}
