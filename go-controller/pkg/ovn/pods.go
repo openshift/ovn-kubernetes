@@ -291,7 +291,7 @@ func (oc *Controller) getRoutingPodGWs(ns string) map[string]*gatewayInfo {
 func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
 	// NOTE (trozet): we have to wait for namespace locked because namespace update for
 	// hybrid overlay exgw cannot update pod routes inside the pod
-	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(ns, true)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
 		return nil, err
 	}

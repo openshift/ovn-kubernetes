@@ -222,7 +222,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 
 func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(egressFirewall.Namespace, false)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(egressFirewall.Namespace, false, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked for egress firewall: %s, error: %v",
 			egressFirewall.Namespace, err)
@@ -283,7 +283,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 
 func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) error {
 	// block all external traffic in this namespace
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(newEgressFirewall.Namespace, true)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(newEgressFirewall.Namespace, true, nil)
 	if err != nil {
 		return fmt.Errorf("cannot update egressfirewall %s, failed to ensure namespace: %v",
 			newEgressFirewall.Namespace, err)
