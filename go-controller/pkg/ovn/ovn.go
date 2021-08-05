@@ -315,7 +315,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		oc.runPodController(1, oc.stopChan)
+		oc.runPodController(10, oc.stopChan)
 	}()
 
 	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
