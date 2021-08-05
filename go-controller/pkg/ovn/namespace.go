@@ -57,6 +57,7 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 
 	if nsInfo.addressSet == nil {
 		var err error
+klog.Infof("###### addPodToNamespace(%s): creating NS addressset %s", ns, ns)
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
 			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
@@ -244,6 +245,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	}
 	if nsInfo.addressSet == nil {
 		var err error
+		klog.Infof("###### AddNamespace(%s): creating NS addressset %s", ns.Name, ns.Name)
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns.Name)
 		if err != nil {
 			klog.Errorf(err.Error())

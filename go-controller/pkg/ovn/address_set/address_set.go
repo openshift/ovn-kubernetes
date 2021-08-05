@@ -87,6 +87,8 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 	if config.IPv6Mode {
 		hashedAddressSetNames = append(hashedAddressSetNames, ip6ASName)
 	}
+
+	klog.Infof("#### EnsureAddressSet(%s) hash %v", name, hashedAddressSetNames)
 	for _, hashedAddressSetName := range hashedAddressSetNames {
 		uuid, stderr, err := util.RunOVNNbctl(
 			"--data=bare",
@@ -245,19 +247,23 @@ func newOvnAddressSets(name string, ips []net.IP) (*ovnAddressSets, error) {
 	)
 	v4IPs, v6IPs := splitIPsByFamily(ips)
 
+	hashNames := make([]string, 0, 2)
 	ip4ASName, ip6ASName := MakeAddressSetName(name)
 	if config.IPv4Mode {
 		v4set, err = newOvnAddressSet(ip4ASName, v4IPs)
 		if err != nil {
 			return nil, err
 		}
+		hashNames = append(hashNames, v4set.hashName)
 	}
 	if config.IPv6Mode {
 		v6set, err = newOvnAddressSet(ip6ASName, v6IPs)
 		if err != nil {
 			return nil, err
 		}
+		hashNames = append(hashNames, v6set.hashName)
 	}
+	klog.Infof("#### NewAddressSet(%s) hash %v", name, hashNames)
 	return &ovnAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 

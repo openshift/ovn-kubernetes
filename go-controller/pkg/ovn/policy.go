@@ -971,7 +971,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
 	for i, ingressJSON := range policy.Spec.Ingress {
-		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
+		klog.Infof("Network policy ingress is %+v", ingressJSON)
 
 		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name)
 
@@ -981,7 +981,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(ingressJSON.From) {
-			klog.V(5).Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
+			klog.Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
 			if err := ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
@@ -1008,7 +1008,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	// Go through each egress rule.  For each egress rule, create an
 	// addressSet for the peer pods.
 	for i, egressJSON := range policy.Spec.Egress {
-		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
+		klog.Infof("Network policy egress is %+v", egressJSON)
 
 		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name)
 
@@ -1018,7 +1018,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(egressJSON.To) {
-			klog.V(5).Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
+			klog.Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
 			if err := egress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue

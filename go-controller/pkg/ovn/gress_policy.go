@@ -84,6 +84,7 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory
 
 	direction := strings.ToLower(string(gp.policyType))
 	asName := fmt.Sprintf("%s.%s.%s.%d", gp.policyNamespace, gp.policyName, direction, gp.idx)
+klog.Infof("##### gressPolicy(%s/%s) => creating addressset %s", gp.policyNamespace, gp.policyName, asName)
 	as, err := factory.NewAddressSet(asName, nil)
 	if err != nil {
 		return err
@@ -252,6 +253,7 @@ func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 		gp.peerV6AddressSets.Insert(v6HashName)
 	}
 
+	klog.Infof("##### gressPolicy(%s/%s) addNamespaceAddressSet(%s) => %s %s", gp.policyNamespace, gp.policyName, name, v4HashName, v6HashName)
 	return true
 }
 
@@ -302,6 +304,7 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 	} else {
 		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
 	}
+klog.Infof("##### gressPolicy(%s/%s) creating local pod ACL %s port %s", gp.policyNamespace, gp.policyName, l3Match, lportMatch)
 
 	if len(gp.portPolicies) == 0 {
 		match := fmt.Sprintf("match=\"%s && %s\"", l3Match, lportMatch)
