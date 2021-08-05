@@ -43,7 +43,8 @@ const (
 func (oc *Controller) ensurePod(key string, pod *kapi.Pod) error {
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
-		return fmt.Errorf("pod %s not scheduled", pod.Name)
+		klog.V(5).Infof("pod %s not scheduled; trying again later", pod.Name)
+		return nil
 	}
 
 	tmp, ok := oc.podsCache.Load(key)
