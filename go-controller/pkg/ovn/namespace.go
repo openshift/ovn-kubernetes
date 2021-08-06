@@ -51,8 +51,34 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
-// adds pod to addr set and returns true if namespace supports multicast
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) error {
+func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
+	res := gatewayInfo{}
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
+	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
+	copy(res.gws, nsInfo.routingExternalGWs.gws)
+	return &res
+}
+
+func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewayInfo {
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res := make(map[string]*gatewayInfo)
+	for k, v := range nsInfo.routingExternalPodGWs {
+		item := &gatewayInfo{
+			bfdEnabled: v.bfdEnabled,
+			gws:        make([]net.IP, len(v.gws)),
+		}
+		copy(item.gws, v.gws)
+		res[k] = item
+	}
+	return res
+}
+
+// addPodToNamespace adds the pod's IP to the namespace's address set and returns
+// pod's routing gateway info and hybrid overlay gateway
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, error) {
 	nsInfo := oc.ensureNamespaceLocked(ns)
 	defer nsInfo.Unlock()
 
@@ -60,15 +86,15 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) error {
 		var err error
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
-			return fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
+			return nil, nil, nil, fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
 		}
 	}
 
 	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips)); err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
-	return nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
@@ -85,7 +111,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 
 	// Remove the port from the multicast allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled {
+	if oc.multicastSupport && nsInfo.multicastEnabled && portInfo != nil {
 		if err := podDeleteAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
 			return err
 		}
@@ -195,24 +221,28 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	nsInfo := oc.ensureNamespaceLocked(ns.Name)
 	defer nsInfo.Unlock()
 
-	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
-		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
+	if config.HybridOverlay.Enabled {
+		annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
+		if annotation != "" {
+			parsedAnnotation := net.ParseIP(annotation)
+			if parsedAnnotation == nil {
+				klog.Errorf("Could not parse hybrid overlay external gw annotation")
+			} else {
+				nsInfo.hybridOverlayExternalGW = parsedAnnotation
+			}
+		}
+
+		annotation = ns.Annotations[hotypes.HybridOverlayVTEP]
+		if annotation != "" {
+			parsedAnnotation := net.ParseIP(annotation)
+			if parsedAnnotation == nil {
+				klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+			} else {
+				nsInfo.hybridOverlayVTEP = parsedAnnotation
+			}
 		}
 	}
-	annotation = ns.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
-		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
-		}
-	}
+
 	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
 		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
@@ -229,7 +259,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		}
 	}
 
-	annotation = ns.Annotations[aclLoggingAnnotation]
+	annotation := ns.Annotations[aclLoggingAnnotation]
 	if annotation != "" {
 		if oc.aclLoggingCanEnable(annotation, nsInfo) {
 			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
@@ -335,28 +365,31 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		}
 	}
 
-	annotation := newer.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
+	if config.HybridOverlay.Enabled {
+		annotation := newer.Annotations[hotypes.HybridOverlayExternalGw]
+		if annotation != "" {
+			parsedAnnotation := net.ParseIP(annotation)
+			if parsedAnnotation == nil {
+				klog.Errorf("Could not parse hybrid overlay external gw annotation")
+			} else {
+				nsInfo.hybridOverlayExternalGW = parsedAnnotation
+			}
 		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
+			nsInfo.hybridOverlayExternalGW = nil
 		}
-	} else {
-		nsInfo.hybridOverlayExternalGW = nil
-	}
-	annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+		annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
+		if annotation != "" {
+			parsedAnnotation := net.ParseIP(annotation)
+			if parsedAnnotation == nil {
+				klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+			} else {
+				nsInfo.hybridOverlayVTEP = parsedAnnotation
+			}
 		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
+			nsInfo.hybridOverlayVTEP = nil
 		}
-	} else {
-		nsInfo.hybridOverlayVTEP = nil
 	}
+
 	oc.multicastUpdateNamespace(newer, nsInfo)
 }
 
