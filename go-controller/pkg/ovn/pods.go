@@ -119,7 +119,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
 
-	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
+	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo.name, portInfo.uuid, portInfo.ips); err != nil {
 		klog.Errorf(err.Error())
 	}
 
@@ -325,7 +325,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			} else {
 				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
 			}
-			oc.deletePodFromNamespace(pod.Namespace, nil)
+			oc.deletePodFromNamespace(pod.Namespace, portName, "", podIfAddrs)
 		}
 	}()
 

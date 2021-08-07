@@ -97,22 +97,22 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
+func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) error {
 	nsInfo := oc.getNamespaceLocked(ns)
 	if nsInfo == nil {
 		return nil
 	}
 	defer nsInfo.Unlock()
 
-	if nsInfo.addressSet != nil {
-		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
+	if nsInfo.addressSet != nil && len(ips) > 0 {
+		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(ips)); err != nil {
 			return err
 		}
 	}
 
 	// Remove the port from the multicast allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled && portInfo != nil {
-		if err := podDeleteAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
+	if oc.multicastSupport && nsInfo.multicastEnabled && uuid != "" {
+		if err := podDeleteAllowMulticastPolicy(oc.ovnNBClient, ns, name, uuid); err != nil {
 			return err
 		}
 	}
