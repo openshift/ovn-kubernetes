@@ -85,13 +85,17 @@ func (oc *Controller) syncPods(pods []interface{}) {
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
+	klog.Infof("[%s/%s %s] deleting pod", pod.Namespace, pod.Name, pod.UID)
+
+	start := time.Now()
+	defer func() {
+		klog.Infof("[%s/%s %s] deleteLogicalPort took %v", pod.Namespace, pod.Name, pod.UID, time.Since(start))
+	}()
+
 	oc.deletePodExternalGW(pod)
 	if pod.Spec.HostNetwork {
 		return
 	}
-
-	podDesc := pod.Namespace + "/" + pod.Name
-	klog.Infof("Deleting pod: %s", podDesc)
 
 	logicalPort := podLogicalPortName(pod)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
@@ -250,7 +254,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
+		klog.Infof("[%s/%s %s] addLogicalPort took %v", pod.Namespace, pod.Name, pod.UID, time.Since(start))
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
@@ -260,7 +264,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	portName := podLogicalPortName(pod)
-	klog.V(5).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
+	klog.Infof("[%s/%s %s] creating logical port %s on switch %s", pod.Namespace, pod.Name, pod.UID, portName, logicalSwitch)
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
