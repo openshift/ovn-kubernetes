@@ -13,6 +13,7 @@ import (
 
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
+	ktypes "k8s.io/apimachinery/pkg/types"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -63,6 +64,11 @@ type listerInterface interface{}
 
 type initialAddFn func(*Handler, []interface{})
 
+type queueMapEntry struct {
+	queue    uint32
+	refcount int32
+}
+
 type informer struct {
 	sync.RWMutex
 	oType    reflect.Type
@@ -74,7 +80,8 @@ type informer struct {
 	// when a handler is added
 	initialAddFunc initialAddFn
 	shutdownWg     sync.WaitGroup
-	queueMap       sync.Map
+	queueMap       map[ktypes.NamespacedName]*queueMapEntry
+	queueMapLock   sync.Mutex
 	queueIndex     uint32
 }
 
@@ -161,35 +168,58 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 	}
 }
 
-func (i *informer) getQueueNum(oType reflect.Type, obj interface{}, numEventQueues uint32, del bool) uint32 {
-
+func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQueues uint32) (ktypes.NamespacedName, *queueMapEntry, uint32) {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
 		klog.Errorf("Object has no meta: %v", err)
-		return 0
+		return ktypes.NamespacedName{}, nil, 0
 	}
 
-	if del {
-		if queue, exists := i.queueMap.LoadAndDelete(meta.UID); exists {
-			// entry exists, just return it
-			return queue.(uint32)
+	namespacedName := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
+
+	i.queueMapLock.Lock()
+	defer i.queueMapLock.Unlock()
+
+	entry, ok := i.queueMap[namespacedName]
+	if ok {
+		if atomic.AddInt32(&entry.refcount, 1) == 1 {
+			// Entry was previously unused; assign new queue to ensure
+			// better balance between handlers. Otherwise we would
+			// use the same queue for all events of the entire lifetime
+			// of objects like Namespaces.
+			entry.queue = atomic.AddUint32(&i.queueIndex, 1) % numEventQueues
 		}
 	} else {
-		if queue, loaded := i.queueMap.Load(meta.UID); loaded {
-			// new entry loaded, means it existed, return it
-			return queue.(uint32)
+		// no entry found, assign new queue
+		entry = &queueMapEntry{
+			refcount: 1,
+			queue:    atomic.AddUint32(&i.queueIndex, 1) % numEventQueues,
 		}
+		i.queueMap[namespacedName] = entry
+	}
+	return namespacedName, entry, entry.queue
+}
+
+func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, entry *queueMapEntry, del bool) {
+	if entry == nil {
+		return
 	}
 
-	// no entry found, assign new queue
-	queue := atomic.AddUint32(&i.queueIndex, 1) % numEventQueues
-	i.queueMap.Store(meta.UID, queue)
-	return queue
+	if !del {
+		atomic.AddInt32(&entry.refcount, -1)
+		return
+	}
+
+	i.queueMapLock.Lock()
+	defer i.queueMapLock.Unlock()
+	if atomic.AddInt32(&entry.refcount, -1) <= 0 {
+		delete(i.queueMap, key)
+	}
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (i *informer) enqueueEvent(oldObj, obj interface{}, numEventQueues uint32, del bool, processFunc func(*event)) {
-	i.events[i.getQueueNum(i.oType, obj, numEventQueues, del)] <- &event{
+func (i *informer) enqueueEvent(oldObj, obj interface{}, queueNum uint32, processFunc func(*event)) {
+	i.events[queueNum] <- &event{
 		obj:     obj,
 		oldObj:  oldObj,
 		process: processFunc,
@@ -216,23 +246,27 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.enqueueEvent(nil, obj, numEventQueues, false, func(e *event) {
+			key, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues)
+			i.enqueueEvent(nil, obj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "add").Observe(time.Since(start).Seconds())
+				i.unrefQueueEntry(key, entry, false)
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.enqueueEvent(oldObj, newObj, numEventQueues, false, func(e *event) {
+			key, entry, queueNum := i.refQueueEntry(i.oType, newObj, numEventQueues)
+			i.enqueueEvent(oldObj, newObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnUpdate(e.oldObj, e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "update").Observe(time.Since(start).Seconds())
+				i.unrefQueueEntry(key, entry, false)
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -241,13 +275,15 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			i.enqueueEvent(nil, realObj, numEventQueues, true, func(e *event) {
+			key, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues)
+			i.enqueueEvent(nil, realObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "delete").Observe(time.Since(start).Seconds())
+				i.unrefQueueEntry(key, entry, true)
 			})
 		},
 	}
@@ -334,12 +370,11 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	}
 
 	return &informer{
-		oType:      oType,
-		inf:        sharedInformer,
-		lister:     lister,
-		handlers:   make(map[uint64]*Handler),
-		shutdownWg: sync.WaitGroup{},
-		queueMap:   sync.Map{},
+		oType:    oType,
+		inf:      sharedInformer,
+		lister:   lister,
+		handlers: make(map[uint64]*Handler),
+		queueMap: make(map[ktypes.NamespacedName]*queueMapEntry),
 	}, nil
 }
 
@@ -374,27 +409,37 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// initial add events will be distributed. When a new handler
 		// is added, only that handler should receive events for all
 		// existing objects.
-		adds := make([]chan interface{}, numEventQueues)
+		type initialAddEntry struct {
+			obj      interface{}
+			doneFunc func()
+		}
+		adds := make([]chan *initialAddEntry, numEventQueues)
 		queueWg := &sync.WaitGroup{}
 		queueWg.Add(len(adds))
 		for j := range adds {
-			adds[j] = make(chan interface{}, 10)
-			go func(addChan chan interface{}) {
+			adds[j] = make(chan *initialAddEntry, 10)
+			go func(addChan chan *initialAddEntry) {
 				defer queueWg.Done()
 				for {
-					obj, ok := <-addChan
+					entry, ok := <-addChan
 					if !ok {
 						return
 					}
-					h.OnAdd(obj)
+					h.OnAdd(entry.obj)
+					entry.doneFunc()
 				}
 			}(adds[j])
 		}
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			queueIdx := i.getQueueNum(i.oType, obj, numEventQueues, false)
-			adds[queueIdx] <- obj
+			key, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues)
+			adds[queueNum] <- &initialAddEntry{
+				obj: obj,
+				doneFunc: func() {
+					i.unrefQueueEntry(key, entry, false)
+				},
+			}
 		}
 		// Close all the channels
 		for j := range adds {
