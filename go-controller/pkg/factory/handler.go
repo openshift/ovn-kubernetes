@@ -13,6 +13,7 @@ import (
 
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
+	ktypes "k8s.io/apimachinery/pkg/types"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -169,13 +170,14 @@ func (i *informer) getQueueNum(oType reflect.Type, obj interface{}, numEventQueu
 		return 0
 	}
 
+	namespacedName := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
 	if del {
-		if queue, exists := i.queueMap.LoadAndDelete(meta.UID); exists {
+		if queue, exists := i.queueMap.LoadAndDelete(namespacedName); exists {
 			// entry exists, just return it
 			return queue.(uint32)
 		}
 	} else {
-		if queue, loaded := i.queueMap.Load(meta.UID); loaded {
+		if queue, loaded := i.queueMap.Load(namespacedName); loaded {
 			// new entry loaded, means it existed, return it
 			return queue.(uint32)
 		}
@@ -183,7 +185,7 @@ func (i *informer) getQueueNum(oType reflect.Type, obj interface{}, numEventQueu
 
 	// no entry found, assign new queue
 	queue := atomic.AddUint32(&i.queueIndex, 1) % numEventQueues
-	i.queueMap.Store(meta.UID, queue)
+	i.queueMap.Store(namespacedName, queue)
 	return queue
 }
 
