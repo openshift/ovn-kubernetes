@@ -168,14 +168,19 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 	}
 }
 
-func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQueues uint32) (ktypes.NamespacedName, *queueMapEntry, uint32) {
+func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQueues uint32, op string) (ktypes.NamespacedName, string, *queueMapEntry, uint32) {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
 		klog.Errorf("Object has no meta: %v", err)
-		return ktypes.NamespacedName{}, nil, 0
+		return ktypes.NamespacedName{}, "", nil, 0
 	}
 
+	start := time.Now()
 	namespacedName := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
+
+	defer func() {
+		klog.Infof("#### [%s %s] %s refQueueEntry took %v", namespacedName, meta.UID, op, time.Since(start))
+	}()
 
 	i.queueMapLock.Lock()
 	defer i.queueMapLock.Unlock()
@@ -197,13 +202,18 @@ func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQu
 		}
 		i.queueMap[namespacedName] = entry
 	}
-	return namespacedName, entry, entry.queue
+	return namespacedName, string(meta.UID), entry, entry.queue
 }
 
-func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, entry *queueMapEntry, del bool) {
+func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, uid string, entry *queueMapEntry, del bool, op string) {
 	if entry == nil {
 		return
 	}
+
+	start := time.Now()
+	defer func() {
+		klog.Infof("#### [%s %s] %s unrefQueueEntry took %v", key, uid, op, time.Since(start))
+	}()
 
 	if !del {
 		atomic.AddInt32(&entry.refcount, -1)
@@ -246,7 +256,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			key, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues)
+			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "ADD")
 			i.enqueueEvent(nil, obj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
@@ -254,11 +264,11 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					h.OnAdd(e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "add").Observe(time.Since(start).Seconds())
-				i.unrefQueueEntry(key, entry, false)
+				i.unrefQueueEntry(key, uid, entry, false, "ADD")
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			key, entry, queueNum := i.refQueueEntry(i.oType, newObj, numEventQueues)
+			key, uid, entry, queueNum := i.refQueueEntry(i.oType, newObj, numEventQueues, "UPDATE")
 			i.enqueueEvent(oldObj, newObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
@@ -266,7 +276,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					h.OnUpdate(e.oldObj, e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "update").Observe(time.Since(start).Seconds())
-				i.unrefQueueEntry(key, entry, false)
+				i.unrefQueueEntry(key, uid, entry, false, "UPDATE")
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -275,7 +285,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			key, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues)
+			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "DEL")
 			i.enqueueEvent(nil, realObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
@@ -283,7 +293,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "delete").Observe(time.Since(start).Seconds())
-				i.unrefQueueEntry(key, entry, true)
+				i.unrefQueueEntry(key, uid, entry, true, "DEL")
 			})
 		},
 	}
@@ -433,11 +443,11 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			key, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues)
+			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "INIADD")
 			adds[queueNum] <- &initialAddEntry{
 				obj: obj,
 				doneFunc: func() {
-					i.unrefQueueEntry(key, entry, false)
+					i.unrefQueueEntry(key, uid, entry, false, "INIADD")
 				},
 			}
 		}
