@@ -65,7 +65,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		// END OCP HACK
 	} else {
 		gwBridge, _, err := gatewayInitInternal(
-			nodeName, gwIntf, "", hostSubnets, gwNextHops, nodeAnnotator)
+			nodeName, gwIntf, "", hostSubnets, gwNextHops, nil, nodeAnnotator)
 		if err != nil {
 			return nil, err
 		}
