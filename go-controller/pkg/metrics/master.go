@@ -72,6 +72,37 @@ var MetricResourceUpdateLatency = prometheus.NewHistogramVec(prometheus.Histogra
 	},
 )
 
+// MetricResourceAddLatency is the time taken to complete resource update by an handler.
+// This measures the latency for all of the handlers for a given resource.
+var MetricHandlerAddLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "handler_add_latency_ms",
+	Help:      "The duration to enqueue a resource add event.",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+)
+
+// MetricHandlerUpdateLatency is the time taken to complete resource update by an handler.
+// This measures the latency for all of the handlers for a given resource.
+var MetricHandlerUpdateLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "handler_update_latency_ms",
+	Help:      "The duration to enqueue a resource update event.",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+)
+
+// MetricHandlerDeleteLatency is the time taken to complete resource update by an handler.
+// This measures the latency for all of the handlers for a given resource.
+var MetricHandlerDeleteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "handler_delete_latency_ms",
+	Help:      "The duration to enqueue a resource update event.",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+)
+
+
 // MetricRequeueServiceCount is the number of times a particular service has been requeued.
 var MetricRequeueServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
@@ -187,6 +218,9 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		util.MetricOvnCliLatency = metricOvnCliLatency
 		prometheus.MustRegister(MetricResourceUpdateCount)
 		prometheus.MustRegister(MetricResourceUpdateLatency)
+		prometheus.MustRegister(MetricHandlerAddLatency)
+		prometheus.MustRegister(MetricHandlerUpdateLatency)
+		prometheus.MustRegister(MetricHandlerDeleteLatency)
 		prometheus.MustRegister(MetricRequeueServiceCount)
 		prometheus.MustRegister(MetricSyncServiceCount)
 		prometheus.MustRegister(MetricSyncServiceLatency)
