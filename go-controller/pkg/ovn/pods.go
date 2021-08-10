@@ -258,13 +258,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
+	portName := podLogicalPortName(pod)
+	klog.Infof("[%s/%s %s] creating logical port %s on switch %s", pod.Namespace, pod.Name, pod.UID, portName, logicalSwitch)
+
 	err = oc.waitForNodeLogicalSwitch(logicalSwitch)
 	if err != nil {
 		return err
 	}
-
-	portName := podLogicalPortName(pod)
-	klog.Infof("[%s/%s %s] creating logical port %s on switch %s", pod.Namespace, pod.Name, pod.UID, portName, logicalSwitch)
+	nodeSwitchTime := time.Since(start)
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
@@ -274,6 +275,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var releaseIPs bool
 	needsIP := true
 
+	lspAddStart := time.Now()
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
@@ -310,6 +312,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
 	}
 	cmds = append(cmds, cmd)
+	lspAddEnd := time.Since(lspAddStart)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 
@@ -333,6 +336,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}()
 
+	ipTimeStart := time.Now()
 	if err == nil {
 		podMac = annotation.MAC
 		podIfAddrs = annotation.IPs
@@ -379,16 +383,19 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					portName, logicalSwitch, err)
 			}
 		}
-
 		releaseIPs = true
 	}
+	ipTimeEnd := time.Since(ipTimeStart)
 
 	// Ensure the namespace/nsInfo exists
+	addToNSStart := time.Now()
 	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
+	addToNSEnd := time.Since(addToNSStart)
 
+	annotateStart := time.Now()
 	if needsIP {
 		var networks []*types.NetworkSelectionElement
 
@@ -438,7 +445,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 		releaseIPs = false
 	}
+	annotateEnd := time.Since(annotateStart)
 
+	gwsStart := time.Now()
 	// if we have any external or pod Gateways, add routes
 	gateways := make([]*gatewayInfo, 0)
 
@@ -471,7 +480,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
+	gwsEnd := time.Since(gwsStart)
 
+	ovnExecStart := time.Now()
 	// set addresses on the port
 	addresses = make([]string, len(podIfAddrs)+1)
 	addresses[0] = podMac.String()
@@ -508,6 +519,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
+	ovnExecEnd := time.Since(ovnExecStart)
 
 	lsp, err = oc.ovnNBClient.LSPGet(portName)
 	if err != nil || lsp == nil {
@@ -515,11 +527,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
+	portCacheStart := time.Now()
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+	portCacheEnd := time.Since(portCacheStart)
 
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
 	// it's rare and easily worked around for now.
+	mcStart := time.Now()
 	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
 	if err != nil {
 		return err
@@ -529,8 +544,26 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+	mcEnd := time.Since(mcStart)
 	// observe the pod creation latency metric.
+	metricsStart := time.Now()
 	metrics.RecordPodCreated(pod)
+	metricsEnd := time.Since(metricsStart)
+
+	klog.Infof("#### [%s/%s %s] 1addLogicalPort took %v\n"+
+		"    node switch took %v\n"+
+		"    LSP add took %v\n"+
+		"    IPAM took %v\n"+
+		"    addToNS took %v\n"+
+		"    annotate took %v\n"+
+		"    gws took %v\n"+
+		"    ovnExec took %v\n"+
+		"    portCache took %v\n"+
+		"    mc took %v\n"+
+		"    metrics took %v\n",
+		pod.Namespace, pod.Name, pod.UID,
+		time.Since(start), nodeSwitchTime, lspAddEnd, ipTimeEnd, addToNSEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
+
 	return nil
 }
 
