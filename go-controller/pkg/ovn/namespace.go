@@ -51,6 +51,12 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
+func (oc *Controller) hasPodRoutingExternalGWs(ns string) (bool, bool) {
+	nsInfo := oc.ensureNamespaceLocked(ns)
+	defer nsInfo.Unlock()
+	return len(nsInfo.routingExternalGWs.gws) > 0, len(nsInfo.routingExternalPodGWs) > 0
+}
+
 func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
 	res := gatewayInfo{}
 	// return a copy of the object so it can be handled without the
