@@ -75,6 +75,8 @@ type informer struct {
 	inf      cache.SharedIndexInformer
 	handlers map[uint64]*Handler
 	events   []chan *event
+	eventC   []int32
+	count    uint32
 	lister   listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
 	// when a handler is added
@@ -153,7 +155,7 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
+func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}, chanNum int32) {
 	defer i.shutdownWg.Done()
 	for {
 		select {
@@ -162,6 +164,7 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 				return
 			}
 			e.process(e)
+			atomic.AddInt32(&(i.eventC[chanNum]), -1)
 		case <-stopChan:
 			return
 		}
@@ -175,16 +178,10 @@ func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQu
 		return ktypes.NamespacedName{}, "", nil, 0
 	}
 
-	start := time.Now()
-	namespacedName := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
-
-	defer func() {
-		klog.Infof("#### [%s %s] %s refQueueEntry took %v", namespacedName, meta.UID, op, time.Since(start))
-	}()
-
 	i.queueMapLock.Lock()
 	defer i.queueMapLock.Unlock()
 
+	namespacedName := ktypes.NamespacedName{Namespace: meta.Namespace, Name: meta.Name}
 	entry, ok := i.queueMap[namespacedName]
 	if ok {
 		if atomic.AddInt32(&entry.refcount, 1) == 1 {
@@ -205,15 +202,21 @@ func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQu
 	return namespacedName, string(meta.UID), entry, entry.queue
 }
 
+func (i *informer) incAndPrintQueues(numEventQueues uint32, queueNum uint32, detail string) {
+	atomic.AddInt32(&(i.eventC[queueNum]), 1)
+	if atomic.AddUint32(&i.count, 1) % 10 == 0 {
+		msg := fmt.Sprintf("#### %s queue depth ", detail)
+		for j := 0; j < int(numEventQueues); j++ {
+			msg = msg + fmt.Sprintf("%2d ", atomic.LoadInt32(&(i.eventC[j])))
+		}
+		klog.Infof(msg)
+	}
+}
+
 func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, uid string, entry *queueMapEntry, del bool, op string) {
 	if entry == nil {
 		return
 	}
-
-	start := time.Now()
-	defer func() {
-		klog.Infof("#### [%s %s] %s unrefQueueEntry took %v", key, uid, op, time.Since(start))
-	}()
 
 	if !del {
 		atomic.AddInt32(&entry.refcount, -1)
@@ -258,6 +261,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 		AddFunc: func(obj interface{}) {
 			start2 := time.Now()
 			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "ADD")
+			i.incAndPrintQueues(numEventQueues, queueNum, name)
 			i.enqueueEvent(nil, obj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
@@ -272,6 +276,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			start2 := time.Now()
 			key, uid, entry, queueNum := i.refQueueEntry(i.oType, newObj, numEventQueues, "UPDATE")
+			i.incAndPrintQueues(numEventQueues, queueNum, name)
 			i.enqueueEvent(oldObj, newObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
@@ -291,6 +296,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 			}
 			start2 := time.Now()
 			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "DEL")
+			i.incAndPrintQueues(numEventQueues, queueNum, name)
 			i.enqueueEvent(nil, realObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
@@ -415,10 +421,11 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return nil, err
 	}
 	i.events = make([]chan *event, numEventQueues)
+	i.eventC = make([]int32, numEventQueues)
 	i.shutdownWg.Add(len(i.events))
 	for j := range i.events {
 		i.events[j] = make(chan *event, 10)
-		go i.processEvents(i.events[j], stopChan)
+		go i.processEvents(i.events[j], stopChan, int32(j))
 	}
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		// Make a handler-specific channel array across which the

@@ -26,6 +26,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 
@@ -211,6 +212,9 @@ type Controller struct {
 
 	// channel to indicate we need to retry pods immediately
 	retryPodsChan chan struct{}
+
+	podTracker      sync.Map
+	podEventHandler informer.EventHandler
 }
 
 type retryEntry struct {
@@ -313,6 +317,35 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	if err := oc.StartServiceController(wg, true); err != nil {
 		return err
 	}
+
+	oc.podEventHandler = informer.NewDefaultEventHandler("pod", oc.watchFactory.PodInformer(),
+		func(obj interface{}) error {
+			pod, ok := obj.(*kapi.Pod)
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			if util.PodScheduled(pod) {
+				key := pod.Namespace + "/" + pod.Name
+				oc.podTracker.Store(key, time.Now())
+			}
+			return nil
+		},
+		func(obj interface{}) error {
+			return nil
+		},
+		func(old, new interface{}) bool {
+			oldPod := old.(*kapi.Pod)
+			newPod := new.(*kapi.Pod)
+			return !util.PodScheduled(oldPod) && util.PodScheduled(newPod)
+		},
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := oc.podEventHandler.Run(10, oc.stopChan); err != nil {
+			klog.Error(err)
+		}
+	}()
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
@@ -614,6 +647,7 @@ func (oc *Controller) WatchPods() {
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.checkAndDeleteRetryPod(pod.UID)
+			oc.podTracker.Delete(pod.Namespace + "/" + pod.Name)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)
 				return
