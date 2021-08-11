@@ -394,14 +394,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	ipTimeEnd := time.Since(ipTimeStart)
 
 	// Ensure the namespace/nsInfo exists
-	addToNSStart := time.Now()
-	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, nsLockEnd, addrsetEnd, addrAddEnd, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
-	addToNSEnd := time.Since(addToNSStart)
 
-	annotateStart := time.Now()
+	var annotateEnd, getSwSubEnd time.Duration
 	if needsIP {
 		var networks []*types.NetworkSelectionElement
 
@@ -425,6 +423,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					networks[0].MacRequest, pod.Name, err)
 			}
 		}
+		getSwSubStart := time.Now()
 		podAnnotation := util.PodAnnotation{
 			IPs: podIfAddrs,
 			MAC: podMac,
@@ -438,6 +437,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return err
 		}
+		getSwSubEnd = time.Since(getSwSubStart)
+		annotateStart := time.Now()
 		var marshalledAnnotation map[string]string
 		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
 		if err != nil {
@@ -450,8 +451,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
 		releaseIPs = false
+		annotateEnd = time.Since(annotateStart)
 	}
-	annotateEnd := time.Since(annotateStart)
 
 	gwsStart := time.Now()
 	// if we have any external or pod Gateways, add routes
@@ -561,7 +562,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		"    node switch took %v\n"+
 		"    LSP add took %v\n"+
 		"    IPAM took %v\n"+
-		"    addToNS took %v\n"+
+		"    nsLock took %v\n"+
+		"    nsAddrset took %v\n"+
+		"    nsAddrAdd took %v\n"+
+		"    getSwSub took %v\n"+
 		"    annotate took %v\n"+
 		"    gws took %v\n"+
 		"    ovnExec took %v\n"+
@@ -569,7 +573,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		"    mc took %v\n"+
 		"    metrics took %v\n",
 		pod.Namespace, pod.Name, pod.UID,
-		time.Since(start), podDelay, nodeSwitchTime, lspAddEnd, ipTimeEnd, addToNSEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
+		time.Since(start), podDelay, nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, addrsetEnd, addrAddEnd, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
 
 	return nil
 }
