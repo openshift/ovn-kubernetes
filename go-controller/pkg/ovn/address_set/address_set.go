@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -50,7 +51,7 @@ type AddressSet interface {
 	// GetName returns the descriptive name of the address set
 	GetName() string
 	// AddIPs adds the array of IPs to the address set
-	AddIPs(ip []net.IP) error
+	AddIPs(ip []net.IP) (time.Duration, time.Duration, error)
 	// SetIPs sets the address set to the given array of addresses
 	SetIPs(ip []net.IP) error
 	DeleteIPs(ip []net.IP) error
@@ -343,27 +344,31 @@ func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 	return err
 }
 
-func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
+func (as *ovnAddressSets) AddIPs(ips []net.IP) (time.Duration, time.Duration, error) {
 	if len(ips) == 0 {
-		return nil
+		return 0 * time.Second, 0 * time.Second, nil
 	}
 
+	start := time.Now()
 	as.Lock()
 	defer as.Unlock()
+	lockEnd := time.Since(start)
 
+	start = time.Now()
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
 		if err := as.ipv6.addIPs(v6ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+			return 0 * time.Second, 0 * time.Second, fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
 		}
 	}
 	if as.ipv4 != nil {
 		if err := as.ipv4.addIPs(v4ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+			return 0 * time.Second, 0 * time.Second, fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
 		}
 	}
+	addEnd := time.Since(start)
 
-	return nil
+	return lockEnd, addEnd, nil
 }
 
 func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {

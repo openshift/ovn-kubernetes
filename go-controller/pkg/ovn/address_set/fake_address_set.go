@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
@@ -232,7 +233,7 @@ func (as *fakeAddressSets) GetName() string {
 	return as.name
 }
 
-func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
+func (as *fakeAddressSets) AddIPs(ips []net.IP) (time.Duration, time.Duration, error) {
 	var err error
 	as.Lock()
 	defer as.Unlock()
@@ -244,10 +245,10 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 			err = as.ipv4.addIP(ip)
 		}
 		if err != nil {
-			return err
+			return 0 * time.Second, 0 * time.Second, err
 		}
 	}
-	return nil
+	return 0 * time.Second, 0 * time.Second, nil
 }
 
 func (as *fakeAddressSets) SetIPs(ips []net.IP) error {

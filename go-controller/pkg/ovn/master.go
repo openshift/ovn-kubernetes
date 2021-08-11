@@ -813,7 +813,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 						"error: %v", hostNetworkNamespace, err)
 				}
 			}
-			if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
+			if _, _, err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
 				return err
 			}
 		}

@@ -110,7 +110,8 @@ func (gp *gressPolicy) addPeerSvcVip(service *v1.Service) error {
 	ips := getSvcVips(service)
 
 	klog.V(5).Infof("Adding SVC clusterIP to gressPolicy's Address Set: %v", ips)
-	return gp.peerAddressSet.AddIPs(ips)
+	_, _, err := gp.peerAddressSet.AddIPs(ips)
+	return err
 }
 
 func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
@@ -145,7 +146,8 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 		ips = append(ips, podIPs...)
 	}
 
-	return gp.peerAddressSet.AddIPs(ips)
+	_, _, err := gp.peerAddressSet.AddIPs(ips)
+	return err
 }
 
 func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
