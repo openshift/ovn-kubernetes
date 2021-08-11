@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -171,6 +172,22 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}, c
 	}
 }
 
+func (i *informer) getNewQueueNum(numEventQueues uint32) uint32 {
+	var j, startIdx, queueIdx uint32
+	startIdx = uint32(rand.Intn(int(numEventQueues-1)))
+	queueIdx = startIdx
+	lowestNum := atomic.LoadInt32(&(i.eventC[startIdx]))
+	for j = 0; j < numEventQueues; j++ {
+		tryQueue := (startIdx + j) % numEventQueues
+		num := atomic.LoadInt32(&(i.eventC[tryQueue]))
+		if num < lowestNum {
+			lowestNum = num
+			queueIdx = tryQueue
+		}
+	}
+	return queueIdx
+}
+
 func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQueues uint32, op string) (ktypes.NamespacedName, string, *queueMapEntry, uint32) {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
@@ -189,13 +206,15 @@ func (i *informer) refQueueEntry(oType reflect.Type, obj interface{}, numEventQu
 			// better balance between handlers. Otherwise we would
 			// use the same queue for all events of the entire lifetime
 			// of objects like Namespaces.
-			entry.queue = atomic.AddUint32(&i.queueIndex, 1) % numEventQueues
+//			entry.queue = atomic.AddUint32(&i.queueIndex, 1) % numEventQueues
+			entry.queue = i.getNewQueueNum(numEventQueues)
 		}
 	} else {
 		// no entry found, assign new queue
 		entry = &queueMapEntry{
 			refcount: 1,
-			queue:    atomic.AddUint32(&i.queueIndex, 1) % numEventQueues,
+//			queue:    atomic.AddUint32(&i.queueIndex, 1) % numEventQueues,
+			queue:    i.getNewQueueNum(numEventQueues),
 		}
 		i.queueMap[namespacedName] = entry
 	}
