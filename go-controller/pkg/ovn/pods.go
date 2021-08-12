@@ -394,7 +394,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	ipTimeEnd := time.Since(ipTimeStart)
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, nsLockEnd, addrsetEnd, addrLockEnd, addrAddEnd, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
@@ -563,6 +563,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		"    LSP add took %v\n"+
 		"    IPAM took %v\n"+
 		"    nsLock took %v\n"+
+		"    nsiLock took %v\n"+
+		"    nsRelock took %v\n"+
 		"    nsAddrset took %v\n"+
 		"    nsAddrLock took %v\n"+
 		"    nsAddrAdd took %v\n"+
@@ -574,7 +576,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		"    mc took %v\n"+
 		"    metrics took %v\n",
 		pod.Namespace, pod.Name, pod.UID,
-		time.Since(start), podDelay, nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, addrsetEnd, addrLockEnd, addrAddEnd, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
+		time.Since(start), podDelay, nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
 
 	return nil
 }

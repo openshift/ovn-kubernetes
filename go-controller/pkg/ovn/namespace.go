@@ -78,28 +78,26 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewa
 
 // addPodToNamespace adds the pod's IP to the namespace's address set and returns
 // pod's routing gateway info and hybrid overlay gateway
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, time.Duration, time.Duration, time.Duration, time.Duration, error) {
-	start := time.Now()
-	nsInfo := oc.ensureNamespaceLocked(ns)
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
+	nsLockEnd, nsiLockEnd, relockEnd, nsInfo := oc.ensureNamespaceLocked(ns)
 	defer nsInfo.Unlock()
-	nsLockEnd := time.Since(start)
 
-	start = time.Now()
+	start := time.Now()
 	if nsInfo.addressSet == nil {
 		var err error
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
-			return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
+			return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
 		}
 	}
 	addrsetEnd := time.Since(start)
 
 	lock, add, err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
 	if err != nil {
-		return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, err
+		return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, err
 	}
 
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nsLockEnd, addrsetEnd, lock, add, nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, lock, add, nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) error {
@@ -223,7 +221,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()
 
-	nsInfo := oc.ensureNamespaceLocked(ns.Name)
+	_, _, _, nsInfo := oc.ensureNamespaceLocked(ns.Name)
 	defer nsInfo.Unlock()
 
 	if config.HybridOverlay.Enabled {
@@ -463,8 +461,10 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 
 // ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, and returns it
 // with its mutex locked.
-func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
+func (oc *Controller) ensureNamespaceLocked(ns string) (time.Duration, time.Duration, time.Duration, *namespaceInfo) {
+	start := time.Now()
 	oc.namespacesMutex.Lock()
+	nsLockEnd := time.Since(start)
 	nsInfo := oc.namespaces[ns]
 	nsInfoExisted := false
 	if nsInfo == nil {
@@ -485,19 +485,24 @@ func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
 		oc.namespacesMutex.Unlock()
 	}
 
+	start = time.Now()
 	nsInfo.Lock()
+	nsiLockEnd := time.Since(start)
 
+	var relockEnd time.Duration
 	if nsInfoExisted {
 		// Check that the namespace wasn't deleted while we were waiting for the lock
+		start = time.Now()
 		oc.namespacesMutex.Lock()
+		relockEnd = time.Since(start)
 		defer oc.namespacesMutex.Unlock()
 		if nsInfo != oc.namespaces[ns] {
 			nsInfo.Unlock()
-			return nil
+			return 0 * time.Second, 0 * time.Second, 0 * time.Second, nil
 		}
 	}
 
-	return nsInfo
+	return nsLockEnd, nsiLockEnd, relockEnd, nsInfo
 }
 
 // deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
