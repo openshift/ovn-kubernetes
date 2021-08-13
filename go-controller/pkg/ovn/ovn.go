@@ -303,6 +303,64 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	}
 }
 
+// GetPodReadyCondition extracts the pod ready condition from the given status and returns that.
+// Returns nil if the condition is not present.
+func GetPodReadyCondition(status kapi.PodStatus) *kapi.PodCondition {
+	_, condition := GetPodCondition(&status, kapi.PodReady)
+	return condition
+}
+
+func GetPodScheduledCondition(status kapi.PodStatus) *kapi.PodCondition {
+	_, condition := GetPodCondition(&status, kapi.PodScheduled)
+	return condition
+}
+
+// GetPodCondition extracts the provided condition from the given status and returns that.
+// Returns nil and -1 if the condition is not present, and the index of the located condition.
+func GetPodCondition(status *kapi.PodStatus, conditionType kapi.PodConditionType) (int, *kapi.PodCondition) {
+	if status == nil {
+		return -1, nil
+	}
+	for i := range status.Conditions {
+		if status.Conditions[i].Type == conditionType {
+			return i, &status.Conditions[i]
+		}
+	}
+	return -1, nil
+}
+
+func (oc *Controller) printPodLatencies(pod *kapi.Pod) {
+	key := pod.Namespace + "/" + pod.Name
+	peT, ok := oc.podTracker.Load(key)
+	if !ok {
+		return
+	}
+	pe := peT.(*podEntry)
+	klog.Infof("##### [%s] scheduled %v ready %v", key, pe.scheduled.Sub(pe.created), pe.ready.Sub(pe.created))
+
+	allReady := make([]float64, 0, 10000)
+	oc.podTracker.Range(func(k, v interface{}) bool {
+		pe := v.(*podEntry)
+		if !pe.ready.IsZero() {
+			allReady = append(allReady, pe.ready.Sub(pe.created).Seconds())
+		}
+		return true
+	})
+
+	var total float64
+	for _, r := range allReady {
+		total = total + r
+	}
+	total = total / float64(len(allReady))
+	klog.Infof("##### PodReady average %v (%d samples)", total, len(allReady))
+}
+
+type podEntry struct {
+	created   time.Time
+	scheduled time.Time
+	ready     time.Time
+}
+
 // Run starts the actual watching.
 func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	oc.syncPeriodic()
@@ -324,20 +382,21 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 			if !ok {
 				return fmt.Errorf("object is not a pod")
 			}
-			if util.PodScheduled(pod) {
-				key := pod.Namespace + "/" + pod.Name
-				oc.podTracker.Store(key, time.Now())
+			pe := &podEntry{created: pod.CreationTimestamp.Time}
+			if c := GetPodReadyCondition(pod.Status); c != nil {
+				pe.ready = c.LastTransitionTime.Time
 			}
+			if c := GetPodScheduledCondition(pod.Status); c != nil {
+				pe.scheduled = c.LastTransitionTime.Time
+			}
+			key := pod.Namespace + "/" + pod.Name
+			oc.podTracker.Store(key, pe)
 			return nil
 		},
 		func(obj interface{}) error {
 			return nil
 		},
-		func(old, new interface{}) bool {
-			oldPod := old.(*kapi.Pod)
-			newPod := new.(*kapi.Pod)
-			return !util.PodScheduled(oldPod) && util.PodScheduled(newPod)
-		},
+		informer.ReceiveAllUpdates,
 	)
 	wg.Add(1)
 	go func() {
@@ -647,6 +706,7 @@ func (oc *Controller) WatchPods() {
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.checkAndDeleteRetryPod(pod.UID)
+			oc.printPodLatencies(pod)
 			oc.podTracker.Delete(pod.Namespace + "/" + pod.Name)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)

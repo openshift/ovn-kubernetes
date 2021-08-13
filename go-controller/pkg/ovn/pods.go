@@ -254,7 +254,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var podDelay time.Duration
 	val, ok := oc.podTracker.Load(pod.Namespace + "/" + pod.Name)
 	if ok {
-		podDelay = time.Since(val.(time.Time))
+		pe := val.(*podEntry)
+		podDelay = time.Since(pe.scheduled)
 	}
 
 	// Keep track of how long syncs take.
