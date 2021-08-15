@@ -26,7 +26,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 
@@ -212,9 +211,6 @@ type Controller struct {
 
 	// channel to indicate we need to retry pods immediately
 	retryPodsChan chan struct{}
-
-	podTracker      sync.Map
-	podEventHandler informer.EventHandler
 }
 
 type retryEntry struct {
@@ -329,38 +325,6 @@ func GetPodCondition(status *kapi.PodStatus, conditionType kapi.PodConditionType
 	return -1, nil
 }
 
-func (oc *Controller) printPodLatencies(pod *kapi.Pod) {
-	key := pod.Namespace + "/" + pod.Name
-	peT, ok := oc.podTracker.Load(key)
-	if !ok {
-		return
-	}
-	pe := peT.(*podEntry)
-	klog.Infof("##### [%s] scheduled %v ready %v", key, pe.scheduled.Sub(pe.created), pe.ready.Sub(pe.created))
-
-	allReady := make([]float64, 0, 10000)
-	oc.podTracker.Range(func(k, v interface{}) bool {
-		pe := v.(*podEntry)
-		if !pe.ready.IsZero() {
-			allReady = append(allReady, pe.ready.Sub(pe.created).Seconds())
-		}
-		return true
-	})
-
-	var total float64
-	for _, r := range allReady {
-		total = total + r
-	}
-	total = total / float64(len(allReady))
-	klog.Infof("##### PodReady average %v (%d samples)", total, len(allReady))
-}
-
-type podEntry struct {
-	created   time.Time
-	scheduled time.Time
-	ready     time.Time
-}
-
 // Run starts the actual watching.
 func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	oc.syncPeriodic()
@@ -376,35 +340,9 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		return err
 	}
 
-	oc.podEventHandler = informer.NewDefaultEventHandler("pod", oc.watchFactory.PodInformer(),
-		func(obj interface{}) error {
-			pod, ok := obj.(*kapi.Pod)
-			if !ok {
-				return fmt.Errorf("object is not a pod")
-			}
-			pe := &podEntry{created: pod.CreationTimestamp.Time}
-			if c := GetPodReadyCondition(pod.Status); c != nil {
-				pe.ready = c.LastTransitionTime.Time
-			}
-			if c := GetPodScheduledCondition(pod.Status); c != nil {
-				pe.scheduled = c.LastTransitionTime.Time
-			}
-			key := pod.Namespace + "/" + pod.Name
-			oc.podTracker.Store(key, pe)
-			return nil
-		},
-		func(obj interface{}) error {
-			return nil
-		},
-		informer.ReceiveAllUpdates,
-	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := oc.podEventHandler.Run(10, oc.stopChan); err != nil {
-			klog.Error(err)
-		}
-	}()
+	c := oc.client.(*clientset.Clientset)
+	pl := newPodLatency()
+	pl.start(c, oc.stopChan)
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
@@ -706,8 +644,6 @@ func (oc *Controller) WatchPods() {
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.checkAndDeleteRetryPod(pod.UID)
-			oc.printPodLatencies(pod)
-			oc.podTracker.Delete(pod.Namespace + "/" + pod.Name)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)
 				return

@@ -251,13 +251,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return nil
 	}
 
-	var podDelay time.Duration
-	val, ok := oc.podTracker.Load(pod.Namespace + "/" + pod.Name)
-	if ok {
-		pe := val.(*podEntry)
-		podDelay = time.Since(pe.scheduled)
-	}
-
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
@@ -559,7 +552,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	metricsEnd := time.Since(metricsStart)
 
 	klog.Infof("#### [%s/%s %s] 1addLogicalPort took %v\n"+
-		"    pod delay %v\n"+
 		"    node switch took %v\n"+
 		"    LSP add took %v\n"+
 		"    IPAM took %v\n"+
@@ -577,7 +569,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		"    mc took %v\n"+
 		"    metrics took %v\n",
 		pod.Namespace, pod.Name, pod.UID,
-		time.Since(start), podDelay, nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
+		time.Since(start), nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
 
 	return nil
 }
