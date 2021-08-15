@@ -277,7 +277,6 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 		AddFunc: func(obj interface{}) {
 			start2 := time.Now()
 			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "ADD")
-			i.printQueues(numEventQueues, name)
 			i.enqueueEvent(nil, obj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
@@ -287,12 +286,12 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "add").Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, uid, entry, false, "ADD")
 			})
+			i.printQueues(numEventQueues, name)
 			metrics.MetricHandlerAddLatency.Observe(float64(time.Since(start2).Milliseconds()))
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			start2 := time.Now()
 			key, uid, entry, queueNum := i.refQueueEntry(i.oType, newObj, numEventQueues, "UPDATE")
-			i.printQueues(numEventQueues, name)
 			i.enqueueEvent(oldObj, newObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
@@ -302,6 +301,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "update").Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, uid, entry, false, "UPDATE")
 			})
+			i.printQueues(numEventQueues, name)
 			metrics.MetricHandlerUpdateLatency.Observe(float64(time.Since(start2).Milliseconds()))
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -312,7 +312,6 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 			}
 			start2 := time.Now()
 			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "DEL")
-			i.printQueues(numEventQueues, name)
 			i.enqueueEvent(nil, realObj, queueNum, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
@@ -322,6 +321,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "delete").Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, uid, entry, true, "DEL")
 			})
+			i.printQueues(numEventQueues, name)
 			metrics.MetricHandlerDeleteLatency.Observe(float64(time.Since(start2).Milliseconds()))
 		},
 	}

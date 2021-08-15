@@ -551,23 +551,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	metrics.RecordPodCreated(pod)
 	metricsEnd := time.Since(metricsStart)
 
-	klog.Infof("#### [%s/%s %s] 1addLogicalPort took %v\n"+
-		"    node switch took %v\n"+
-		"    LSP add took %v\n"+
-		"    IPAM took %v\n"+
-		"    nsLock took %v\n"+
-		"    nsiLock took %v\n"+
-		"    nsRelock took %v\n"+
-		"    nsAddrset took %v\n"+
-		"    nsAddrLock took %v\n"+
-		"    nsAddrAdd took %v\n"+
-		"    getSwSub took %v\n"+
-		"    annotate took %v\n"+
-		"    gws took %v\n"+
-		"    ovnExec took %v\n"+
-		"    portCache took %v\n"+
-		"    mc took %v\n"+
-		"    metrics took %v\n",
+	klog.Infof("#### [%s/%s %s] 1addLogicalPort:%v nodeswitch:%v LSPadd:%v IPAM:%v nsLock:%v nsiLock:%v nsRelock:%v nsAddrset:%v nsAddrLock:%v nsAddrAdd:%v getSwSub:%v annotate:%v gws:%v ovnExec:%v portCache:%v mc:%v metrics:%v\n",
 		pod.Namespace, pod.Name, pod.UID,
 		time.Since(start), nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
 

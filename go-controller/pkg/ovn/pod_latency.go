@@ -156,7 +156,7 @@ func (p *podLatency) start(clientset *kubernetes.Clientset, stopChan <-chan stru
 
 func (p *podLatency) writeToFile() error {
 	filesMetrics := map[string]interface{}{
-		fmt.Sprintf("podLatency.json"):         normLatencies,
+//		fmt.Sprintf("podLatency.json"):         normLatencies,
 		fmt.Sprintf("podLatency-summary.json"): podQuantiles,
 	}
 	for filename, data := range filesMetrics {
@@ -227,6 +227,7 @@ func calcQuantiles() {
 		quantileMap[v1.PodInitialized] = append(quantileMap[v1.PodInitialized], normLatency.(podMetric).InitializedLatency)
 		quantileMap[v1.PodReady] = append(quantileMap[v1.PodReady], normLatency.(podMetric).PodReadyLatency)
 	}
+	podQuantiles = make([]interface{}, 0, 5)
 	for quantileName, v := range quantileMap {
 		podQ := podLatencyQuantiles{
 			QuantileName: quantileName,
