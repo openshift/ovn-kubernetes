@@ -651,7 +651,7 @@ func (i *informer) syncPodHandler(key string) error {
 
 	// Delete the pod if it was not found (already gone) or if it had a
 	// deletion timestamp set (deleted but not yet finalized); if so
-	if apierrors.IsNotFound(err) || !pod.GetDeletionTimestamp().IsZero() {
+	if apierrors.IsNotFound(err) { // || time.Now().After(pod.GetDeletionTimestamp().Time) {
 		if pod != nil {
 			klog.Infof("!!!!!! [%s] deleting TS %s", key, pod.GetDeletionTimestamp())
 		} else {
