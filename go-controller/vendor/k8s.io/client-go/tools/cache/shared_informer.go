@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/clock"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -524,6 +525,14 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 	}
 }
 
+func getMeta(obj interface{}) string {
+	om, ok := obj.(metav1.ObjectMeta)
+	if ok {
+		return om.Namespace + "/" + om.Name
+	}
+	return fmt.Sprintf("%v", obj)
+}
+
 func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 	s.blockDeltas.Lock()
 	defer s.blockDeltas.Unlock()
@@ -534,6 +543,7 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 		case Sync, Replaced, Added, Updated:
 			s.cacheMutationDetector.AddObject(d.Object)
 			if old, exists, err := s.indexer.Get(d.Object); err == nil && exists {
+				klog.Infof("^^^^ UPDATING indexer %v", getMeta(d.Object))
 				if err := s.indexer.Update(d.Object); err != nil {
 					return err
 				}
@@ -554,12 +564,14 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 				}
 				s.processor.distribute(updateNotification{oldObj: old, newObj: d.Object}, isSync)
 			} else {
+				klog.Infof("^^^^ ADDING indexer %v", getMeta(d.Object))
 				if err := s.indexer.Add(d.Object); err != nil {
 					return err
 				}
 				s.processor.distribute(addNotification{newObj: d.Object}, false)
 			}
 		case Deleted:
+			klog.Infof("^^^^ DELETING indexer %v", getMeta(d.Object))
 			if err := s.indexer.Delete(d.Object); err != nil {
 				return err
 			}
