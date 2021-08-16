@@ -533,7 +533,7 @@ klog.Infof("!!!! UPD %v", key)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(obj)
+			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 			if err == nil {
 klog.Infof("!!!! DEL %v", key)
 				i.podsQueue.Add(key)
@@ -652,6 +652,11 @@ func (i *informer) syncPodHandler(key string) error {
 	// Delete the pod if it was not found (already gone) or if it had a
 	// deletion timestamp set (deleted but not yet finalized); if so
 	if apierrors.IsNotFound(err) || !pod.GetDeletionTimestamp().IsZero() {
+		if pod != nil {
+			klog.Infof("!!!!!! [%s] deleting TS %s", key, pod.GetDeletionTimestamp())
+		} else {
+			klog.Infof("!!!!!! [%s] deleting (only not found)", key)
+		}
 		p, ok := i.podsCache.Load(key)
 		if !ok {
 			klog.Infof("Pod %s deleted before it could be handled", key)
