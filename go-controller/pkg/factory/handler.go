@@ -14,10 +14,17 @@ import (
 
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
+	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
+	v1coreinformers "k8s.io/client-go/informers/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+
 )
 
 // Handler represents an event handler and is private to the factory module
@@ -82,9 +89,14 @@ type informer struct {
 	// when a handler is added
 	initialAddFunc initialAddFn
 	shutdownWg     sync.WaitGroup
+
 	queueMap       map[ktypes.NamespacedName]*queueMapEntry
 	queueMapLock   sync.Mutex
 	queueIndex     uint32
+
+	podsSynced cache.InformerSynced
+	podsQueue  workqueue.RateLimitingInterface
+	podsCache  sync.Map
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -488,4 +500,250 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	}
 	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
 	return i, nil
+}
+
+func newPodsInformer(oType reflect.Type, pods v1coreinformers.PodInformer,
+	stopChan chan struct{}, numEventQueues uint32) (*informer, error) {
+
+	i, err := newBaseInformer(oType, pods.Informer())
+	if err != nil {
+		return nil, err
+	}
+
+	i.events = make([]chan *event, numEventQueues)
+	i.podsSynced = pods.Informer().HasSynced
+	i.podsQueue = workqueue.NewNamedRateLimitingQueue(
+		workqueue.DefaultControllerRateLimiter(),
+		"pods",
+	)
+
+	pods.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(obj)
+			if err == nil {
+klog.Infof("!!!! ADD %v", key)
+				i.podsQueue.Add(key)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(new)
+			if err == nil {
+klog.Infof("!!!! UPD %v", key)
+				i.podsQueue.Add(key)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(obj)
+			if err == nil {
+klog.Infof("!!!! DEL %v", key)
+				i.podsQueue.Add(key)
+			}
+		},
+	})
+
+	i.initialAddFunc = func(h *Handler, items []interface{}) {
+		// Make a handler-specific channel array across which the
+		// initial add events will be distributed. When a new handler
+		// is added, only that handler should receive events for all
+		// existing objects.
+		type initialAddEntry struct {
+			obj      interface{}
+			doneFunc func()
+		}
+		adds := make([]chan *initialAddEntry, numEventQueues)
+		queueWg := &sync.WaitGroup{}
+		queueWg.Add(len(adds))
+		for j := range adds {
+			adds[j] = make(chan *initialAddEntry, 10)
+			go func(addChan chan *initialAddEntry) {
+				defer queueWg.Done()
+				for {
+					entry, ok := <-addChan
+					if !ok {
+						return
+					}
+					h.OnAdd(entry.obj)
+					entry.doneFunc()
+				}
+			}(adds[j])
+		}
+		// Distribute the existing items into the handler-specific
+		// channel array.
+		for _, obj := range items {
+			key, uid, entry, queueNum := i.refQueueEntry(i.oType, obj, numEventQueues, "INIADD")
+			adds[queueNum] <- &initialAddEntry{
+				obj: obj,
+				doneFunc: func() {
+					i.unrefQueueEntry(key, uid, entry, false, "INIADD")
+				},
+			}
+		}
+		// Close all the channels
+		for j := range adds {
+			close(adds[j])
+		}
+		// Wait until all the object additions have been processed
+		queueWg.Wait()
+	}
+	return i, nil
+}
+
+func (i *informer) runPodInformer(threadiness int, stopCh <-chan struct{}) {
+	// don't let panics crash the process
+	defer utilruntime.HandleCrash()
+
+	klog.Infof("Starting Pod Controller")
+
+	// wait for your caches to fill before starting your work
+	if !cache.WaitForCacheSync(stopCh, i.podsSynced) {
+		return
+	}
+
+	i.shutdownWg.Add(1)
+	defer i.shutdownWg.Done()
+
+	// start up your worker threads based on threadiness.  Some controllers
+	// have multiple kinds of workers
+	wg := &sync.WaitGroup{}
+	for j := 0; j < threadiness; j++ {
+		wg.Add(1)
+		// runWorker will loop until "something bad" happens.  The .Until will
+		// then rekick the worker after one second
+		go func() {
+			defer wg.Done()
+			wait.Until(func() {
+				i.runPodWorker(wg)
+			}, time.Second, stopCh)
+		}()
+	}
+
+	// wait until we're told to stop
+	<-stopCh
+
+	klog.Infof("Shutting down Pod controller")
+	// make sure the work queue is shutdown which will trigger workers to end
+	i.podsQueue.ShutDown()
+	// wait for workers to finish
+	wg.Wait()
+}
+
+func (i *informer) runPodWorker(wg *sync.WaitGroup) {
+	// hot loop until we're told to stop.  processNextWorkItem will
+	// automatically wait until there's work available, so we don't worry
+	// about secondary waits
+	for i.processNextPodWorkItem(wg) {
+	}
+}
+
+// sync pod handler brings the pod resource in sync
+func (i *informer) syncPodHandler(key string) error {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return err
+	}
+
+	pod, err := i.lister.(listers.PodLister).Pods(namespace).Get(name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		// Very unlikely to see any error other than "not found" since
+		// wer're pulling from the informer cache, but just try again
+		return err
+	}
+
+	// Delete the pod if it was not found (already gone) or if it had a
+	// deletion timestamp set (deleted but not yet finalized); if so
+	if apierrors.IsNotFound(err) || !pod.GetDeletionTimestamp().IsZero() {
+		p, ok := i.podsCache.Load(key)
+		if !ok {
+			klog.Infof("Pod %s deleted before it could be handled", key)
+			return nil
+		}
+		pod = p.(*kapi.Pod)
+
+		metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
+		start := time.Now()
+		i.forEachQueuedHandler(func(h *Handler) {
+			h.OnDelete(pod)
+		})
+		metrics.MetricResourceUpdateLatency.WithLabelValues(name, "delete").Observe(time.Since(start).Seconds())
+
+		i.podsCache.Delete(key)
+		return nil
+	}
+
+	p, existed := i.podsCache.Load(key)
+	if !existed {
+		// ADD
+		i.podsCache.Store(key, pod)
+
+		metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
+		start := time.Now()
+		i.forEachQueuedHandler(func(h *Handler) {
+			h.OnAdd(pod)
+		})
+		metrics.MetricResourceUpdateLatency.WithLabelValues(name, "add").Observe(time.Since(start).Seconds())
+
+		return nil
+	}
+
+	// UPDATE
+	oldPod := p.(*kapi.Pod)
+	i.podsCache.Store(key, pod)
+
+	metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
+	start := time.Now()
+	i.forEachQueuedHandler(func(h *Handler) {
+		h.OnUpdate(oldPod, pod)
+	})
+	metrics.MetricResourceUpdateLatency.WithLabelValues(name, "update").Observe(time.Since(start).Seconds())
+
+	return nil
+}
+
+const maxPodRetries = 5
+
+// processNextPodWorkItem deals with one key off the queue.  It returns false
+// when it's time to quit.
+func (i *informer) processNextPodWorkItem(wg *sync.WaitGroup) bool {
+	wg.Add(1)
+	defer wg.Done()
+	// pull the next work item from queue.  It should be a key we use to lookup
+	// something in a cache
+	key, quit := i.podsQueue.Get()
+	if quit {
+		return false
+	}
+	// you always have to indicate to the queue that you've completed a piece of
+	// work
+	defer i.podsQueue.Done(key)
+
+	// do your work on the key.  This method will contains your "do stuff" logic
+	err := i.syncPodHandler(key.(string))
+	if err == nil {
+		// if you had no error, tell the queue to stop tracking history for your
+		// key. This will reset things like failure counts for per-item rate
+		// limiting
+		i.podsQueue.Forget(key)
+		return true
+	}
+
+	// there was a failure so be sure to report it.  This method allows for
+	// pluggable error handling which can be used for things like
+	// cluster-monitoring
+	utilruntime.HandleError(fmt.Errorf("%v failed with : %v", key, err))
+
+	// since we failed, we should requeue the item to work on later.
+	// but only if we've not exceeded max retries. This method
+	// will add a backoff to avoid hotlooping on particular items
+	// (they're probably still not going to work right away) and overall
+	// controller protection (everything I've done is broken, this controller
+	// needs to calm down or it can starve other useful work) cases.
+	if i.podsQueue.NumRequeues(key) < maxPodRetries {
+		i.podsQueue.AddRateLimited(key)
+		return true
+	}
+
+	// if we've exceeded MaxRetries, remove the item from the queue
+	i.podsQueue.Forget(key)
+
+	return true
 }

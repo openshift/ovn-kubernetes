@@ -3,6 +3,7 @@ package factory
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -125,7 +126,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	})
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+	wf.informers[podType], err = newPodsInformer(podType, wf.iFactory.Core().V1().Pods(), wf.stopChan,
 		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
@@ -178,6 +179,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		}
 
 	}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		wf.informers[podType].runPodInformer(int(defaultNumEventQueues), wf.stopChan)
+	}()
+	wg.Wait()
 	return wf, nil
 }
 

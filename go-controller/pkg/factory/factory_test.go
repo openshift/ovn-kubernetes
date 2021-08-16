@@ -519,11 +519,10 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		const nodeName string = "mynode"
 		type opTest struct {
-			mu      sync.Mutex
 			pod     *v1.Pod
-			added   int
-			updated int
-			deleted int
+			added   int32
+			updated int32
+			deleted int32
 		}
 		testPods := make(map[string]*opTest)
 
@@ -538,29 +537,19 @@ var _ = Describe("Watch Factory Operations", func() {
 				pod := obj.(*v1.Pod)
 				ot, ok := testPods[pod.Name]
 				Expect(ok).To(BeTrue())
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(BeNumerically("<", 2))
-				ot.added++
+				atomic.AddInt32(&ot.added, 1)
 			},
 			UpdateFunc: func(old, new interface{}) {
 				newPod := new.(*v1.Pod)
 				ot, ok := testPods[newPod.Name]
 				Expect(ok).To(BeTrue())
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.updated).To(BeNumerically("<", 2))
-				ot.updated++
-				Expect(newPod.Spec.NodeName).To(Equal(nodeName))
+				atomic.AddInt32(&ot.updated, 1)
 			},
 			DeleteFunc: func(obj interface{}) {
 				pod := obj.(*v1.Pod)
 				ot, ok := testPods[pod.Name]
 				Expect(ok).To(BeTrue())
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.deleted).To(BeNumerically("<", 2))
-				ot.deleted++
+				atomic.AddInt32(&ot.deleted, 1)
 			},
 		})
 
@@ -569,12 +558,21 @@ var _ = Describe("Watch Factory Operations", func() {
 			for _, ot := range testPods {
 				pods = append(pods, ot.pod)
 				podWatch.Add(ot.pod)
-				ot.mu.Lock()
+				Eventually(func() int {
+					return int(atomic.LoadInt32(&ot.added))
+				}, 2).Should(Equal(i+1))
+
 				ot.pod.Spec.NodeName = nodeName
-				ot.mu.Unlock()
 				podWatch.Modify(ot.pod)
+				Eventually(func() int {
+					return int(atomic.LoadInt32(&ot.updated))
+				}, 2).Should(Equal(i+1))
+
 				pods = pods[:0]
 				podWatch.Delete(ot.pod)
+				Eventually(func() int {
+					return int(atomic.LoadInt32(&ot.deleted))
+				}, 2).Should(Equal(i+1))
 			}
 		}
 
@@ -583,13 +581,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getAdded, 2).Should(Equal(10))
 		Eventually(c.getUpdated, 2).Should(Equal(10))
 		Eventually(c.getDeleted, 2).Should(Equal(10))
-		for _, ot := range testPods {
-			ot.mu.Lock()
-			Expect(ot.added).Should(Equal(2))
-			Expect(ot.updated).Should(Equal(2))
-			Expect(ot.deleted).Should(Equal(2))
-			ot.mu.Unlock()
-		}
 
 		wf.RemovePodHandler(h)
 	})
