@@ -530,7 +530,7 @@ func getMeta(obj interface{}) string {
 	if ok {
 		return om.Namespace + "/" + om.Name
 	}
-	return fmt.Sprintf("%v", obj)
+	return fmt.Sprintf("%v", obj)[:150]
 }
 
 func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
