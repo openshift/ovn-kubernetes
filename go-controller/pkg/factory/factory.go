@@ -64,7 +64,7 @@ const (
 	handlerDead    uint32 = 1
 
 	// namespace, node, and pod handlers
-	defaultNumEventQueues uint32 = 15
+	defaultNumEventQueues uint32 = 20
 )
 
 var (
