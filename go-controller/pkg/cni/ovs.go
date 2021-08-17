@@ -150,11 +150,11 @@ func isIfaceIDSet(ifaceName, ifaceID string) error {
 func isIfaceOvnInstalledSet(ifaceName string) bool {
 	out, err := ovsGet("Interface", ifaceName, "external-ids", "ovn-installed")
 	if err == nil && out == "true" {
-		klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+		klog.Infof("Interface %s has ovn-installed=true", ifaceName)
 		return true
 	}
 
-	klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
+	klog.Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
 	return false
 }
 
