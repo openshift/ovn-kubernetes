@@ -307,14 +307,12 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
 				return err
 			}
-			if doPodFlowsExist(queries) {
-				if checkExternalIDs {
-					if isIfaceOvnInstalledSet(ifaceName) {
-						return nil
-					}
-				} else {
+			if isIfaceOvnInstalledSet(ifaceName) {
+				if doPodFlowsExist(queries) {
+					klog.Infof("OVS port %s has ovs-flows", ifaceName)
 					return nil
 				}
+				klog.Errorf("TROZET: Still waiting for OVS port %s to have ovs-flows", ifaceName)
 			}
 
 			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, initialPodUID); err != nil {
