@@ -308,6 +308,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 				return err
 			}
 			if isIfaceOvnInstalledSet(ifaceName) {
+				return nil
 				if doPodFlowsExist(queries) {
 					klog.Infof("OVS port %s has ovs-flows", ifaceName)
 					return nil
