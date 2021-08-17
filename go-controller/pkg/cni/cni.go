@@ -157,6 +157,7 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 }
 
 func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
+	return []byte{}, nil
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
