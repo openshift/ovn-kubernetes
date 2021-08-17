@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	utilnet "k8s.io/utils/net"
 	"net"
 	"strconv"
 	"strings"
