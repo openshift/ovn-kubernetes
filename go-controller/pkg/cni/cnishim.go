@@ -243,6 +243,7 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 func (p *Plugin) CmdCheck(args *skel.CmdArgs) error {
 	var err error
 
+	return nil
 	startTime := time.Now()
 	defer func() {
 		p.postMetrics(startTime, CNICheck, err)
