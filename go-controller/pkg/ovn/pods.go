@@ -388,7 +388,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	ipTimeEnd := time.Since(ipTimeStart)
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd,
+	addrAddOpsTime, addrAddTransTime, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
@@ -551,9 +552,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	metrics.RecordPodCreated(pod)
 	metricsEnd := time.Since(metricsStart)
 
-	klog.Infof("#### [%s/%s %s] 1addLogicalPort:%v nodeswitch:%v LSPadd:%v IPAM:%v nsLock:%v nsiLock:%v nsRelock:%v nsAddrset:%v nsAddrLock:%v nsAddrAdd:%v getSwSub:%v annotate:%v gws:%v ovnExec:%v portCache:%v mc:%v metrics:%v\n",
+	klog.Infof("#### [%s/%s %s] 1addLogicalPort:%v nodeswitch:%v LSPadd:%v IPAM:%v nsLock:%v nsiLock:%v nsRelock:%v nsAddrset:%v nsAddrLock:%v nsAddrAdd:%v nsAddrAddOps:%v nsAddrAddTrans:%v getSwSub:%v annotate:%v gws:%v ovnExec:%v portCache:%v mc:%v metrics:%v\n",
 		pod.Namespace, pod.Name, pod.UID,
-		time.Since(start), nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
+		time.Since(start), nodeSwitchTime, lspAddEnd, ipTimeEnd, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, addrLockEnd, addrAddEnd, addrAddOpsTime, addrAddTransTime, getSwSubEnd, annotateEnd, gwsEnd, ovnExecEnd, portCacheEnd, mcEnd, metricsEnd)
 
 	return nil
 }

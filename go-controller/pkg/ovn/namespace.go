@@ -78,7 +78,7 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewa
 
 // addPodToNamespace adds the pod's IP to the namespace's address set and returns
 // pod's routing gateway info and hybrid overlay gateway
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
 	nsLockEnd, nsiLockEnd, relockEnd, nsInfo := oc.ensureNamespaceLocked(ns, true)
 
 	start := time.Now()
@@ -91,7 +91,7 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 		if nsInfo.addressSet == nil {
 			nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 			if err != nil {
-				return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
+				return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
 			}
 		}
 	} else {
@@ -99,12 +99,12 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 	}
 	addrsetEnd := time.Since(start)
 
-	lock, add, err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
+	lock, add, opsTime, transTime, err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
 	if err != nil {
-		return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, err
+		return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, err
 	}
 
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, lock, add, nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, lock, add, opsTime, transTime, nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) error {

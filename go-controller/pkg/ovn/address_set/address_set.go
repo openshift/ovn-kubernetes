@@ -55,7 +55,7 @@ type AddressSet interface {
 	// GetName returns the descriptive name of the address set
 	GetName() string
 	// AddIPs adds the array of IPs to the address set
-	AddIPs(ip []net.IP) (time.Duration, time.Duration, error)
+	AddIPs(ip []net.IP) (time.Duration, time.Duration, time.Duration, time.Duration, error)
 	// SetIPs sets the address set to the given array of addresses
 	SetIPs(ip []net.IP) error
 	DeleteIPs(ip []net.IP) error
@@ -362,26 +362,28 @@ func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 	return err
 }
 
-func (as *ovnAddressSets) AddIPs(ips []net.IP) (time.Duration, time.Duration, error) {
+func (as *ovnAddressSets) AddIPs(ips []net.IP) (time.Duration, time.Duration, time.Duration, time.Duration, error) {
 	if len(ips) == 0 {
-		return 0 * time.Second, 0 * time.Second, nil
+		return 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, nil
 	}
 	lockEnd := 0 * time.Second
 	start := time.Now()
 	v4ips, v6ips := splitIPsByFamily(ips)
+	var opsTime, transTime time.Duration
+	var err error
 	if as.ipv6 != nil {
-		if err := as.ipv6.addIPs(v6ips); err != nil {
-			return 0 * time.Second, 0 * time.Second, fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+		if _,_, err := as.ipv6.addIPs(v6ips); err != nil {
+			return 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
 		}
 	}
 	if as.ipv4 != nil {
-		if err := as.ipv4.addIPs(v4ips); err != nil {
-			return 0 * time.Second, 0 * time.Second, fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+		if opsTime, transTime, err = as.ipv4.addIPs(v4ips); err != nil {
+			return 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
 		}
 	}
 	addEnd := time.Since(start)
 
-	return lockEnd, addEnd, nil
+	return lockEnd, addEnd, opsTime, transTime, nil
 }
 
 func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
@@ -443,7 +445,7 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 }
 
 // addIPs appends the set of IPs to the existing address_set.
-func (as *ovnAddressSet) addIPs(ips []net.IP) error {
+func (as *ovnAddressSet) addIPs(ips []net.IP) (time.Duration, time.Duration, error) {
 
 	uniqIPs := make([]string, 0, len(ips))
 	for _, ip := range ips {
@@ -451,9 +453,10 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 	}
 
 	if len(ips) == 0 {
-		return nil
+		return 0 *time.Second, 0*time.Second, nil
 	}
 
+	start := time.Now()
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), uniqIPs)
 	addrset := &nbdb.AddressSet{UUID: as.uuid}
 	ops, err := as.nbClient.Where(addrset).Mutate(addrset, model.Mutation{
@@ -461,17 +464,20 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 		Mutator: ovsdb.MutateOperationInsert,
 		Value:   uniqIPs,
 	})
+	opsTime := time.Since(start)
 	if err != nil {
-		return fmt.Errorf("failed to add IPs to address set %q (%v)",
+		return 0 *time.Second, 0*time.Second, fmt.Errorf("failed to add IPs to address set %q (%v)",
 			asDetail(as), err)
 	}
+	start = time.Now()
 	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
 	if err != nil {
-		return fmt.Errorf("failed add ips to address set %s (%v)",
+		return 0 *time.Second, 0*time.Second, fmt.Errorf("failed add ips to address set %s (%v)",
 			as.name, err)
 	}
+	transactTime := time.Since(start)
 
-	return nil
+	return opsTime, transactTime, nil
 }
 
 // deleteIPs removes selected IPs from the existing address_set
