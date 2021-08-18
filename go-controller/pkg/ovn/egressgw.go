@@ -99,10 +99,11 @@ func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.P
 	}
 	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
 		pod.Name, gws, namespace, egress.bfdEnabled)
-	_, _, _, nsInfo := oc.ensureNamespaceLocked(namespace, false)
-	defer nsInfo.Unlock()
-	nsInfo.routingExternalPodGWs[pod.Name] = egress
-	return oc.addGWRoutesForNamespace(namespace, egress, nsInfo)
+	_, _, _, err := oc.ensureNamespaceLocked(namespace, false, func(nsInfo *namespaceInfo) error {
+		nsInfo.routingExternalPodGWs[pod.Name] = egress
+		return oc.addGWRoutesForNamespace(namespace, egress, nsInfo)
+	})
+	return err
 }
 
 // addExternalGWsForNamespace handles adding annotated gw routes to all pods in namespace

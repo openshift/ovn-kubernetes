@@ -218,6 +218,23 @@ type ovnAddressSet struct {
 	hashName string
 	uuid     string
 	ips      map[string]net.IP
+	stopCh   chan bool
+	ops      chan *addrOp
+	doneWg   *sync.WaitGroup
+}
+
+type addrOpType uint
+
+const (
+	addrOpAdd = iota
+	addrOpDel
+	addrOpSet
+	addrOpClear
+)
+
+type addrOp struct {
+	ips []net.IP
+	op  addrOpType
 }
 
 type ovnAddressSets struct {
@@ -262,11 +279,105 @@ func newOvnAddressSets(name string, ips []net.IP) (*ovnAddressSets, error) {
 	return &ovnAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
+func (as *ovnAddressSet) runBatch(ops []*addrOp) {
+	if len(ops) == 0 {
+		return
+	}
+
+	newOps := make([]*addrOp, 0, len(ops))
+	var lastOp *addrOp
+	for _, op := range ops {
+		if op.op == addrOpSet || op.op == addrOpClear {
+			// set or clear discards all earlier ops
+			newOps = []*addrOp{op}
+		} else if lastOp != nil && lastOp.op == op.op {
+			// Same type as previous, just add new ips to previous op
+			lastOp.ips = append(lastOp.ips, op.ips...)
+		} else {
+			// New op
+			newOps = append(newOps, op)
+		}
+	}
+
+	txn := util.NewNBTxn()
+	for _, op := range newOps {
+		switch op.op {
+		case addrOpClear:
+			request := []string{"clear", "address_set", as.uuid, "addresses"}
+			if _, stderr, err := txn.AddOrCommit(request); err != nil {
+				klog.Errorf("failed to clear address set %q, stderr: %q (%v)",
+					asDetail(as), stderr, err)
+			} else {
+				as.ips = make(map[string]net.IP, 5)
+			}
+		case addrOpSet:
+			ipStr := joinIPs(op.ips)
+			request := []string{"set", "address_set", as.uuid, "addresses="+ipStr}
+			if _, stderr, err := txn.AddOrCommit(request); err != nil {
+				klog.Errorf("failed to set address set %q to %q, stderr: %q (%v)",
+					asDetail(as), ipStr, stderr, err)
+			} else {
+				as.ips = make(map[string]net.IP, len(op.ips))
+				for _, ip := range op.ips {
+					as.ips[ip.String()] = ip
+				}
+			}
+		case addrOpAdd:
+			uniqIPs := make([]net.IP, 0, len(op.ips))
+			for _, ip := range op.ips {
+				if _, ok := as.ips[ip.String()]; !ok {
+					uniqIPs = append(uniqIPs, ip)
+				}
+			}
+			if len(uniqIPs) > 0 {
+				ipStr := joinIPs(op.ips)
+				request := []string{"add", "address_set", as.uuid, "addresses", ipStr}
+				if _, stderr, err := txn.AddOrCommit(request); err != nil {
+					klog.Errorf("failed to add IPs (%q) to address set %q, stderr: %q (%v)",
+						ipStr, asDetail(as), stderr, err)
+				} else {
+					for _, ip := range op.ips {
+						as.ips[ip.String()] = ip
+					}
+				}
+			}
+		case addrOpDel:
+			uniqIPs := make([]net.IP, 0, len(op.ips))
+			for _, ip := range op.ips {
+				if _, ok := as.ips[ip.String()]; !ok {
+					continue
+				}
+				uniqIPs = append(uniqIPs, ip)
+			}
+			if len(uniqIPs) > 0 {
+				ipStr := joinIPs(uniqIPs)
+				request := []string{"remove", "address_set", as.uuid, "addresses", ipStr}
+				if _, stderr, err := txn.AddOrCommit(request); err != nil {
+					klog.Errorf("failed to remove IPs %q from address set %q, stderr: %q (%v)",
+						ipStr, asDetail(as), stderr, err)
+				} else {
+					for _, ip := range uniqIPs {
+						delete(as.ips, ip.String())
+					}
+				}
+			}
+		}
+	}
+
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		klog.Errorf("Error updating address set %q: stdout: %q, stderr: %q, error: %v",
+			asDetail(as), stdout, stderr, err)
+	}
+}
+
 func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 	as := &ovnAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
 		ips:      make(map[string]net.IP),
+		ops:      make(chan *addrOp),
+		stopCh:   make(chan bool),
+		doneWg:   &sync.WaitGroup{},
 	}
 	for _, ip := range ips {
 		as.ips[ip.String()] = ip
@@ -280,6 +391,34 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 			as.name, stderr, err)
 	}
 	as.uuid = uuid
+
+	// Start processing update batches
+	startWg := &sync.WaitGroup{}
+	startWg.Add(1)
+	as.doneWg.Add(1)
+	go func() {
+		startWg.Done()
+		defer as.doneWg.Done()
+		items := make([]*addrOp, 0, 5)
+		for {
+			select {
+			case op, ok := <-as.ops:
+				if !ok {
+					return
+				}
+				items = append(items, op)
+
+			case <-time.After(10 * time.Millisecond):
+				as.runBatch(items)
+				items = make([]*addrOp, 0, 5)
+
+			case <-as.stopCh:
+				as.runBatch(items)
+				return
+			}
+		}
+	}()
+	startWg.Wait()
 
 	if uuid != "" {
 		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
@@ -417,87 +556,42 @@ func (as *ovnAddressSets) Destroy() error {
 // setIP updates the given address set in OVN to be only the given IPs, disregarding
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
-	var err error
-	var stderr string
+klog.Errorf("### setting Ips to %v", ips)
 	if len(ips) > 0 {
-		_, stderr, err = util.RunOVNNbctl("set", "address_set", as.uuid, "addresses="+joinIPs(ips))
+		as.ops <- &addrOp{
+			op:  addrOpSet,
+			ips: ips,
+		}
 	} else {
-		// cannot set an address_set to the empty set, must use clear
-		_, stderr, err = util.RunOVNNbctl("clear", "address_set", as.uuid, "addresses")
-	}
-	if err != nil {
-		return fmt.Errorf("failed to set address set %q, stderr: %q (%v)",
-			asDetail(as), stderr, err)
-	}
-
-	as.ips = make(map[string]net.IP, len(ips))
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
+		as.ops <- &addrOp{
+			op:  addrOpClear,
+		}
 	}
 	return nil
 }
 
 // addIPs appends the set of IPs to the existing address_set.
 func (as *ovnAddressSet) addIPs(ips []net.IP) error {
-	// dedup
-	uniqIPs := make([]net.IP, 0, len(ips))
-	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; ok {
-			continue
-		}
-		uniqIPs = append(uniqIPs, ip)
-	}
-
-	if len(uniqIPs) == 0 {
-		return nil
-	}
-
-	ipStr := joinIPs(uniqIPs)
-
-	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), ipStr)
-	_, stderr, err := util.RunOVNNbctl("add", "address_set", as.uuid, "addresses", ipStr)
-	if err != nil {
-		return fmt.Errorf("failed to add IPs (%q) to address set %q, stderr: %q (%v)",
-			ipStr, asDetail(as), stderr, err)
-	}
-
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
+	as.ops <- &addrOp{
+		op:  addrOpAdd,
+		ips: ips,
 	}
 	return nil
 }
 
 // deleteIPs removes selected IPs from the existing address_set
 func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
-	// dedup
-	uniqIPs := make([]net.IP, 0, len(ips))
-	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; !ok {
-			continue
-		}
-		uniqIPs = append(uniqIPs, ip)
-	}
-
-	if len(uniqIPs) == 0 {
-		return nil
-	}
-
-	ipStr := joinIPs(uniqIPs)
-	klog.V(5).Infof("(%s) deleting IP %s from address set", asDetail(as), ipStr)
-
-	_, stderr, err := util.RunOVNNbctl("remove", "address_set", as.uuid, "addresses", ipStr)
-	if err != nil {
-		return fmt.Errorf("failed to remove IPs %q from address set %q, stderr: %q (%v)",
-			ipStr, asDetail(as), stderr, err)
-	}
-
-	for _, ip := range uniqIPs {
-		delete(as.ips, ip.String())
+	as.ops <- &addrOp{
+		op:  addrOpDel,
+		ips: ips,
 	}
 	return nil
 }
 
 func (as *ovnAddressSet) destroy() error {
+	close(as.stopCh)
+	as.doneWg.Wait()
+
 	klog.V(5).Infof("destroy(%s)", asDetail(as))
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy", "address_set", as.uuid)
 	if err != nil {

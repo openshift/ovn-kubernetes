@@ -133,11 +133,15 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr1 + `" "` + addr2 + `"`,
+					`ovn-nbctl --timeout=15 --if-exists destroy address_set ` + fakeUUID,
 				})
 
-				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -156,11 +160,15 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					"ovn-nbctl --timeout=15 clear address_set " + fakeUUID + " addresses",
+					`ovn-nbctl --timeout=15 --if-exists destroy address_set ` + fakeUUID,
 				})
 
-				_, err = asFactory.NewAddressSet("foobar", nil)
+				as, err := asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -185,10 +193,16 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `" "` + addr2 + `"`,
 					Output: fakeUUID,
 				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 --if-exists destroy address_set ` + fakeUUID,
+				})
 
-				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -216,7 +230,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 			err = as.Destroy()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+			gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -241,16 +255,19 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 add address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
 				})
 
 				as, err := asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Re-adding is a no-op
-				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
+				_, _, err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -274,6 +291,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
 				})
 
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
@@ -286,7 +304,9 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -311,6 +331,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr2 + `" ` + `"` + addr3 + `"`,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
 				})
 
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
@@ -319,7 +340,9 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				err = as.SetIPs([]net.IP{net.ParseIP(addr2), net.ParseIP(addr3)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -329,6 +352,14 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	})
 
 	ginkgo.Context("Dual stack : when creating an address set object", func() {
+		ginkgo.JustBeforeEach(func() {
+			// Need loose compare fexec because each IP family address set
+			// processes ops independently
+			fexec = ovntest.NewLooseCompareFakeExec()
+			err := util.SetExec(fexec)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("re-uses an existing dual stack address set and replaces IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
@@ -356,12 +387,17 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 set address_set ` + fakeUUIDv6 + ` addresses="` + addr3 + `" "` + addr4 + `"`,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
 				})
 
-				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
 					net.ParseIP(addr3), net.ParseIP(addr4)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -389,11 +425,16 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 clear address_set ` + fakeUUIDv6 + " addresses",
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
 				})
 
-				_, err = asFactory.NewAddressSet("foobar", nil)
+				as, err := asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -429,11 +470,18 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6 addresses="` + addr3 + `" "` + addr4 + `"`,
 					Output: fakeUUIDv6,
 				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
+				})
 
-				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
 					net.ParseIP(addr3), net.ParseIP(addr4)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -444,7 +492,13 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 	ginkgo.It("destroys an dual stack address set", func() {
 		app.Action = func(ctx *cli.Context) error {
-			_, err := config.InitConfig(ctx, fexec, nil)
+			// Need loose compare fexec because each IP family address set
+			// processes ops independently
+			fexec = ovntest.NewLooseCompareFakeExec()
+			err := util.SetExec(fexec)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			_, err = config.InitConfig(ctx, fexec, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.IPv6Mode = true
 
@@ -462,8 +516,6 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 clear address_set " + fakeUUIDv6 + " addresses",
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
 				"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
 			})
@@ -473,7 +525,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 			err = as.Destroy()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+			gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -482,6 +534,14 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	})
 
 	ginkgo.Context("Dual Stack : when manipulating IPs in an address set object", func() {
+		ginkgo.JustBeforeEach(func() {
+			// Need loose compare fexec because each IP family address set
+			// processes ops independently
+			fexec = ovntest.NewLooseCompareFakeExec()
+			err := util.SetExec(fexec)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("adds IP to an empty dual stack address set", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const addr1 string = "1.2.3.4"
@@ -505,25 +565,26 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6",
 					Output: fakeUUIDv6,
 				})
-
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 add address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
-				})
-				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 add address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
 				})
 
 				as, err := asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = as.AddIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				_, _, err = as.AddIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Re-adding is a no-op
-				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
+				_, _, err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -554,12 +615,11 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6 addresses="` + addr2 + `"`,
 					Output: fakeUUIDv6,
 				})
-
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
-				})
-				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
 				})
 
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
@@ -572,7 +632,9 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+				err = as.Destroy()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -656,7 +718,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 				err = NonDualStackAddressSetCleanup()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+				gomega.Eventually(fexec.CalledMatchesExpected).Should(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 

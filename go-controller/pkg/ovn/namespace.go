@@ -79,32 +79,27 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewa
 // addPodToNamespace adds the pod's IP to the namespace's address set and returns
 // pod's routing gateway info and hybrid overlay gateway
 func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
-	nsLockEnd, nsiLockEnd, relockEnd, nsInfo := oc.ensureNamespaceLocked(ns, true)
+	var (
+		routingExternalGWs      *gatewayInfo
+		routingPodGWs           map[string]*gatewayInfo
+		hybridOverlayExternalGW net.IP
+		err                     error
+		lock, add               time.Duration
+	)
 
-	start := time.Now()
-	if nsInfo.addressSet == nil {
-		nsInfo.RUnlock()
-		nsInfo.Lock()
-		defer nsInfo.Unlock()
-		var err error
-		// check again cause we had to re-lock
-		if nsInfo.addressSet == nil {
-			nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
-			if err != nil {
-				return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
-			}
+	nsLockEnd, nsiLockEnd, relockEnd, err := oc.ensureNamespaceLocked(ns, true, func(nsInfo *namespaceInfo) error {
+		lock, add, err = nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
+		if err != nil {
+			return err
 		}
-	} else {
-		defer nsInfo.RUnlock()
-	}
-	addrsetEnd := time.Since(start)
 
-	lock, add, err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
-	if err != nil {
-		return nil, nil, nil, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, 0 * time.Second, err
-	}
+		routingExternalGWs = oc.getRoutingExternalGWs(nsInfo)
+		routingPodGWs = oc.getRoutingPodGWs(nsInfo)
+		hybridOverlayExternalGW = nsInfo.hybridOverlayExternalGW
+		return nil
+	})
 
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, addrsetEnd, lock, add, nil
+	return routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, nsLockEnd, nsiLockEnd, relockEnd, 0 * time.Second, lock, add, err
 }
 
 func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) error {
@@ -228,72 +223,76 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()
 
-	_, _, _, nsInfo := oc.ensureNamespaceLocked(ns.Name, false)
-	defer nsInfo.Unlock()
+	_, _, _, err := oc.ensureNamespaceLocked(ns.Name, false, func(nsInfo *namespaceInfo) error {
+		if config.HybridOverlay.Enabled {
+			annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
+			if annotation != "" {
+				parsedAnnotation := net.ParseIP(annotation)
+				if parsedAnnotation == nil {
+					klog.Errorf("Could not parse hybrid overlay external gw annotation")
+				} else {
+					nsInfo.hybridOverlayExternalGW = parsedAnnotation
+				}
+			}
 
-	if config.HybridOverlay.Enabled {
-		annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
-		if annotation != "" {
-			parsedAnnotation := net.ParseIP(annotation)
-			if parsedAnnotation == nil {
-				klog.Errorf("Could not parse hybrid overlay external gw annotation")
-			} else {
-				nsInfo.hybridOverlayExternalGW = parsedAnnotation
+			annotation = ns.Annotations[hotypes.HybridOverlayVTEP]
+			if annotation != "" {
+				parsedAnnotation := net.ParseIP(annotation)
+				if parsedAnnotation == nil {
+					klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+				} else {
+					nsInfo.hybridOverlayVTEP = parsedAnnotation
+				}
 			}
 		}
 
-		annotation = ns.Annotations[hotypes.HybridOverlayVTEP]
-		if annotation != "" {
-			parsedAnnotation := net.ParseIP(annotation)
-			if parsedAnnotation == nil {
-				klog.Errorf("Could not parse hybrid overlay VTEP annotation")
-			} else {
-				nsInfo.hybridOverlayVTEP = parsedAnnotation
-			}
-		}
-	}
-
-	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
-		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
-		if err != nil {
-			klog.Errorf(err.Error())
-		} else {
-			_, bfdEnabled := ns.Annotations[bfdAnnotation]
-			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
+		if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
+			exGateways, err := parseRoutingExternalGWAnnotation(annotation)
 			if err != nil {
-				klog.Error(err.Error())
+				klog.Errorf(err.Error())
+			} else {
+				_, bfdEnabled := ns.Annotations[bfdAnnotation]
+				err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
+				if err != nil {
+					klog.Error(err.Error())
+				}
+			}
+			if _, ok := ns.Annotations[bfdAnnotation]; ok {
+				nsInfo.routingExternalGWs.bfdEnabled = true
 			}
 		}
-		if _, ok := ns.Annotations[bfdAnnotation]; ok {
-			nsInfo.routingExternalGWs.bfdEnabled = true
-		}
-	}
 
-	annotation := ns.Annotations[aclLoggingAnnotation]
-	if annotation != "" {
-		if oc.aclLoggingCanEnable(annotation, nsInfo) {
-			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+		annotation := ns.Annotations[aclLoggingAnnotation]
+		if annotation != "" {
+			if oc.aclLoggingCanEnable(annotation, nsInfo) {
+				klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+			} else {
+				klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
+			}
+		}
+		if nsInfo.addressSet == nil {
+			var err error
+			nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns.Name)
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
 		} else {
-			klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
+			klog.V(5).Infof("Address set already exists for namespace: %s", ns.Name)
 		}
-	}
-	if nsInfo.addressSet == nil {
-		var err error
-		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns.Name)
-		if err != nil {
-			klog.Errorf(err.Error())
-		}
-	} else {
-		klog.V(5).Infof("Address set already exists for namespace: %s", ns.Name)
+
+		// TODO(trozet) figure out if there is any possibility of detecting if a pod GW already exists, which
+		// is servicing this namespace. Right now that would mean searching through all pods, which is very inefficient.
+		// For now it is required that a pod serving as a gateway for a namespace is added AFTER the serving namespace is
+		// created
+
+		// If multicast enabled, adds all current pods in the namespace to the allow policy
+		oc.multicastUpdateNamespace(ns, nsInfo)
+		return nil
+	})
+	if err != nil {
+		klog.Errorf(err.Error())
 	}
 
-	// TODO(trozet) figure out if there is any possibility of detecting if a pod GW already exists, which
-	// is servicing this namespace. Right now that would mean searching through all pods, which is very inefficient.
-	// For now it is required that a pod serving as a gateway for a namespace is added AFTER the serving namespace is
-	// created
-
-	// If multicast enabled, adds all current pods in the namespace to the allow policy
-	oc.multicastUpdateNamespace(ns, nsInfo)
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
@@ -475,29 +474,37 @@ func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) *namespaceInf
 
 // ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, and returns it
 // with its mutex locked.
-func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (time.Duration, time.Duration, time.Duration, *namespaceInfo) {
+func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, doFn func(*namespaceInfo) error) (time.Duration, time.Duration, time.Duration, error) {
 	start := time.Now()
 	oc.namespacesMutex.Lock()
 	nsLockEnd := time.Since(start)
 	nsInfo := oc.namespaces[ns]
-	nsInfoExisted := false
 	if nsInfo == nil {
+		defer oc.namespacesMutex.Unlock()
+
 		nsInfo = &namespaceInfo{
 			networkPolicies:       make(map[string]*networkPolicy),
 			podExternalRoutes:     make(map[string]map[string]string),
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
 		}
+
+		var err error
+		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
+		if err != nil {
+			klog.Warningf("cannot create address set for namespace %s: %v", ns, err)
+		}
+
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it
-		defer oc.namespacesMutex.Unlock()
 		oc.namespaces[ns] = nsInfo
-	} else {
-		nsInfoExisted = true
-		// if we found and existing nsInfo, do not hold the namespaces lock
-		// while waiting for nsInfo to Lock
-		oc.namespacesMutex.Unlock()
+		err = doFn(nsInfo)
+		return nsLockEnd, 0 * time.Second, 0 * time.Second, err
 	}
+
+	// if we found and existing nsInfo, do not hold the namespaces lock
+	// while waiting for nsInfo to Lock
+	oc.namespacesMutex.Unlock()
 
 	start = time.Now()
 	if readOnly {
@@ -508,23 +515,27 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (time.Dura
 	nsiLockEnd := time.Since(start)
 
 	var relockEnd time.Duration
-	if nsInfoExisted {
-		// Check that the namespace wasn't deleted while we were waiting for the lock
-		start = time.Now()
-		oc.namespacesMutex.Lock()
-		relockEnd = time.Since(start)
-		defer oc.namespacesMutex.Unlock()
-		if nsInfo != oc.namespaces[ns] {
-			if readOnly {
-				nsInfo.RLock()
-			} else {
-				nsInfo.Unlock()
-			}
-			return 0 * time.Second, 0 * time.Second, 0 * time.Second, nil
+	// Check that the namespace wasn't deleted while we were waiting for the lock
+	start = time.Now()
+	oc.namespacesMutex.Lock()
+	relockEnd = time.Since(start)
+	defer oc.namespacesMutex.Unlock()
+	if nsInfo != oc.namespaces[ns] {
+		if readOnly {
+			nsInfo.RLock()
+		} else {
+			nsInfo.Unlock()
 		}
+		return 0 * time.Second, 0 * time.Second, 0 * time.Second, fmt.Errorf("namespace info deleted")
 	}
 
-	return nsLockEnd, nsiLockEnd, relockEnd, nsInfo
+	err := doFn(nsInfo)
+	if readOnly {
+		nsInfo.RUnlock()
+	} else {
+		nsInfo.Unlock()
+	}
+	return nsLockEnd, nsiLockEnd, relockEnd, err
 }
 
 // deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
