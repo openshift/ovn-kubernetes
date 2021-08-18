@@ -258,7 +258,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				as, err := asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
+				_,_, err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				expectedDatabaseState := &nbdb.AddressSet{
@@ -545,7 +545,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				}
 				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
-				err = as.AddIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				_,_, err = as.AddIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				expectedDatabaseState = []libovsdbtest.TestData{
 					&nbdb.AddressSet{
 						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
@@ -562,7 +562,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Re-adding is a no-op
-				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
+				_,_, err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				return nil
