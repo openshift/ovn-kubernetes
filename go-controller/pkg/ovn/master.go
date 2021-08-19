@@ -271,6 +271,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
+	if err := startRelays(oc.client); err != nil {
+		klog.Errorf(err.Error())
+	}
+
 	// Enable logical datapath groups for OVN 20.12 and later
 	if err := oc.enableOVNLogicalDatapathGroups(); err != nil {
 		return err
