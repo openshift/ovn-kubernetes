@@ -243,7 +243,7 @@ func GetIPFullMask(ip string) string {
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory()
+		addressSetFactory = addressset.NewOvnAddressSetFactory(ovnNBClient)
 	}
 	return &Controller{
 		client: ovnClient.KubeClient,
@@ -393,7 +393,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
 	if ver <= ovntypes.OvnPortBindingTopoVersion {
-		err = addressset.NonDualStackAddressSetCleanup()
+		err = addressset.NonDualStackAddressSetCleanup(oc.ovnNBClient)
 	}
 	return err
 }
