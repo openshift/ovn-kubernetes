@@ -168,12 +168,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
-
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
 			wf.Shutdown()
 		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
 
 		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}
 
