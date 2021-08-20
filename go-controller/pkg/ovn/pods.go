@@ -279,11 +279,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			pod.Namespace, pod.Name, time.Since(start), ovnExecuteTime, podAnnoTime)
 	}()
 
+	start1 := time.Now()
 	logicalSwitch := pod.Spec.NodeName
 	lsUUID, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
 	if err != nil {
 		return err
 	}
+	waitForSwitchTime := time.Since(start1)
 
 	portName := podLogicalPortName(pod)
 	klog.V(5).Infof("Creating logical port for %s on switch %s [%s]", portName, logicalSwitch, lsUUID)
@@ -298,6 +300,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	opts := make(map[string]string)
 
+	start1 = time.Now()
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
@@ -317,6 +320,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			}
 		}
 	}
+	lspGetTime := time.Since(start1)
 
 	// Bind the port to the node's chassis; prevents ping-ponging between
 	// chassis if ovnkube-node isn't running correctly and hasn't cleared
@@ -324,6 +328,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// rescheduled.
 	opts["requested-chassis"] = pod.Spec.NodeName
 
+	start1 = time.Now()
 	if lsp == nil {
 		podCmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, lsUUID, portName)
 		if err != nil {
@@ -332,6 +337,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	} else {
 		klog.Infof("LSP already exists for port: %s", portName)
 	}
+	lspAddTime := time.Since(start1)
 
 	// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node.
 	// ovn-controller will claim the OVS interface only if external_ids:iface-id
@@ -385,6 +391,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}()
 
+	start1 = time.Now()
 	needsIP := true
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err == nil {
@@ -434,14 +441,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		releaseIPs = true
 	}
+	ipamTime := time.Since(start1)
 
 	// Ensure the namespace/nsInfo exists
+	start1 = time.Now()
 	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, addrSetCmds, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
 	cmds = append(cmds, addrSetCmds...)
+	addToNSTime := time.Since(start1)
 
+	var annoTime time.Duration
 	if needsIP {
 		var networks []*types.NetworkSelectionElement
 
@@ -484,6 +495,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
 
+		start1 = time.Now()
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
 		annoStart := time.Now()
@@ -492,9 +504,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
+		annoTime = time.Since(start1)
 		releaseIPs = false
 	}
 
+	start1 = time.Now()
 	// if we have any external or pod Gateways, add routes
 	gateways := make([]*gatewayInfo, 0)
 
@@ -528,6 +542,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
+	exGWTime := time.Since(start1)
 
 	// set addresses on the port
 	addresses = make([]string, len(podIfAddrs)+1)
@@ -560,7 +575,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	podCmd.Operations[0].Row["port_security"] = cmd.Operations[0].Row["port_security"]
 
-	start1 := time.Now()
+	start1 = time.Now()
 	// execute all the commands together. If a single operation fails, all commands will roll back =>
 	// for new Pod no LSP will be created
 	var r []string
@@ -571,6 +586,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			portName, err)
 	}
 
+	start1 = time.Now()
 	if lsp == nil {
 		// Grab the LSP's UUID from the creation response
 		if len(r) != 1 {
@@ -585,13 +601,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("unexpected logical switch port name %q for uuid %s (expected %q)", lsp.Name, lsp.UUID, portName)
 		}
 	}
+	ovnVerifyTime := time.Since(start1)
 
 	// Add the pod's logical switch port to the port cache
+	start1 = time.Now()
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+	cacheTime := time.Since(start1)
 
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
 	// it's rare and easily worked around for now.
+	start1 = time.Now()
 	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
 	if err != nil {
 		return err
@@ -601,8 +621,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+	mcTime := time.Since(start1)
+
 	// observe the pod creation latency metric.
+	start1 = time.Now()
 	metrics.RecordPodCreated(pod)
+	metricsTime := time.Since(start1)
+
+	klog.Infof("[%s/%s] TROZETaddLogicalPort took %v, waitSwitch: %v, lspGet: %v, lspAdd: %v, ipam: %v, addToNS: %v, annoTime: %v, exGW: %v, ovnExecuteTime: %v, ovnVerifyTime: %v, cache: %v, mc: %v, metrics: %v", pod.Namespace, pod.Name,
+		time.Since(start), waitForSwitchTime, lspGetTime, lspAddTime, ipamTime, addToNSTime, annoTime, exGWTime, ovnExecuteTime, ovnVerifyTime, cacheTime, mcTime, metricsTime)
 	return nil
 }
 
