@@ -382,12 +382,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Ensure the namespace/nsInfo exists
+	start1 := time.Now()
 	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, addrSetCmds, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	addPodToNsTime := time.Since(start1)
 	if err != nil {
 		return err
 	}
 	cmds = append(cmds, addrSetCmds...)
 
+	var annoTime time.Duration
 	if needsIP {
 		var networks []*types.NetworkSelectionElement
 
@@ -430,11 +433,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
 
+		start1 = time.Now()
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
+		annoTime = time.Since(start1)
 		releaseIPs = false
 	}
 
@@ -501,12 +506,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	cmds = append(cmds, cmd)
 
+	start1 = time.Now()
 	// execute all the commands together.
 	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
 		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
+	ovnExecuteTime := time.Since(start1)
 
 	lsp, err = oc.ovnNBClient.LSPGet(portName)
 	if err != nil || lsp == nil {
@@ -530,6 +537,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
+	klog.Infof("[%s/%s] TROZETaddLogicalPort took %v, addPodToNamespace: %v, ovnExecuteTime: %v, annoTime: %v", pod.Namespace, pod.Name,
+		time.Since(start), addPodToNsTime, ovnExecuteTime, annoTime)
 	return nil
 }
 
