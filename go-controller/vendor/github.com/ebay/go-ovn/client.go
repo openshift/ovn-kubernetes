@@ -290,6 +290,7 @@ type ovndb struct {
 	tableCols    map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
+	ticker       *time.Ticker
 }
 
 func connect(c *ovndb) (err error) {
@@ -348,6 +349,7 @@ func NewClient(cfg *Config) (Client, error) {
 		addr:         cfg.Addr,
 		tlsConfig:    cfg.TLSConfig,
 		reconn:       cfg.Reconnect,
+		ticker:       time.NewTicker(time.Second/20),
 	}
 
 	err := connect(ovndb)
@@ -744,7 +746,10 @@ func (c *ovndb) QoSList(ls string) ([]*QoS, error) {
 }
 
 func (c *ovndb) Execute(cmds ...*OvnCommand) error {
-	return c.execute(cmds...)
+	for range c.ticker.C {
+		return c.execute(cmds...)
+	}
+	return nil
 }
 
 func (c *ovndb) ExecuteR(cmds ...*OvnCommand) ([]string, error) {
