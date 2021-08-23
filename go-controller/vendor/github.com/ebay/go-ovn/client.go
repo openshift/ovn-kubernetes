@@ -350,7 +350,7 @@ func NewClient(cfg *Config) (Client, error) {
 		addr:         cfg.Addr,
 		tlsConfig:    cfg.TLSConfig,
 		reconn:       cfg.Reconnect,
-		ticker:       time.NewTicker(time.Second/20),
+		ticker:       time.NewTicker(time.Second/10),
 	}
 
 	err := connect(ovndb)
