@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	goovn "github.com/ebay/go-ovn"
@@ -108,11 +107,6 @@ type namespaceInfo struct {
 	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
-type OVNNBClient struct {
-	goovn.Client
-	locked uint32
-}
-
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
@@ -194,9 +188,6 @@ type Controller struct {
 	// go-ovn northbound client interface
 	ovnNBClient goovn.Client
 
-	// go-ovn northbound client interface
-	ovnNBClients []*OVNNBClient
-
 	// go-ovn southbound client interface
 	ovnSBClient goovn.Client
 
@@ -255,7 +246,7 @@ func GetIPFullMask(ip string) string {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	ovnNBClients []*OVNNBClient, ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
+	ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(ovnNBClient)
@@ -299,7 +290,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryPodsChan:            make(chan struct{}, 1),
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
-		ovnNBClients:             ovnNBClients,
 		ovnSBClient:              ovnSBClient,
 		nbClient:                 libovsdbOvnNBClient,
 		sbClient:                 libovsdbOvnSBClient,
@@ -1222,20 +1212,4 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		}
 	}()
 	return nil
-}
-
-// GetOVNNBClient polls through the list of clients and gets one ASAP
-func (oc *Controller) GetOVNNBClient() *OVNNBClient {
-	for {
-		for _, client := range oc.ovnNBClients {
-			if atomic.CompareAndSwapUint32(&client.locked, 0, 1) {
-				return client
-			}
-		}
-	}
-}
-
-// ReleaseOVNNBClient adds the client back to the pool
-func (oc *Controller) ReleaseOVNNBClient(client *OVNNBClient) {
-	atomic.StoreUint32(&client.locked, 0)
 }

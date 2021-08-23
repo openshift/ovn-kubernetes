@@ -1154,9 +1154,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			nbClients := []*OVNNBClient{{Client: ovntest.NewMockOVNClient(goovn.DBNB)}}
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				nbClients, ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
@@ -1420,9 +1419,8 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				t.Fatalf("Error creating libovsdb test harness %v", err)
 			}
 
-			nbClients := []*OVNNBClient{{Client: ovntest.NewMockOVNClient(goovn.DBNB)}}
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				nbClients, ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 
