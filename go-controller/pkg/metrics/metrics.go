@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,12 @@ type metricDetails struct {
 // metrics we are interested in that output for a given component. We generalize capturing
 // these metrics across all OVN/OVS components.
 var componentCoverageShowMetricsMap = map[string]map[string]*metricDetails{}
+
+// OVN/OVS components, namely ovn-northd, ovn-controller, and ovs-vswitchd provide various
+// metrics through the 'stopwatch/show' command. The following data structure holds all the
+// metrics we are interested in that output for a given component. We generalize capturing
+// these metrics across all OVN/OVS components.
+var componentStopwatchShowMetricsMap = map[string]map[string]*metricDetails{}
 
 func parseMetricToFloat(componentName, metricName, value string) float64 {
 	f64Value, err := strconv.ParseFloat(value, 64)
@@ -140,6 +147,110 @@ func coverageShowMetricsUpdater(component string) {
 				}
 			}
 			metricInfo.metric.Set(metricValue)
+		}
+	}
+}
+
+// registerStopwatchShowMetrics registers stopwatch/show metrics for
+// various components(ovn-northd, ovn-controller, and ovs-vswitchd) with prometheus
+func registerStopwatchShowMetrics(component string, metricNamespace string, metricSubsystem string) {
+	stopwatchShowMetricsMap := componentStopwatchShowMetricsMap[component]
+	for metricName, metricInfo := range stopwatchShowMetricsMap {
+		metricInfo.metric = prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: metricNamespace,
+			Subsystem: metricSubsystem,
+			Name:      metricName,
+			Help:      metricInfo.help,
+		})
+		prometheus.MustRegister(metricInfo.metric)
+	}
+}
+
+// getStopwatchShowOutputMap obtains the stopwatch/show metric values for the specified component.
+func getStopwatchShowOutputMap(component string) (map[string]int, error) {
+	var stdout, stderr string
+	var err error
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from a panic while parsing the stopwatch/show output for %s: %v", component, r)
+		}
+	}()
+
+	switch component {
+	case ovnController:
+		stdout, stderr, err = util.RunOVNControllerAppCtl("stopwatch/show")
+	case ovnNorthd:
+		stdout, stderr, err = util.RunOVNNorthAppCtl("stopwatch/show")
+	default:
+		return nil, fmt.Errorf("unknown component %s for stopwatch/show", component)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stopwatch/show output for %s (stderr: %s): %w", component, stderr, err)
+	}
+
+	parsedOutput, err := parseStopwatchShowOutput(stdout)
+	return parsedOutput, err //need to return err, as it could be set in the defer
+}
+
+// parseStopwatchShowOutput returns the number of total samples for each poll loop
+func parseStopwatchShowOutput(output string) (map[string]int, error) {
+	result := make(map[string]int)
+
+	reStatisticsBlock := regexp.MustCompile(`(?m)^Statistics for '(?P<name>.+)'$(?:\n  .*)+`)
+	reTotalSamples := regexp.MustCompile(`(?m)^  Total samples: (?P<samplesCount>\d*)$`)
+	nameIndex := reStatisticsBlock.SubexpIndex("name")
+	samplesIndex := reTotalSamples.SubexpIndex("samplesCount")
+
+	for _, match := range reStatisticsBlock.FindAllStringSubmatch(output, -1) {
+		name := match[nameIndex]
+
+		sampleMatch := reTotalSamples.FindStringSubmatch(match[0])
+		sampleCount, err := strconv.Atoi(sampleMatch[samplesIndex])
+
+		if err != nil {
+			return nil, err
+		}
+
+		result[name] = sampleCount
+	}
+
+	return result, nil
+}
+
+// stopwatchShowMetricsUpdater updates the metric by obtaining the stopwatch/show
+// metrics for the specified component.
+func stopwatchShowMetricsUpdater(component string) {
+	for {
+		time.Sleep(30 * time.Second)
+
+		stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
+		if err != nil {
+			klog.Errorln(err)
+			continue
+		}
+
+		stopwatchShowInterestingMetrics := componentStopwatchShowMetricsMap[component]
+		for metricName, metricInfo := range stopwatchShowInterestingMetrics {
+			var metricValue int
+			if metricInfo.srcName != "" {
+				metricName = metricInfo.srcName
+			}
+
+			if metricInfo.aggregateFrom != nil {
+				for _, aggregateMetricName := range metricInfo.aggregateFrom {
+					if value, ok := stopwatchShowOutputMap[aggregateMetricName]; ok {
+						metricValue += value
+					}
+				}
+			} else {
+				if value, ok := stopwatchShowOutputMap[metricName]; ok {
+					metricValue = value
+				}
+			}
+
+			metricInfo.metric.Set(float64(metricValue))
 		}
 	}
 }
