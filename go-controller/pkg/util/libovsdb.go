@@ -94,7 +94,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 		return nil, err
 	}
 
-	_, err = c.MonitorAll()
+	_, err = c.MonitorAll(context.TODO())
 	if err != nil {
 		c.Close()
 		return nil, err
