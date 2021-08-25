@@ -19,7 +19,6 @@ type OvsdbServer struct {
 	listener     net.Listener
 	done         chan struct{}
 	db           Database
-	dbUpdates    chan ovsdb.TableUpdates
 	ready        bool
 	readyMutex   sync.RWMutex
 	models       map[string]DatabaseModel
@@ -42,7 +41,6 @@ func NewOvsdbServer(db Database, models ...DatabaseModel) (*OvsdbServer, error) 
 		modelsMutex:  sync.RWMutex{},
 		monitors:     make(map[*rpc2.Client]*connectionMonitors),
 		monitorMutex: sync.RWMutex{},
-		dbUpdates:    make(chan ovsdb.TableUpdates),
 	}
 	o.modelsMutex.Lock()
 	for _, model := range models {
@@ -74,7 +72,6 @@ func (o *OvsdbServer) Serve(protocol string, path string) error {
 	if err != nil {
 		return err
 	}
-	go o.dispatch()
 	o.readyMutex.Lock()
 	o.ready = true
 	o.readyMutex.Unlock()
@@ -168,12 +165,31 @@ func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, repl
 		for i, mutation := range op.Mutations {
 			op.Mutations[i].Value = expandNamedUUID(mutation.Value, namedUUID)
 		}
+		for _, row := range op.Rows {
+			for k, v := range row {
+				row[k] = expandNamedUUID(v, namedUUID)
+			}
+		}
+		for k, v := range op.Row {
+			op.Row[k] = expandNamedUUID(v, namedUUID)
+		}
 		ops = append(ops, op)
 	}
-	response, update := o.db.Transact(db, ops)
+	response, updates := o.transact(db, ops)
 	*reply = response
-	o.dbUpdates <- update
-	return nil
+	dbUpdates, _ := deepCopy(updates)
+	o.processMonitors(dbUpdates)
+	return o.db.Commit(db, dbUpdates)
+}
+
+func deepCopy(a ovsdb.TableUpdates) (ovsdb.TableUpdates, error) {
+	var b ovsdb.TableUpdates
+	raw, err := json.Marshal(a)
+	if err != nil {
+		return b, err
+	}
+	err = json.Unmarshal(raw, &b)
+	return b, err
 }
 
 // Cancel cancels the last transaction
@@ -190,10 +206,7 @@ func (o *OvsdbServer) Monitor(client *rpc2.Client, args []json.RawMessage, reply
 	if !o.db.Exists(db) {
 		return fmt.Errorf("db does not exist")
 	}
-	var value string
-	if err := json.Unmarshal(args[1], &value); err != nil {
-		return fmt.Errorf("values %v is not a string", args[1])
-	}
+	value := string(args[1])
 	var request map[string]*ovsdb.MonitorRequest
 	if err := json.Unmarshal(args[2], &request); err != nil {
 		return err
@@ -210,7 +223,7 @@ func (o *OvsdbServer) Monitor(client *rpc2.Client, args []json.RawMessage, reply
 	}
 	tableUpdates := make(ovsdb.TableUpdates)
 	for t, request := range request {
-		rows := o.db.Select(db, t, nil, request.Columns)
+		rows := o.Select(db, t, nil, request.Columns)
 		for i := range rows.Rows {
 			tu := make(ovsdb.TableUpdate)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
@@ -253,28 +266,14 @@ func (o *OvsdbServer) Echo(client *rpc2.Client, args []interface{}, reply *[]int
 	return nil
 }
 
-func (o *OvsdbServer) dispatch() {
-	for {
-		select {
-		case update := <-o.dbUpdates:
-			o.monitorMutex.RLock()
-			for _, c := range o.monitors {
-				for _, m := range c.monitors {
-					m.Enqueue(update)
-				}
-			}
-			o.monitorMutex.RUnlock()
-		case <-o.done:
-			o.monitorMutex.RLock()
-			for _, c := range o.monitors {
-				for _, m := range c.monitors {
-					close(m.stopCh)
-				}
-			}
-			o.monitorMutex.RUnlock()
-			return
+func (o *OvsdbServer) processMonitors(update ovsdb.TableUpdates) {
+	o.monitorMutex.RLock()
+	for _, c := range o.monitors {
+		for _, m := range c.monitors {
+			m.Send(update)
 		}
 	}
+	o.monitorMutex.RUnlock()
 }
 
 func expandNamedUUID(value interface{}, namedUUID map[string]ovsdb.UUID) interface{} {

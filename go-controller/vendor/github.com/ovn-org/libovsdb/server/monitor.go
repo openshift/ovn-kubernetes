@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -28,8 +29,6 @@ type monitor struct {
 	id      string
 	request map[string]*ovsdb.MonitorRequest
 	client  *rpc2.Client
-	updates chan ovsdb.TableUpdates
-	stopCh  chan struct{}
 }
 
 func newMonitor(id string, request map[string]*ovsdb.MonitorRequest, client *rpc2.Client) *monitor {
@@ -37,33 +36,14 @@ func newMonitor(id string, request map[string]*ovsdb.MonitorRequest, client *rpc
 		id:      id,
 		request: request,
 		client:  client,
-		updates: make(chan ovsdb.TableUpdates),
-		stopCh:  make(chan struct{}, 1),
 	}
-	go m.sendUpdates()
 	return m
 }
 
-func (m *monitor) sendUpdates() {
-	for {
-		select {
-		case update := <-m.updates:
-			args := []interface{}{m.id, update}
-			var reply interface{}
-			err := m.client.Call("update", args, &reply)
-			if err != nil {
-				log.Printf("client error handling update rpc: %v", err)
-			}
-		case <-m.stopCh:
-			return
-		}
-	}
-}
-
-// Enqueue will enqueue an update if it matches the tables and monitor select arguments
+// Send will send an update if it matches the tables and monitor select arguments
 // we take the update by value (not reference) so we can mutate it in place before
 // queuing it for dispatch
-func (m *monitor) Enqueue(update ovsdb.TableUpdates) {
+func (m *monitor) Send(update ovsdb.TableUpdates) {
 	// remove updates for tables that we aren't watching
 	if len(m.request) != 0 {
 		m.filter(update)
@@ -71,7 +51,12 @@ func (m *monitor) Enqueue(update ovsdb.TableUpdates) {
 	if len(update) == 0 {
 		return
 	}
-	m.updates <- update
+	args := []interface{}{json.RawMessage([]byte(m.id)), update}
+	var reply interface{}
+	err := m.client.Call("update", args, &reply)
+	if err != nil {
+		log.Printf("client error handling update rpc: %v", err)
+	}
 }
 
 func (m *monitor) filter(update ovsdb.TableUpdates) {
@@ -102,7 +87,8 @@ func (m *monitor) filter(update ovsdb.TableUpdates) {
 									delete(new, k)
 								}
 							}
-							update[table][uuid].New = &new
+							row.New = &new
+							update[table][uuid] = row
 						}
 						if row.Old != nil {
 							old := *row.Old
@@ -111,7 +97,8 @@ func (m *monitor) filter(update ovsdb.TableUpdates) {
 									delete(old, k)
 								}
 							}
-							update[table][uuid].Old = &old
+							row.Old = &old
+							update[table][uuid] = row
 						}
 					}
 				default:
