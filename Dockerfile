@@ -33,7 +33,8 @@ RUN yum install -y  \
 	yum clean all
 
 ARG ovsver=2.15.0-28.el8fdp
-ARG ovnver=21.09.0-15.el8fdp
+ARG ovnver=21.09.0-private_ct_snat.142.el8fdp.x86_64.rpm
+ARG ovnhttp=http://people.redhat.com/dwinship/ovn
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
@@ -45,7 +46,7 @@ RUN INSTALL_PKGS=" \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn21.09 = $ovnver" "ovn21.09-central = $ovnver" "ovn21.09-host = $ovnver" "ovn21.09-vtep = $ovnver" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "$ovnhttp/ovn21.09-$ovnver" "$ovnhttp/ovn21.09-central-$ovnver" "$ovnhttp/ovn21.09-host-$ovnver" "$ovnhttp/ovn21.09-vtep-$ovnver" && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
