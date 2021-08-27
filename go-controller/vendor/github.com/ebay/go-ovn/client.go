@@ -326,7 +326,7 @@ func connect(c *ovndb) (err error) {
 	}
 
 	// We do the initial dump and populate the cache, we have the mutex
-	c.populateCache(*initial)
+	c.populateCache2(*initial)
 	return nil
 }
 
@@ -390,7 +390,6 @@ func (c *ovndb) reconnect() {
 // NBTablesOrder / SBTablesOrder exists in current ovn-db schema
 func (c *ovndb) filterTablesFromSchema() []string {
 	var tables []string
-
 	// get the table list based on the DB
 	if c.db == DBNB {
 		tables = NBTablesOrder
@@ -408,7 +407,7 @@ func (c *ovndb) filterTablesFromSchema() []string {
 	return schemaTables
 }
 
-func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
+func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates2, error) {
 	tables := c.filterTablesFromSchema()
 	// verify whether user specified table and its columns are legit
 	if len(c.tableCols) != 0 {
@@ -446,7 +445,8 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, 
 				Modify:  true,
 			}}
 	}
-	return c.client.Monitor(c.db, jsonContext, requests)
+
+	return c.client.Monitor2(c.db, jsonContext, requests)
 }
 
 func (c *ovndb) close() error {
@@ -737,7 +737,7 @@ func (c *ovndb) ASAddIPs(name string, addrs []string) (*OvnCommand, error) {
 }
 
 func (c *ovndb) ASDelIPs(name string, addrs []string) (*OvnCommand, error) {
-	return c. asDelIPImp(name, addrs)
+	return c.asDelIPImp(name, addrs)
 }
 
 func (c *ovndb) ASDel(name string) (*OvnCommand, error) {
