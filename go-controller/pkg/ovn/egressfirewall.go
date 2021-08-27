@@ -268,6 +268,8 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 
 func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) error {
 	// block all external traffic in this namespace
+	klog.Infof("[updateFirewallRules] oldEgressFirewall=%v, newEgressFirewal=%v\n",
+		oldEgressFirewall, newEgressFirewall)
 	nsInfo, err := oc.waitForNamespaceLocked(newEgressFirewall.Namespace)
 	if err != nil {
 		return fmt.Errorf("cannot update egressfirewall in %s:%v", newEgressFirewall.Namespace, err)
@@ -278,6 +280,8 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 	if err != nil {
 		return fmt.Errorf("cannot update egressfirewall in %s:%v", newEgressFirewall.Namespace, err)
 	}
+	klog.Infof("[updateFirewallRules] addressSet=%v, priority=%s\n",
+		addressSet, priority)
 
 	ipv4ASHashName, ipv6ASHashName := addressSet.GetASHashNames()
 	match := generateMatch(ipv4ASHashName, ipv6ASHashName, []matchTarget{
@@ -286,15 +290,17 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 	},
 		[]egressfirewallapi.EgressFirewallPort{},
 	)
+	klog.Infof("[updateFirewallRules] match=%v\n", match)
 
 	err = oc.createEgressFirewallRules(priority, match, "drop", newEgressFirewall.Namespace+"-blockAll")
 	if err != nil {
 		return fmt.Errorf("cannot update egressfirewall in %s:%v", newEgressFirewall.Namespace, err)
 	}
+	klog.Infof("[updateFirewallRules] Deleting oldEgressFirewall=%s\n", oldEgressFirewall)
 
 	updateErrors := oc.deleteEgressFirewall(oldEgressFirewall)
 	// add the new egressfirewall
-
+	klog.Infof("[updateFirewallRules] Adding newEgressFirewall=%s\n", newEgressFirewall)
 	updateErrors = errors.Wrapf(updateErrors, "%v", oc.addEgressFirewall(newEgressFirewall))
 	// delete rules blocking all external traffic
 	err = oc.deleteEgressFirewallRules(newEgressFirewall.Namespace + "-blockAll")
@@ -334,9 +340,12 @@ func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewa
 }
 
 func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, namespace string, efStartPriority int) error {
+	klog.Infof("[addEgressFirewallRules] hashedAddressSetNameIPv4=%s, hashedAddressSetNameIPv6=%s, namespace=%s, efStartPriority=%d\n",
+		hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, namespace, efStartPriority)
 	var err error
 	ef := oc.namespaces[namespace].egressFirewall
 	for _, rule := range ef.egressRules {
+		klog.Infof("[addEgressFirewallRules] processing rule: %v", rule)
 		var action string
 		var matchTargets []matchTarget
 		if rule.access == egressfirewallapi.EgressFirewallRuleAllow {
@@ -344,6 +353,7 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 		} else {
 			action = "drop"
 		}
+		klog.Infof("[addEgressFirewallRules] processing rule %v, action=%s", rule, action)
 		if rule.to.cidrSelector != "" {
 			if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
 				matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector}}
@@ -364,7 +374,9 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName})
 			}
 		}
+		klog.Infof("[addEgressFirewallRules] processing rule %v, matchTargets=%s", rule, matchTargets)
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
+		klog.Infof("[addEgressFirewallRules] processing rule %v, match=%s", rule, match)
 		err = oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace)
 		if err != nil {
 			return err
@@ -376,6 +388,9 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 // createEgressFirewallRules uses the previously generated elements and creates the
 // logical_router_policy/join_switch_acl for a specific egressFirewallRouter
 func (oc *Controller) createEgressFirewallRules(priority int, match, action, externalID string) error {
+	klog.Infof("[createEgressFirewallRules] priority=%d, match=%s, action=%s, externalID=%s\n",
+		priority, match, action, externalID)
+
 	logicalSwitches := []string{}
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		nodes, err := oc.watchFactory.GetNodes()
@@ -388,13 +403,18 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	} else {
 		logicalSwitches = append(logicalSwitches, types.OVNJoinSwitch)
 	}
+	klog.Infof("[createEgressFirewallRules] logicalSwitches=%v\n", logicalSwitches)
+
 	uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action="+action,
 		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
+	klog.Infof("[createEgressFirewallRules] finding matching ACLs... uuids=%v, stderr=%s, err=%s\n",
+		uuids, stderr, err)
 	if err != nil {
 		return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
 	}
 	for _, logicalSwitch := range logicalSwitches {
+		klog.Infof("[createEgressFirewallRules] for logicalSwitch=%s: uuids=%v\n", logicalSwitch, uuids)
 		if uuids == "" {
 			_, stderr, err := util.RunOVNNbctl("--id=@acl", "create", "acl",
 				fmt.Sprintf("priority=%d", priority),
@@ -402,10 +422,17 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 				fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
 				"--", "add", "logical_switch", logicalSwitch,
 				"acls", "@acl")
+			klog.Infof("[createEgressFirewallRules] for logicalSwitch=%s created ACL and added to it: stderr=%s, err=%s\n",
+				logicalSwitch, uuids, stderr, err)
+
 			if err != nil {
 				return fmt.Errorf("error executing create ACL command, stderr: %q, %+v", stderr, err)
 			}
 		} else {
+			klog.Infof("[createEgressFirewallRules] for logicalSwitch=%s trying to add"+
+				" existing uuids=%s to the logical switch\n",
+				logicalSwitch, uuids)
+
 			for _, uuid := range strings.Split(uuids, "\n") {
 				_, stderr, err := util.RunOVNNbctl("add", "logical_switch", logicalSwitch, "acls", uuid)
 				if err != nil {
