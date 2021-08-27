@@ -29,6 +29,11 @@ func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.Tabl
 	defer notify.odbi.cachemutex.Unlock()
 	notify.odbi.populateCache(tableUpdates)
 }
+func (notify ovnNotifier) Update2(context interface{}, tableUpdates libovsdb.TableUpdates2) {
+	notify.odbi.cachemutex.Lock()
+	defer notify.odbi.cachemutex.Unlock()
+	notify.odbi.populateCache2(tableUpdates)
+}
 func (notify ovnNotifier) Locked([]interface{}) {
 }
 func (notify ovnNotifier) Stolen([]interface{}) {

@@ -247,7 +247,6 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 					continue
 				}
 				odbi.cache[table][uuid] = row.New
-
 				if odbi.signalCB != nil {
 					switch table {
 					case TableLogicalRouter:
@@ -343,6 +342,165 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 						}
 					}(table, uuid)
 				}
+			}
+		}
+	}
+}
+
+func (odbi *ovndb) initMissingColumnsWithDefaults(table string, row *libovsdb.Row) {
+	schema := odbi.GetSchema()
+	tableSchema := schema.Tables[table]
+
+	for column, columnSchema := range tableSchema.Columns {
+		_, ok := row.Fields[column]
+		if !ok {
+			switch columnSchema.Type {
+			case "integer", "real":
+				row.Fields[column] = columnSchema.TypeObj.Min()
+			case "boolean":
+				if (columnSchema.TypeObj.Min() == 0) && (columnSchema.TypeObj.Max() == 1) {
+					row.Fields[column] = interface{}(nil)
+				} else {
+					row.Fields[column] = false
+				}
+			case "map":
+				row.Fields[column] = libovsdb.OvsMap{}
+			case "set":
+				row.Fields[column] = libovsdb.OvsSet{}
+			case "string":
+				row.Fields[column] = ""
+			default:
+				row.Fields[column] = interface{}(nil)
+			}
+		}
+	}
+}
+
+func updateSetWithElem(ovsSet *libovsdb.OvsSet, elem interface{}) {
+	bv := reflect.ValueOf(ovsSet.GoSet)
+	nv := reflect.ValueOf(elem)
+	var found bool
+	for i := 0; i < bv.Len(); i++ {
+		if bv.Index(i).Interface() == nv.Interface() {
+			// found a match, delete from slice
+			found = true
+			ovsSet.GoSet[i] = ovsSet.GoSet[bv.Len()-1]
+			ovsSet.GoSet = ovsSet.GoSet[0 : bv.Len()-1]
+			break
+		}
+	}
+
+	if !found {
+		ovsSet.GoSet = append(ovsSet.GoSet, elem)
+	}
+}
+
+func (odbi *ovndb) modifySet(orig interface{}, elem interface{}) *libovsdb.OvsSet {
+	var cv *libovsdb.OvsSet
+	o := reflect.ValueOf(orig)
+	switch o.Elem().Interface().(type) {
+	case libovsdb.OvsSet:
+		t := o.Elem().Interface().(libovsdb.OvsSet)
+		cv = &t
+	default:
+		temp := o.Elem().Interface()
+		origC := make([]interface{}, 1)
+		origC[0] = temp
+		cv, _ = libovsdb.NewOvsSet(origC)
+	}
+
+	switch elem.(type) {
+	case libovsdb.OvsSet:
+		t := elem.(libovsdb.OvsSet)
+		tv := reflect.ValueOf(t.GoSet)
+		for i := 0; i < tv.Len(); i++ {
+			updateSetWithElem(cv, tv.Index(i).Interface())
+		}
+	default:
+		updateSetWithElem(cv, elem)
+	}
+
+	return cv
+}
+
+func (odbi *ovndb) applyUpdatesToRow(table string, uuid string, rowdiff *libovsdb.Row) {
+	row := odbi.cache[table][uuid]
+
+	for column, value := range rowdiff.Fields {
+		columnSchema, ok := odbi.GetSchema().Tables[table].Columns[column]
+		if !ok {
+			continue
+		}
+
+		switch columnSchema.Type {
+		case "map":
+			for k, v := range value.(libovsdb.OvsMap).GoMap {
+				pv, ok := row.Fields[column].(libovsdb.OvsMap).GoMap[k]
+				if !ok {
+					/* New key */
+					row.Fields[column].(libovsdb.OvsMap).GoMap[k] = v
+				} else {
+					if pv != v {
+						/* Value changed.  Update it. */
+						row.Fields[column].(libovsdb.OvsMap).GoMap[k] = v
+					} else {
+						/* Delete the key. */
+						delete(row.Fields[column].(libovsdb.OvsMap).GoMap, k)
+					}
+				}
+			}
+		case "set":
+			if columnSchema.TypeObj.Max() == 1 {
+				row.Fields[column] = value
+			} else {
+				cv := row.Fields[column]
+				nv := odbi.modifySet(&cv, value)
+				bv := reflect.ValueOf(nv.GoSet)
+				if bv.Len() == 1 {
+					row.Fields[column] = bv.Index(0).Interface()
+				} else {
+					row.Fields[column] = *nv
+				}
+			}
+		default:
+			row.Fields[column] = value
+		}
+	}
+
+	odbi.cache[table][uuid] = row
+}
+
+func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2) {
+	for table := range odbi.tableCols {
+		tableUpdate, ok := updates.Updates[table]
+		if !ok {
+			continue
+		}
+
+		if _, ok := odbi.cache[table]; !ok {
+			odbi.cache[table] = make(map[string]libovsdb.Row)
+		}
+
+		for uuid, row := range tableUpdate.Rows {
+			switch {
+			case row.Initial.Fields != nil:
+				if reflect.DeepEqual(row.Initial, odbi.cache[table][uuid]) {
+					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
+					continue
+				}
+				odbi.initMissingColumnsWithDefaults(table, &row.Initial)
+				odbi.cache[table][uuid] = row.Initial
+				/* TODO ***
+				 * if odbi.signalCB != nil {
+				 * }
+				 */
+			case row.Insert.Fields != nil:
+				odbi.initMissingColumnsWithDefaults(table, &row.Insert)
+				odbi.cache[table][uuid] = row.Insert
+			case row.Modify.Fields != nil:
+				odbi.applyUpdatesToRow(table, uuid, &row.Modify)
+			case row.Delete.Fields != nil:
+				defer delete(odbi.cache[table], uuid)
 			}
 		}
 	}
