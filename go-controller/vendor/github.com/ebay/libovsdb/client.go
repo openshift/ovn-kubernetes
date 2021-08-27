@@ -100,6 +100,7 @@ func newRPC2Client(conn net.Conn) (*OvsdbClient, error) {
 	c.SetBlocking(true)
 	c.Handle("echo", echo)
 	c.Handle("update", update)
+	c.Handle("update2", update2)
 	go c.Run()
 	go handleDisconnectNotification(c)
 
@@ -153,6 +154,8 @@ func (ovs *OvsdbClient) Unregister(handler NotificationHandler) error {
 type NotificationHandler interface {
 	// RFC 7047 section 4.1.6 Update Notification
 	Update(context interface{}, tableUpdates TableUpdates)
+
+	Update2(context interface{}, tableUpdates TableUpdates2)
 
 	// RFC 7047 section 4.1.9 Locked Notification
 	Locked([]interface{})
@@ -219,6 +222,42 @@ func update(client *rpc2.Client, params []interface{}, reply *interface{}) error
 	return nil
 }
 
+func update2(client *rpc2.Client, params []interface{}, reply *interface{}) error {
+	if len(params) < 2 {
+		return errors.New("Invalid Update message")
+	}
+	// Ignore params[0] as we dont use the <json-value> currently for comparison
+
+	raw, ok := params[1].(map[string]interface{})
+	if !ok {
+		return errors.New("Invalid Update message")
+	}
+	var rowUpdates2 map[string]map[string]RowUpdate2
+
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, &rowUpdates2)
+	if err != nil {
+		return err
+	}
+
+	// Update the local DB cache with the tableUpdates
+	tableUpdates2 := getTableUpdates2FromRawUnmarshal(rowUpdates2)
+	connectionsMutex.RLock()
+	defer connectionsMutex.RUnlock()
+	if _, ok := connections[client]; ok {
+		connections[client].handlersMutex.Lock()
+		defer connections[client].handlersMutex.Unlock()
+		for _, handler := range connections[client].handlers {
+			handler.Update2(params[0], tableUpdates2)
+		}
+	}
+
+	return nil
+}
+
 // GetSchema returns the schema in use for the provided database name
 // RFC 7047 : get_schema
 func (ovs OvsdbClient) GetSchema(dbName string) (*DatabaseSchema, error) {
@@ -252,7 +291,7 @@ func (ovs OvsdbClient) Transact(database string, operation ...Operation) ([]Oper
 		return nil, fmt.Errorf("invalid Database %q Schema", database)
 	}
 
-	if ok := db.validateOperations(operation...); !ok {
+	if ok := db.ValidateOperations(operation...); !ok {
 		return nil, errors.New("Validation failed for the operation")
 	}
 
@@ -289,6 +328,31 @@ func (ovs OvsdbClient) MonitorAll(database string, jsonContext interface{}) (*Ta
 	return ovs.Monitor(database, jsonContext, requests)
 }
 
+// MonitorAll is a convenience method to monitor every table/column
+func (ovs OvsdbClient) Monitor2All(database string, jsonContext interface{}) (*TableUpdates2, error) {
+	schema, ok := ovs.Schema[database]
+	if !ok {
+		return nil, fmt.Errorf("invalid Database %q Schema", database)
+	}
+
+	requests := make(map[string]MonitorRequest)
+	for table, tableSchema := range schema.Tables {
+		var columns []string
+		for column := range tableSchema.Columns {
+			columns = append(columns, column)
+		}
+		requests[table] = MonitorRequest{
+			Columns: columns,
+			Select: MonitorSelect{
+				Initial: true,
+				Insert:  true,
+				Delete:  true,
+				Modify:  true,
+			}}
+	}
+	return ovs.Monitor2(database, jsonContext, requests)
+}
+
 // MonitorCancel will request cancel a previously issued monitor request
 // RFC 7047 : monitor_cancel
 func (ovs OvsdbClient) MonitorCancel(database string, jsonContext interface{}) error {
@@ -323,11 +387,36 @@ func (ovs OvsdbClient) Monitor(database string, jsonContext interface{}, request
 	return &reply, err
 }
 
+func (ovs OvsdbClient) Monitor2(database string, jsonContext interface{}, requests map[string]MonitorRequest) (*TableUpdates2, error) {
+	var reply TableUpdates2
+
+	args := NewMonitorArgs(database, jsonContext, requests)
+
+	// This totally sucks. Refer to golang JSON issue #6213
+	var response2 map[string]map[string]RowUpdate2
+	err := ovs.rpcClient.Call("monitor_cond", args, &response2)
+	reply = getTableUpdates2FromRawUnmarshal(response2)
+	if err != nil {
+		return nil, err
+	}
+	return &reply, err
+}
+
 func getTableUpdatesFromRawUnmarshal(raw map[string]map[string]RowUpdate) TableUpdates {
 	var tableUpdates TableUpdates
 	tableUpdates.Updates = make(map[string]TableUpdate)
 	for table, update := range raw {
 		tableUpdate := TableUpdate{update}
+		tableUpdates.Updates[table] = tableUpdate
+	}
+	return tableUpdates
+}
+
+func getTableUpdates2FromRawUnmarshal(raw map[string]map[string]RowUpdate2) TableUpdates2 {
+	var tableUpdates TableUpdates2
+	tableUpdates.Updates = make(map[string]TableUpdate2)
+	for table, update := range raw {
+		tableUpdate := TableUpdate2{update}
 		tableUpdates.Updates[table] = tableUpdate
 	}
 	return tableUpdates
