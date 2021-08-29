@@ -314,19 +314,18 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 	}
 }
 
-func (odbi *ovndb) serverSignalCreate(table, uuid string) {
-	if table != TableDatabase {
-		return
+func (odbi *ovndb) disconnectIfFollower(table, uuid string) {
+	if table == TableDatabase {
+		if odbi.leaderOnly && !odbi.serverIsLeader() {
+			log.Printf("Leader-only requested; disconnecting from follower %s...", odbi.endpoints[odbi.curEndpoint])
+			odbi.curEndpoint = (odbi.curEndpoint + 1) % len(odbi.endpoints)
+			odbi.client.Disconnect()
+			odbi.client = nil
+		}
 	}
 }
 
-func (odbi *ovndb) serverSignalDelete(table, uuid string) {
-	if table != TableDatabase {
-		return
-	}
-}
-
-func (odbi *ovndb) populateCache(context interface{}, updates libovsdb.TableUpdates) {
+func (odbi *ovndb) populateCache(context interface{}, updates libovsdb.TableUpdates, signal bool) {
 	dbName, ok := context.(string)
 	if !ok {
 		log.Printf("invalid populateCache context %v", context)
@@ -340,8 +339,8 @@ func (odbi *ovndb) populateCache(context interface{}, updates libovsdb.TableUpda
 	if dbName == DBServer {
 		tableCols = &odbi.serverTableCols
 		cache = &odbi.serverCache
-		signalCreate = odbi.serverSignalCreate
-		signalDelete = odbi.serverSignalDelete
+		signalCreate = odbi.disconnectIfFollower
+		signalDelete = odbi.disconnectIfFollower
 	} else {
 		tableCols = &odbi.tableCols
 		cache = &odbi.cache
@@ -373,12 +372,12 @@ func (odbi *ovndb) populateCache(context interface{}, updates libovsdb.TableUpda
 					continue
 				}
 				(*cache)[table][uuid] = row.New
-				if signalCreate != nil {
+				if signal && signalCreate != nil {
 					signalCreate(table, uuid)
 				}
 			} else {
 				defer delete((*cache)[table], uuid)
-				if signalDelete != nil {
+				if signal && signalDelete != nil {
 					defer signalDelete(table, uuid)
 				}
 			}
