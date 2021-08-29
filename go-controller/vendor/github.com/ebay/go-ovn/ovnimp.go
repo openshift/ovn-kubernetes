@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"github.com/ebay/libovsdb"
+
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -148,8 +150,12 @@ func (odbi *ovndb) getRowsMatchingUUID(table, field, uuid string) ([]string, err
 func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.OperationResult, error) {
 	odbi.tranmutex.RLock()
 	defer odbi.tranmutex.RUnlock()
-	reply, err := odbi.client.Transact(db, ops...)
+	client, err := odbi.getClient()
+	if err != nil {
+		return nil, err
+	}
 
+	reply, err := client.Transact(db, ops...)
 	if err != nil {
 		return reply, err
 	}
@@ -316,15 +322,19 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 	}
 }
 
-func (odbi *ovndb) serverSignal(table, uuid string) {
-	if table != TableDatabase {
-		return
+func (odbi *ovndb) disconnectIfFollower(table, uuid string) {
+	if table == TableDatabase && odbi.leaderOnly && !odbi.serverIsLeader() {
+		klog.Infof("Leader-only requested; disconnecting from follower %s...", odbi.endpoints[odbi.curEndpoint])
+		// Disconnect client and let the disconnect notification
+		// from libovsdb trigger our reconnect handler
+		odbi.nextEndpoint()
+		odbi.disconnect()
 	}
 }
 
 func (odbi *ovndb) getContext(dbName string) (*map[string][]string, *map[string]map[string]libovsdb.Row, func(string, string), func(string, string)) {
 	if dbName == DBServer {
-		return &odbi.serverTableCols, &odbi.serverCache, odbi.serverSignal, odbi.serverSignal
+		return &odbi.serverTableCols, &odbi.serverCache, odbi.disconnectIfFollower, odbi.disconnectIfFollower
 	}
 	if odbi.signalCB == nil {
 		return &odbi.tableCols, &odbi.cache, nil, nil
