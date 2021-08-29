@@ -17,6 +17,8 @@
 package goovn
 
 import (
+	"log"
+
 	"github.com/ebay/libovsdb"
 )
 
@@ -25,9 +27,19 @@ type ovnNotifier struct {
 }
 
 func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.TableUpdates) {
-	notify.odbi.cachemutex.Lock()
-	defer notify.odbi.cachemutex.Unlock()
-	notify.odbi.populateCache(tableUpdates)
+	dbName, ok := context.(string)
+	if !ok {
+		log.Printf("invalid Update context %v", context)
+		return
+	}
+	if dbName == DBServer {
+		notify.odbi.serverCacheMutex.Lock()
+		defer notify.odbi.serverCacheMutex.Unlock()
+	} else {
+		notify.odbi.cachemutex.Lock()
+		defer notify.odbi.cachemutex.Unlock()
+	}
+	notify.odbi.populateCache(context, tableUpdates)
 }
 func (notify ovnNotifier) Locked([]interface{}) {
 }

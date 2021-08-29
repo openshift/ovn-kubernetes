@@ -290,9 +290,13 @@ type ovndb struct {
 	tableCols    map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
+
+	serverCache      map[string]map[string]libovsdb.Row
+	serverTableCols  map[string][]string
+	serverCacheMutex sync.RWMutex
 }
 
-func connect(c *ovndb) (err error) {
+func (c *ovndb) connect(reconnect bool) (err error) {
 	ovsdb, err := libovsdb.Connect(c.addr, c.tlsConfig)
 	if err != nil {
 		return err
@@ -309,6 +313,8 @@ func connect(c *ovndb) (err error) {
 	// events from the notifier are handled.
 	c.cachemutex.Lock()
 	defer c.cachemutex.Unlock()
+	c.serverCacheMutex.Lock()
+	defer c.serverCacheMutex.Unlock()
 
 	// We register the notifier, events start coming in but the
 	// mutex is locked
@@ -318,13 +324,18 @@ func connect(c *ovndb) (err error) {
 	// When we connect we initialize the cache, so any deletions
 	// happened while reconnecting are handled correctly.
 	c.cache = make(map[string]map[string]libovsdb.Row)
-	initial, err := c.MonitorTables("")
-	if err != nil {
-		return err
+	c.serverCache = make(map[string]map[string]libovsdb.Row)
+
+	for _, db := range []string{c.db, DBServer} {
+		initial, err := c.MonitorTables(db, db)
+		if err != nil {
+			return fmt.Errorf("failed to monitor db %s tables: %v", db, err)
+		}
+
+		// We do the initial dump and populate the cache, we have the mutex
+		c.populateCache(db, *initial)
 	}
 
-	// We do the initial dump and populate the cache, we have the mutex
-	c.populateCache(*initial)
 	return nil
 }
 
@@ -350,7 +361,7 @@ func NewClient(cfg *Config) (Client, error) {
 		reconn:       cfg.Reconnect,
 	}
 
-	err := connect(ovndb)
+	err := ovndb.connect(false)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +374,7 @@ func (c *ovndb) reconnect() {
 		log.Printf("%s disconnected. Reconnecting ... \n", c.addr)
 		retry := 0
 		for range ticker.C {
-			if err := connect(c); err != nil {
+			if err := c.connect(true); err != nil {
 				if retry < 10 {
 					log.Printf("%s reconnect failed (%v). Retry...\n",
 						c.addr, err)
@@ -383,17 +394,19 @@ func (c *ovndb) reconnect() {
 
 // filterTablesFromSchema checks whether tables in
 // NBTablesOrder / SBTablesOrder exists in current ovn-db schema
-func (c *ovndb) filterTablesFromSchema() []string {
+func (c *ovndb) filterTablesFromSchema(db string) []string {
 	var tables []string
 
 	// get the table list based on the DB
-	if c.db == DBNB {
+	if db == DBNB {
 		tables = NBTablesOrder
-	} else {
+	} else if db == DBSB {
 		tables = SBTablesOrder
+	} else if db == DBServer {
+		tables = ServerTablesOrder
 	}
 
-	dbSchema := c.GetSchema()
+	dbSchema := c.getSchema(db)
 	schemaTables := make([]string, 0)
 	for _, table := range tables {
 		if _, ok := dbSchema.Tables[table]; ok {
@@ -403,15 +416,23 @@ func (c *ovndb) filterTablesFromSchema() []string {
 	return schemaTables
 }
 
-func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
-	tables := c.filterTablesFromSchema()
+func (c *ovndb) MonitorTables(db string, jsonContext interface{}) (*libovsdb.TableUpdates, error) {
+	tables := c.filterTablesFromSchema(db)
+
+	var tableCols *map[string][]string
+	if db == DBServer {
+		tableCols = &c.serverTableCols
+	} else {
+		tableCols = &c.tableCols
+	}
+
 	// verify whether user specified table and its columns are legit
-	if len(c.tableCols) != 0 {
+	if len(*tableCols) != 0 {
 		supportedTableMaps := make(map[string]bool)
 		for _, table := range tables {
 			supportedTableMaps[table] = true
 		}
-		for table, columns := range c.tableCols {
+		for table, columns := range *tableCols {
 			if _, ok := supportedTableMaps[table]; ok {
 				// TODO: adding support for specific columns requires more work.
 				// All of the rowTo<TableName>() functions need to be fixed for
@@ -421,17 +442,17 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, 
 				}
 			} else {
 				return nil, fmt.Errorf("specified table %q in database %q not supported by the library",
-					table, c.db)
+					table, db)
 			}
 		}
 	} else {
-		c.tableCols = make(map[string][]string)
+		*tableCols = make(map[string][]string)
 		for _, table := range tables {
-			c.tableCols[table] = []string{}
+			(*tableCols)[table] = []string{}
 		}
 	}
 	requests := make(map[string]libovsdb.MonitorRequest)
-	for table, columns := range c.tableCols {
+	for table, columns := range *tableCols {
 		requests[table] = libovsdb.MonitorRequest{
 			Columns: columns,
 			Select: libovsdb.MonitorSelect{
@@ -441,7 +462,8 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, 
 				Modify:  true,
 			}}
 	}
-	return c.client.Monitor(c.db, jsonContext, requests)
+
+	return c.client.Monitor(db, jsonContext, requests)
 }
 
 // TODO return proper error
@@ -450,8 +472,12 @@ func (c *ovndb) Close() error {
 	return nil
 }
 
+func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
+	return c.client.Schema[db]
+}
+
 func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
-	return c.client.Schema[c.db]
+	return c.getSchema(c.db)
 }
 
 func (c *ovndb) EncapList(chname string) ([]*Encap, error) {
