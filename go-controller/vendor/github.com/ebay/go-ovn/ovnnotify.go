@@ -17,6 +17,8 @@
 package goovn
 
 import (
+	"k8s.io/klog/v2"
+
 	"github.com/ebay/libovsdb"
 )
 
@@ -25,9 +27,19 @@ type ovnNotifier struct {
 }
 
 func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.TableUpdates) {
-	notify.odbi.cachemutex.Lock()
-	defer notify.odbi.cachemutex.Unlock()
-	notify.odbi.populateCache(tableUpdates, true)
+	dbName, ok := context.(string)
+	if !ok {
+		klog.Warningf("Expected string-type context but got %v", context)
+		return
+	}
+	if dbName == DBServer {
+		notify.odbi.serverCacheMutex.Lock()
+		defer notify.odbi.serverCacheMutex.Unlock()
+	} else {
+		notify.odbi.cachemutex.Lock()
+		defer notify.odbi.cachemutex.Unlock()
+	}
+	notify.odbi.populateCache(context, tableUpdates, true)
 }
 func (notify ovnNotifier) Locked([]interface{}) {
 }

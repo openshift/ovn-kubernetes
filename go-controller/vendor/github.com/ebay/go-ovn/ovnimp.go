@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"github.com/ebay/libovsdb"
+
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -313,17 +315,47 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 	}
 }
 
-func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates, signal bool) {
+func (odbi *ovndb) serverSignal(table, uuid string) {
+	if table != TableDatabase {
+		return
+	}
+}
+
+func (odbi *ovndb) populateCache(context interface{}, updates libovsdb.TableUpdates, signal bool) {
+	dbName, ok := context.(string)
+	if !ok {
+		klog.Warningf("Expected string-type context but got %v", context)
+		return
+	}
+
+	var tableCols *map[string][]string
+	var cache *map[string]map[string]libovsdb.Row
+	var signalCreate, signalDelete func(string, string)
+
+	if dbName == DBServer {
+		tableCols = &odbi.serverTableCols
+		cache = &odbi.serverCache
+		signalCreate = odbi.serverSignal
+		signalDelete = odbi.serverSignal
+	} else {
+		tableCols = &odbi.tableCols
+		cache = &odbi.cache
+		if odbi.signalCB != nil {
+			signalCreate = odbi.signalCreate
+			signalDelete = odbi.signalDelete
+		}
+	}
+
 	empty := libovsdb.Row{}
 
-	for table := range odbi.tableCols {
+	for table := range *tableCols {
 		tableUpdate, ok := updates.Updates[table]
 		if !ok {
 			continue
 		}
 
-		if _, ok := odbi.cache[table]; !ok {
-			odbi.cache[table] = make(map[string]libovsdb.Row)
+		if _, ok := (*cache)[table]; !ok {
+			(*cache)[table] = make(map[string]libovsdb.Row)
 		}
 		for uuid, row := range tableUpdate.Rows {
 			// TODO: this is a workaround for the problem of
@@ -331,20 +363,18 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates, signal bool) {
 			odbi.float64_to_int(row.New)
 
 			if !reflect.DeepEqual(row.New, empty) {
-				if reflect.DeepEqual(row.New, odbi.cache[table][uuid]) {
+				if reflect.DeepEqual(row.New, (*cache)[table][uuid]) {
 					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
 					continue
 				}
-				odbi.cache[table][uuid] = row.New
-
-				if signal && odbi.signalCB != nil {
-					odbi.signalCreate(table, uuid)
+				(*cache)[table][uuid] = row.New
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
 				}
 			} else {
-				defer delete(odbi.cache[table], uuid)
-
-				if signal && odbi.signalCB != nil {
-					defer odbi.signalDelete(table, uuid)
+				defer delete((*cache)[table], uuid)
+				if signal && signalDelete != nil {
+					defer signalDelete(table, uuid)
 				}
 			}
 		}
