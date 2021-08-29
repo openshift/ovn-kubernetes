@@ -18,6 +18,7 @@ package goovn
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"crypto/tls"
@@ -283,37 +284,100 @@ var _ Client = &ovndb{}
 
 type ovndb struct {
 	client       *libovsdb.OvsdbClient
+	clientLock   sync.RWMutex
 	cache        map[string]map[string]libovsdb.Row
 	cachemutex   sync.RWMutex
-	tranmutex    sync.RWMutex
 	signalCB     OVNSignal
 	disconnectCB OVNDisconnectedCallback
 	db           string
-	addr         string
+	endpoints    []string
+	curEndpoint  int
 	tableCols    map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
 	ticker       *time.Ticker
 	currentTxn   string
+	leaderOnly   bool
 
 	serverCache      map[string]map[string]libovsdb.Row
 	serverTableCols  map[string][]string
 	serverCacheMutex sync.RWMutex
 }
 
-func (c *ovndb) connect() (err error) {
-	ovsdb, err := libovsdb.Connect(c.addr, c.tlsConfig)
-	if err != nil {
-		return err
+func (c *ovndb) serverIsLeader() bool {
+	dbTable, ok := c.serverCache[TableDatabase]
+	if !ok {
+		return true
 	}
-	c.client = ovsdb
-	defer func() {
-		if err != nil {
+	for _, row := range dbTable {
+		fName, ok := row.Fields["name"]
+		if !ok {
+			continue
+		}
+		name, ok := fName.(string)
+		if !ok || name != c.db {
+			continue
+		}
+
+		fModel, ok := row.Fields["model"]
+		if !ok {
+			continue
+		}
+		model, ok := fModel.(string)
+		if !ok || model != "clustered" {
+			continue
+		}
+		fLeader, ok := row.Fields["leader"]
+		if !ok {
+			continue
+		}
+		leader, ok := fLeader.(bool)
+		if !ok {
+			continue
+		}
+		return leader
+	}
+	return true
+}
+
+func (c *ovndb) nextEndpoint() {
+	c.curEndpoint = (c.curEndpoint + 1) % len(c.endpoints)
+}
+
+func (c *ovndb) connect() error {
+	c.clientLock.Lock()
+	defer c.clientLock.Unlock()
+
+	var err error
+	for i := 0; i < len(c.endpoints); i++ {
+		addr := c.endpoints[c.curEndpoint]
+		klog.Infof("[%s] connecting to %s...", c.db, addr)
+		c.client, err = libovsdb.Connect(addr, c.tlsConfig)
+		if err == nil {
+			if err = c.connectEndpoint(); err == nil {
+				// success
+				klog.Infof("[%s] connected to %s", c.db, addr)
+				return nil
+			}
+		}
+		klog.Infof("[%s] failed to connect to %s (trying next endpoint): %v", c.db, addr, err)
+
+		c.nextEndpoint()
+
+		if c.client != nil {
+			// Unregister notifier to suppress the Disconnect notifier
+			// from triggering reconnect attempts
+			if err := c.client.Unregister(ovnNotifier{c}); err != nil {
+				klog.Warningf("failed to unregister event handler before disconnect: %v", err)
+			}
 			c.client.Disconnect()
 			c.client = nil
 		}
-	}()
+	}
+	return fmt.Errorf("failed to connect to all %s DB endpoints %v", c.db, c.endpoints)
+}
 
+func (c *ovndb) connectEndpoint() error {
 	// Locking the cache mutex to ensure the cache is filled before
 	// events from the notifier are handled.
 	c.cachemutex.Lock()
@@ -324,7 +388,7 @@ func (c *ovndb) connect() (err error) {
 	// We register the notifier, events start coming in but the
 	// mutex is locked
 	notifier := ovnNotifier{c}
-	ovsdb.Register(notifier)
+	c.client.Register(notifier)
 
 	// When we connect we initialize the cache, so any deletions
 	// happened while reconnecting are handled correctly.
@@ -332,13 +396,17 @@ func (c *ovndb) connect() (err error) {
 	c.serverCache = make(map[string]map[string]libovsdb.Row)
 
 	for _, db := range []string{c.db, DBServer} {
-		initial, err := c.MonitorTables(db, db)
+		initial, err := c.monitorTables(db, db)
 		if err != nil {
 			return fmt.Errorf("failed to monitor db %s tables: %v", db, err)
 		}
 
 		// We do the initial dump and populate the cache, we have the mutex
 		c.populateCache2(db, *initial, false)
+	}
+
+	if c.leaderOnly && !c.serverIsLeader() {
+		return fmt.Errorf("leader-only requested; disconnecting from follower")
 	}
 
 	return nil
@@ -361,26 +429,26 @@ func NewClient(cfg *Config) (Client, error) {
 		disconnectCB: cfg.DisconnectCB,
 		db:           db,
 		tableCols:    cfg.TableCols,
-		addr:         cfg.Addr,
+		endpoints:    strings.Split(cfg.Addr, ","),
+		curEndpoint:  0,
 		tlsConfig:    cfg.TLSConfig,
 		reconn:       cfg.Reconnect,
 		ticker:       time.NewTicker(time.Second/25),
 		currentTxn:   ZERO_TRANSACTION,
+		leaderOnly:   cfg.LeaderOnly,
 	}
 
 	err := ovndb.connect()
 	if err != nil {
 		return nil, err
 	}
-	return ovndb, err
+	return ovndb, nil
 }
 
 func (c *ovndb) reconnect() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	go func() {
-		klog.Infof("[%s] disconnected from %s; reconnecting ... ", c.db, c.addr)
-		c.tranmutex.Lock()
-		defer c.tranmutex.Unlock()
+		klog.Infof("[%s] disconnected from %s; reconnecting ... ", c.db, c.endpoints[c.curEndpoint])
 		retry := 0
 		for range ticker.C {
 			if err := c.connect(); err != nil {
@@ -394,7 +462,7 @@ func (c *ovndb) reconnect() {
 				continue
 			}
 			klog.Infof("[%s] reconnected to %s after %d retries.",
-				c.db, c.addr, retry)
+				c.db, c.endpoints[c.curEndpoint], retry)
 			ticker.Stop()
 			return
 		}
@@ -414,7 +482,7 @@ func (c *ovndb) filterTablesFromSchema(db string) []string {
 		tables = ServerTablesOrder
 	}
 
-	dbSchema := c.getSchema(db)
+	dbSchema := c.client.Schema[db]
 	schemaTables := make([]string, 0)
 	for _, table := range tables {
 		if _, ok := dbSchema.Tables[table]; ok {
@@ -424,7 +492,9 @@ func (c *ovndb) filterTablesFromSchema(db string) []string {
 	return schemaTables
 }
 
-func (c *ovndb) MonitorTables(db string, jsonContext interface{}) (*libovsdb.TableUpdates2, error) {
+// monitorTables starts watching the given database for changes. Must be called
+// with the clientLock held.
+func (c *ovndb) monitorTables(db string, jsonContext interface{}) (*libovsdb.TableUpdates2, error) {
 	tables := c.filterTablesFromSchema(db)
 
 	var tableCols *map[string][]string
@@ -477,16 +547,17 @@ func (c *ovndb) MonitorTables(db string, jsonContext interface{}) (*libovsdb.Tab
 	return updates, err
 }
 
-func (c *ovndb) close() error {
+func (c *ovndb) close() {
 	c.client.Disconnect()
-	return nil
+	c.client = nil
 }
 
 // TODO return proper error
 func (c *ovndb) Close() error {
-	c.tranmutex.Lock()
-	defer c.tranmutex.Unlock()
-	return c.close()
+	c.clientLock.Lock()
+	defer c.clientLock.Unlock()
+	c.close()
+	return nil
 }
 
 func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
@@ -494,9 +565,14 @@ func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
 }
 
 func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
-	c.tranmutex.RLock()
-	defer c.tranmutex.RUnlock()
-	return c.getSchema(c.db)
+	c.clientLock.RLock()
+	defer c.clientLock.RUnlock()
+	if c.client != nil {
+		return c.client.Schema[c.db]
+	}
+	return libovsdb.DatabaseSchema{
+		Tables: make(map[string]libovsdb.TableSchema),
+	}
 }
 
 func (c *ovndb) EncapList(chname string) ([]*Encap, error) {
