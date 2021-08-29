@@ -316,17 +316,35 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 	}
 }
 
-func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates, signal bool) {
+func (odbi *ovndb) serverSignal(table, uuid string) {
+	if table != TableDatabase {
+		return
+	}
+}
+
+func (odbi *ovndb) getContext(dbName string) (*map[string][]string, *map[string]map[string]libovsdb.Row, func(string, string), func(string, string)) {
+	if dbName == DBServer {
+		return &odbi.serverTableCols, &odbi.serverCache, odbi.serverSignal, odbi.serverSignal
+	}
+	if odbi.signalCB == nil {
+		return &odbi.tableCols, &odbi.cache, nil, nil
+	}
+	return &odbi.tableCols, &odbi.cache, odbi.signalCreate, odbi.signalDelete
+}
+
+func (odbi *ovndb) populateCache(dbName string, updates libovsdb.TableUpdates, signal bool) {
+	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
+
 	empty := libovsdb.Row{}
 
-	for table := range odbi.tableCols {
+	for table := range *tableCols {
 		tableUpdate, ok := updates.Updates[table]
 		if !ok {
 			continue
 		}
 
-		if _, ok := odbi.cache[table]; !ok {
-			odbi.cache[table] = make(map[string]libovsdb.Row)
+		if _, ok := (*cache)[table]; !ok {
+			(*cache)[table] = make(map[string]libovsdb.Row)
 		}
 		for uuid, row := range tableUpdate.Rows {
 			// TODO: this is a workaround for the problem of
@@ -334,28 +352,26 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates, signal bool) {
 			odbi.float64_to_int(row.New)
 
 			if !reflect.DeepEqual(row.New, empty) {
-				if reflect.DeepEqual(row.New, odbi.cache[table][uuid]) {
+				if reflect.DeepEqual(row.New, (*cache)[table][uuid]) {
 					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
 					continue
 				}
-				odbi.cache[table][uuid] = row.New
-
-				if signal && odbi.signalCB != nil {
-					odbi.signalCreate(table, uuid)
+				(*cache)[table][uuid] = row.New
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
 				}
 			} else {
-				defer delete(odbi.cache[table], uuid)
-
-				if signal && odbi.signalCB != nil {
-					defer odbi.signalDelete(table, uuid)
+				defer delete((*cache)[table], uuid)
+				if signal && signalDelete != nil {
+					defer signalDelete(table, uuid)
 				}
 			}
 		}
 	}
 }
 
-func (odbi *ovndb) initMissingColumnsWithDefaults(table string, row *libovsdb.Row) {
-	schema := odbi.GetSchema()
+func (odbi *ovndb) initMissingColumnsWithDefaults(db, table string, row *libovsdb.Row) {
+	schema := odbi.getSchema(db)
 	tableSchema := schema.Tables[table]
 
 	for column, columnSchema := range tableSchema.Columns {
@@ -430,11 +446,9 @@ func (odbi *ovndb) modifySet(orig interface{}, elem interface{}) *libovsdb.OvsSe
 	return cv
 }
 
-func (odbi *ovndb) applyUpdatesToRow(table string, uuid string, rowdiff *libovsdb.Row) {
-	row := odbi.cache[table][uuid]
-
+func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *libovsdb.Row, row libovsdb.Row) libovsdb.Row {
 	for column, value := range rowdiff.Fields {
-		columnSchema, ok := odbi.GetSchema().Tables[table].Columns[column]
+		columnSchema, ok := odbi.getSchema(db).Tables[table].Columns[column]
 		if !ok {
 			continue
 		}
@@ -474,18 +488,20 @@ func (odbi *ovndb) applyUpdatesToRow(table string, uuid string, rowdiff *libovsd
 		}
 	}
 
-	odbi.cache[table][uuid] = row
+	return row
 }
 
-func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2, signal bool) {
-	for table := range odbi.tableCols {
+func (odbi *ovndb) populateCache2(dbName string, updates libovsdb.TableUpdates2, signal bool) {
+	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
+
+	for table := range *tableCols {
 		tableUpdate, ok := updates.Updates[table]
 		if !ok {
 			continue
 		}
 
-		if _, ok := odbi.cache[table]; !ok {
-			odbi.cache[table] = make(map[string]libovsdb.Row)
+		if _, ok := (*cache)[table]; !ok {
+			(*cache)[table] = make(map[string]libovsdb.Row)
 		}
 
 		for uuid, row := range tableUpdate.Rows {
@@ -494,36 +510,38 @@ func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2, signal bool) {
 				// TODO: this is a workaround for the problem of
 				// missing json number conversion in libovsdb
 				odbi.float64_to_int(row.Initial)
-				if reflect.DeepEqual(row.Initial, odbi.cache[table][uuid]) {
+				if reflect.DeepEqual(row.Initial, (*cache)[table][uuid]) {
 					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
 					continue
 				}
-				odbi.initMissingColumnsWithDefaults(table, &row.Initial)
-				odbi.cache[table][uuid] = row.Initial
-				if signal && odbi.signalCB != nil {
-					odbi.signalCreate(table, uuid)
+				odbi.initMissingColumnsWithDefaults(dbName, table, &row.Initial)
+				(*cache)[table][uuid] = row.Initial
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
 				}
 			case row.Insert.Fields != nil:
-				odbi.initMissingColumnsWithDefaults(table, &row.Insert)
+				odbi.initMissingColumnsWithDefaults(dbName, table, &row.Insert)
 				// TODO: this is a workaround for the problem of
 				// missing json number conversion in libovsdb
 				odbi.float64_to_int(row.Insert)
-				odbi.cache[table][uuid] = row.Insert
-				if signal && odbi.signalCB != nil {
-					odbi.signalCreate(table, uuid)
+				(*cache)[table][uuid] = row.Insert
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
 				}
 			case row.Modify.Fields != nil:
 				// TODO: this is a workaround for the problem of
 				// missing json number conversion in libovsdb
 				odbi.float64_to_int(row.Modify)
-				odbi.applyUpdatesToRow(table, uuid, &row.Modify)
-				if signal && odbi.signalCB != nil {
-					odbi.signalCreate(table, uuid)
+				oldRow := (*cache)[table][uuid]
+				newRow := odbi.applyUpdatesToRow(dbName, table, uuid, &row.Modify, oldRow)
+				(*cache)[table][uuid] = newRow
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
 				}
 			case row.Delete.Fields != nil:
-				defer delete(odbi.cache[table], uuid)
-				if signal && odbi.signalCB != nil {
-					odbi.signalDelete(table, uuid)
+				defer delete((*cache)[table], uuid)
+				if signal && signalDelete != nil {
+					signalDelete(table, uuid)
 				}
 			}
 		}
