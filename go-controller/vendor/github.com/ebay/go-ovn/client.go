@@ -18,6 +18,7 @@ package goovn
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"crypto/tls"
@@ -286,20 +287,74 @@ type ovndb struct {
 	signalCB     OVNSignal
 	disconnectCB OVNDisconnectedCallback
 	db           string
-	addr         string
+	endpoints    []string
+	curEndpoint  int
 	tableCols    map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
+	leaderOnly   bool
 
 	serverCache      map[string]map[string]libovsdb.Row
 	serverTableCols  map[string][]string
 	serverCacheMutex sync.RWMutex
 }
 
-func (c *ovndb) connect(reconnect bool) (err error) {
-	ovsdb, err := libovsdb.Connect(c.addr, c.tlsConfig)
+func (c *ovndb) serverIsLeader() bool {
+	dbTable, ok := c.serverCache[TableDatabase]
+	if !ok {
+		return true
+	}
+	for _, row := range dbTable {
+		fName, ok := row.Fields["name"]
+		if !ok {
+			continue
+		}
+		name, ok := fName.(string)
+		if !ok || name != c.db {
+			continue
+		}
+
+		fModel, ok := row.Fields["model"]
+		if !ok {
+			continue
+		}
+		model, ok := fModel.(string)
+		if !ok || model != "clustered" {
+			continue
+		}
+		fLeader, ok := row.Fields["leader"]
+		if !ok {
+			continue
+		}
+		leader, ok := fLeader.(bool)
+		if !ok {
+			continue
+		}
+		return leader
+	}
+	return true
+}
+
+func (c *ovndb) connect() error {
+	for i := 0; i < len(c.endpoints); i++ {
+		addr := c.endpoints[c.curEndpoint]
+		if err := c.connectEndpoint(addr); err == nil {
+			// Success
+			log.Printf("connected to db %s at %s\n", c.db, addr)
+			return nil
+		} else {
+			log.Printf("%v\n", err)
+			c.curEndpoint = (c.curEndpoint + 1) % len(c.endpoints)
+		}
+	}
+	return fmt.Errorf("failed to connect to all db %s endpoints %v", c.db, c.endpoints)
+}
+
+func (c *ovndb) connectEndpoint(addr string) (err error) {
+	log.Printf("#### connecting to %s...\n", addr)
+	ovsdb, err := libovsdb.Connect(addr, c.tlsConfig)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to connect to %s: %v", addr, err)
 	}
 	c.client = ovsdb
 	defer func() {
@@ -333,7 +388,11 @@ func (c *ovndb) connect(reconnect bool) (err error) {
 		}
 
 		// We do the initial dump and populate the cache, we have the mutex
-		c.populateCache(db, *initial)
+		c.populateCache(db, *initial, false)
+	}
+
+	if c.leaderOnly && !c.serverIsLeader() {
+		return fmt.Errorf("leader-only requested; disconnecting from follower %s", addr)
 	}
 
 	return nil
@@ -356,36 +415,40 @@ func NewClient(cfg *Config) (Client, error) {
 		disconnectCB: cfg.DisconnectCB,
 		db:           db,
 		tableCols:    cfg.TableCols,
-		addr:         cfg.Addr,
+		endpoints:    strings.Split(cfg.Addr, ","),
+		curEndpoint:  0,
 		tlsConfig:    cfg.TLSConfig,
 		reconn:       cfg.Reconnect,
+		leaderOnly:   cfg.LeaderOnly,
 	}
 
-	err := ovndb.connect(false)
-	if err != nil {
+	if len(ovndb.endpoints) > 1 {
+		ovndb.curEndpoint = 1
+	}
+
+	if err := ovndb.connect(); err != nil {
 		return nil, err
 	}
-	return ovndb, err
+	return ovndb, nil
 }
 
 func (c *ovndb) reconnect() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	go func() {
-		log.Printf("%s disconnected. Reconnecting ... \n", c.addr)
+		log.Printf("disconnected; reconnecting ... \n")
 		retry := 0
 		for range ticker.C {
-			if err := c.connect(true); err != nil {
+			if err := c.connect(); err != nil {
 				if retry < 10 {
-					log.Printf("%s reconnect failed (%v). Retry...\n",
-						c.addr, err)
+					log.Printf("reconnect failed (%v); retry...\n", err)
 				} else if retry == 10 {
-					log.Printf("%s reconnect failed (%v). Continue retrying but log will be supressed.\n",
-						c.addr, err)
+					log.Printf("reconnect failed (%v); continue retrying but log will be supressed.\n",
+						err)
 				}
 				retry++
 				continue
 			}
-			log.Printf("%s reconnected after %d retries.\n", c.addr, retry)
+			log.Printf("reconnected after %d retries.\n", retry)
 			ticker.Stop()
 			return
 		}
