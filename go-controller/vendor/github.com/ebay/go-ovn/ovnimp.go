@@ -484,6 +484,9 @@ func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2) {
 		for uuid, row := range tableUpdate.Rows {
 			switch {
 			case row.Initial.Fields != nil:
+				// TODO: this is a workaround for the problem of
+				// missing json number conversion in libovsdb
+				odbi.float64_to_int(row.Initial)
 				if reflect.DeepEqual(row.Initial, odbi.cache[table][uuid]) {
 					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
 					continue
@@ -496,8 +499,14 @@ func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2) {
 				 */
 			case row.Insert.Fields != nil:
 				odbi.initMissingColumnsWithDefaults(table, &row.Insert)
+				// TODO: this is a workaround for the problem of
+				// missing json number conversion in libovsdb
+				odbi.float64_to_int(row.Insert)
 				odbi.cache[table][uuid] = row.Insert
 			case row.Modify.Fields != nil:
+				// TODO: this is a workaround for the problem of
+				// missing json number conversion in libovsdb
+				odbi.float64_to_int(row.Modify)
 				odbi.applyUpdatesToRow(table, uuid, &row.Modify)
 			case row.Delete.Fields != nil:
 				defer delete(odbi.cache[table], uuid)
