@@ -518,6 +518,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
 	}
 
+	klog.Infof("TROZET: pod %s_%s, port uuid: %s, port name: %s", pod.Namespace, pod.Name, lsp.UUID, lsp.Name)
+
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
 
