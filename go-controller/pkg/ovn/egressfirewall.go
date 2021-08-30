@@ -121,6 +121,7 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 					"--data=bare",
 					"--no-heading",
 					"--columns=acls",
+					"--format=table",
 					"list",
 					"logical_switch",
 					logicalSwitch,
@@ -128,7 +129,7 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 				if err != nil {
 					klog.Errorf("Unable to remove egress firewall acl, cannot list ACLs on switch: %s, stderr: %s, err: %v", logicalSwitch, stderr, err)
 				}
-				for _, egressFirewallACLID := range strings.Split(egressFirewallACLIDs, "\n") {
+				for _, egressFirewallACLID := range strings.Fields(egressFirewallACLIDs) {
 					if strings.Contains(switchACLs, egressFirewallACLID) {
 						_, stderr, err := util.RunOVNNbctl(
 							"remove",
@@ -406,7 +407,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	klog.Infof("[createEgressFirewallRules] logicalSwitches=%v\n", logicalSwitches)
 
 	uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL", match, "action="+action,
+		"--columns=_uuid", "--format=table", "find", "ACL", match, "action="+action,
 		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
 	klog.Infof("[createEgressFirewallRules] finding matching ACLs... uuids=%v, stderr=%s, err=%s\n",
 		uuids, stderr, err)
@@ -414,7 +415,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
 	}
 	for _, logicalSwitch := range logicalSwitches {
-		klog.Infof("[createEgressFirewallRules] for logicalSwitch=%s: uuids=%v\n", logicalSwitch, uuids)
+		klog.Infof("[createEgressFirewallRules] for logicalSwitch=%s; uuids=%v\n", logicalSwitch, uuids)
 		if uuids == "" {
 			_, stderr, err := util.RunOVNNbctl("--id=@acl", "create", "acl",
 				fmt.Sprintf("priority=%d", priority),
@@ -433,7 +434,9 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 				" existing uuids=%s to the logical switch\n",
 				logicalSwitch, uuids)
 
-			for _, uuid := range strings.Split(uuids, "\n") {
+			for _, uuid := range strings.Fields(uuids) {
+				klog.Infof("[createEgressFirewallRules] for logicalSwitch=%s adding uuuid=%s\n",
+					logicalSwitch, uuid)
 				_, stderr, err := util.RunOVNNbctl("add", "logical_switch", logicalSwitch, "acls", uuid)
 				if err != nil {
 					return fmt.Errorf("error adding ACL to joinsSwitch %s failed, stderr: %q, %+v",
@@ -460,7 +463,7 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	} else {
 		logicalSwitches = []string{types.OVNJoinSwitch}
 	}
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "ACL",
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "--format=table", "find", "ACL",
 		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
 	if err != nil {
 		return fmt.Errorf("error deleting egressFirewall with external-ids %s, cannot get ACL policies - %s:%s",
