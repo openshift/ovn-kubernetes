@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pkg/errors"
 	"net"
 	"reflect"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -552,8 +554,9 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	}
 
 	if util.PodWantsNetwork(pod) && addPort {
+		klog.Infof("Adding pod: %s_%s: stack trace: %s", pod.Namespace, pod.Name, debug.Stack())
 		if err := oc.addLogicalPort(pod); err != nil {
-			klog.Errorf(err.Error())
+			klog.Errorf(errors.WithStack(err).Error())
 			oc.recordPodEvent(err, pod)
 			return false
 		}
