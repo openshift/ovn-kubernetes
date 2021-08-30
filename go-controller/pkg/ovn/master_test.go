@@ -20,7 +20,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -1150,14 +1149,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			clusterController := NewOvnController(fakeClient, f, stopChan,
+				addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
+				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.SCTPSupport = true
@@ -1412,17 +1406,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
 			f, err := factory.NewMasterWatchFactory(fakeClient)
-
-			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-			if err != nil {
-				t.Fatalf("Error creating libovsdb test harness %v", err)
-			}
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			clusterController := NewOvnController(fakeClient, f, stopChan,
+				addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
+				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0))
 
 			// configure the cluster allocators
 			for _, subnetString := range tt.networkRanges {
