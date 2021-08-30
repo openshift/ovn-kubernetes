@@ -101,6 +101,7 @@ func newRPC2Client(conn net.Conn) (*OvsdbClient, error) {
 	c.Handle("echo", echo)
 	c.Handle("update", update)
 	c.Handle("update2", update2)
+	c.Handle("update3", update3)
 	go c.Run()
 	go handleDisconnectNotification(c)
 
@@ -156,6 +157,8 @@ type NotificationHandler interface {
 	Update(context interface{}, tableUpdates TableUpdates)
 
 	Update2(context interface{}, tableUpdates TableUpdates2)
+
+	Update3(context interface{}, tableUpdates TableUpdates2, lastTxnId string)
 
 	// RFC 7047 section 4.1.9 Locked Notification
 	Locked([]interface{})
@@ -255,6 +258,40 @@ func update2(client *rpc2.Client, params []interface{}, reply *interface{}) erro
 		}
 	}
 
+	return nil
+}
+
+func update3(client *rpc2.Client, params []interface{}, reply *interface{}) error {
+	if len(params) != 3 {
+		return fmt.Errorf("update3 requires exactly 3 args")
+	}
+
+	raw, ok := params[2].(map[string]interface{})
+	if !ok {
+		return errors.New("Invalid Update message")
+	}
+	var rowUpdates2 map[string]map[string]RowUpdate2
+
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, &rowUpdates2)
+	if err != nil {
+		return err
+	}
+
+	// Update the local DB cache with the tableUpdates
+	tableUpdates2 := getTableUpdates2FromRawUnmarshal(rowUpdates2)
+	connectionsMutex.RLock()
+	defer connectionsMutex.RUnlock()
+	if _, ok := connections[client]; ok {
+		connections[client].handlersMutex.Lock()
+		defer connections[client].handlersMutex.Unlock()
+		for _, handler := range connections[client].handlers {
+			handler.Update3(params[0], tableUpdates2, params[1].(string))
+		}
+	}
 	return nil
 }
 
@@ -400,6 +437,30 @@ func (ovs OvsdbClient) Monitor2(database string, jsonContext interface{}, reques
 		return nil, err
 	}
 	return &reply, err
+}
+
+func (ovs OvsdbClient) Monitor3(database string, jsonContext interface{}, requests map[string]MonitorRequest, currentTxn string) (*TableUpdates2, string, error) {
+	var reply TableUpdates2
+
+	args := NewMonitorArgs3(database, jsonContext, requests, currentTxn)
+
+	// This totally sucks. Refer to golang JSON issue #6213
+	var response []interface{}
+	err := ovs.rpcClient.Call("monitor_cond_since", args, &response)
+	b, err := json.Marshal(response[2])
+	if err != nil {
+		return nil, "", err
+	}
+	parsedResponse := make(map[string]map[string]RowUpdate2)
+	err = json.Unmarshal(b, &parsedResponse)
+	if err != nil {
+		return nil, "", err
+	}
+	reply = getTableUpdates2FromRawUnmarshal(parsedResponse)
+	if err != nil {
+		return nil, "", err
+	}
+	return &reply, response[1].(string), err
 }
 
 func getTableUpdatesFromRawUnmarshal(raw map[string]map[string]RowUpdate) TableUpdates {

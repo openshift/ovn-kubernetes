@@ -30,8 +30,9 @@ import (
 type EntityType string
 
 const (
-	PORT_GROUP     EntityType = "PORT_GROUP"
-	LOGICAL_SWITCH EntityType = "LOGICAL_SWITCH"
+	PORT_GROUP       EntityType = "PORT_GROUP"
+	LOGICAL_SWITCH   EntityType = "LOGICAL_SWITCH"
+	ZERO_TRANSACTION string = "00000000-0000-0000-0000-000000000000"
 )
 
 // Client ovnnb/sb client
@@ -291,6 +292,7 @@ type ovndb struct {
 	tlsConfig    *tls.Config
 	reconn       bool
 	ticker       *time.Ticker
+	currentTxn   string
 }
 
 func connect(c *ovndb) (err error) {
@@ -350,6 +352,7 @@ func NewClient(cfg *Config) (Client, error) {
 		tlsConfig:    cfg.TLSConfig,
 		reconn:       cfg.Reconnect,
 		ticker:       time.NewTicker(time.Second/25),
+		currentTxn:   ZERO_TRANSACTION,
 	}
 
 	err := connect(ovndb)
@@ -442,8 +445,11 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates2,
 				Modify:  true,
 			}}
 	}
-
-	return c.client.Monitor2(c.db, jsonContext, requests)
+	updates, currentTxn, err := c.client.Monitor3(c.db, jsonContext, requests, c.currentTxn)
+	if err == nil {
+		c.currentTxn = currentTxn
+	}
+	return updates, err
 }
 
 // TODO return proper error
