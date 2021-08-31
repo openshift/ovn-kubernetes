@@ -638,7 +638,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	// GatewayModeLocal is only used if Local mode is specified and None shared gateway bridge is specified
 	// This is to allow local gateway mode without having to configure/use the shared gateway bridge
 	// See https://github.com/openshift/ovn-kubernetes/pull/281
-	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(types.OVNClusterRouter)
+	drLRPIPs, _ := oc.joinSwIPManager.ensureJoinLRPIPs(types.OVNClusterRouter)
 	if l3GatewayConfig.Mode == config.GatewayModeLocal {
 		err = gatewayInitMinimal(node.Name, l3GatewayConfig, oc.SCTPSupport)
 		if err != nil {
