@@ -289,6 +289,7 @@ type ovndb struct {
 	tableCols    map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
+	monitorSem   uint32
 }
 
 func connect(c *ovndb) (err error) {
@@ -357,6 +358,8 @@ func NewClient(cfg *Config) (Client, error) {
 }
 
 func (c *ovndb) reconnect() {
+	c.tranmutex.Lock()
+	defer c.tranmutex.Unlock()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	go func() {
 		log.Printf("%s disconnected. Reconnecting ... \n", c.addr)

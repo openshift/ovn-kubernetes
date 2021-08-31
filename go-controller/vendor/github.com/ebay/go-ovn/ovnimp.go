@@ -19,8 +19,10 @@ package goovn
 import (
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
+	"sync/atomic"
 
 	"github.com/ebay/libovsdb"
 )
@@ -149,6 +151,7 @@ func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.Op
 	// Only support one trans at same time now.
 	odbi.tranmutex.Lock()
 	defer odbi.tranmutex.Unlock()
+	atomic.StoreUint32(&odbi.monitorSem, 1)
 	reply, err := odbi.client.Transact(db, ops...)
 
 	if err != nil {
@@ -173,6 +176,11 @@ func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.Op
 	}
 	if len(reply) < len(ops) {
 		return reply, fmt.Errorf("Number of Replies should be atleast equal to number of operations")
+	}
+	if atomic.LoadUint32(&odbi.monitorSem) != 0 {
+		// we did not receive an Update for this transaction, disconnect
+		log.Printf("TROZET WARN: did not receive and update for transaction...disconnecting: %+v\n", ops)
+		odbi.Close()
 	}
 	return reply, nil
 }

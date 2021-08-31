@@ -17,6 +17,9 @@
 package goovn
 
 import (
+
+	"sync/atomic"
+
 	"github.com/ebay/libovsdb"
 )
 
@@ -28,6 +31,7 @@ func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.Tabl
 	notify.odbi.cachemutex.Lock()
 	defer notify.odbi.cachemutex.Unlock()
 	notify.odbi.populateCache(tableUpdates)
+	atomic.StoreUint32(&notify.odbi.monitorSem, 0)
 }
 func (notify ovnNotifier) Locked([]interface{}) {
 }
