@@ -540,9 +540,16 @@ func (c *ovndb) monitorTables(db string, jsonContext interface{}) (*libovsdb.Tab
 				Modify:  true,
 			}}
 	}
-	updates, currentTxn, err := c.client.Monitor3(db, jsonContext, requests, c.currentTxn)
-	if err == nil {
-		c.currentTxn = currentTxn
+	var updates *libovsdb.TableUpdates2
+	var err error
+	if db == DBServer {
+		updates, err = c.client.Monitor2(db, jsonContext, requests)
+	} else {
+		var currentTxn string
+		updates, currentTxn, err = c.client.Monitor3(db, jsonContext, requests, c.currentTxn)
+		if err == nil && len(currentTxn) > 0 {
+			c.currentTxn = currentTxn
+		}
 	}
 	return updates, err
 }
