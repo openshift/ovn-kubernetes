@@ -363,14 +363,17 @@ func (c *ovndb) connect() error {
 		}
 		klog.Infof("[%s] failed to connect to %s (trying next endpoint): %v", c.db, addr, err)
 
-		// Unregister notifier to suppress the Disconnect notifier
-		// from triggering reconnect attempts
-		if err := c.client.Unregister(ovnNotifier{c}); err != nil {
-			klog.Warningf("failed to unregister event handler before disconnect: %v", err)
-		}
 		c.nextEndpoint()
-		c.client.Disconnect()
-		c.client = nil
+
+		if c.client != nil {
+			// Unregister notifier to suppress the Disconnect notifier
+			// from triggering reconnect attempts
+			if err := c.client.Unregister(ovnNotifier{c}); err != nil {
+				klog.Warningf("failed to unregister event handler before disconnect: %v", err)
+			}
+			c.client.Disconnect()
+			c.client = nil
+		}
 	}
 	return fmt.Errorf("failed to connect to all %s DB endpoints %v", c.db, c.endpoints)
 }
