@@ -297,7 +297,7 @@ type ovndb struct {
 	currentTxn   string
 }
 
-func connect(c *ovndb) (err error) {
+func (c *ovndb) connect() (err error) {
 	ovsdb, err := libovsdb.Connect(c.addr, c.tlsConfig)
 	if err != nil {
 		return err
@@ -357,7 +357,7 @@ func NewClient(cfg *Config) (Client, error) {
 		currentTxn:   ZERO_TRANSACTION,
 	}
 
-	err := connect(ovndb)
+	err := ovndb.connect()
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +372,7 @@ func (c *ovndb) reconnect() {
 		defer c.tranmutex.Unlock()
 		retry := 0
 		for range ticker.C {
-			if err := connect(c); err != nil {
+			if err := c.connect(); err != nil {
 				if retry < 10 {
 					klog.Warningf("[%s] reconnect failed (%v); retry...", c.db, err)
 				} else if retry == 10 {
