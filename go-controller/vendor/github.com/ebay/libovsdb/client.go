@@ -453,6 +453,9 @@ func (ovs OvsdbClient) Monitor3(database string, jsonContext interface{}, reques
 	// This totally sucks. Refer to golang JSON issue #6213
 	var response []interface{}
 	err := ovs.rpcClient.Call("monitor_cond_since", args, &response)
+	if len(response) < 3 {
+		return nil, "", fmt.Errorf("monitor_cond_since reply has less than 3 elements: %v", response)
+	}
 	b, err := json.Marshal(response[2])
 	if err != nil {
 		return nil, "", err
