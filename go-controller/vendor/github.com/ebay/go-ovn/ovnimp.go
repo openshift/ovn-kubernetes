@@ -316,7 +316,7 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 	}
 }
 
-func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
+func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates, signal bool) {
 	empty := libovsdb.Row{}
 
 	for table := range odbi.tableCols {
@@ -339,13 +339,14 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 					continue
 				}
 				odbi.cache[table][uuid] = row.New
-				if odbi.signalCB != nil {
+
+				if signal && odbi.signalCB != nil {
 					odbi.signalCreate(table, uuid)
 				}
 			} else {
 				defer delete(odbi.cache[table], uuid)
 
-				if odbi.signalCB != nil {
+				if signal && odbi.signalCB != nil {
 					defer odbi.signalDelete(table, uuid)
 				}
 			}
@@ -476,7 +477,7 @@ func (odbi *ovndb) applyUpdatesToRow(table string, uuid string, rowdiff *libovsd
 	odbi.cache[table][uuid] = row
 }
 
-func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2) {
+func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2, signal bool) {
 	for table := range odbi.tableCols {
 		tableUpdate, ok := updates.Updates[table]
 		if !ok {
@@ -499,23 +500,31 @@ func (odbi *ovndb) populateCache2(updates libovsdb.TableUpdates2) {
 				}
 				odbi.initMissingColumnsWithDefaults(table, &row.Initial)
 				odbi.cache[table][uuid] = row.Initial
-				/* TODO ***
-				 * if odbi.signalCB != nil {
-				 * }
-				 */
+				if signal && odbi.signalCB != nil {
+					odbi.signalCreate(table, uuid)
+				}
 			case row.Insert.Fields != nil:
 				odbi.initMissingColumnsWithDefaults(table, &row.Insert)
 				// TODO: this is a workaround for the problem of
 				// missing json number conversion in libovsdb
 				odbi.float64_to_int(row.Insert)
 				odbi.cache[table][uuid] = row.Insert
+				if signal && odbi.signalCB != nil {
+					odbi.signalCreate(table, uuid)
+				}
 			case row.Modify.Fields != nil:
 				// TODO: this is a workaround for the problem of
 				// missing json number conversion in libovsdb
 				odbi.float64_to_int(row.Modify)
 				odbi.applyUpdatesToRow(table, uuid, &row.Modify)
+				if signal && odbi.signalCB != nil {
+					odbi.signalCreate(table, uuid)
+				}
 			case row.Delete.Fields != nil:
 				defer delete(odbi.cache[table], uuid)
+				if signal && odbi.signalCB != nil {
+					odbi.signalDelete(table, uuid)
+				}
 			}
 		}
 	}
