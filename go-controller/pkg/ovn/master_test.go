@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -1291,8 +1292,8 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = node1.UDPLBUUID
 			clusterController.SCTPLoadBalancerUUID = node1.SCTPLBUUID
 			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = newJoinLogicalSwitchIPManager([]string{node1.Name})
-			_, _ = clusterController.joinSwIPManager.ensureJoinLRPIPs(types.OVNClusterRouter)
+			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager([]string{node1.Name})
+			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
 

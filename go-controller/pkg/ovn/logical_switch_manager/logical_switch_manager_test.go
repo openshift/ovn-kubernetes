@@ -1,4 +1,4 @@
-package ovn
+package logicalswitchmanager
 
 import (
 	"github.com/urfave/cli/v2"
@@ -20,7 +20,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 	var (
 		app       *cli.App
 		fexec     *ovntest.FakeExec
-		lsManager *logicalSwitchManager
+		lsManager *LogicalSwitchManager
 	)
 
 	BeforeEach(func() {
@@ -30,7 +30,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
-		lsManager = newLogicalSwitchManager()
+		lsManager = NewLogicalSwitchManager()
 	})
 
 	Context("when adding node", func() {

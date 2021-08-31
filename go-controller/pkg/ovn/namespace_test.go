@@ -10,6 +10,7 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -267,10 +268,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 				})
 
 				addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, false)
-				fakeOvn.controller.joinSwIPManager, _ = newJoinLogicalSwitchIPManager([]string{node1.Name})
-				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
+				fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager([]string{node1.Name})
+				_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
 				Expect(err).NotTo(HaveOccurred())
-				gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(node1.Name)
+				gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(node1.Name)
 				Expect(len(gwLRPIPs) != 0).To(BeTrue())
 
 				fakeOvn.controller.WatchNamespaces()
