@@ -1226,10 +1226,8 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		foundNodes[node.Name] = node
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		_, err := oc.joinSwIPManager.ensureJoinLRPIPs(node.Name)
-		if err != nil {
-			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
-		}
+		gwLRPIPs := oc.getJoinLRPAddresses(node.Name)
+		_ = oc.joinSwIPManager.reserveJoinLRPIPs(node.Name, gwLRPIPs)
 	}
 
 	// We only deal with cleaning up nodes that shouldn't exist here, since
