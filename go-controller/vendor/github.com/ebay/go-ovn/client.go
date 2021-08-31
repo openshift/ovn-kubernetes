@@ -323,7 +323,7 @@ func (c *ovndb) connect() (err error) {
 	// When we connect we initialize the cache, so any deletions
 	// happened while reconnecting are handled correctly.
 	c.cache = make(map[string]map[string]libovsdb.Row)
-	initial, err := c.MonitorTables("")
+	initial, err := c.MonitorTables(c.db, "")
 	if err != nil {
 		return err
 	}
@@ -392,16 +392,16 @@ func (c *ovndb) reconnect() {
 
 // filterTablesFromSchema checks whether tables in
 // NBTablesOrder / SBTablesOrder exists in current ovn-db schema
-func (c *ovndb) filterTablesFromSchema() []string {
+func (c *ovndb) filterTablesFromSchema(db string) []string {
 	var tables []string
 	// get the table list based on the DB
-	if c.db == DBNB {
+	if db == DBNB {
 		tables = NBTablesOrder
 	} else {
 		tables = SBTablesOrder
 	}
 
-	dbSchema := c.getSchema(c.db)
+	dbSchema := c.getSchema(db)
 	schemaTables := make([]string, 0)
 	for _, table := range tables {
 		if _, ok := dbSchema.Tables[table]; ok {
@@ -411,8 +411,8 @@ func (c *ovndb) filterTablesFromSchema() []string {
 	return schemaTables
 }
 
-func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates2, error) {
-	tables := c.filterTablesFromSchema()
+func (c *ovndb) MonitorTables(db string, jsonContext interface{}) (*libovsdb.TableUpdates2, error) {
+	tables := c.filterTablesFromSchema(db)
 	// verify whether user specified table and its columns are legit
 	if len(c.tableCols) != 0 {
 		supportedTableMaps := make(map[string]bool)
@@ -429,7 +429,7 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates2,
 				}
 			} else {
 				return nil, fmt.Errorf("specified table %q in database %q not supported by the library",
-					table, c.db)
+					table, db)
 			}
 		}
 	} else {
@@ -449,7 +449,7 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates2,
 				Modify:  true,
 			}}
 	}
-	updates, currentTxn, err := c.client.Monitor3(c.db, jsonContext, requests, c.currentTxn)
+	updates, currentTxn, err := c.client.Monitor3(db, jsonContext, requests, c.currentTxn)
 	if err == nil {
 		c.currentTxn = currentTxn
 	}
