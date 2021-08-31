@@ -21,10 +21,11 @@ import (
 	"sync"
 
 	"crypto/tls"
-	"log"
 	"time"
 
 	"github.com/ebay/libovsdb"
+
+	"k8s.io/klog/v2"
 )
 
 type EntityType string
@@ -366,23 +367,23 @@ func NewClient(cfg *Config) (Client, error) {
 func (c *ovndb) reconnect() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	go func() {
-		log.Printf("%s disconnected. Reconnecting ... \n", c.addr)
 		c.tranmutex.Lock()
 		defer c.tranmutex.Unlock()
+		klog.Infof("[%s] disconnected from %s; reconnecting ... ", c.db, c.addr)
 		retry := 0
 		for range ticker.C {
 			if err := connect(c); err != nil {
 				if retry < 10 {
-					log.Printf("%s reconnect failed (%v). Retry...\n",
-						c.addr, err)
+					klog.Warningf("[%s] reconnect failed (%v); retry...", c.db, err)
 				} else if retry == 10 {
-					log.Printf("%s reconnect failed (%v). Continue retrying but log will be supressed.\n",
-						c.addr, err)
+					klog.Warningf("[%s] reconnect failed (%v); continue retrying but log will be supressed.",
+						c.db, err)
 				}
 				retry++
 				continue
 			}
-			log.Printf("%s reconnected after %d retries.\n", c.addr, retry)
+			klog.Infof("[%s] reconnected to %s after %d retries.",
+				c.db, c.addr, retry)
 			ticker.Stop()
 			return
 		}
