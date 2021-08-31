@@ -20,6 +20,8 @@ import (
 	"fmt"
 
 	"github.com/ebay/libovsdb"
+
+	"k8s.io/klog/v2"
 )
 
 func (odbi *ovndb) addGlobalTableRowImp(options map[string]string, table string) (*OvnCommand, error) {
@@ -127,6 +129,7 @@ func (odbi *ovndb) globalGetOptionsImp(table string) (map[string]string, error) 
 	defer odbi.cachemutex.RUnlock()
 	cacheGlobal, ok := odbi.cache[table]
 	if !ok {
+		klog.Infof("##### [%s] globalGetOptionsImp() fail for %s, cache %v", odbi.db, table, odbi.cache)
 		return nil, ErrorSchema
 	}
 	for _, drows := range cacheGlobal {

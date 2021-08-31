@@ -355,16 +355,17 @@ func (c *ovndb) connect() error {
 	var err error
 	for i := 0; i < len(c.endpoints); i++ {
 		addr := c.endpoints[c.curEndpoint]
-		klog.Infof("[%s] connecting to %s...", c.db, addr)
+		klog.Infof("[%s %s] connecting...", addr, c.db)
 		c.client, err = libovsdb.Connect(addr, c.tlsConfig)
 		if err == nil {
+			klog.Infof("[%s %s] connected; reading database", addr, c.db)
 			if err = c.connectEndpoint(); err == nil {
 				// success
-				klog.Infof("[%s] connected to %s", c.db, addr)
+				klog.Infof("[%s %s] connected", addr, c.db)
 				return nil
 			}
 		}
-		klog.Infof("[%s] failed to connect to %s (trying next endpoint): %v", c.db, addr, err)
+		klog.Infof("[%s %s] failed to connect (trying next endpoint): %v", addr, c.db, err)
 
 		c.nextEndpoint()
 
@@ -473,21 +474,21 @@ func NewClient(cfg *Config) (Client, error) {
 func (c *ovndb) reconnect() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	go func() {
-		klog.Infof("[%s] disconnected from %s; reconnecting ... ", c.db, c.endpoints[c.curEndpoint])
+		klog.Infof("[%s %s] disconnected; reconnecting ... ", c.endpoints[c.curEndpoint], c.db)
 		retry := 0
 		for range ticker.C {
 			if err := c.connect(); err != nil {
 				if retry < 10 {
-					klog.Warningf("[%s] reconnect failed (%v); retry...", c.db, err)
+					klog.Warningf("[%s %s] reconnect failed (%v); retry...", c.endpoints[c.curEndpoint], c.db, err)
 				} else if retry == 10 {
-					klog.Warningf("[%s] reconnect failed (%v); continue retrying but log will be supressed.",
-						c.db, err)
+					klog.Warningf("[%s %s] reconnect failed (%v); continue retrying but log will be supressed.",
+						c.endpoints[c.curEndpoint], c.db, err)
 				}
 				retry++
 				continue
 			}
-			klog.Infof("[%s] reconnected to %s after %d retries.",
-				c.db, c.endpoints[c.curEndpoint], retry)
+			klog.Infof("[%s %s] reconnected after %d retries.",
+				c.endpoints[c.curEndpoint], c.db, retry)
 			ticker.Stop()
 			return
 		}
