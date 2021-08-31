@@ -317,7 +317,7 @@ func (c *ovndb) connect() (err error) {
 	// When we connect we initialize the cache, so any deletions
 	// happened while reconnecting are handled correctly.
 	c.cache = make(map[string]map[string]libovsdb.Row)
-	initial, err := c.MonitorTables("")
+	initial, err := c.MonitorTables(c.db, "")
 	if err != nil {
 		return err
 	}
@@ -382,17 +382,17 @@ func (c *ovndb) reconnect() {
 
 // filterTablesFromSchema checks whether tables in
 // NBTablesOrder / SBTablesOrder exists in current ovn-db schema
-func (c *ovndb) filterTablesFromSchema() []string {
+func (c *ovndb) filterTablesFromSchema(db string) []string {
 	var tables []string
 
 	// get the table list based on the DB
-	if c.db == DBNB {
+	if db == DBNB {
 		tables = NBTablesOrder
 	} else {
 		tables = SBTablesOrder
 	}
 
-	dbSchema := c.GetSchema()
+	dbSchema := c.getSchema(db)
 	schemaTables := make([]string, 0)
 	for _, table := range tables {
 		if _, ok := dbSchema.Tables[table]; ok {
@@ -402,8 +402,8 @@ func (c *ovndb) filterTablesFromSchema() []string {
 	return schemaTables
 }
 
-func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
-	tables := c.filterTablesFromSchema()
+func (c *ovndb) MonitorTables(db string, jsonContext interface{}) (*libovsdb.TableUpdates, error) {
+	tables := c.filterTablesFromSchema(db)
 	// verify whether user specified table and its columns are legit
 	if len(c.tableCols) != 0 {
 		supportedTableMaps := make(map[string]bool)
@@ -420,7 +420,7 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, 
 				}
 			} else {
 				return nil, fmt.Errorf("specified table %q in database %q not supported by the library",
-					table, c.db)
+					table, db)
 			}
 		}
 	} else {
@@ -440,7 +440,7 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, 
 				Modify:  true,
 			}}
 	}
-	return c.client.Monitor(c.db, jsonContext, requests)
+	return c.client.Monitor(db, jsonContext, requests)
 }
 
 // TODO return proper error
@@ -449,8 +449,12 @@ func (c *ovndb) Close() error {
 	return nil
 }
 
+func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
+	return c.client.Schema[db]
+}
+
 func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
-	return c.client.Schema[c.db]
+	return c.getSchema(c.db)
 }
 
 func (c *ovndb) EncapList(chname string) ([]*Encap, error) {
