@@ -323,7 +323,7 @@ func connect(c *ovndb) (err error) {
 	}
 
 	// We do the initial dump and populate the cache, we have the mutex
-	c.populateCache(*initial)
+	c.populateCache(*initial, false)
 	return nil
 }
 

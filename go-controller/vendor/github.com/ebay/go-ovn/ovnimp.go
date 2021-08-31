@@ -313,7 +313,7 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 	}
 }
 
-func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
+func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates, signal bool) {
 	empty := libovsdb.Row{}
 
 	for table := range odbi.tableCols {
@@ -337,13 +337,13 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 				}
 				odbi.cache[table][uuid] = row.New
 
-				if odbi.signalCB != nil {
+				if signal && odbi.signalCB != nil {
 					odbi.signalCreate(table, uuid)
 				}
 			} else {
 				defer delete(odbi.cache[table], uuid)
 
-				if odbi.signalCB != nil {
+				if signal && odbi.signalCB != nil {
 					defer odbi.signalDelete(table, uuid)
 				}
 			}
