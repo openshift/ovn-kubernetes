@@ -434,7 +434,7 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	} else {
 		logicalSwitches = []string{types.OVNJoinSwitch}
 	}
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "ACL",
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "--format=table", "find", "ACL",
 		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
 	if err != nil {
 		return fmt.Errorf("error deleting egressFirewall with external-ids %s, cannot get ACL policies - %s:%s",
