@@ -300,6 +300,9 @@ type ovndb struct {
 	currentTxn   string
 	leaderOnly   bool
 
+	connecting      bool
+	deferredUpdates []*deferredUpdate
+
 	serverCache      map[string]map[string]libovsdb.Row
 	serverTableCols  map[string][]string
 	serverCacheMutex sync.RWMutex
@@ -379,6 +382,8 @@ func (c *ovndb) connect() error {
 }
 
 func (c *ovndb) connectEndpoint() error {
+	c.connecting = true
+
 	// Locking the cache mutex to ensure the cache is filled before
 	// events from the notifier are handled.
 	c.cachemutex.Lock()
@@ -415,6 +420,18 @@ func (c *ovndb) connectEndpoint() error {
 		return fmt.Errorf("leader-only requested; disconnecting from follower")
 	}
 
+	// success; handle any updates that came in while
+	// the initial dump was happening
+	for _, u := range c.deferredUpdates {
+		if u.updates != nil {
+			c.populateCache(u.db, *u.updates, false)
+		} else if u.updates2 != nil {
+			c.populateCache2(u.db, *u.updates2, false)
+		}
+	}
+	c.deferredUpdates = make([]*deferredUpdate, 0)
+	c.connecting = false
+
 	return nil
 }
 
@@ -431,18 +448,19 @@ func NewClient(cfg *Config) (Client, error) {
 	}
 
 	ovndb := &ovndb{
-		signalCB:     cfg.SignalCB,
-		disconnectCB: cfg.DisconnectCB,
-		db:           db,
-		tableCols:    cfg.TableCols,
-		cfgTableCols: cfg.TableCols,
-		endpoints:    strings.Split(cfg.Addr, ","),
-		curEndpoint:  0,
-		tlsConfig:    cfg.TLSConfig,
-		reconn:       cfg.Reconnect,
-		ticker:       time.NewTicker(time.Second/25),
-		currentTxn:   ZERO_TRANSACTION,
-		leaderOnly:   cfg.LeaderOnly,
+		signalCB:        cfg.SignalCB,
+		disconnectCB:    cfg.DisconnectCB,
+		db:              db,
+		tableCols:       cfg.TableCols,
+		cfgTableCols:    cfg.TableCols,
+		endpoints:       strings.Split(cfg.Addr, ","),
+		curEndpoint:     0,
+		tlsConfig:       cfg.TLSConfig,
+		reconn:          cfg.Reconnect,
+		ticker:          time.NewTicker(time.Second/25),
+		currentTxn:      ZERO_TRANSACTION,
+		leaderOnly:      cfg.LeaderOnly,
+		deferredUpdates: make([]*deferredUpdate, 0, 0),
 	}
 
 	err := ovndb.connect()
