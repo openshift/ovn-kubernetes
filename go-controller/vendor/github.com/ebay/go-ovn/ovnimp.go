@@ -399,7 +399,7 @@ func (odbi *ovndb) initMissingColumnsWithDefaults(db, table string, row *libovsd
 			case "map":
 				row.Fields[column] = libovsdb.OvsMap{GoMap: make(map[interface{}]interface{})}
 			case "set":
-				row.Fields[column] = libovsdb.OvsSet{}
+				row.Fields[column] = libovsdb.OvsSet{GoSet: make([]interface{}, 0)}
 			case "string":
 				row.Fields[column] = ""
 			default:
