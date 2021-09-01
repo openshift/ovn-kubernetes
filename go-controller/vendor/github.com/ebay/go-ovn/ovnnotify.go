@@ -28,6 +28,25 @@ type ovnNotifier struct {
 	odbi *ovndb
 }
 
+type deferredUpdate struct {
+	db       string
+	updates  *libovsdb.TableUpdates
+	updates2 *libovsdb.TableUpdates2
+}
+
+// maybeDeferUpdate returns true if the update was deferred
+func (notify ovnNotifier) maybeDeferUpdate(db string, updates *libovsdb.TableUpdates, updates2 *libovsdb.TableUpdates2) bool {
+	if !notify.odbi.connecting {
+		return false
+	}
+	notify.odbi.deferredUpdates = append(notify.odbi.deferredUpdates, &deferredUpdate{
+		db:       db,
+		updates:  updates,
+		updates2: updates2,
+	})
+	return true
+}
+
 func (notify ovnNotifier) getDBNameAndLock(context interface{}) (string, *sync.RWMutex) {
 	dbName, ok := context.(string)
 	if !ok {
@@ -44,28 +63,37 @@ func (notify ovnNotifier) getDBNameAndLock(context interface{}) (string, *sync.R
 
 func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.TableUpdates) {
 	db, lock := notify.getDBNameAndLock(context)
-	if lock != nil {
-		lock.Lock()
-		defer lock.Unlock()
-		notify.odbi.populateCache(db, tableUpdates, true)
+
+	if !notify.maybeDeferUpdate(db, &tableUpdates, nil) {
+		if lock != nil {
+			lock.Lock()
+			defer lock.Unlock()
+			notify.odbi.populateCache(db, tableUpdates, true)
+		}
 	}
 }
 func (notify ovnNotifier) Update2(context interface{}, tableUpdates libovsdb.TableUpdates2) {
 	db, lock := notify.getDBNameAndLock(context)
-	if lock != nil {
-		lock.Lock()
-		defer lock.Unlock()
-		notify.odbi.populateCache2(db, tableUpdates, true)
+
+	if !notify.maybeDeferUpdate(db, nil, &tableUpdates) {
+		if lock != nil {
+			lock.Lock()
+			defer lock.Unlock()
+			notify.odbi.populateCache2(db, tableUpdates, true)
+		}
 	}
 }
 
 func (notify ovnNotifier) Update3(context interface{}, tableUpdates libovsdb.TableUpdates2, lastTxnId string) {
 	db, lock := notify.getDBNameAndLock(context)
-	if lock != nil {
-		lock.Lock()
-		defer lock.Unlock()
-		notify.odbi.populateCache2(db, tableUpdates, true)
-		notify.odbi.currentTxn = lastTxnId
+
+	if !notify.maybeDeferUpdate(db, nil, &tableUpdates) {
+		if lock != nil {
+			lock.Lock()
+			defer lock.Unlock()
+			notify.odbi.populateCache2(db, tableUpdates, true)
+			notify.odbi.currentTxn = lastTxnId
+		}
 	}
 }
 
