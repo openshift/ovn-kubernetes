@@ -397,7 +397,7 @@ func (odbi *ovndb) initMissingColumnsWithDefaults(db, table string, row *libovsd
 					row.Fields[column] = false
 				}
 			case "map":
-				row.Fields[column] = libovsdb.OvsMap{}
+				row.Fields[column] = libovsdb.OvsMap{GoMap: make(map[interface{}]interface{})}
 			case "set":
 				row.Fields[column] = libovsdb.OvsSet{}
 			case "string":
