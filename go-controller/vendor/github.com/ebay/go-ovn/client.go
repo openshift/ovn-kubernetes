@@ -293,6 +293,7 @@ type ovndb struct {
 	endpoints    []string
 	curEndpoint  int
 	tableCols    map[string][]string
+	cfgTableCols map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
 	ticker       *time.Ticker
@@ -390,9 +391,14 @@ func (c *ovndb) connectEndpoint() error {
 	notifier := ovnNotifier{c}
 	c.client.Register(notifier)
 
-	// When we connect we initialize the cache, so any deletions
-	// happened while reconnecting are handled correctly.
-	c.cache = make(map[string]map[string]libovsdb.Row)
+	if c.currentTxn == ZERO_TRANSACTION {
+		// The first time we connect we initialize the cache, so any deletions
+		// happened while reconnecting are handled correctly. The cache
+		// survives reconnections as the db server will send us changes
+		// since the last transaction
+		c.cache = make(map[string]map[string]libovsdb.Row)
+	}
+	c.tableCols = c.cfgTableCols
 	c.serverCache = make(map[string]map[string]libovsdb.Row)
 
 	for _, db := range []string{c.db, DBServer} {
@@ -429,6 +435,7 @@ func NewClient(cfg *Config) (Client, error) {
 		disconnectCB: cfg.DisconnectCB,
 		db:           db,
 		tableCols:    cfg.TableCols,
+		cfgTableCols: cfg.TableCols,
 		endpoints:    strings.Split(cfg.Addr, ","),
 		curEndpoint:  0,
 		tlsConfig:    cfg.TLSConfig,
