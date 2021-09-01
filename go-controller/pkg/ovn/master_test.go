@@ -313,7 +313,6 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 
 func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6, sync bool) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + node.Name + " networks",
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch",
 	})
 
@@ -910,7 +909,7 @@ subnet=%s
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
+			clusterController.joinSwIPManager, _ = newJoinLogicalSwitchIPManager()
 			_, _ = clusterController.joinSwIPManager.ensureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
@@ -1141,7 +1140,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
+			clusterController.joinSwIPManager, _ = newJoinLogicalSwitchIPManager()
 			_, _ = clusterController.joinSwIPManager.ensureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
@@ -1259,6 +1258,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + types.OVNClusterRouter + " networks",
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + node1.Name + " networks",
+				Output: "[\"100.64.0.2/16\"]",
+			})
 			addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, true)
 
 			addPBRandNATRules(fexec, node1.Name, node1.NodeSubnet, node1.GatewayRouterIP, node1.NodeMgmtPortIP, node1.NodeMgmtPortMAC)
@@ -1278,7 +1281,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			clusterController.clusterLBsUUIDs = []string{node1.TCPLBUUID, node1.UDPLBUUID, node1.SCTPLBUUID}
 			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
+			clusterController.joinSwIPManager, _ = newJoinLogicalSwitchIPManager([]string{node1.Name})
 			_, _ = clusterController.joinSwIPManager.ensureJoinLRPIPs(types.OVNClusterRouter)
 
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
