@@ -456,7 +456,12 @@ func (odbi *ovndb) modifySet(orig interface{}, elem interface{}) *libovsdb.OvsSe
 	return cv
 }
 
-func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *libovsdb.Row, row libovsdb.Row) libovsdb.Row {
+func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *libovsdb.Row, cache *map[string]map[string]libovsdb.Row) {
+	row := odbi.cache[table][uuid]
+	if len(row.Fields) == 0 {
+		row.Fields = make(map[string]interface{})
+	}
+
 	for column, value := range rowdiff.Fields {
 		columnSchema, ok := odbi.getSchema(db).Tables[table].Columns[column]
 		if !ok {
@@ -498,7 +503,7 @@ func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *lib
 		}
 	}
 
-	return row
+	(*cache)[table][uuid] = row
 }
 
 func (odbi *ovndb) populateCache2(dbName string, updates libovsdb.TableUpdates2, signal bool) {
@@ -542,9 +547,7 @@ func (odbi *ovndb) populateCache2(dbName string, updates libovsdb.TableUpdates2,
 				// TODO: this is a workaround for the problem of
 				// missing json number conversion in libovsdb
 				odbi.float64_to_int(row.Modify)
-				oldRow := (*cache)[table][uuid]
-				newRow := odbi.applyUpdatesToRow(dbName, table, uuid, &row.Modify, oldRow)
-				(*cache)[table][uuid] = newRow
+				odbi.applyUpdatesToRow(dbName, table, uuid, &row.Modify, cache)
 				if signal && signalCreate != nil {
 					signalCreate(table, uuid)
 				}
