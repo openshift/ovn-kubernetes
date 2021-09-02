@@ -289,7 +289,6 @@ type ovndb struct {
 	tableCols    map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
-	monitorSem   uint32
 }
 
 func connect(c *ovndb) (err error) {
