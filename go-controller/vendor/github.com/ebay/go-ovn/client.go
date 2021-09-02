@@ -297,7 +297,6 @@ type ovndb struct {
 	cfgTableCols map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
-	ticker       *time.Ticker
 	currentTxn   string
 	leaderOnly   bool
 
@@ -458,7 +457,6 @@ func NewClient(cfg *Config) (Client, error) {
 		curEndpoint:     0,
 		tlsConfig:       cfg.TLSConfig,
 		reconn:          cfg.Reconnect,
-		ticker:          time.NewTicker(time.Second/25),
 		currentTxn:      ZERO_TRANSACTION,
 		leaderOnly:      cfg.LeaderOnly,
 		deferredUpdates: make([]*deferredUpdate, 0, 0),
@@ -917,10 +915,7 @@ func (c *ovndb) QoSList(ls string) ([]*QoS, error) {
 }
 
 func (c *ovndb) Execute(cmds ...*OvnCommand) error {
-	for range c.ticker.C {
-		return c.execute(cmds...)
-	}
-	return nil
+	return c.execute(cmds...)
 }
 
 func (c *ovndb) ExecuteR(cmds ...*OvnCommand) ([]string, error) {
