@@ -397,7 +397,7 @@ func (odbi *ovndb) initMissingColumnsWithDefaults(db, table string, row *libovsd
 			case "map":
 				row.Fields[column] = libovsdb.OvsMap{GoMap: make(map[interface{}]interface{})}
 			case "set":
-				row.Fields[column] = libovsdb.OvsSet{}
+				row.Fields[column] = libovsdb.OvsSet{GoSet: make([]interface{}, 0)}
 			case "string":
 				row.Fields[column] = ""
 			default:
@@ -455,10 +455,7 @@ func (odbi *ovndb) modifySet(orig interface{}, elem interface{}) *libovsdb.OvsSe
 }
 
 func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *libovsdb.Row, cache *map[string]map[string]libovsdb.Row) {
-	row := odbi.cache[table][uuid]
-	if len(row.Fields) == 0 {
-		row.Fields = make(map[string]interface{})
-	}
+	row := (*cache)[table][uuid]
 
 	for column, value := range rowdiff.Fields {
 		columnSchema, ok := odbi.getSchema(db).Tables[table].Columns[column]
