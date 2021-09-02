@@ -19,6 +19,7 @@ package goovn
 import (
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 
@@ -195,6 +196,8 @@ func (odbi *ovndb) executeR(cmds ...*OvnCommand) ([]string, error) {
 
 	results, err := odbi.transact(odbi.db, ops...)
 	if err != nil {
+		log.Printf("TROZET WARN: received transaction error...disconnecting: %+v\n", ops)
+		odbi.Close()
 		return nil, err
 	}
 
