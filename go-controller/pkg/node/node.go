@@ -320,6 +320,16 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
 	}
 
+	networkUnavailableTaint := &kapi.Taint{
+		Key:    types.OvnK8sPrefix + "/" + "network-unavailable",
+		Effect: kapi.TaintEffectNoSchedule,
+	}
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return n.Kube.RemoveTaintFromNode(n.name, networkUnavailableTaint)
+	}); err != nil {
+		klog.Errorf("#### error removing network unavailable taint: %v", err)
+	}
+
 	// Create CNI Server
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
 		isOvnUpEnabled, err = getOVNIfUpCheckMode()
