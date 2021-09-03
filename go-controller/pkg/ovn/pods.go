@@ -117,13 +117,25 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
 
-	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo.name, portInfo.uuid, portInfo.ips); err != nil {
-		klog.Errorf(err.Error())
-	}
-
-	err = util.OvnNBLSPDel(oc.ovnNBClient, logicalPort)
+	var cmds []*goovn.OvnCommand
+	addrSetCmds, err := oc.deletePodFromNamespace(pod.Namespace, portInfo.name, portInfo.uuid, portInfo.ips)
 	if err != nil {
 		klog.Errorf(err.Error())
+	} else {
+		cmds = append(cmds, addrSetCmds...)
+	}
+
+	cmd, err := oc.ovnNBClient.LSPDel(logicalPort)
+	if err != nil {
+		klog.Errorf(err.Error())
+	} else {
+		cmds = append(cmds, cmd)
+	}
+
+	// execute all the commands together.
+	err = oc.ovnNBClient.Execute(cmds...)
+	if err != nil {
+		klog.Errorf("error deleting logical port %s: %v", portInfo.name, err)
 	}
 
 	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
@@ -347,8 +359,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			} else {
 				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
 			}
-			if nsErr := oc.deletePodFromNamespace(pod.Namespace, portName, "", podIfAddrs); nsErr != nil {
+			if addrSetCmds, nsErr := oc.deletePodFromNamespace(pod.Namespace, portName, "", podIfAddrs); nsErr != nil {
 				klog.Errorf("Error when deleting pod: %s from namespace: %v", pod.Name, err)
+			} else {
+				err = oc.ovnNBClient.Execute(addrSetCmds...)
+				if err != nil {
+					klog.Errorf("Error removing pod %s IPs from namespace address set: %v", portName, err)
+				}
 			}
 		}
 	}()
