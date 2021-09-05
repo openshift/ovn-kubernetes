@@ -458,7 +458,7 @@ func NewClient(cfg *Config) (Client, error) {
 		curEndpoint:     0,
 		tlsConfig:       cfg.TLSConfig,
 		reconn:          cfg.Reconnect,
-		ticker:          time.NewTicker(time.Second/25),
+		ticker:          time.NewTicker(time.Second/50),
 		currentTxn:      ZERO_TRANSACTION,
 		leaderOnly:      cfg.LeaderOnly,
 		deferredUpdates: make([]*deferredUpdate, 0, 0),
