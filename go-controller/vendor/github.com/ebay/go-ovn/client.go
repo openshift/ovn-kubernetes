@@ -547,16 +547,23 @@ func (c *ovndb) monitorTables(db string, jsonContext interface{}) (*libovsdb.Tab
 	return updates, err
 }
 
-func (c *ovndb) close() {
-	c.client.Disconnect()
-	c.client = nil
+func (c *ovndb) getClient() (*libovsdb.OvsdbClient, error) {
+	c.clientLock.RLock()
+	defer c.clientLock.RUnlock()
+	if c.client == nil {
+		return nil, fmt.Errorf("client is disconnected")
+	}
+	return c.client, nil
 }
 
 // TODO return proper error
 func (c *ovndb) Close() error {
 	c.clientLock.Lock()
 	defer c.clientLock.Unlock()
-	c.close()
+	if c.client != nil {
+		c.client.Disconnect()
+		c.client = nil
+	}
 	return nil
 }
 
@@ -565,10 +572,8 @@ func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
 }
 
 func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
-	c.clientLock.RLock()
-	defer c.clientLock.RUnlock()
-	if c.client != nil {
-		return c.client.Schema[c.db]
+	if client, _ := c.getClient(); client != nil {
+		return client.Schema[c.db]
 	}
 	return libovsdb.DatabaseSchema{
 		Tables: make(map[string]libovsdb.TableSchema),
