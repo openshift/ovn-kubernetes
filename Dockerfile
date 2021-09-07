@@ -41,7 +41,7 @@ RUN INSTALL_PKGS=" \
 	containernetworking-plugins \
 	tcpdump iputils \
 	libreswan \
-	ethtool conntrack-tools \
+	ethtool conntrack-tools perf \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.16 = $ovsver" "openvswitch2.16-devel = $ovsver" "python3-openvswitch2.16 = $ovsver" "openvswitch2.16-ipsec = $ovsver" && \
