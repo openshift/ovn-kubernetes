@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"net"
+	"net/http"
 	"reflect"
 	"strconv"
 	"sync"
@@ -437,13 +439,25 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		if podEntry.ignore {
 			continue
 		}
+
 		pod := podEntry.pod
-		if !util.PodScheduled(pod) {
+		podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+		// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
+		kPod, err := oc.watchFactory.GetPod(pod.Namespace, pod.Name)
+		if err != nil {
+			if e, ok := err.(*errors.StatusError); ok && e.ErrStatus.Code == http.StatusNotFound {
+				klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
+				delete(oc.retryPods, uid)
+				continue
+			}
+		}
+
+		if !util.PodScheduled(kPod) {
+			klog.V(5).Infof("retry: %s not scheduled", podDesc)
 			continue
 		}
 		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if updateAll || now.After(podTimer) {
-			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
 			klog.Infof("%s retry pod setup", podDesc)
 
 			if oc.ensurePod(nil, pod, true) {
@@ -453,6 +467,8 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
 				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
 			}
+		} else {
+			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
 		}
 	}
 }
