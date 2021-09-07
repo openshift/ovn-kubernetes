@@ -460,7 +460,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		if updateAll || now.After(podTimer) {
 			klog.Infof("%s retry pod setup", podDesc)
 
-			if oc.ensurePod(nil, pod, true) {
+			if oc.ensurePod(nil, kPod, true) {
 				klog.Infof("%s pod setup successful", podDesc)
 				delete(oc.retryPods, uid)
 			} else {
