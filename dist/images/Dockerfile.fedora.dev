@@ -41,7 +41,6 @@ RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
 	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
         libpcap hostname kubernetes-client python3-openvswitch python3-pyOpenSSL  \
         iptables iproute iputils strace socat\
-        "kernel-devel-uname-r == $KERNEL_VERSION" \
 	@'Development Tools' rpm-build dnf-plugins-core kmod && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
@@ -59,7 +58,7 @@ RUN rm -f /tmp/ovs.spec
 #Build OVS binaries and install
 RUN echo "Building OVS with kernel version : " $KERNEL_VERSION
 RUN ./boot.sh
-RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl --with-linux=/usr/src/kernels/$KERNEL_VERSION/
+RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl
 RUN make && make install
 RUN ovs-vsctl --version && ovs-ofctl --version
 

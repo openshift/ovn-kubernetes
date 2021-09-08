@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debug-deployment
+  labels:
+    app: debug
+spec:
+  replicas: 200
+  selector:
+    matchLabels:
+      app: debug
+  template:
+    metadata:
+      labels:
+        app: debug
+    spec:
+      containers:
+        - name: c1
+          image: k8s.gcr.io/e2e-test-images/agnhost:2.26
+          command: ["/bin/sh", "-c"]
+          args:
+            ["while true; do sleep 3600; done"]
+      nodeSelector:
+        debugtype: worker
