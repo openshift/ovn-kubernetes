@@ -847,4 +847,3 @@ func TestUpdateServiceEndpointsLessRemoveOps(t *testing.T) {
 func protoPtr(proto v1.Protocol) *v1.Protocol {
 	return &proto
 }
->>>>>>> parent of 59cb3ee5aac5c (Add libovsdb clients to controllers & test harness)
