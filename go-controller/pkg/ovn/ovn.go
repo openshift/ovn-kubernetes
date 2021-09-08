@@ -698,10 +698,12 @@ func (oc *Controller) WatchPods() {
 			// 2. creates OVN logical port with old pod annotation value
 			// 3. CNI flows check fails and pod annotation does not match what is in OVN
 			// Therefore we need to get the latest version of this pod to attempt to addLogicalPort with
-			pod, err := oc.watchFactory.GetPod(pod.Namespace, pod.Name)
+			podName := pod.Name
+			podNs := pod.Namespace
+			pod, err := oc.watchFactory.GetPod(podNs, podName)
 			if err != nil {
 				klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
-					pod.Namespace, pod.Name)
+					podNs, podName)
 				return
 			}
 
