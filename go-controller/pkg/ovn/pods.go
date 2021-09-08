@@ -239,6 +239,20 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	return nil
 }
 
+func (oc *Controller) executeWithLimiter(node string, cmds []*goovn.OvnCommand) error {
+	if v, ok := oc.nodeRateLimiters.Load(node); ok {
+		nodeT := v.(*nodeTicker)
+		nodeT.Lock()
+		defer nodeT.Unlock()
+		for range nodeT.ticker.C {
+			return oc.ovnNBClient.Execute(cmds...)
+		}
+	}
+	klog.Warningf("TROZET: unable to find rate limiter for node: %s", node)
+	return oc.ovnNBClient.Execute(cmds...)
+
+}
+
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
@@ -506,7 +520,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	start1 = time.Now()
 	// execute all the commands together.
-	err = oc.ovnNBClient.Execute(cmds...)
+	err = oc.executeWithLimiter(pod.Spec.NodeName, cmds)
 	if err != nil {
 		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
