@@ -44,14 +44,18 @@ func ovsExec(args ...string) (string, error) {
 			return "", err
 		}
 	}
-
-	args = append([]string{"--timeout=30"}, args...)
-	output, err := runner.Command(vsctlPath, args...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
+	OvsTickerMutex.RLock()
+	defer OvsTickerMutex.RUnlock()
+	for range OvsTicker.C {
+		args = append([]string{"--timeout=30"}, args...)
+		output, err := runner.Command(vsctlPath, args...).CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
+		}
+		return strings.TrimSuffix(string(output), "\n"), nil
 	}
 
-	return strings.TrimSuffix(string(output), "\n"), nil
+	return "", nil
 }
 
 func ovsCreate(table string, values ...string) (string, error) {
