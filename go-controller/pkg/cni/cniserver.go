@@ -5,9 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/fsnotify/fsnotify"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +25,65 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
+
+var OvsTicker *time.Ticker
+var ovsTickerDuration time.Duration
+var OvsTickerMutex sync.RWMutex
+
+func updateTicker(value time.Duration) {
+	a := time.Second / value
+	if ovsTickerDuration == a {
+		return
+	}
+	OvsTickerMutex.Lock()
+	defer OvsTickerMutex.Unlock()
+	OvsTicker = time.NewTicker(a)
+	ovsTickerDuration = a
+	klog.Infof("TROZET TICKER UPDATE: %s", ovsTickerDuration)
+}
+
+func watchAndUpdateTicker() error {
+	// initialize ticker
+	updateTicker(time.Duration(5))
+	tickerFile := "/tmp/trozet"
+	err := os.WriteFile("/tmp/trozet", []byte("5"), 0644)
+	if err != nil {
+		return err
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			select {
+			// watch for events
+			case <-watcher.Events:
+				data, err := ioutil.ReadFile(tickerFile)
+				if err != nil {
+					klog.Errorf("TROZET TICKER FILE READ ERR: %v", err)
+					continue
+				}
+				rate, err := strconv.Atoi(strings.TrimSpace(string(data)))
+				if err != nil {
+					klog.Errorf("TROZET TICKER PARSE ERROR: %v", err)
+					continue
+				}
+				klog.Infof("rate value from update: %d", rate)
+				if rate <= 0 {
+					continue
+				}
+				updateTicker(time.Duration(rate))
+			}
+		}
+	}()
+
+	if err = watcher.Add(tickerFile); err != nil {
+		return err
+	}
+	klog.Info("Ticker watcher started")
+	return nil
+}
 
 // *** The Server is PRIVATE API between OVN components and may be
 // changed at any time.  It is in no way a supported interface or API. ***
@@ -51,6 +114,10 @@ import (
 func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
+	}
+
+	if err := watchAndUpdateTicker(); err != nil {
+		return nil, err
 	}
 
 	if len(rundir) == 0 {
