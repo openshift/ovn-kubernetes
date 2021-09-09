@@ -54,7 +54,6 @@ const (
 	clusterPortGroupName             string        = "clusterPortGroup"
 	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
-	defaultTxnRatePerNode            int           = 5
 )
 
 // ACL logging severity levels
@@ -110,11 +109,6 @@ type namespaceInfo struct {
 	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
-type nodeTicker struct {
-	sync.Mutex
-	ticker *time.Ticker
-}
-
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
@@ -123,7 +117,6 @@ type Controller struct {
 	watchFactory          *factory.WatchFactory
 	egressFirewallHandler *factory.Handler
 	stopChan              <-chan struct{}
-	nodeRateLimiters      sync.Map
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator     *subnetallocator.SubnetAllocator
@@ -929,16 +922,6 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	return nil
 }
 
-func (oc *Controller) getRateFromNode(node *kapi.Node) int {
-	if v, ok := node.Annotations["trozet"]; ok {
-		r, err := strconv.Atoi(v)
-		if err == nil {
-			return r
-		}
-	}
-	return defaultTxnRatePerNode
-}
-
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() {
@@ -951,9 +934,6 @@ func (oc *Controller) WatchNodes() {
 	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			rate := oc.getRateFromNode(node)
-			klog.Infof("OVN node rate set: %d, for node: %s", rate, node.Name)
-			oc.nodeRateLimiters.Store(node.Name, &nodeTicker{ticker: time.NewTicker(time.Second/time.Duration(rate))})
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
 				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
 				if err != nil {
@@ -1008,17 +988,6 @@ func (oc *Controller) WatchNodes() {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
-
-			rate := oc.getRateFromNode(node)
-			klog.Infof("OVN update node rate set: %d, for node: %s", rate, node.Name)
-			if v, ok := oc.nodeRateLimiters.Load(node.Name); ok {
-				nodeT := v.(*nodeTicker)
-				nodeT.Lock()
-				nodeT.ticker = time.NewTicker(time.Second/time.Duration(rate))
-				nodeT.Unlock()
-			} else {
-				klog.Errorf("TROZET: failed to update rate to %d, for node: %s", rate, node.Name)
-			}
 
 			shouldUpdate, err := shouldUpdate(node, oldNode)
 			if err != nil {
