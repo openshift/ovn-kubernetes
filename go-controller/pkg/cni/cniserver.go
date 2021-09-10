@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/gorilla/mux"
 	"k8s.io/client-go/kubernetes"
@@ -46,7 +47,7 @@ func watchAndUpdateTicker() error {
 	// initialize ticker
 	updateTicker(time.Duration(5))
 	tickerFile := "/tmp/trozet"
-	err := os.WriteFile("/tmp/trozet", []byte("5"), 0644)
+	err := os.WriteFile("/tmp/trozet", []byte("15"), 0644)
 	if err != nil {
 		return err
 	}
