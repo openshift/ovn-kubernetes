@@ -1,7 +1,6 @@
 package cni
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 
@@ -93,7 +92,7 @@ func (pr *PodRequest) checkOrUpdatePodUID(podUID string) error {
 	return nil
 }
 
-func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, kclient kubernetes.Interface) ([]byte, error) {
+func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, kclient kubernetes.Interface) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -105,7 +104,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	// Get the IP address and MAC address of the pod
 	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
 	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
 		return nil, err
@@ -126,26 +125,21 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		response.PodIFInfo = podInterfaceInfo
 	}
 
-	responseBytes, err := json.Marshal(response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal pod request response: %v", err)
-	}
-
-	return responseBytes, nil
+	return response, nil
 }
 
-func (pr *PodRequest) cmdDel() ([]byte, error) {
+func (pr *PodRequest) cmdDel() error {
 	if err := pr.PlatformSpecificCleanup(); err != nil {
-		return nil, err
+		return err
 	}
-	return []byte{}, nil
+	return nil
 }
 
-func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, kclient kubernetes.Interface) ([]byte, error) {
+func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
-		return nil, fmt.Errorf("required CNI variable missing")
+		return fmt.Errorf("required CNI variable missing")
 	}
 
 	// Get the IP address and MAC address of the pod
@@ -153,16 +147,16 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, kclient kubern
 
 	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
-		return nil, err
+		return err
 	}
 
 	if pr.CNIConf.PrevResult != nil {
 		result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
 		if err != nil {
-			return nil, fmt.Errorf("could not convert result to current version: %v", err)
+			return fmt.Errorf("could not convert result to current version: %v", err)
 		}
 		hostIfaceName := ""
 		for _, interf := range result.Interfaces {
@@ -172,18 +166,18 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, kclient kubern
 			}
 		}
 		if len(hostIfaceName) == 0 {
-			return nil, fmt.Errorf("could not find host interface in the prevResult: %v", result)
+			return fmt.Errorf("could not find host interface in the prevResult: %v", result)
 		}
 		ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
 		ofPort, err := getIfaceOFPort(hostIfaceName)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, ip := range result.IPs {
 			if err = waitForPodInterface(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address},
 				hostIfaceName, ifaceID, ofPort, podLister, kclient, pr.PodNamespace, pr.PodName,
 				pr.PodUID); err != nil {
-				return nil, fmt.Errorf("error while waiting on OVN pod interface: %s ip: %v, error: %v", ifaceID, ip, err)
+				return fmt.Errorf("error while waiting on OVN pod interface: %s ip: %v, error: %v", ifaceID, ip, err)
 			}
 		}
 
@@ -194,17 +188,17 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, kclient kubern
 				continue
 			}
 			if annotationErr != nil {
-				return nil, errors.Wrapf(err, "Failed to get bandwith from annotations of pod %s %s", podName, direction)
+				return errors.Wrapf(err, "Failed to get bandwith from annotations of pod %s %s", podName, direction)
 			}
 			if ovnErr != nil {
-				return nil, errors.Wrapf(err, "Failed to get pod %s %s bandwith from ovn", direction, podName)
+				return errors.Wrapf(err, "Failed to get pod %s %s bandwith from ovn", direction, podName)
 			}
 			if annotationBandwith != ovnBandwith {
-				return nil, fmt.Errorf("defined %s bandwith restriction %d is not equal to the set one %d", direction, annotationBandwith, ovnBandwith)
+				return fmt.Errorf("defined %s bandwith restriction %d is not equal to the set one %d", direction, annotationBandwith, ovnBandwith)
 			}
 		}
 	}
-	return []byte{}, nil
+	return nil
 }
 
 // HandleCNIRequest is the callback for all the requests
@@ -213,21 +207,33 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, kclient kubern
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
 func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error) {
-	var result []byte
-	var err error
+	var result, resultForLogging []byte
+	var response *Response
+	var err, err1 error
 
 	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		result, err = request.cmdAdd(kubeAuth, podLister, kclient)
+		response, err = request.cmdAdd(kubeAuth, podLister, kclient)
 	case CNIDel:
-		result, err = request.cmdDel()
+		err = request.cmdDel()
 	case CNICheck:
-		result, err = request.cmdCheck(podLister, kclient)
+		err = request.cmdCheck(podLister, kclient)
 	default:
 	}
+
+	if response != nil {
+		if result, err1 = response.Marshal(); err1 != nil {
+			return nil, fmt.Errorf("%s %s CNI request %+v failed to marshal result: %v",
+				request, request.Command, request, err)
+		}
+		if resultForLogging, err1 = response.MarshalForLogging(); err1 != nil {
+			klog.Errorf("%s %s CNI request %+v, %v", request, request.Command, request, err1)
+		}
+	}
+
 	klog.Infof("%s %s finished CNI request %+v, result %q, err %v",
-		request, request.Command, request, string(formatResponseForLogging(result, request)), err)
+		request, request.Command, request, string(resultForLogging), err)
 
 	if err != nil {
 		// Prefix errors with request info for easier failure debugging
@@ -273,35 +279,4 @@ func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient ku
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
-}
-
-// Filter out kubeAuth from response, since it might contain sensitive information.
-func formatResponseForLogging(response []byte, request *PodRequest) []byte {
-	var noAuthJSON []byte
-	var err error
-
-	if response == nil {
-		return nil
-	}
-	if len(response) == 0 {
-		return []byte{}
-	}
-
-	noAuth := struct {
-		Result    *current.Result
-		PodIFInfo *PodInterfaceInfo
-	}{}
-	if err = json.Unmarshal(response, &noAuth); err != nil {
-		klog.Errorf("Could not extract Response from %s %s CNI request %+v, : %v",
-			request, request.Command, request, err)
-		return nil
-	}
-
-	if noAuthJSON, err = json.Marshal(noAuth); err != nil {
-		klog.Errorf("Could not JSON-encode the extracted Response from %s %s "+
-			"CNI request %+v: %v", request, request.Command, request, err)
-		return nil
-	}
-
-	return noAuthJSON
 }
