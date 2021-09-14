@@ -265,6 +265,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var cmds []*goovn.OvnCommand
 	var addresses []string
 	var cmd *goovn.OvnCommand
+	var addCmd *goovn.OvnCommand
 	var releaseIPs bool
 	needsIP := true
 
@@ -291,11 +292,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	opts["requested-chassis"] = pod.Spec.NodeName
 
 	if lsp == nil {
-		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
+		addCmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
 		if err != nil {
 			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
 		}
-		cmds = append(cmds, cmd)
+		cmds = append(cmds, addCmd)
 		// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
 		// ovn-controller will claim the OVS interface only if external_ids:iface-id
 		// matches with the Port_Binding.logical_port and external_ids:iface-id-ver matches
@@ -313,7 +314,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
 	}
-	cmds = append(cmds, cmd)
+	if addCmd != nil {
+		addCmd.Operations[0].Row["options"] = cmd.Operations[0].Row["options"]
+	} else {
+		cmds = append(cmds, cmd)
+	}
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 
@@ -349,7 +354,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return fmt.Errorf("unable to create LSPSetDynamicAddresses command for port: %s", portName)
 		}
-		cmds = append(cmds, cmd)
+		if addCmd != nil {
+			addCmd.Operations[0].Row["dynamic_addresses"] = ""
+		} else {
+			cmds = append(cmds, cmd)
+		}
 
 		// ensure we have reserved the IPs in the annotation
 		if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
@@ -492,11 +501,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// LSP addresses in OVN are a single space-separated value
-	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
+	lspAddrs := strings.Join(addresses, " ")
+	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, lspAddrs)
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
 	}
-	cmds = append(cmds, cmd)
+	if addCmd != nil {
+		addCmd.Operations[0].Row["addresses"] = cmd.Operations[0].Row["addresses"]
+	} else {
+		cmds = append(cmds, cmd)
+	}
 
 	// add external ids
 	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
@@ -504,15 +518,26 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
 	}
-	cmds = append(cmds, cmd)
+	if addCmd != nil {
+		addCmd.Operations[0].Row["external_ids"] = cmd.Operations[0].Row["external_ids"]
+	} else {
+		cmds = append(cmds, cmd)
+	}
 
 	// CNI depends on the flows from port security, delay setting it until end
-	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
+	psAddrs := strings.Join(addresses, " ")
+	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, psAddrs)
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
-
-	cmds = append(cmds, cmd)
+	if addCmd != nil {
+		addCmd.Operations[0].Row["port_security"] = cmd.Operations[0].Row["port_security"]
+	} else {
+		cmds = append(cmds, cmd)
+	}
+	if addCmd != nil {
+		klog.Infof("###### [%s/%s] addCmd ops %+v", pod.Namespace, pod.Name, addCmd.Operations)
+	}
 
 	start1 = time.Now()
 	// execute all the commands together. If a single operation fails, all commands will roll back =>
