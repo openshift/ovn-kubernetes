@@ -216,7 +216,6 @@ type ovnAddressSet struct {
 	name     string
 	hashName string
 	uuid     string
-	ips      map[string]net.IP
 }
 
 type ovnAddressSets struct {
@@ -265,10 +264,6 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 	as := &ovnAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]net.IP),
-	}
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
 	}
 
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare",
@@ -294,7 +289,7 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 			"name=" + as.hashName,
 			"external-ids:name=" + as.name,
 		}
-		joinedIPs := joinIPs(as.allIPs())
+		joinedIPs := joinIPs(ips)
 		if len(joinedIPs) > 0 {
 			args = append(args, "addresses="+joinedIPs)
 		}
@@ -344,22 +339,26 @@ func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 }
 
 func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
+	var err error
 	if len(ips) == 0 {
 		return nil
 	}
 
-	as.Lock()
-	defer as.Unlock()
-
+	as.RLock()
+	defer as.RUnlock()
 	v4ips, v6ips := splitIPsByFamily(ips)
-	if as.ipv6 != nil {
-		if err := as.ipv6.addIPs(v6ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+	for _, ip := range ips {
+		switch {
+		case utilnet.IsIPv6(ip) && as.ipv6 != nil:
+			err = as.ipv6.addIPs(v6ips)
+		case !utilnet.IsIPv6(ip) && as.ipv4 != nil:
+			err = as.ipv4.addIPs(v4ips)
+		default:
+			err = fmt.Errorf("cluster is not configured for this type of ip address (%s)", ip)
 		}
-	}
-	if as.ipv4 != nil {
-		if err := as.ipv4.addIPs(v4ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+
+		if err != nil {
+			return err
 		}
 	}
 
@@ -370,19 +369,18 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-
-	as.Lock()
-	defer as.Unlock()
+	as.RLock()
+	defer as.RUnlock()
 
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
 		if err := as.ipv6.deleteIPs(v6ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+			return fmt.Errorf("failed to DeleteIPs to the v6 set: %w", err)
 		}
 	}
 	if as.ipv4 != nil {
 		if err := as.ipv4.deleteIPs(v4ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+			return fmt.Errorf("failed to DeleteIPs to the v4 set: %w", err)
 		}
 	}
 	return nil
@@ -407,7 +405,7 @@ func (as *ovnAddressSets) Destroy() error {
 	return nil
 }
 
-// setIP updates the given address set in OVN to be only the given IPs, disregarding
+// setIPs updates the given address set in OVN to be only the given IPs, disregarding
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 	var err error
@@ -423,29 +421,16 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 			asDetail(as), stderr, err)
 	}
 
-	as.ips = make(map[string]net.IP, len(ips))
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
-	}
 	return nil
 }
 
 // addIPs appends the set of IPs to the existing address_set.
 func (as *ovnAddressSet) addIPs(ips []net.IP) error {
-	// dedup
-	uniqIPs := make([]net.IP, 0, len(ips))
-	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; ok {
-			continue
-		}
-		uniqIPs = append(uniqIPs, ip)
-	}
-
-	if len(uniqIPs) == 0 {
+	if len(ips) == 0 {
 		return nil
 	}
 
-	ipStr := joinIPs(uniqIPs)
+	ipStr := joinIPs(ips)
 
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), ipStr)
 	_, stderr, err := util.RunOVNNbctl("add", "address_set", as.uuid, "addresses", ipStr)
@@ -454,28 +439,16 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 			ipStr, asDetail(as), stderr, err)
 	}
 
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
-	}
 	return nil
 }
 
 // deleteIPs removes selected IPs from the existing address_set
 func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
-	// dedup
-	uniqIPs := make([]net.IP, 0, len(ips))
-	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; !ok {
-			continue
-		}
-		uniqIPs = append(uniqIPs, ip)
-	}
-
-	if len(uniqIPs) == 0 {
+	if len(ips) == 0 {
 		return nil
 	}
 
-	ipStr := joinIPs(uniqIPs)
+	ipStr := joinIPs(ips)
 	klog.V(5).Infof("(%s) deleting IP %s from address set", asDetail(as), ipStr)
 
 	_, stderr, err := util.RunOVNNbctl("remove", "address_set", as.uuid, "addresses", ipStr)
@@ -484,9 +457,6 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
 			ipStr, asDetail(as), stderr, err)
 	}
 
-	for _, ip := range uniqIPs {
-		delete(as.ips, ip.String())
-	}
 	return nil
 }
 
@@ -497,7 +467,7 @@ func (as *ovnAddressSet) destroy() error {
 		return fmt.Errorf("failed to destroy address set %q, stderr: %q, (%v)",
 			asDetail(as), stderr, err)
 	}
-	as.ips = nil
+
 	return nil
 }
 
@@ -531,13 +501,4 @@ func joinIPs(ips []net.IP) string {
 	// so tests are predictable
 	sort.Strings(list)
 	return strings.Join(list, " ")
-}
-
-func (as *ovnAddressSet) allIPs() []net.IP {
-	// my kingdom for a ".values()" function
-	out := make([]net.IP, 0, len(as.ips))
-	for _, ip := range as.ips {
-		out = append(out, ip)
-	}
-	return out
 }
