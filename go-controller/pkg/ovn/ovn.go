@@ -20,6 +20,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -135,7 +136,7 @@ type Controller struct {
 	loadbalancerClusterCache map[kapi.Protocol]string
 
 	// A cache of all logical switches seen by the watcher and their subnets
-	lsManager *logicalSwitchManager
+	lsManager *lsm.LogicalSwitchManager
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -192,7 +193,7 @@ type Controller struct {
 
 	serviceLBLock sync.Mutex
 
-	joinSwIPManager *joinSwitchIPManager
+	joinSwIPManager *lsm.JoinSwitchIPManager
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -263,7 +264,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
 		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
 		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
-		lsManager:                 newLogicalSwitchManager(),
+		lsManager:                 lsm.NewLogicalSwitchManager(),
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
@@ -1054,7 +1055,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
-		if err := oc.joinSwIPManager.releaseJoinLRPIPs(node.Name); err != nil {
+		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
 			return err
 		}
 	} else if hostSubnets != nil {
