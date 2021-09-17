@@ -95,7 +95,7 @@ var maxArgs int
 
 func init() {
 	maxArgs = findMaxArgsUsable(defaultOSMaxArgs)
-	klog.Infof("Maximum command line arguments set to: %d", maxArgs)
+	klog.Infof("Flavio told me to do this... Maximum command line arguments set to: %d", maxArgs)
 }
 
 // findMaxArgsUsable finds the maximum amount of usable args on the system, which may be
