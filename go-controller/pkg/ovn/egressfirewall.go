@@ -43,6 +43,8 @@ type destination struct {
 	dnsName      string
 }
 
+// dummy change
+
 // cloneEgressFirewall shallow copies the egressfirewallapi.EgressFirewall object provided.
 // This concretely means that it create a new egressfirewallapi.EgressFirewall with the name and
 // namespace set, but without any rules specified.
