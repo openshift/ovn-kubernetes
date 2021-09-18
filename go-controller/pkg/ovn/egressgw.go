@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	utilnet "k8s.io/utils/net"
 
@@ -27,6 +28,15 @@ type gatewayInfo struct {
 	bfdEnabled bool
 }
 
+// Build cache of routes in OVN
+// map[podIP][]ovnRoute
+type ovnRoute struct {
+	nextHop     string
+	uuid        string
+	router      string
+	shouldExist bool
+}
+
 // addPodExternalGW handles detecting if a pod is serving as an external gateway for namespace(s) and adding routes
 // to all pods in that namespace
 func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
@@ -40,36 +50,10 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 	}
 
 	klog.Infof("External gateway pod: %s, detected for namespace(s) %s", pod.Name, podRoutingNamespaceAnno)
-	var foundGws []net.IP
 
-	if pod.Annotations[routingNetworkAnnotation] != "" {
-		var multusNetworks []nettypes.NetworkStatus
-		err := json.Unmarshal([]byte(pod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot]), &multusNetworks)
-		if err != nil {
-			return fmt.Errorf("unable to unmarshall annotation k8s.v1.cni.cncf.io/network-status on pod %s: %v", pod.Name, err)
-		}
-		for _, multusNetwork := range multusNetworks {
-			if multusNetwork.Name == pod.Annotations[routingNetworkAnnotation] {
-				for _, gwIP := range multusNetwork.IPs {
-					ip := net.ParseIP(gwIP)
-					if ip != nil {
-						foundGws = append(foundGws, ip)
-					}
-				}
-			}
-		}
-	} else if pod.Spec.HostNetwork {
-		for _, podIP := range pod.Status.PodIPs {
-			ip := net.ParseIP(podIP.IP)
-			if ip != nil {
-				foundGws = append(foundGws, ip)
-			}
-		}
-	} else {
-		klog.Errorf("Ignoring pod %s as an external gateway candidate. Invalid combination "+
-			"of host network: %t and routing-network annotation: %s", pod.Name, pod.Spec.HostNetwork,
-			pod.Annotations[routingNetworkAnnotation])
-		return nil
+	foundGws, err := getExGwPodIPs(pod)
+	if err != nil {
+		return err
 	}
 
 	// if we found any gateways then we need to update current pods routing in the relevant namespace
@@ -89,6 +73,15 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 
 // addPodExternalGWForNamespace handles adding routes to all pods in that namespace for a pod GW
 func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.Pod, egress gatewayInfo) error {
+	var gws string
+	for _, ip := range egress.gws {
+		if len(gws) != 0 {
+			gws += ","
+		}
+		gws += ip.String()
+	}
+	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
+		pod.Name, gws, namespace, egress.bfdEnabled)
 	nsInfo, err := oc.waitForNamespaceLocked(namespace)
 	if err != nil {
 		return err
@@ -206,7 +199,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 					// TODO (trozet): use the go bindings here and batch commands
 					// delete the ovn_cluster_router policy if the pod has no more exgws to revert back to normal
 					// default gw behavior
-					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
 						klog.Error(err)
 					}
 				}
@@ -231,7 +224,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 			}
 			mask := GetIPFullMask(podIP)
 			node := util.GetWorkerFromGatewayRouter(gr)
-			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
 				klog.Error(err)
 			}
 			_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
@@ -265,7 +258,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
 				node := util.GetWorkerFromGatewayRouter(gr)
-				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node, false); err != nil {
 					klog.Error(err)
 				}
 				_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
@@ -432,8 +425,9 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 
 // delHybridRoutePolicyForPod handles deleting a higher priority allow policy to allow traffic to be routed normally
 // by ecmp routes
-func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
-	if config.Gateway.Mode == config.GatewayModeLocal {
+// force is used to indicate to force remove LRPs, useful for when going from LGW->SGW
+func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string, force bool) error {
+	if config.Gateway.Mode == config.GatewayModeLocal || force {
 		// delete allow policy to bypass lr-policy in GR
 		var l3Prefix string
 		if utilnet.IsIPv6(podIP) {
@@ -504,4 +498,247 @@ func cleanUpBFDEntry(gatewayIP, gatewayRouter string) {
 				uuid, stderr, err)
 		}
 	}
+}
+
+func (oc *Controller) cleanExGwECMPRoutes() {
+	start := time.Now()
+	defer func() {
+		klog.Infof("Syncing exgw routes took %v", time.Since(start))
+	}()
+
+	// Get all ECMP routes in OVN and build cache
+	ovnRouteCache := buildOVNECMPCache()
+
+	if len(ovnRouteCache) == 0 {
+		// nothing in OVN, so no reason to search for stale routes
+		return
+	}
+
+	// Build cache of expected routes in the cluster
+	// map[podIP][]nextHops
+	clusterRouteCache := make(map[string][]string)
+
+	// Find all pods serving as exgw
+	oc.buildClusterECMPCacheFromPods(clusterRouteCache)
+
+	// Get all namespaces with exgw routes specified
+	oc.buildClusterECMPCacheFromNamespaces(clusterRouteCache)
+
+	// compare caches and see if OVN routes are stale
+	for podIP, ovnRoutes := range ovnRouteCache {
+		// pod IP does not exist in the cluster
+		// remove route and any hybrid policy
+		if _, ok := clusterRouteCache[podIP]; !ok {
+			continue
+		}
+
+		// podIP exists, check if route matches
+		expectedNexthops := clusterRouteCache[podIP]
+		for _, ovnRoute := range ovnRoutes {
+			for _, clusterNexthop := range expectedNexthops {
+				if ovnRoute.nextHop == clusterNexthop {
+					ovnRoute.shouldExist = true
+				}
+			}
+		}
+	}
+
+	klog.Infof("OVN ECMP route cache is: %+v", ovnRouteCache)
+	klog.Infof("Cluster ECMP route cache is: %+v", clusterRouteCache)
+
+	// iterate through ovn routes and remove any stale entries
+	for podIP, ovnRoutes := range ovnRouteCache {
+		podHasAnyECMPRoutes := false
+		for _, ovnRoute := range ovnRoutes {
+			if !ovnRoute.shouldExist {
+				klog.Infof("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
+					podIP, ovnRoute.nextHop, ovnRoute.router)
+				_, stderr, err := util.RunOVNNbctl("--if-exists", "remove", "Logical_Router",
+					strings.TrimSuffix(ovnRoute.router, "\n"), "static_routes", ovnRoute.uuid)
+				if err != nil {
+					klog.Errorf("Failed to destroy Logical_Router_Static_Route %s, stderr: %q, (%v)",
+						ovnRoute.uuid, stderr, err)
+				}
+
+				cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router)
+
+			} else {
+				podHasAnyECMPRoutes = true
+			}
+		}
+
+		// if pod had no ECMP routes we need to make sure we remove any logical route policy for local gw mode
+		// for shared gateway mode, these LRPs shouldn't exist, so delete them all
+		if !podHasAnyECMPRoutes || config.Gateway.Mode == config.GatewayModeShared {
+			for _, ovnRoute := range ovnRoutes {
+				gr := strings.TrimPrefix(ovnRoute.router, types.GWRouterPrefix)
+				if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), gr, true); err != nil {
+					klog.Errorf("Error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
+						podIP, gr, err)
+				}
+			}
+		}
+	}
+}
+
+func getExGwPodIPs(gatewayPod *kapi.Pod) ([]net.IP, error) {
+	var foundGws []net.IP
+	if gatewayPod.Annotations[routingNetworkAnnotation] != "" {
+		var multusNetworks []nettypes.NetworkStatus
+		err := json.Unmarshal([]byte(gatewayPod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot]), &multusNetworks)
+		if err != nil {
+			return nil, fmt.Errorf("unable to unmarshall annotation k8s.v1.cni.cncf.io/network-status on pod %s: %v",
+				gatewayPod.Name, err)
+		}
+		for _, multusNetwork := range multusNetworks {
+			if multusNetwork.Name == gatewayPod.Annotations[routingNetworkAnnotation] {
+				for _, gwIP := range multusNetwork.IPs {
+					ip := net.ParseIP(gwIP)
+					if ip != nil {
+						foundGws = append(foundGws, ip)
+					}
+				}
+			}
+		}
+	} else if gatewayPod.Spec.HostNetwork {
+		for _, podIP := range gatewayPod.Status.PodIPs {
+			ip := net.ParseIP(podIP.IP)
+			if ip != nil {
+				foundGws = append(foundGws, ip)
+			}
+		}
+	} else {
+		klog.Errorf("Ignoring pod %s as an external gateway candidate. Invalid combination "+
+			"of host network: %t and routing-network annotation: %s", gatewayPod.Name, gatewayPod.Spec.HostNetwork,
+			gatewayPod.Annotations[routingNetworkAnnotation])
+		return nil, nil
+	}
+	return foundGws, nil
+}
+
+func (oc *Controller) buildClusterECMPCacheFromNamespaces(clusterRouteCache map[string][]string) {
+	namespaces, err := oc.watchFactory.GetNamespaces()
+	if err != nil {
+		klog.Errorf("Error getting all namespaces for exgw ecmp route sync: %v", err)
+		return
+	}
+	for _, namespace := range namespaces {
+		if _, ok := namespace.Annotations[routingExternalGWsAnnotation]; !ok {
+			continue
+		}
+		// namespace has exgw routes, build cache
+		gwIPs, err := parseRoutingExternalGWAnnotation(namespace.Annotations[routingExternalGWsAnnotation])
+		if err != nil {
+			klog.Errorf("Unable to clean ExGw ECMP routes for namespace: %s, %v", namespace.Name, err)
+			continue
+		}
+		// get all pods in the namespace
+		nsPods, err := oc.watchFactory.GetPods(namespace.Name)
+		if err != nil {
+			klog.Errorf("Unable to clean ExGw ECMP routes for namespace: %s, %v",
+				namespace, err)
+			continue
+		}
+		for _, gwIP := range gwIPs {
+			for _, nsPod := range nsPods {
+				for _, podIP := range nsPod.Status.PodIPs {
+					if utilnet.IsIPv6(gwIP) != utilnet.IsIPv6String(podIP.IP) {
+						continue
+					}
+					if val, ok := clusterRouteCache[podIP.IP]; ok {
+						// add gwIP to cache only if buildClusterECMPCacheFromPods hasn't already added it
+						gwIPexists := false
+						for _, existingGwIP := range val {
+							if existingGwIP == gwIP.String() {
+								gwIPexists = true
+								break
+							}
+						}
+						if !gwIPexists {
+							clusterRouteCache[podIP.IP] = append(clusterRouteCache[podIP.IP], gwIP.String())
+						}
+					} else {
+						clusterRouteCache[podIP.IP] = []string{gwIP.String()}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string][]string) {
+	// Get all Pods serving as exgws
+	pods, err := oc.watchFactory.GetAllPods()
+	if err != nil {
+		klog.Error("Error getting all pods for exgw ecmp route sync: %v", err)
+		return
+	}
+	for _, pod := range pods {
+		podRoutingNamespaceAnno := pod.Annotations[routingNamespaceAnnotation]
+		if podRoutingNamespaceAnno == "" {
+			continue
+		}
+		// get all pods in the namespace
+		nsPods, err := oc.watchFactory.GetPods(podRoutingNamespaceAnno)
+		if err != nil {
+			klog.Errorf("Unable to clean ExGw ECMP routes for exgw: %s, serving namespace: %s, %v",
+				pod.Name, podRoutingNamespaceAnno, err)
+			continue
+		}
+
+		// pod is serving as exgw, build cache
+		gwIPs, err := getExGwPodIPs(pod)
+		if err != nil {
+			klog.Errorf("Error getting exgw IPs for pod: %s, error: %v", pod.Name, err)
+			continue
+		}
+		for _, gwIP := range gwIPs {
+			for _, nsPod := range nsPods {
+				for _, podIP := range nsPod.Status.PodIPs {
+					if utilnet.IsIPv6(gwIP) != utilnet.IsIPv6String(podIP.IP) {
+						continue
+					}
+					clusterRouteCache[podIP.IP] = append(clusterRouteCache[podIP.IP], gwIP.String())
+				}
+			}
+		}
+	}
+}
+
+func buildOVNECMPCache() map[string][]*ovnRoute {
+	ovnRouteCache := make(map[string][]*ovnRoute)
+	out, stderr, err := util.RunOVNNbctl(
+		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid,ip_prefix,nexthop", "find", "Logical_Router_Static_Route", "options={ecmp_symmetric_reply=\"true\"}")
+	if err != nil {
+		klog.Errorf("CleanECMPRoutes: failed to list ecmp routes %v %s", err, stderr)
+		return nil
+	}
+	if strings.TrimSpace(out) == "" {
+		klog.Infof("Did not find ecmp routes to clean")
+		return nil
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		values := strings.Split(line, ",")
+		uuid := values[0]
+		podIP := values[1]
+		nexthop := values[2]
+		gr, stderr, err := util.RunOVNNbctl(
+			"--format=csv", "--data=bare", "--no-heading", "--columns=name", "find", "Logical_Router", fmt.Sprintf("static_routes{>=}[%s]", uuid))
+		if err != nil || gr == "" {
+			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s", uuid, err, stderr)
+			continue
+		}
+		route := &ovnRoute{
+			nextHop: nexthop,
+			uuid:    uuid,
+			router:  gr,
+		}
+		if _, ok := ovnRouteCache[podIP]; !ok {
+			ovnRouteCache[podIP] = []*ovnRoute{route}
+		} else {
+			ovnRouteCache[podIP] = append(ovnRouteCache[podIP], route)
+		}
+	}
+	return ovnRouteCache
 }
