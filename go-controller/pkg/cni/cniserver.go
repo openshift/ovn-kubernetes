@@ -179,7 +179,7 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 
 	req.CNIConf = conf
 	req.timestamp = time.Now()
-	req.ctx, req.cancel = context.WithTimeout(context.Background(), time.Minute)
+	req.ctx, req.cancel = context.WithTimeout(context.Background(), 5 * time.Minute)
 	return req, nil
 }
 
