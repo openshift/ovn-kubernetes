@@ -208,12 +208,12 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 
 func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
-	nsInfo, err := oc.waitForNamespaceLocked(egressFirewall.Namespace)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(egressFirewall.Namespace, false)
 	if err != nil {
-		return fmt.Errorf("failed to wait for namespace %s event (%v)",
+		return fmt.Errorf("failed to ensure namespace locked for egress firewall: %s, error: %v",
 			egressFirewall.Namespace, err)
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 
 	if nsInfo.egressFirewall != nil {
 		return fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewall",
@@ -269,12 +269,13 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 
 func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) error {
 	// block all external traffic in this namespace
-	nsInfo, err := oc.waitForNamespaceLocked(newEgressFirewall.Namespace)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(newEgressFirewall.Namespace, true)
 	if err != nil {
-		return fmt.Errorf("cannot update egressfirewall in %s:%v", newEgressFirewall.Namespace, err)
+		return fmt.Errorf("cannot update egressfirewall %s, failed to ensure namespace: %v",
+			newEgressFirewall.Namespace, err)
 	}
 	addressSet := nsInfo.addressSet
-	nsInfo.Unlock()
+	nsUnlock()
 	priority, err := strconv.Atoi(types.EgressFirewallStartPriority)
 	if err != nil {
 		return fmt.Errorf("cannot update egressfirewall in %s:%v", newEgressFirewall.Namespace, err)
@@ -309,7 +310,7 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
 	deleteDNS := false
 
-	nsInfo := oc.getNamespaceLocked(egressFirewall.Namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(egressFirewall.Namespace, false)
 	if nsInfo != nil {
 		// clear it so an error does not prevent future egressFirewalls
 		for _, rule := range nsInfo.egressFirewall.egressRules {
@@ -319,7 +320,7 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 			}
 		}
 		nsInfo.egressFirewall = nil
-		nsInfo.Unlock()
+		nsUnlock()
 	}
 	if deleteDNS {
 		oc.egressFirewallDNS.Delete(egressFirewall.Namespace)
