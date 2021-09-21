@@ -3,7 +3,7 @@ package rpc2
 import "log"
 
 // DebugLog controls the printing of internal and I/O errors.
-var DebugLog = true
+var DebugLog = false
 
 func debugln(v ...interface{}) {
 	if DebugLog {
