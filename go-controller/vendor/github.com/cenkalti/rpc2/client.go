@@ -206,7 +206,7 @@ func (c *Client) readResponse(resp *Response) error {
 		// to read error body, but there's no one to give it to.
 		err = c.codec.ReadResponseBody(nil)
 		if err != nil {
-			err = errors.New("reading error body: " + err.Error())
+			err = errors.New("nil call reading error body: " + err.Error())
 		}
 	case resp.Error != "":
 		// We've got an error response. Give this to the request;
@@ -215,13 +215,13 @@ func (c *Client) readResponse(resp *Response) error {
 		call.Error = ServerError(resp.Error)
 		err = c.codec.ReadResponseBody(nil)
 		if err != nil {
-			err = errors.New("reading error body: " + err.Error())
+			err = errors.New("resp Error reading error body: " + err.Error())
 		}
 		call.done()
 	default:
 		err = c.codec.ReadResponseBody(call.Reply)
 		if err != nil {
-			call.Error = errors.New("reading body " + err.Error())
+			call.Error = errors.New("default reading body " + err.Error())
 		}
 		call.done()
 	}
