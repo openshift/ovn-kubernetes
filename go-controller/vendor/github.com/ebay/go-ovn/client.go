@@ -299,6 +299,7 @@ type ovndb struct {
 	ticker       *time.Ticker
 	currentTxn   string
 	leaderOnly   bool
+	timeout      time.Duration
 
 	connecting      bool
 	deferredUpdates []*deferredUpdate
@@ -356,7 +357,7 @@ func (c *ovndb) connect() error {
 	for i := 0; i < len(c.endpoints); i++ {
 		addr := c.endpoints[c.curEndpoint]
 		klog.Infof("[%s %s] connecting...", addr, c.db)
-		c.client, err = libovsdb.Connect(addr, c.tlsConfig)
+		c.client, err = libovsdb.Connect(c.timeout, addr, c.tlsConfig)
 		if err == nil {
 			klog.Infof("[%s %s] connected; reading database", addr, c.db)
 			if err = c.connectEndpoint(); err == nil {
@@ -462,6 +463,10 @@ func NewClient(cfg *Config) (Client, error) {
 		currentTxn:      ZERO_TRANSACTION,
 		leaderOnly:      cfg.LeaderOnly,
 		deferredUpdates: make([]*deferredUpdate, 0, 0),
+		timeout:         cfg.Timeout,
+	}
+	if cfg.Timeout == 0 {
+		cfg.Timeout = time.Minute
 	}
 
 	err := ovndb.connect()
