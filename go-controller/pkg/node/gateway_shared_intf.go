@@ -910,7 +910,8 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, nodeAnnotator kube.Annotator, cfg *managementPortConfig, watchFactory factory.NodeWatchFactory) (*gateway, error) {
+func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+	nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig, watchFactory factory.NodeWatchFactory) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
@@ -975,7 +976,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			return err
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeAnnotator, cfg)
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg)
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")
