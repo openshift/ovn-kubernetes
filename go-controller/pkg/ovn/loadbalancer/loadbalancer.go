@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -73,10 +74,12 @@ func EnsureLBs(externalIDs map[string]string, LBs []LB) error {
 			len(uuidsToDelete), externalIDs, err)
 	}
 
+	start := time.Now()
 	_, _, err = txn.Commit()
 	if err != nil {
 		return fmt.Errorf("failed to commit load balancer changes for %#v: %w", externalIDs, err)
 	}
+	klog.Infof("####### [%v] LB updates took %v", externalIDs, time.Since(start))
 	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(uuidsToDelete), externalIDs)
 
 	lbCache.update(LBs, uuidsToDelete)
@@ -94,12 +97,14 @@ func ensureLB(txn *util.NBTxn, lbCache *LBCache, lb *LB, existing *CachedLB) (st
 		}
 		cmds = append(cmds, lbToColumns(lb)...)
 		// note: load-balancer creation is not in the transaction
+		start := time.Now()
 		stdout, _, err := util.RunOVNNbctl(cmds...)
 		if err != nil {
 			return "", fmt.Errorf("failed to create load_balancer %s: %w", lb.Name, err)
 		}
 		uuid = stdout
 		lb.UUID = uuid
+		klog.Infof("####### [%s %s] LB creation took %v", lb.UUID, lb.Name, time.Since(start))
 
 		// Since this short-cut the transation, immediately add it to the cache.
 		lbCache.addNewLB(lb)
