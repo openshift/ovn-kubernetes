@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/ebay/libovsdb"
 
@@ -503,6 +504,15 @@ func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *lib
 
 func (odbi *ovndb) populateCache2(dbName string, updates libovsdb.TableUpdates2, signal bool) {
 	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
+
+	start := time.Now()
+	defer func() {
+		tables := make([]string, 0, len(updates.Updates))
+		for table := range updates.Updates {
+			tables = append(tables, table)
+		}
+		klog.Infof("###### populateCache2 %v took %v", tables, time.Since(start))
+	}()
 
 	for table := range *tableCols {
 		tableUpdate, ok := updates.Updates[table]
