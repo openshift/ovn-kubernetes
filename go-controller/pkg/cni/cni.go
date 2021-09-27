@@ -213,6 +213,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([
 func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
 	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo)
 	if err != nil {
+		pr.deletePorts()
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}
 
