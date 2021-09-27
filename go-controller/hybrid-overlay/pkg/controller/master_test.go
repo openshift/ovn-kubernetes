@@ -543,7 +543,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs)
+			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs.Name)
 			nsAnnotator.Set(hotypes.HybridOverlayVTEP, nsVTEPUpdated)
 			nsAnnotator.Set(hotypes.HybridOverlayExternalGw, nsExGwUpdated)
 			err = nsAnnotator.Run()
