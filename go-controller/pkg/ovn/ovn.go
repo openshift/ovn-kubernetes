@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -96,10 +97,6 @@ type namespaceInfo struct {
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
 	routingExternalGWs gatewayInfo
-	// podExternalRoutes is a cache keeping the LR routes added to the GRs when
-	// the k8s.ovn.org/routing-external-gws annotation is used. The first map key
-	// is the podIP, the second the GW and the third the GR
-	podExternalRoutes map[string]map[string]string
 
 	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
 	// exgw IPs
@@ -148,6 +145,9 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
+	exGWCacheMutex  sync.RWMutex
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
@@ -269,6 +269,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
+		externalGWCache:           make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:            sync.RWMutex{},
 		addressSetFactory:         addressSetFactory,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
