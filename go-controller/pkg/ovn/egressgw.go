@@ -94,11 +94,15 @@ func (oc *Controller) getRouteInfosForGateway(gatewayIP, namespace string) []*ex
 			continue
 		}
 
+		routeFound := false
 		for _, route := range routeInfo.routes {
 			if _, ok := route[gatewayIP]; ok {
-				routeInfo.Lock()
 				routes = append(routes, routeInfo)
+				routeFound = true
 			}
+		}
+		if routeFound {
+			routeInfo.Lock()
 		}
 	}
 
