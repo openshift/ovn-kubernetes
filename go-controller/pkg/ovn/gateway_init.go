@@ -17,7 +17,8 @@ import (
 
 // gatewayInit creates a gateway router for the local chassis.
 func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet) error {
+	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet,
+	clusterLBGroupUUID string) error {
 
 	gwLRPIPs := make([]net.IP, 0)
 	for _, gwLRPIfAddr := range gwLRPIfAddrs {
@@ -38,6 +39,15 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	if err != nil {
 		return fmt.Errorf("failed to create logical router %v, stdout: %q, "+
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	}
+
+	if clusterLBGroupUUID != "" && l3GatewayConfig.Mode == config.GatewayModeShared {
+		stdout, stderr, err := util.RunOVNNbctl("--", "add", "logical_router",
+			gatewayRouter, "load_balancer_group", clusterLBGroupUUID)
+		if err != nil {
+			return fmt.Errorf("failed to add load_balancer_group to logical router %v, stdout: %q, "+
+				"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+		}
 	}
 
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + gatewayRouter
