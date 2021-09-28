@@ -351,25 +351,18 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
-	oc.clusterLBGroupUUID, _, err = util.RunOVNNbctl("get", "Load_Balancer_Group", "clusterLBGroup", "_uuid")
-	// if err != nil {
-	// 	// TODO: SOMETHING LIKE THIS SHOULD ACTUALLY BE USED TO DETECT THAT LB GROUPS ARE NOT SUPPORTED.
-	// 	klog.Errorf("Error getting UUID for clusterLBGroup "+
-	// 		"stdout: %q, stderr: %q (%v)", oc.clusterLBGroupUUID, stderr, err)
-	// 	panic(err)
-	// }
-	if err != nil || oc.clusterLBGroupUUID == "" {
-		stdout, stderr, err := util.RunOVNNbctl("create", "Load_Balancer_Group", "name=clusterLBGroup")
-		if err != nil {
-			klog.Errorf("Error creating clusterLBGroup "+
-				"stdout: %q, stderr: %q (%v)", stdout, stderr, err)
-			panic(err)
-		}
+	if _, stderr, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
+		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups. " +
+			"Disabling Load Balancer Groups")
+		oc.clusterLBGroupUUID = ""
+	} else {
 		oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("get", "Load_Balancer_Group", "clusterLBGroup", "_uuid")
-		if err != nil {
-			klog.Errorf("Error getting UUID for clusterLBGroup "+
-				"stdout: %q, stderr: %q (%v)", oc.clusterLBGroupUUID, stderr, err)
-			panic(err)
+		if err != nil || oc.clusterLBGroupUUID == "" {
+			oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("create", "Load_Balancer_Group", "name=clusterLBGroup")
+			if err != nil {
+				klog.Errorf("Error creating clusterLBGroup "+
+					"stdout: %q, stderr: %q (%v)", oc.clusterLBGroupUUID, stderr, err)
+			}
 		}
 	}
 
