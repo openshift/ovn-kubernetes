@@ -281,7 +281,7 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
 func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, true)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
