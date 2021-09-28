@@ -293,7 +293,7 @@ func (c *Controller) syncService(key string) error {
 
 	// Convert the LB configs in to load-balancer objects
 	nodeInfos := c.nodeTracker.allNodes()
-	clusterLBs := buildClusterLBs(service, clusterConfigs, c.clusterLBGroupUUID)
+	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos, c.clusterLBGroupUUID)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
 	klog.V(3).Infof("Service %s has %d cluster-wide and %d per-node configs, making %d and %d load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(clusterLBs), len(perNodeLBs))
