@@ -149,10 +149,30 @@ func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 // It takes a list of (proto:[vips]:port -> [endpoints]) configs and re-aggregates
 // them to a list of (proto:[vip:port -> [endpoint:port]])
 // This load balancer is attached to all node switches. In shared-GW mode, it is also on all routers
-func buildClusterLBs(service *v1.Service, configs []lbConfig, clusterLBGroup string) []ovnlb.LB {
-	switches := make([]string, 0, 0)
-	routers := make([]string, 0, 0)
-	groups := []string{clusterLBGroup}
+func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, clusterLBGroup string) []ovnlb.LB {
+	var nodeSwitches []string
+	var nodeRouters []string
+	var groups []string
+	if clusterLBGroup != "" {
+		nodeSwitches = make([]string, 0, 0)
+		nodeRouters = make([]string, 0, 0)
+		groups = []string{clusterLBGroup}
+	} else {
+		nodeSwitches = make([]string, 0, 0)
+		nodeRouters = make([]string, 0, 0)
+		groups = []string{}
+
+		for _, node := range nodeInfos {
+			nodeSwitches = append(nodeSwitches, node.switchName)
+			// For shared gateway, add to the node's GWR as well.
+			// The node may not have a gateway router - it might be waiting initialization, or
+			// might have disabled GWR creation via the k8s.ovn.org/l3-gateway-config annotation
+			if globalconfig.Gateway.Mode == globalconfig.GatewayModeShared && node.gatewayRouterName != "" {
+				nodeRouters = append(nodeRouters, node.gatewayRouterName)
+			}
+		}
+	}
+
 	cbp := configsByProto(configs)
 
 	out := []ovnlb.LB{}
@@ -167,8 +187,8 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, clusterLBGroup str
 			ExternalIDs: util.ExternalIDsForObject(service),
 			Opts:        lbOpts(service),
 
-			Switches: switches,
-			Routers:  routers,
+			Switches: nodeSwitches,
+			Routers:  nodeRouters,
 			Groups:   groups,
 		}
 
