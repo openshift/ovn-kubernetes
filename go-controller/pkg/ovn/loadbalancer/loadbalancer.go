@@ -119,13 +119,16 @@ func ensureLB(txn *util.NBTxn, lbCache *LBCache, lb *LB, existing *CachedLB) (st
 	// List existing routers and switches, to see if there are any for which we should remove
 	existingRouters := sets.String{}
 	existingSwitches := sets.String{}
+	existingGroups := sets.String{}
 	if existing != nil {
 		existingRouters = existing.Routers
 		existingSwitches = existing.Switches
+		existingGroups = existing.Groups
 	}
 
 	wantRouters := sets.NewString(lb.Routers...)
 	wantSwitches := sets.NewString(lb.Switches...)
+	wantGroups := sets.NewString(lb.Groups...)
 
 	// add missing switches
 	for _, sw := range wantSwitches.Difference(existingSwitches).List() {
@@ -155,6 +158,21 @@ func ensureLB(txn *util.NBTxn, lbCache *LBCache, lb *LB, existing *CachedLB) (st
 		if err != nil {
 
 			return uuid, fmt.Errorf("failed to synchronize LB %s switches / routers: %w", lb.Name, err)
+		}
+	}
+
+	// add missing groups
+	for _, grp := range wantGroups.Difference(existingGroups).List() {
+		_, _, err := txn.AddOrCommit([]string{"add", "Load_Balancer_Group", grp, "load_balancer", uuid})
+		if err != nil {
+			return uuid, fmt.Errorf("failed to synchronize LB %s groups (add): %w", lb.Name, err)
+		}
+	}
+	// remove old groups
+	for _, grp := range existingGroups.Difference(wantGroups).List() {
+		_, _, err := txn.AddOrCommit([]string{"remove", "Load_Balancer_Group", grp, "load_balancer", uuid})
+		if err != nil {
+			return uuid, fmt.Errorf("failed to synchronize LB %s groups (remove): %w", lb.Name, err)
 		}
 	}
 
@@ -224,7 +242,7 @@ func (r *LBRule) nbctlString() string {
 }
 
 // DeleteLBs deletes all load balancer uuids supplied
-// Note: this also automatically removes them from the switches and the routers :-)
+// Note: this also automatically removes them from the switches, routers and the groups :-)
 func DeleteLBs(txn *util.NBTxn, uuids []string) error {
 	if len(uuids) == 0 {
 		return nil
