@@ -139,16 +139,22 @@ type Controller struct {
 	// if a service's config hasn't changed
 	alreadyApplied     map[string][]ovnlb.LB
 	alreadyAppliedLock sync.Mutex
+
+	//TODO:
+	clusterLBGroupUUID string
 }
 
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
-func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool, clusterPortGroupUUID string) error {
+func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool, clusterPortGroupUUID, clusterLBGroupUUID string) error {
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
+
+	//TODO: comment
+	c.clusterLBGroupUUID = clusterLBGroupUUID
 
 	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")
@@ -287,7 +293,7 @@ func (c *Controller) syncService(key string) error {
 
 	// Convert the LB configs in to load-balancer objects
 	nodeInfos := c.nodeTracker.allNodes()
-	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos)
+	clusterLBs := buildClusterLBs(service, clusterConfigs, c.clusterLBGroupUUID)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
 	klog.V(3).Infof("Service %s has %d cluster-wide and %d per-node configs, making %d and %d load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(clusterLBs), len(perNodeLBs))

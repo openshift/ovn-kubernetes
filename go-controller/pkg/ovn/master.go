@@ -354,6 +354,28 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
+	oc.clusterLBGroupUUID, _, err = util.RunOVNNbctl("get", "Load_Balancer_Group", "clusterLBGroup", "_uuid")
+	// if err != nil {
+	// 	// TODO: SOMETHING LIKE THIS SHOULD ACTUALLY BE USED TO DETECT THAT LB GROUPS ARE NOT SUPPORTED.
+	// 	klog.Errorf("Error getting UUID for clusterLBGroup "+
+	// 		"stdout: %q, stderr: %q (%v)", oc.clusterLBGroupUUID, stderr, err)
+	// 	panic(err)
+	// }
+	if err != nil || oc.clusterLBGroupUUID == "" {
+		stdout, stderr, err := util.RunOVNNbctl("create", "Load_Balancer_Group", "name=clusterLBGroup")
+		if err != nil {
+			klog.Errorf("Error creating clusterLBGroup "+
+				"stdout: %q, stderr: %q (%v)", stdout, stderr, err)
+			panic(err)
+		}
+		oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("get", "Load_Balancer_Group", "clusterLBGroup", "_uuid")
+		if err != nil {
+			klog.Errorf("Error getting UUID for clusterLBGroup "+
+				"stdout: %q, stderr: %q (%v)", oc.clusterLBGroupUUID, stderr, err)
+			panic(err)
+		}
+	}
+
 	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -600,7 +622,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	drLRPIPs, _ := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
-	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
+	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs, oc.clusterLBGroupUUID)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -738,6 +760,13 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				"other-config:exclude_ips="+excludeIPs,
 			)
 		}
+	}
+
+	if oc.clusterLBGroupUUID != "" {
+		lsArgs = append(lsArgs,
+			"--", "add", "logical_switch", nodeName,
+			"load_balancer_group", oc.clusterLBGroupUUID,
+		)
 	}
 
 	// Create a logical switch and set its subnet.
