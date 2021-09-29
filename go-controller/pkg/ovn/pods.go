@@ -84,7 +84,9 @@ func (oc *Controller) syncPods(pods []interface{}) {
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
+	start := time.Now()
 	oc.deletePodExternalGW(pod)
+	deleteExGwTime := time.Since(start)
 	if pod.Spec.HostNetwork {
 		return
 	}
@@ -118,26 +120,37 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
 
+	start1 := time.Now()
 	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
 		klog.Errorf(err.Error())
 	}
+	deletePodFromNSTime := time.Since(start1)
 
+	start1 = time.Now()
 	err = util.OvnNBLSPDel(oc.ovnNBClient, logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
-
+	deleteLSPTime := time.Since(start1)
 	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
 		klog.Errorf(err.Error())
 	}
 
+	start1 = time.Now()
 	if config.Gateway.DisableSNATMultipleGWs {
 		oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
 	}
+	deleteSNATTime := time.Since(start1)
 	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+	start1 = time.Now()
 	oc.deleteGWRoutesForPod(podNsName, portInfo.ips)
+	deleteGWRoutesTime := time.Since(start1)
 
 	oc.logicalPortCache.remove(logicalPort)
+
+	klog.Infof("TROZET: deleteLogicalPort for %s took %v, deleteExGWTime: %v, deletePodFromNSTime: %v, deleteLSPTime: %v," +
+		"deleteSNATTime: %v, deleteGWRoutesTime: %v", podNsName, time.Since(start), deleteExGwTime, deletePodFromNSTime, deleteLSPTime,
+		deleteSNATTime, deleteGWRoutesTime)
 }
 
 func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
