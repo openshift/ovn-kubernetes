@@ -324,10 +324,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
 		klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-		if _, err = isOVNControllerReady(); err != nil {
-			return err
-		}
-
 		nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
 		waiter := newStartupWaiter()
 
