@@ -381,7 +381,9 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 
 // deleteGwRoutesForPod handles deleting all routes to gateways for a pod IP on a specific GR
 func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets []*net.IPNet) {
+	start := time.Now()
 	routeInfo := oc.deleteRouteInfoLocked(name)
+	klog.Infof("routeInfoLocked for pod %s, took: %v", name, time.Since(start))
 	if routeInfo == nil {
 		return
 	}
