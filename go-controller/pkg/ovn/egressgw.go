@@ -73,8 +73,8 @@ func (oc *Controller) ensureRouteInfoLocked(podName ktypes.NamespacedName, readO
 
 	if routeInfoExisted {
 		// Check that the namespace wasn't deleted while we were waiting for the lock
-		oc.egressGWCacheMutex.Lock()
-		defer oc.egressGWCacheMutex.Unlock()
+		oc.egressGWCacheMutex.RLock()
+		defer oc.egressGWCacheMutex.RUnlock()
 		if routeInfo != oc.egressGWCache[podName] {
 			unlockFunc()
 			return nil, nil, fmt.Errorf("pod %s, was removed during ensure route info", podName)
