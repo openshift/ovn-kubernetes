@@ -253,9 +253,11 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 					routeUnlock()
 					return fmt.Errorf("unable to add src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 				}
-				if err := oc.addHybridRoutePolicyForPod(net.ParseIP(podIP.IP), pod.Spec.NodeName); err != nil {
-					routeUnlock()
-					return err
+				if len(routeInfo.routes[podIP.IP]) == 0 {
+					if err := oc.addHybridRoutePolicyForPod(net.ParseIP(podIP.IP), pod.Spec.NodeName); err != nil {
+						routeUnlock()
+						return err
+					}
 				}
 				if routeInfo.routes[podIP.IP] == nil {
 					routeInfo.routes[podIP.IP] = map[string]string{gw.String(): gr}
@@ -356,15 +358,18 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 				}
 				mask := GetIPFullMask(podIP)
 				node := strings.TrimPrefix(gr, "GR_")
-				if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
-					klog.Error(err)
-				}
 				_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
 					"lr-route-del", gr, podIP+mask, gw)
 				if err != nil {
 					klog.Errorf("Unable to delete src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 				} else {
-					delete(routeInfo.routes, podIP)
+					delete(routeInfo.routes[podIP], gw)
+				}
+
+				if entry := routeInfo.routes[podIP]; len(entry) == 0 {
+					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
+						klog.Error(err)
+					}
 				}
 
 				cleanUpBFDEntry(gw, gr)
@@ -392,15 +397,17 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
 				node := strings.TrimPrefix(gr, "GR_")
-				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node, false); err != nil {
-					klog.Error(err)
-				}
 				_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
 					"lr-route-del", gr, pod+mask, gw)
 				if err != nil {
 					klog.Errorf("Unable to delete external gw ecmp route to GR router, stderr:%q, err:%v", stderr, err)
 				} else {
-					delete(routeInfo.routes, pod)
+					delete(routeInfo.routes[pod], gw)
+				}
+				if entry := routeInfo.routes[pod]; len(entry) == 0 {
+					if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node, false); err != nil {
+						klog.Error(err)
+					}
 				}
 				cleanUpBFDEntry(gw, gr)
 			}
@@ -443,8 +450,10 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 					if err != nil {
 						return fmt.Errorf("unable to add external gwStr src-ip route to GR router, stderr:%q, err:%gw", stderr, err)
 					}
-					if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
-						return err
+					if len(routeInfo.routes[podIP]) == 0 {
+						if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+							return err
+						}
 					}
 					if routeInfo.routes[podIP] == nil {
 						routeInfo.routes[podIP] = make(map[string]string)
