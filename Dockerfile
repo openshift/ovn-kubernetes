@@ -36,8 +36,8 @@ ARG ovsver=2.16.0-6.el8fdp
 ARG ovnver=21.09.0-18.el8fdp
 
 COPY openvswitch2.16-2.16.0-13.1.el8fdp.x86_64.rpm openvswitch2.16-devel-2.16.0-13.1.el8fdp.x86_64.rpm openvswitch2.16-ipsec-2.16.0-13.1.el8fdp.x86_64.rpm python3-openvswitch2.16-2.16.0-13.1.el8fdp.x86_64.rpm /root/
-COPY ovn21.09-21.09.0-21.el8fdp.x86_64.rpm ovn21.09-central-21.09.0-21.el8fdp.x86_64.rpm ovn21.09-host-21.09.0-21.el8fdp.x86_64.rpm ovn21.09-vtep-21.09.0-21.el8fdp.x86_64.rpm /root/
-COPY glibc-debuginfo-2.28-151.el8.x86_64.rpm glibc-debuginfo-common-2.28-151.el8.x86_64.rpm openvswitch2.16-debuginfo-2.16.0-13.1.el8fdp.x86_64.rpm openvswitch2.16-debugsource-2.16.0-13.1.el8fdp.x86_64.rpm ovn21.09-central-debuginfo-21.09.0-21.el8fdp.x86_64.rpm ovn21.09-debuginfo-21.09.0-21.el8fdp.x86_64.rpm ovn21.09-debugsource-21.09.0-21.el8fdp.x86_64.rpm ovn21.09-host-debuginfo-21.09.0-21.el8fdp.x86_64.rpm ovn21.09-vtep-debuginfo-21.09.0-21.el8fdp.x86_64.rpm python3-openvswitch2.16-debuginfo-2.16.0-13.1.el8fdp.x86_64.rpm /root/
+COPY ovn21.09-21.09.0-22.el8fdp.x86_64.rpm ovn21.09-central-21.09.0-22.el8fdp.x86_64.rpm ovn21.09-host-21.09.0-22.el8fdp.x86_64.rpm ovn21.09-vtep-21.09.0-22.el8fdp.x86_64.rpm /root/
+COPY glibc-debuginfo-2.28-151.el8.x86_64.rpm glibc-debuginfo-common-2.28-151.el8.x86_64.rpm openvswitch2.16-debuginfo-2.16.0-13.1.el8fdp.x86_64.rpm openvswitch2.16-debugsource-2.16.0-13.1.el8fdp.x86_64.rpm ovn21.09-central-debuginfo-21.09.0-22.el8fdp.x86_64.rpm ovn21.09-debuginfo-21.09.0-22.el8fdp.x86_64.rpm ovn21.09-debugsource-21.09.0-22.el8fdp.x86_64.rpm ovn21.09-host-debuginfo-21.09.0-22.el8fdp.x86_64.rpm ovn21.09-vtep-debuginfo-21.09.0-22.el8fdp.x86_64.rpm python3-openvswitch2.16-debuginfo-2.16.0-13.1.el8fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
