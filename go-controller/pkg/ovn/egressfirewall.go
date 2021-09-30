@@ -162,7 +162,7 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 		return
 	}
 	if egressFirewallACLIDs != "" {
-		for _, egressFirewallACLID := range strings.Split(egressFirewallACLIDs, "\n") {
+		for _, egressFirewallACLID := range strings.Fields(egressFirewallACLIDs) {
 			_, stderr, err := util.RunOVNNbctl(
 				"set",
 				"acl",
