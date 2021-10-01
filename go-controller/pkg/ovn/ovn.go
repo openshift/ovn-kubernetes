@@ -31,6 +31,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -603,18 +604,33 @@ func (oc *Controller) iterateRetryPods() {
 	now := time.Now()
 	for uid, podEntry := range oc.retryPods {
 		pod := podEntry.pod
+		podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+		// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
+		kPod, err := oc.watchFactory.GetPod(pod.Namespace, pod.Name)
+		if err != nil && kapierrors.IsNotFound(err) {
+			klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
+			delete(oc.retryPods, uid)
+			continue
+		}
+
+		if !podScheduled(kPod) {
+			klog.V(5).Infof("retry: %s not scheduled", podDesc)
+			continue
+		}
+
 		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if now.After(podTimer) {
-			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
 			klog.Infof("%s retry pod setup", podDesc)
 
-			if oc.ensurePod(nil, pod, true) {
+			if oc.ensurePod(nil, kPod, true) {
 				klog.Infof("%s pod setup successful", podDesc)
 				delete(oc.retryPods, uid)
 			} else {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
 				oc.retryPods[uid] = retryEntry{pod, time.Now()}
 			}
+		} else {
+			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
 		}
 	}
 }
