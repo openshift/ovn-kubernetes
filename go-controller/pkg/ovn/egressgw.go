@@ -82,11 +82,11 @@ func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.P
 	}
 	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
 		pod.Name, gws, namespace, egress.bfdEnabled)
-	nsInfo, err := oc.waitForNamespaceLocked(namespace)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(namespace, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	nsInfo.routingExternalPodGWs[pod.Name] = egress
 	return oc.addGWRoutesForNamespace(namespace, egress, nsInfo)
 }
@@ -114,6 +114,11 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 		for _, gw := range egress.gws {
 			for _, podIP := range pod.Status.PodIPs {
 				if utilnet.IsIPv6(gw) != utilnet.IsIPv6String(podIP.IP) {
+					continue
+				}
+
+				// if route was already programmed, skip it
+				if foundGR, ok := nsInfo.podExternalRoutes[podIP.IP][gw.String()]; ok && foundGR == gr {
 					continue
 				}
 
@@ -159,11 +164,11 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
 func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
-	nsInfo := oc.getNamespaceLocked(namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	// check if any gateways were stored for this pod
 	foundGws, ok := nsInfo.routingExternalPodGWs[pod]
 	if !ok {
@@ -243,11 +248,12 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 // deleteGwRoutesForPod handles deleting all routes to gateways for a pod IP on a specific GR
 func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IPNet) {
 	// delete src-ip cached route to GR
-	nsInfo := oc.getNamespaceLocked(namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
+
 	for _, podIPNet := range podIPNets {
 		pod := podIPNet.IP.String()
 		if gwToGr, ok := nsInfo.podExternalRoutes[pod]; ok {
@@ -276,11 +282,11 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
 func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*net.IPNet, namespace, node string) error {
-	nsInfo, err := oc.waitForNamespaceLocked(namespace)
-	if err != nil {
-		return err
+	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
+	if nsInfo == nil {
+		return fmt.Errorf("unable to get namespace: %s", namespace)
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	gr := util.GetGatewayRouterFromNode(node)
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
@@ -292,6 +298,10 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 				podIP := podIPNet.IP.String()
 				for _, gw := range gws {
 					gwStr := gw.String()
+					// if route was already programmed, skip it
+					if foundGR, ok := nsInfo.podExternalRoutes[podIP][gwStr]; ok && foundGR == gr {
+						continue
+					}
 					mask := GetIPFullMask(podIP)
 					nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
 						"lr-route-add", gr, podIP + mask, gw.String()}
