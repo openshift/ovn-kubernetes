@@ -298,6 +298,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	opts := make(map[string]string)
 
+	start1 := time.Now()
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
@@ -317,6 +318,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			}
 		}
 	}
+	lspGetTime := time.Since(start1)
 
 	// Bind the port to the node's chassis; prevents ping-ponging between
 	// chassis if ovnkube-node isn't running correctly and hasn't cleared
@@ -379,6 +381,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}()
 
+	start1 = time.Now()
 	needsIP := true
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err == nil {
@@ -428,11 +431,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		releaseIPs = true
 	}
+	ipamTime := time.Since(start1)
 
 	// Ensure the namespace/nsInfo exists
-	start1 := time.Now()
 	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, addrSetCmds, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
-	addPodToNsTime := time.Since(start1)
 	if err != nil {
 		return err
 	}
@@ -570,6 +572,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			portName, err)
 	}
 
+	start1 = time.Now()
 	if lsp == nil {
 		// Grab the LSP's UUID from the creation response
 		if len(r) != 1 {
@@ -584,6 +587,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("unexpected logical switch port name %q for uuid %s (expected %q)", lsp.Name, lsp.UUID, portName)
 		}
 	}
+	ovnVerifyTime := time.Since(start1)
 
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
@@ -602,8 +606,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
-	klog.Infof("[%s/%s] TROZETaddLogicalPort took %v, addPodToNamespace: %v, ovnExecuteTime: %v, annoTime: %v", pod.Namespace, pod.Name,
-		time.Since(start), addPodToNsTime, ovnExecuteTime, annoTime)
+	klog.Infof("[%s/%s] TROZETaddLogicalPort took %v, lspGet: %v, ipam: %v, annoTime: %v, ovnExecuteTime: %v, ovnVerifyTime: %v", pod.Namespace, pod.Name,
+		time.Since(start), lspGetTime, ipamTime, annoTime, ovnExecuteTime, ovnVerifyTime)
 	return nil
 }
 
