@@ -7,10 +7,13 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"text/template"
+	"time"
 
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
@@ -158,6 +161,30 @@ func setupPIDFile(pidfile string) error {
 	return nil
 }
 
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
+}
+
+func checkHeap() {
+	klog.Infof("TROZET: started heap checker")
+	memProfile, err := os.Create("/etc/openvswitch/trozet-mem-heap.prof")
+	if err != nil {
+		klog.Fatalf("Failed to create memory profile")
+	}
+	defer memProfile.Close()
+	for {
+		time.Sleep(50 * time.Millisecond)
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		if bToMb(m.Alloc) > 300 {
+			klog.Infof("TROZET: heap greater than 300MB: %d, dumping to /etc/openvswitch/trozet-mem-heap.prof", bToMb(m.Alloc))
+			pprof.WriteHeapProfile(memProfile)
+			break
+		}
+	}
+	klog.Infof("TROZET: heap checker stopped")
+}
+
 func runOvnKubeDBChecker(ctx *cli.Context) error {
 	pidfile := ctx.String("pidfile")
 	if pidfile != "" {
@@ -185,6 +212,8 @@ func runOvnKubeDBChecker(ctx *cli.Context) error {
 	if err = ovndbmanager.EnableDBMemTrimming(); err != nil {
 		return err
 	}
+
+	go checkHeap()
 
 	stopChan := make(chan struct{})
 	ovndbmanager.RunDBChecker(
