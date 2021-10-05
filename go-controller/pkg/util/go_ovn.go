@@ -187,8 +187,8 @@ func initGoOvnUnixClient(address, db string) (goovn.Client, error) {
 }
 
 // OvnNBLSPDel deletes the given logical switch port using the go-ovn library
-func OvnNBLSPDel(nbClient goovn.Client, logicalPort string) error {
-	cmd, err := nbClient.LSPDel(logicalPort)
+func OvnNBLSPDel(nbClient goovn.Client, logicalPort, uuid string) error {
+	cmd, err := nbClient.LSPDel(logicalPort, uuid)
 	if err == nil {
 		if err = nbClient.Execute(cmd); err != nil {
 			return fmt.Errorf("error while deleting logical port: %s, %v", logicalPort, err)
