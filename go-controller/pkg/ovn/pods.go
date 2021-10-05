@@ -69,7 +69,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		if _, ok := expectedLogicalPorts[existingPort]; !ok {
 			// not found, delete this logical port
 			klog.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
-			cmd, err := oc.ovnNBClient.LSPDel(existingPort)
+			cmd, err := oc.ovnNBClient.LSPDel(existingPort, "")
 			if err != nil {
 				klog.Errorf("Error in getting the cmd to delete pod's logical port %s %v", existingPort, err)
 				continue
@@ -103,7 +103,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		start1 := time.Now()
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not readded into the cache. Delete logical switch port anyway.
-		err = util.OvnNBLSPDel(oc.ovnNBClient, logicalPort)
+		err = util.OvnNBLSPDel(oc.ovnNBClient, logicalPort, "")
 		ovnExecuteTime = time.Since(start1)
 		if err != nil {
 			klog.Errorf(err.Error())
@@ -132,7 +132,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		cmds = append(cmds, addrSetCmds...)
 	}
 
-	cmd, err := oc.ovnNBClient.LSPDel(logicalPort)
+	cmd, err := oc.ovnNBClient.LSPDel(logicalPort, portInfo.uuid)
 	if err != nil {
 		klog.Errorf(err.Error())
 	} else {
