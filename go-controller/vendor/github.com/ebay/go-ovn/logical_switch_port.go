@@ -78,13 +78,14 @@ func (odbi *ovndb) lspAddImp(lsw, lswUUID, lsp string) (*OvnCommand, error) {
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 
-func (odbi *ovndb) lspDelImp(lsp string) (*OvnCommand, error) {
-	row := make(OVNRow)
-	row["name"] = lsp
-
-	lspUUID := odbi.getRowUUID(TableLogicalSwitchPort, row)
-	if len(lspUUID) == 0 {
-		return nil, ErrorNotFound
+func (odbi *ovndb) lspDelImp(lsp, lspUUID string) (*OvnCommand, error) {
+	if lspUUID == "" {
+		row := make(OVNRow)
+		row["name"] = lsp
+		lspUUID = odbi.getRowUUID(TableLogicalSwitchPort, row)
+		if len(lspUUID) == 0 {
+			return nil, ErrorNotFound
+		}
 	}
 
 	mutateUUID := []libovsdb.UUID{stringToGoUUID(lspUUID)}

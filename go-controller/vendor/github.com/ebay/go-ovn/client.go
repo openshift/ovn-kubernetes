@@ -62,7 +62,7 @@ type Client interface {
 	// Add logical port PORT on SWITCH
 	LSPAdd(ls string, lsUUID string, lsp string) (*OvnCommand, error)
 	// Delete PORT from its attached switch
-	LSPDel(lsp string) (*OvnCommand, error)
+	LSPDel(lsp, uuid string) (*OvnCommand, error)
 	// Set addressset per lport
 	LSPSetAddress(lsp string, addresses ...string) (*OvnCommand, error)
 	// Set port security per lport
@@ -706,8 +706,8 @@ func (c *ovndb) LinkSwitchToRouter(lsw, lsp, lr, lrp, lrpMac string, networks []
 	return c.linkSwitchToRouterImp(lsw, lsp, lr, lrp, lrpMac, networks, externalIds)
 }
 
-func (c *ovndb) LSPDel(lsp string) (*OvnCommand, error) {
-	return c.lspDelImp(lsp)
+func (c *ovndb) LSPDel(lsp, uuid string) (*OvnCommand, error) {
+	return c.lspDelImp(lsp, uuid)
 }
 
 func (c *ovndb) LSPSetAddress(lsp string, addresses ...string) (*OvnCommand, error) {
