@@ -35,7 +35,7 @@ RUN yum install -y  \
 ARG ovsver=2.13.0-79.el8fdp
 ARG ovnver=20.12.0-140.el8fdp
 
-COPY ovn2.13-20.12.0-180.el8fdp.x86_64.rpm ovn2.13-central-20.12.0-180.el8fdp.x86_64.rpm ovn2.13-host-20.12.0-180.el8fdp.x86_64.rpm ovn2.13-vtep-20.12.0-180.el8fdp.x86_64.rpm /root
+COPY ovn2.13-20.12.0-183.el8fdp.x86_64.rpm ovn2.13-central-20.12.0-183.el8fdp.x86_64.rpm ovn2.13-host-20.12.0-183.el8fdp.x86_64.rpm ovn2.13-vtep-20.12.0-183.el8fdp.x86_64.rpm /root
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
