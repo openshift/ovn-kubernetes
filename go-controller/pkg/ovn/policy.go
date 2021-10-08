@@ -658,7 +658,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
-	nsInfo, err := oc.waitForNamespaceLocked(policy.Namespace)
+	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(policy.Namespace, false)
 	if err != nil {
 		klog.Errorf("Failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
@@ -666,14 +666,14 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	}
 	_, alreadyExists := nsInfo.networkPolicies[policy.Name]
 	if alreadyExists {
-		nsInfo.Unlock()
+		nsUnlock()
 		return
 	}
 
 	np := NewNamespacePolicy(policy)
 	nsInfo.networkPolicies[policy.Name] = np
 	np.Lock()
-	nsInfo.Unlock()
+	nsUnlock()
 
 	// Create a port group for the policy. All the pods that this policy
 	// selects will be eventually added to this port group.
@@ -810,11 +810,11 @@ func (oc *Controller) addNetworkPolicyACL(np *namespacePolicy) {
 
 // deletes the namespacePolicy for policy and returns it, locked
 func (oc *Controller) deleteNetworkPolicyLocked(policy *knet.NetworkPolicy) *namespacePolicy {
-	nsInfo := oc.getNamespaceLocked(policy.Namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(policy.Namespace, false)
 	if nsInfo == nil {
 		return nil
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 
 	np := nsInfo.networkPolicies[policy.Name]
 	if np == nil {

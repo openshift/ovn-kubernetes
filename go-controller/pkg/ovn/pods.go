@@ -248,11 +248,11 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 
 func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
 	res := gatewayInfo{}
-	nsInfo := oc.getNamespaceLocked(ns)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return res
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
@@ -262,11 +262,11 @@ func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
 }
 
 func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
-	nsInfo := oc.getNamespaceLocked(ns)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res := make(map[string]gatewayInfo)
@@ -282,11 +282,13 @@ func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
 }
 
 func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
-	nsInfo, err := oc.waitForNamespaceLocked(ns)
+	// NOTE (trozet): we have to wait for namespace locked because namespace update for
+	// hybrid overlay exgw cannot update pod routes inside the pod
+	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(ns, true)
 	if err != nil {
 		return nil, err
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	return nsInfo.hybridOverlayExternalGW, nil
 }
 
@@ -510,7 +512,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
 
-	// Wait for namespace to exist, no calls after this should ever use waitForNamespaceLocked
+	// Ensure the namespace/nsInfo exists
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
 		return err
 	}
