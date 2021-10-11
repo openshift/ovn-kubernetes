@@ -289,6 +289,8 @@ type ovndb struct {
 	clientLock   sync.RWMutex
 	disconnSig   chan struct{}
 	cache        map[string]map[string]libovsdb.Row
+	// Map of LSP Name to UUID
+	lspUUIDCache map[string]string
 	cachemutex   sync.RWMutex
 	signalCB     OVNSignal
 	disconnectCB OVNDisconnectedCallback
@@ -401,6 +403,7 @@ func (c *ovndb) connectEndpoint() error {
 		// survives reconnections as the db server will send us changes
 		// since the last transaction
 		c.cache = make(map[string]map[string]libovsdb.Row)
+		c.lspUUIDCache = make(map[string]string)
 	}
 	c.tableCols = c.cfgTableCols
 	c.serverCache = make(map[string]map[string]libovsdb.Row)
