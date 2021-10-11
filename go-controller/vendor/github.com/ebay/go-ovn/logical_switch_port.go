@@ -45,7 +45,10 @@ func (odbi *ovndb) lspAddImp(lsw, lswUUID, lsp string) (*OvnCommand, error) {
 	row := make(OVNRow)
 	row["name"] = lsp
 
-	if uuid := odbi.getRowUUID(TableLogicalSwitchPort, row); len(uuid) > 0 {
+	odbi.cachemutex.RLock()
+	_, ok := odbi.lspUUIDCache[lsp]
+	odbi.cachemutex.RUnlock()
+	if ok {
 		return nil, ErrorExist
 	}
 
@@ -404,11 +407,12 @@ func (odbi *ovndb) lspGetImp(lsp string) (*LogicalSwitchPort, error) {
 		return nil, ErrorSchema
 	}
 
-	for uuid, drows := range cacheLogicalSwitchPort {
-		if rlsp, ok := drows.Fields["name"].(string); ok && rlsp == lsp {
-			return odbi.rowToLogicalPort(uuid, &drows)
+	if uuid, ok := odbi.lspUUIDCache[lsp]; ok {
+		if row, ok := cacheLogicalSwitchPort[uuid]; ok {
+			return odbi.rowToLogicalPort(uuid, &row)
 		}
 	}
+
 	return nil, ErrorNotFound
 }
 
