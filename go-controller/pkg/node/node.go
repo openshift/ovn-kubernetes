@@ -85,7 +85,7 @@ func setupOVNNode(node *kapi.Node) error {
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
 			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
-		"external_ids:ovn-monitor-all=true",
+		"external_ids:ovn-monitor-all=false",
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
 	}
 
