@@ -104,13 +104,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 			}
 			flowProtocol := protocol
 			nwDst := "nw_dst"
-			addrResDst := nwDst
-			addrResProto := "arp"
 			if utilnet.IsIPv6String(ing.IP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
-				addrResDst = "nd_target"
-				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			key = strings.Join([]string{"Ingress", service.Namespace, service.Name, ingIP.String(), fmt.Sprintf("%d", svcPort.Port)}, "_")
 			if !add {
@@ -120,22 +116,16 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 						"actions=%s",
 						cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, actions),
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
-						"actions=output:%s",
-						cookie, npw.ofportPhys, addrResProto, addrResDst, ing.IP, ovsLocalPort)})
+					npw.generateArpBypassFlow(protocol, ing.IP, cookie)})
 			}
 		}
 
 		for _, externalIP := range service.Spec.ExternalIPs {
 			flowProtocol := protocol
 			nwDst := "nw_dst"
-			addrResDst := nwDst
-			addrResProto := "arp"
 			if utilnet.IsIPv6String(externalIP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
-				addrResDst = "nd_target"
-				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			cookie, err = svcToCookie(service.Namespace, service.Name, externalIP, svcPort.Port)
 			if err != nil {
@@ -151,12 +141,51 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 						"actions=%s",
 						cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, actions),
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
-						"actions=output:%s",
-						cookie, npw.ofportPhys, addrResProto, addrResDst, externalIP, ovsLocalPort)})
+					npw.generateArpBypassFlow(protocol, externalIP, cookie)})
 			}
 		}
 	}
+}
+
+// generate ARP/NS bypass flow which will send the ARP/NS request everywhere *but* to OVN
+// OpenFlow will not do hairpin switching, so we can safely add the origin port to the list of ports, too
+func (npw *nodePortWatcher) generateArpBypassFlow(protocol string, ipAddr string, cookie string) string {
+	addrResDst := "arp_tpa"
+	addrResProto := "arp, arp_op=1"
+	if utilnet.IsIPv6String(ipAddr) {
+		addrResDst = "nd_target"
+		addrResProto = "icmp6, icmp_type=135, icmp_code=0"
+	}
+
+	var arpFlow string
+	var arpPortsFiltered []string
+	arpPorts, err := util.GetOpenFlowPorts(npw.gwBridge, false)
+	if err != nil {
+		// in the odd case that getting all ports from the bridge should not work,
+		// simply output to LOCAL (this should work well in the vast majority of cases, anyway)
+		klog.Warningf("Unable to get port list from bridge. Using ovsLocalPort as output only: error: %v",
+			err)
+		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+			"actions=output:%s",
+			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, ovsLocalPort)
+	} else {
+		// cover the case where breth0 has more than 3 ports, e.g. if an admin adds a 4th port
+		// and the ExternalIP would be on that port
+		// Use all ports except for ofPortPhys and the ofportPatch
+		// Filtering ofPortPhys is for consistency / readability only, OpenFlow will not send
+		// out the in_port normally (see man 7 ovs-actions)
+		for _, port := range arpPorts {
+			if port == npw.ofportPatch || port == npw.ofportPhys {
+				continue
+			}
+			arpPortsFiltered = append(arpPortsFiltered, port)
+		}
+		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+			"actions=output:%s",
+			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, strings.Join(arpPortsFiltered, ","))
+	}
+
+	return arpFlow
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
