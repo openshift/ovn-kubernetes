@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	utilnet "k8s.io/utils/net"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -55,19 +56,51 @@ func ovsExec(args ...string) (string, error) {
 	return strings.TrimSuffix(string(output), "\n"), nil
 }
 
+func ovsExecRetry(args ...string) (string, error) {
+	if runner == nil {
+		if err := SetExec(kexec.New()); err != nil {
+			return "", err
+		}
+	}
+
+	args = append([]string{fmt.Sprintf("--timeout=30")}, args...)
+
+	retriesLeft := 5
+	for {
+		output, err := runner.Command(vsctlPath, args...).CombinedOutput()
+		if err == nil {
+			return strings.TrimSuffix(string(output), "\n"), nil
+		}
+
+		// Protocol error (actually EAGAIN)
+		if strings.Contains(string(output), "Protocol error") {
+			//TODO
+			klog.Warningf("DEBUG DEBUG DCEARA EPROTO")
+			if retriesLeft == 0 {
+				return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
+			}
+			retriesLeft--
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			// Some other problem for caller to handle
+			return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
+		}
+	}
+}
+
 func ovsCreate(table string, values ...string) (string, error) {
 	args := append([]string{"create", table}, values...)
-	return ovsExec(args...)
+	return ovsExecRetry(args...)
 }
 
 func ovsDestroy(table, record string) error {
-	_, err := ovsExec("--if-exists", "destroy", table, record)
+	_, err := ovsExecRetry("--if-exists", "destroy", table, record)
 	return err
 }
 
 func ovsSet(table, record string, values ...string) error {
 	args := append([]string{"set", table, record}, values...)
-	_, err := ovsExec(args...)
+	_, err := ovsExecRetry(args...)
 	return err
 }
 
@@ -78,13 +111,13 @@ func ovsGet(table, record, column, key string) (string, error) {
 	} else {
 		args = append(args, column)
 	}
-	output, err := ovsExec(args...)
+	output, err := ovsExecRetry(args...)
 	return strings.Trim(strings.TrimSpace(string(output)), "\""), err
 }
 
 // Returns the given column of records that match the condition
 func ovsFind(table, column, condition string) ([]string, error) {
-	output, err := ovsExec("--no-heading", "--format=csv", "--data=bare", "--columns="+column, "find", table, condition)
+	output, err := ovsExecRetry("--no-heading", "--format=csv", "--data=bare", "--columns="+column, "find", table, condition)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +129,7 @@ func ovsFind(table, column, condition string) ([]string, error) {
 
 func ovsClear(table, record string, columns ...string) error {
 	args := append([]string{"--if-exists", "clear", table, record}, columns...)
-	_, err := ovsExec(args...)
+	_, err := ovsExecRetry(args...)
 	return err
 }
 

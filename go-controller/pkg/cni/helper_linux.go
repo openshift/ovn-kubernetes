@@ -282,7 +282,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
 	}
 
-	if out, err := ovsExec(ovsArgs...); err != nil {
+	if out, err := ovsExecRetry(ovsArgs...); err != nil {
 		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
 	}
 
@@ -419,7 +419,7 @@ func (pr *PodRequest) deletePodConntrack() {
 
 func (pr *PodRequest) deletePorts() {
 	ifaceName := pr.SandboxID[:15]
-	out, err := ovsExec("del-port", "br-int", ifaceName)
+	out, err := ovsExecRetry("del-port", "br-int", ifaceName)
 	_ = util.LinkDelete(ifaceName)
 	if err != nil && !strings.Contains(out, "no port named") {
 		// DEL should be idempotent; don't return an error just log it
