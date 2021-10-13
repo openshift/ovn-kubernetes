@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"golang.org/x/net/netutil"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 )
@@ -77,9 +78,10 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 		return fmt.Errorf("failed to set pod info socket mode: %v", err)
 	}
 
+	limit_listener := netutil.LimitListener(l, 20)
 	s.SetKeepAlivesEnabled(false)
 	go utilwait.Forever(func() {
-		if err := s.Serve(l); err != nil {
+		if err := s.Serve(limit_listener); err != nil {
 			utilruntime.HandleError(fmt.Errorf("CNI server Serve() failed: %v", err))
 		}
 	}, 0)
