@@ -45,6 +45,7 @@ kubeadmConfigPatches:
   nodeRegistration:
     kubeletExtraArgs:
       "v": "{{ cluster_log_level }}"
+      "max-pods": "1000"
 nodes:
  - role: control-plane
    kubeadmConfigPatches:
