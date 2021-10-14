@@ -327,6 +327,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// out iface-id for an old instance of this pod, and the pod got
 	// rescheduled.
 	opts["requested-chassis"] = pod.Spec.NodeName
+	//HACK: always set iface-id-ver in case pod.UID changed.
+	//This is just a downstream hack, upstream is already properly fixed.
+	opts["iface-id-ver"] = string(pod.UID)
 
 	start1 = time.Now()
 	if lsp == nil {
@@ -334,15 +337,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
 		}
-		// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
-		// ovn-controller will claim the OVS interface only if external_ids:iface-id
-		// matches with the Port_Binding.logical_port and external_ids:iface-id-ver matches
-		// with the Port_Binding.options:iface-id-ver. This is not mandatory.
-		// If Port_binding.options:iface-id-ver is not set, then OVS
-		// Interface.external_ids:iface-id-ver if set is ignored.
-		// Only set for new LSP for correct ovn-kube upgrade, because for old OVS Interfaces
-		// iface-id-ver is not set => ovn-controller won't bind OVS Interface
-		opts["iface-id-ver"] = string(pod.UID)
 	} else {
 		klog.Infof("LSP already exists for port: %s", portName)
 	}
