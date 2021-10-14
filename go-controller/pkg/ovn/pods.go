@@ -327,6 +327,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// out iface-id for an old instance of this pod, and the pod got
 	// rescheduled.
 	opts["requested-chassis"] = pod.Spec.NodeName
+	//HACK: always set iface-id-ver in case pod.UID changed.
+	//This is just a downstream hack, upstream is already properly fixed.
+	opts["iface-id-ver"] = string(pod.UID)
 
 	start1 = time.Now()
 	if lsp == nil {
