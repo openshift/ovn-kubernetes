@@ -1175,7 +1175,7 @@ func (oc *Controller) WatchNodes() {
 			}
 
 			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) {
+			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1190,7 +1190,7 @@ func (oc *Controller) WatchNodes() {
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) {
+			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1305,11 +1305,6 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-
-	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
-		return false
-	}
-
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
 
@@ -1318,6 +1313,12 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 	oldMacAddress, _ := util.ParseNodeManagementPortMACAddress(oldNode)
 	macAddress, _ := util.ParseNodeManagementPortMACAddress(node)
 	return !bytes.Equal(oldMacAddress, macAddress)
+}
+
+func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
