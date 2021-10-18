@@ -74,8 +74,6 @@ func ovsExecRetry(args ...string) (string, error) {
 
 		// Protocol error (actually EAGAIN)
 		if strings.Contains(string(output), "Protocol error") {
-			//TODO
-			klog.Warningf("DEBUG DEBUG DCEARA EPROTO")
 			if retriesLeft == 0 {
 				return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
 			}
