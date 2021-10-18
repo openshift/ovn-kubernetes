@@ -274,6 +274,12 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.MetricNodeReadyDuration.Set(end.Seconds())
 	}
 
+	util.RunOVNNBAppCtl("ovsdb-server/log-db-ops", "OVN_Northbound", "Logical_Switch_Port", "on")
+	util.RunOVNNBAppCtl("vlog/disable-rate-limit", "transaction")
+
+	util.RunOVNSBAppCtl("ovsdb-server/log-db-ops", "OVN_Southbound", "Port_Binding", "on")
+	util.RunOVNSBAppCtl("vlog/disable-rate-limit", "transaction")
+
 	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
 	// start the prometheus server to serve OVN K8s Metrics (default master port: 9409, node port: 9410)
 	if config.Kubernetes.MetricsBindAddress != "" {
