@@ -469,6 +469,7 @@ func (oc *Controller) deleteNamespacePodsEgressIP(eIP *egressipv1.EgressIP, name
 		return err
 	}
 	for _, pod := range pods.Items {
+		klog.Infof("Alex, I am going to delete pod: %s/%s, the clause below evaluates to %v", pod.Namespace, pod.Name, !oc.eIPC.needsRetry(&pod))
 		if !oc.eIPC.needsRetry(&pod) {
 			if err := oc.eIPC.deletePodEgressIP(eIP, &pod); err != nil {
 				return err
@@ -842,10 +843,12 @@ func (e *egressIPController) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *ka
 	if pod.Spec.HostNetwork {
 		return nil
 	}
+	klog.Infof("Alex, pod: %s/%s has the following podIPs: %v and podIP: %v", pod.Namespace, pod.Name, pod.Status.PodIPs, pod.Status.PodIP)
 	podIPs := e.getPodIPs(pod)
 	if podIPs == nil {
 		return nil
 	}
+	klog.Infof("Alex, I finally made it and am going to delete pod: %s/%s", pod.Namespace, pod.Name)
 	if err := e.handleEgressReroutePolicy(podIPs, eIP.Status.Items, eIP.Name, e.deleteEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
