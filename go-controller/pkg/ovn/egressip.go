@@ -802,8 +802,8 @@ func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.
 	if pod.Spec.HostNetwork {
 		return nil
 	}
-	podIPs := e.getPodIPs(pod)
-	if podIPs == nil {
+	podIPs, err := e.getPodIPs(pod)
+	if err != nil || len(podIPs) == 0 {
 		e.podRetry.Store(getPodKey(pod), true)
 		return nil
 	}
@@ -825,9 +825,12 @@ func (e *egressIPController) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *ka
 	if pod.Spec.HostNetwork {
 		return nil
 	}
-	podIPs := e.getPodIPs(pod)
-	if podIPs == nil {
-		return nil
+	podIPs, err := e.getPodIPs(pod)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve pod IPs, err: %v", err)
+	}
+	if len(podIPs) == 0 {
+		return fmt.Errorf("unable to retrieve pod IPs, err: no pod IPs defined")
 	}
 	for _, status := range eIP.Status.Items {
 		if err := e.deleteEgressReroutePolicy(podIPs, status, eIP.Name); err != nil {
@@ -869,15 +872,16 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 	}
 }
 
-func (e *egressIPController) getPodIPs(pod *kapi.Pod) []net.IP {
-	if len(pod.Status.PodIPs) == 0 {
-		return nil
+func (e *egressIPController) getPodIPs(pod *kapi.Pod) ([]net.IP, error) {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	if err != nil {
+		return nil, err
 	}
-	podIPs := []net.IP{}
-	for _, podIP := range pod.Status.PodIPs {
-		podIPs = append(podIPs, net.ParseIP(podIP.IP))
+	podIPs := make([]net.IP, len(podAnnotation.IPs))
+	for ipIdx, ip := range podAnnotation.IPs {
+		podIPs[ipIdx] = ip.IP
 	}
-	return podIPs
+	return podIPs, nil
 }
 
 func (e *egressIPController) needsRetry(pod *kapi.Pod) bool {
