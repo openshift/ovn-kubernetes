@@ -32,7 +32,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 ARG OVN_REPO=https://github.com/ovn-org/ovn.git
 ARG OVN_BRANCH=main
 ARG OVS_REPO=https://github.com/dceara/ovs.git
-ARG OVS_BRANCH=log-ovsdb-transactions-v3
+ARG OVS_BRANCH=scale-fixes-ocp120
 
 #Install tools that is required for building ovs/ovn
 
