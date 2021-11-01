@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -13,6 +14,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -581,9 +583,37 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 
 	// Get the logical port info
 	logicalPort := podLogicalPortName(pod)
-	portInfo, err := oc.logicalPortCache.get(logicalPort)
-	if err != nil {
-		klog.Errorf(err.Error())
+	var portInfo *lpInfo
+	var err error
+
+	// Get the logical port info from the cache, if that fails, retry
+	// if the gotten LSP is Scheduled for removal, retry (stateful-sets)
+	//
+	// 24ms is chosen because gomega.Eventually default timeout is 50ms
+	// libovsdb transactions take less than 50ms usually as well so pod create
+	// should be done within a couple iterations
+	retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
+		// Retry if getting pod LSP from the cache fails
+		portInfo, err = oc.logicalPortCache.get(logicalPort)
+		if err != nil {
+			klog.Warningf("Failed to get LSP for pod %s/%s for networkPolicy %s refetching err: %v", pod.Namespace, pod.Name, policy.Name, err)
+			return false, nil
+		}
+
+		// Retry if LSP is scheduled for deletion
+		if !portInfo.expires.IsZero() {
+			klog.Warningf("Stale LSP %s for network policy %s found in cache refetching", portInfo.name, policy.Name)
+			return false, nil
+		}
+
+		// LSP get succeeded and LSP is up to fresh, exit and continue
+		klog.V(5).Infof("Fresh LSP %s for network policy %s found in cache", portInfo.name, policy.Name)
+		return true, nil
+
+	})
+	if retryErr != nil {
+		// Failed to get an up to date version of the LSP from the cache
+		klog.Warning("Failed to get LSP after multiple retries for pod %s/%s for networkPolicy %s err: %v", pod.Namespace, pod.Name, policy.Name, retryErr)
 		return
 	}
 
