@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -16,6 +17,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -719,9 +721,37 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 
 	// Get the logical port info
 	logicalPort := podLogicalPortName(pod)
-	portInfo, err := oc.logicalPortCache.get(logicalPort)
-	if err != nil {
-		klog.Errorf(err.Error())
+	var portInfo *lpInfo
+	var err error
+
+	// Get the logical port info from the cache, if that fails, retry
+	// if the gotten LSP is Scheduled for removal, retry (stateful-sets)
+	//
+	// 24ms is chosen because gomega.Eventually default timeout is 50ms
+	// libovsdb transactions take less than 50ms usually as well so pod create
+	// should be done within a couple iterations
+	retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
+		// Retry if getting pod LSP from the cache fails
+		portInfo, err = oc.logicalPortCache.get(logicalPort)
+		if err != nil {
+			klog.Warningf("Failed to get LSP for pod %s/%s for networkPolicy %s refetching err: %v", pod.Namespace, pod.Name, policy.Name, err)
+			return false, nil
+		}
+
+		// Retry if LSP is scheduled for deletion
+		if !portInfo.expires.IsZero() {
+			klog.Warningf("Stale LSP %s for network policy %s found in cache refetching", portInfo.name, policy.Name)
+			return false, nil
+		}
+
+		// LSP get succeeded and LSP is up to fresh, exit and continue
+		klog.V(5).Infof("Fresh LSP %s for network policy %s found in cache", portInfo.name, policy.Name)
+		return true, nil
+
+	})
+	if retryErr != nil {
+		// Failed to get an up to date version of the LSP from the cache
+		klog.Warning("Failed to get LSP after multiple retries for pod %s/%s for networkPolicy %s err: %v", pod.Namespace, pod.Name, policy.Name, retryErr)
 		return
 	}
 
@@ -775,27 +805,77 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 	// theoretically this should never filter any pods but it's always good to be
 	// paranoid.
 	portsToAdd := make([]*lpInfo, 0, len(objs))
+
+	// thread safe helper vars used by the `getPortInfo` go-routine
+	getPortsInfoMap := sync.Map{}
+	getPolicyPortsWg := &sync.WaitGroup{}
+
+	getPortInfo := func(pod *kapi.Pod) {
+		defer getPolicyPortsWg.Done()
+
+		if pod.Spec.NodeName == "" {
+			return
+		}
+
+		logicalPort := podLogicalPortName(pod)
+		var portInfo *lpInfo
+
+		// Get the logical port info from the cache, if that fails, retry
+		// if the gotten LSP is Scheduled for removal, retry (stateful-sets)
+		//
+		// 24ms is chosen because gomega.Eventually default timeout is 50ms
+		// libovsdb transactions take less than 50ms usually as well so pod create
+		// should be done within a couple iterations
+		retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
+			var err error
+
+			// Retry if getting pod LSP from the cache fails
+			portInfo, err = oc.logicalPortCache.get(logicalPort)
+			if err != nil {
+				klog.Warningf("Failed to get LSP for pod %s/%s for networkPolicy %s refetching err: %v", pod.Namespace, pod.Name, policy.Name, err)
+				return false, nil
+			}
+
+			// Retry if LSP is scheduled for deletion
+			if !portInfo.expires.IsZero() {
+				klog.Warningf("Stale LSP %s for network policy %s found in cache refetching", portInfo.name, policy.Name)
+				return false, nil
+			}
+
+			// LSP get succeeded and LSP is up to fresh, exit and continue
+			klog.V(5).Infof("Fresh LSP %s for network policy %s found in cache", portInfo.name, policy.Name)
+			return true, nil
+
+		})
+		if retryErr != nil {
+			// Failed to get an up to date version of the LSP from the cache
+			klog.Warning("Failed to get LSP after multiple retries for pod %s/%s for networkPolicy %s err: %v", pod.Namespace, pod.Name, policy.Name, retryErr)
+			return
+		}
+
+		// if this pod is somehow already added to this policy, then skip
+		if _, ok := np.localPods.LoadOrStore(portInfo.name, portInfo); ok {
+			return
+		}
+
+		getPortsInfoMap.Store(portInfo.uuid, portInfo)
+	}
+
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
-		if pod.Spec.NodeName == "" {
-			continue
-		}
-
-		portInfo, err := oc.logicalPortCache.get(podLogicalPortName(pod))
-		// pod is not yet handled
-		// no big deal, we'll get the update when it is.
-		if err != nil {
-			continue
-		}
-
-		// this pod is somehow already added to this policy, then skip
-		if _, ok := np.localPods.Load(portInfo.name); ok {
-			continue
-		}
-
-		portsToAdd = append(portsToAdd, portInfo)
+		getPolicyPortsWg.Add(1)
+		go getPortInfo(pod)
 	}
+
+	getPolicyPortsWg.Wait()
+
+	// build usable atomic structures from the sync.Map() populated by the getPortInfo threads
+	// add to backup policyPorts array
+	getPortsInfoMap.Range(func(key interface{}, value interface{}) bool {
+		portsToAdd = append(portsToAdd, value.(*lpInfo))
+		return true
+	})
 
 	// add all ports to default deny
 	oc.localPodAddDefaultDeny(nsInfo, policy, portsToAdd...)
@@ -809,13 +889,8 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 		klog.Errorf("Failed to set ports in PortGroup for network policy %s/%s: %v", np.namespace, np.name, err)
 	}
 
-	for _, portInfo := range portsToAdd {
-		np.localPods.Store(portInfo.name, portInfo)
-	}
-
 	klog.Infof("Done setting NetworkPolicy %s/%s local pods",
 		np.namespace, np.name)
-
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(
