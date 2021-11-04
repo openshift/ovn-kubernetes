@@ -73,9 +73,9 @@ func EnsureLBs(externalIDs map[string]string, LBs []LB) error {
 			len(uuidsToDelete), externalIDs, err)
 	}
 
-	_, _, err = txn.Commit()
+	_, stderr, err := txn.Commit()
 	if err != nil {
-		return fmt.Errorf("failed to commit load balancer changes for %#v: %w", externalIDs, err)
+		return fmt.Errorf("failed to commit load balancer changes for %#v: %w\n   %s", externalIDs, err, stderr)
 	}
 	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(uuidsToDelete), externalIDs)
 
