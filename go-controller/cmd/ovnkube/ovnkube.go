@@ -107,7 +107,7 @@ func main() {
 	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
 	// cancel the context
 	ctx, cancel := context.WithCancel(ctx)
-	exitCh := make(chan os.Signal, 1)
+	exitCh := make(chan os.Signal, 0)
 	signal.Notify(exitCh,
 		syscall.SIGHUP,
 		syscall.SIGINT,
