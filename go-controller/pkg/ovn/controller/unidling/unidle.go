@@ -10,8 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
-
+	"k8s.io/client-go/tools/events"
 	"k8s.io/klog/v2"
 )
 
@@ -19,14 +18,14 @@ import (
 // and generates a Kubernetes NeedPods events with the Service
 // associated to the VIP
 type unidlingController struct {
-	eventRecorder record.EventRecorder
+	eventRecorder events.EventRecorder
 	// Map of load balancers to service namespace
 	serviceVIPToName     map[ServiceVIPKey]types.NamespacedName
 	serviceVIPToNameLock sync.Mutex
 }
 
 // NewController creates a new unidling controller
-func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer) *unidlingController {
+func NewController(recorder events.EventRecorder, serviceInformer cache.SharedIndexInformer) *unidlingController {
 	uc := &unidlingController{
 		eventRecorder:    recorder,
 		serviceVIPToName: map[ServiceVIPKey]types.NamespacedName{},
@@ -143,7 +142,7 @@ func (uc *unidlingController) Run(stopCh <-chan struct{}) {
 						Name:      serviceName.Name,
 					}
 					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-					uc.eventRecorder.Eventf(&serviceRef, v1.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+					uc.eventRecorder.Eventf(&serviceRef, nil, v1.EventTypeNormal, "NeedPods", "None", "The service %s needs pods", serviceName.Name)
 				}
 			}
 		case <-stopCh:

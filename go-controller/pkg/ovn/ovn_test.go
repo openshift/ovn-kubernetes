@@ -14,7 +14,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -42,7 +42,7 @@ type FakeOVN struct {
 	stopChan     chan struct{}
 	fakeExec     *ovntest.FakeExec
 	asf          *addressset.FakeAddressSetFactory
-	fakeRecorder *record.FakeRecorder
+	fakeRecorder *events.FakeRecorder
 	ovnNBClient  goovn.Client
 	ovnSBClient  goovn.Client
 	wg           *sync.WaitGroup
@@ -54,7 +54,7 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 	return &FakeOVN{
 		fakeExec:     fexec,
 		asf:          addressset.NewFakeAddressSetFactory(),
-		fakeRecorder: record.NewFakeRecorder(10),
+		fakeRecorder: events.NewFakeRecorder(10),
 		wg:           &sync.WaitGroup{},
 	}
 }

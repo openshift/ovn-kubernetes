@@ -485,7 +485,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 			Kind: "EgressIP",
 			Name: eIP.Name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", eIP.Name, util.GetNodeEgressLabel())
+		oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "NoMatchingNodeFound", "None", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", eIP.Name, util.GetNodeEgressLabel())
 		return fmt.Errorf("no assignable nodes")
 	}
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
@@ -497,7 +497,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 				Kind: "EgressIP",
 				Name: eIP.Name,
 			}
-			oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, eIP.Name)
+			oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "InvalidEgressIP", "None", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, eIP.Name)
 			return fmt.Errorf("unable to parse provided EgressIP: %s, invalid", egressIP)
 		}
 		if node := oc.isAnyClusterNodeIP(eIPC); node != nil {
@@ -507,8 +507,10 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 			}
 			oc.recorder.Eventf(
 				&eIPRef,
+				nil,
 				kapi.EventTypeWarning,
 				"UnsupportedRequest",
+				"None",
 				"Egress IP: %v for object EgressIP: %s is the IP address of node: %s, this is unsupported", eIPC, eIP.Name, node.name,
 			)
 			return fmt.Errorf("egress IP: %v is the IP address of node: %s", eIPC, node.name)
@@ -541,7 +543,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 			Kind: "EgressIP",
 			Name: eIP.Name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", eIP.Spec.EgressIPs, eIP.Name)
+		oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "NoMatchingNodeFound", "None", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", eIP.Spec.EgressIPs, eIP.Name)
 		return fmt.Errorf("no matching host found")
 	}
 	if len(assignments) < len(eIP.Spec.EgressIPs) {
@@ -550,7 +552,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 			Kind: "EgressIP",
 			Name: eIP.Name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "UnassignedRequest", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name)
+		oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "UnassignedRequest", "None", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name)
 	}
 	return nil
 }

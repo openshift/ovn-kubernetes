@@ -45,7 +45,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 )
@@ -184,7 +184,7 @@ type Controller struct {
 	joinSwIPManager *lsm.JoinSwitchIPManager
 
 	// event recorder used to post events to k8s
-	recorder record.EventRecorder
+	recorder events.EventRecorder
 
 	// go-ovn northbound client interface
 	ovnNBClient goovn.Client
@@ -241,7 +241,7 @@ func GetIPFullMask(ip string) string {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
+	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder events.EventRecorder) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(ovnNBClient)
 	}
@@ -425,7 +425,7 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 			pod.Namespace, pod.Name, err)
 	} else {
 		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
-		oc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
+		oc.recorder.Eventf(podRef, nil, kapi.EventTypeWarning, "ErrorAddingLogicalPort", "None", addErr.Error())
 	}
 }
 

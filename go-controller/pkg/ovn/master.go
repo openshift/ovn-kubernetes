@@ -1062,7 +1062,7 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
 	} else if mismatch {
 		klog.V(5).Infof("Node %s is now with a new chassis ID, delete its stale chassis in SBDB", node.Name)
 		if err = oc.deleteNodeChassis(node.Name); err != nil {
-			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+			oc.recorder.Eventf(node, nil, kapi.EventTypeWarning, "ErrorMismatchChassis", "None",
 				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
 				node.Name)
 		}

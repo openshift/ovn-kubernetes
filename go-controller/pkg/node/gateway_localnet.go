@@ -15,7 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -29,7 +29,7 @@ const (
 	localnetGatewayExternalIDTable = "6"
 )
 
-func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string, nodeAnnotator kube.Annotator, recorder record.EventRecorder, cfg *managementPortConfig) (*gateway, error) {
+func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string, nodeAnnotator kube.Annotator, recorder events.EventRecorder, cfg *managementPortConfig) (*gateway, error) {
 	gw := &gateway{}
 	var gatewayIfAddrs []*net.IPNet
 	for _, hostSubnet := range hostSubnets {
@@ -108,12 +108,12 @@ func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 }
 
 type localPortWatcher struct {
-	recorder    record.EventRecorder
+	recorder    events.EventRecorder
 	gatewayIPv4 string
 	gatewayIPv6 string
 }
 
-func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder) *localPortWatcher {
+func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder events.EventRecorder) *localPortWatcher {
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
 	return &localPortWatcher{
 		recorder:    recorder,

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/client-go/tools/events"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -23,11 +25,9 @@ import (
 	discoveryinformers "k8s.io/client-go/informers/discovery/v1beta1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
-	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1beta1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 
 	"k8s.io/klog/v2"
@@ -51,10 +51,8 @@ func NewController(client clientset.Interface,
 	nodeInformer coreinformers.NodeInformer,
 ) *Controller {
 	klog.V(4).Info("Creating event broadcaster")
-	broadcaster := record.NewBroadcaster()
-	broadcaster.StartStructuredLogging(0)
-	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: client.CoreV1().Events("")})
-	recorder := broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: controllerName})
+	broadcaster := events.NewBroadcaster(&events.EventSinkImpl{Interface: client.EventsV1()})
+	recorder := broadcaster.NewRecorder(scheme.Scheme, controllerName)
 
 	c := &Controller{
 		client:           client,
@@ -102,8 +100,8 @@ func NewController(client clientset.Interface,
 // Controller manages selector-based service endpoints.
 type Controller struct {
 	client           clientset.Interface
-	eventBroadcaster record.EventBroadcaster
-	eventRecorder    record.EventRecorder
+	eventBroadcaster events.EventBroadcaster
+	eventRecorder    events.EventRecorder
 
 	// serviceLister is able to list/get services and is populated by the shared informer passed to
 	serviceLister corelisters.ServiceLister
@@ -276,8 +274,8 @@ func (c *Controller) syncService(key string) error {
 	endpointSlices, err := c.endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
 	if err != nil {
 		// Since we're getting stuff from a local cache, it is basically impossible to get this error.
-		c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToListEndpointSlices",
-			"Error listing Endpoint Slices for Service %s/%s: %v", namespace, name, err)
+		c.eventRecorder.Eventf(service, nil, v1.EventTypeWarning, "FailedToListEndpointSlices",
+			"None", "Error listing Endpoint Slices for Service %s/%s: %v", namespace, name, err)
 		return err
 	}
 
