@@ -179,7 +179,9 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	}
 
 	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
-	if err != nil {
+	// Downstream-only hack: Do not return error when gatewayIntf is 'none', this is only for the intermediate
+	// phase of SDN migration when ovnkube runs with '--gateway-interface none'
+	if err != nil && gatewayIntf != "none" {
 		return err
 	}
 
