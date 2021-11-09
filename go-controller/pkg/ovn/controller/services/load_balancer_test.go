@@ -770,8 +770,9 @@ func Test_buildClusterLBs(t *testing.T) {
 		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
 	}
 
-	defaultRouters := []string{"gr-node-a", "gr-node-b"}
-	defaultSwitches := []string{"switch-node-a", "switch-node-b"}
+	defaultRouters := []string{}
+	defaultSwitches := []string{}
+	defaultGroups := []string{"clusterLBGroup"}
 
 	tc := []struct {
 		name      string
@@ -822,6 +823,7 @@ func Test_buildClusterLBs(t *testing.T) {
 
 					Routers:  defaultRouters,
 					Switches: defaultSwitches,
+					Groups:   defaultGroups,
 				},
 			},
 		},
@@ -861,8 +863,9 @@ func Test_buildClusterLBs(t *testing.T) {
 						},
 					},
 
-					Routers:  defaultRouters,
 					Switches: defaultSwitches,
+					Routers:  defaultRouters,
+					Groups:   defaultGroups,
 				},
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_UDP_cluster", namespace, name),
@@ -875,8 +878,9 @@ func Test_buildClusterLBs(t *testing.T) {
 						},
 					},
 
-					Routers:  defaultRouters,
 					Switches: defaultSwitches,
+					Routers:  defaultRouters,
+					Groups:   defaultGroups,
 				},
 			},
 		},
@@ -932,6 +936,7 @@ func Test_buildClusterLBs(t *testing.T) {
 
 					Routers:  defaultRouters,
 					Switches: defaultSwitches,
+					Groups:   defaultGroups,
 				},
 			},
 		},
@@ -939,7 +944,7 @@ func Test_buildClusterLBs(t *testing.T) {
 
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
-			actual := buildClusterLBs(tt.service, tt.configs, tt.nodeInfos)
+			actual := buildClusterLBs(tt.service, tt.configs, tt.nodeInfos, true)
 			assert.Equal(t, tt.expected, actual)
 		})
 	}

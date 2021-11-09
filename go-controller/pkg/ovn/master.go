@@ -307,6 +307,33 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
+	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
+	// use IsTableSupported(nbdb.LoadBalancerGroup).
+	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
+		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups. " +
+			"Disabling Load Balancer Groups")
+		oc.loadBalancerGroupSupport = false
+	} else {
+		loadBalancerGroup := nbdb.LoadBalancerGroup{
+			Name: types.ClusterLBGroupName,
+		}
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model:          &loadBalancerGroup,
+				ModelPredicate: func(lbg *nbdb.LoadBalancerGroup) bool { return lbg.Name == types.ClusterLBGroupName },
+				OnModelUpdates: []interface{}{
+					&loadBalancerGroup.Name,
+				},
+				ErrNotFound: false,
+			},
+		}
+		_, err = oc.modelClient.CreateOrUpdate(opModels...)
+		if err != nil {
+			klog.Errorf("Error creating cluster-wide load balancer group (%v)", err)
+			oc.loadBalancerGroupSupport = false
+		}
+	}
+
 	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -840,6 +867,15 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
+	if oc.loadBalancerGroupSupport {
+		lbGroups, err := oc.findLoadBalancerGroup()
+		if err != nil {
+			return fmt.Errorf("failed to fetch load balancer group for node %s, err : %v",
+				nodeName, err)
+		}
+		logicalSwitch.LoadBalancerGroup = []string{lbGroups[0].UUID}
+	}
+
 	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     logicalRouterPortName,
@@ -871,6 +907,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 			OnModelUpdates: []interface{}{
 				&logicalSwitch.OtherConfig,
+				&logicalSwitch.LoadBalancerGroup,
 			},
 		},
 	}

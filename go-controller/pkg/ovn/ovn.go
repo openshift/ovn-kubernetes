@@ -161,6 +161,9 @@ type Controller struct {
 	// Supports multicast?
 	multicastSupport bool
 
+	// Supports load balancer groups?
+	loadBalancerGroupSupport bool
+
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPController
 
@@ -280,6 +283,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
+		loadBalancerGroupSupport: true,
 		aclLoggingEnabled:        true,
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]*retryEntry),
@@ -459,6 +463,19 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 		return 0, fmt.Errorf("invalid OVN topology version string for the cluster, err: %v", err)
 	}
 	return ver, nil
+}
+
+func (oc *Controller) findLoadBalancerGroup() ([]nbdb.LoadBalancerGroup, error) {
+	loadBalancerGroupResult := []nbdb.LoadBalancerGroup{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+	err := oc.nbClient.WhereCache(func(lbg *nbdb.LoadBalancerGroup) bool {
+		return lbg.Name == ovntypes.ClusterLBGroupName
+	}).List(ctx, &loadBalancerGroupResult)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find load balancer group, err: %v", err)
+	}
+	return loadBalancerGroupResult, nil
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -1303,7 +1320,7 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		defer wg.Done()
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair)
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, oc.loadBalancerGroupSupport)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}

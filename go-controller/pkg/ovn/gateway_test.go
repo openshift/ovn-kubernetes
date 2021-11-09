@@ -132,6 +132,13 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		}
 	}
 
+	var lbGroupUUIDs []string
+	if config.Gateway.Mode == config.GatewayModeShared {
+		lbGroupUUIDs = []string{types.ClusterLBGroupName + "-UUID"}
+	} else {
+		lbGroupUUIDs = []string{}
+	}
+
 	testData = append(testData, &nbdb.LogicalRouter{
 		UUID: GRName + "-UUID",
 		Name: GRName,
@@ -146,9 +153,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			"physical_ip":  physicalIPs[0],
 			"physical_ips": strings.Join(physicalIPs, ","),
 		},
-		Ports:        []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
-		StaticRoutes: grStaticRoutes,
-		Nat:          natUUIDs,
+		Ports:             []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
+		StaticRoutes:      grStaticRoutes,
+		Nat:               natUUIDs,
+		LoadBalancerGroup: lbGroupUUIDs,
 	})
 
 	testData = append(testData, expectedOVNClusterRouter)
@@ -204,6 +212,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			UUID:  externalSwitch + "-UUID",
 			Name:  externalSwitch,
 			Ports: []string{l3GatewayConfig.InterfaceID + "-UUID", externalSwitchPortToRouter + "-UUID"},
+		},
+		&nbdb.LoadBalancerGroup{
+			Name: types.ClusterLBGroupName,
+			UUID: types.ClusterLBGroupName + "-UUID",
 		})
 	return testData
 }
@@ -229,6 +241,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 
 	ginkgo.It("creates an IPv4 gateway in OVN", func() {
+		expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+			UUID: types.ClusterLBGroupName + "-UUID",
+			Name: types.ClusterLBGroupName,
+		}
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -245,6 +261,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				},
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
+				expectedClusterLBGroup,
 			},
 		})
 
@@ -275,6 +292,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 
 	ginkgo.It("creates an IPv6 gateway in OVN", func() {
+		expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+			UUID: types.ClusterLBGroupName + "-UUID",
+			Name: types.ClusterLBGroupName,
+		}
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -291,6 +312,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				},
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
+				expectedClusterLBGroup,
 			},
 		})
 
@@ -322,6 +344,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 
 	ginkgo.It("creates a dual-stack gateway in OVN", func() {
+		expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+			Name: types.ClusterLBGroupName,
+			UUID: types.ClusterLBGroupName + "-UUID",
+		}
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -338,6 +364,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				},
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
+				expectedClusterLBGroup,
 			},
 		})
 
@@ -664,6 +691,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 
 	ginkgo.It("removes leftover SNAT entries during init", func() {
+		expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+			UUID: types.ClusterLBGroupName + "-UUID",
+			Name: types.ClusterLBGroupName,
+		}
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -680,6 +711,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				},
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
+				expectedClusterLBGroup,
 			},
 		})
 

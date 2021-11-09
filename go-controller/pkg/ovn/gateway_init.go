@@ -61,6 +61,16 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		Options:     logicalRouterOptions,
 		ExternalIDs: logicalRouterExternalIDs,
 	}
+
+	if oc.loadBalancerGroupSupport && config.Gateway.Mode == config.GatewayModeShared {
+		lbGroups, err := oc.findLoadBalancerGroup()
+		if err != nil {
+			return fmt.Errorf("failed to fetch load balancer group for logical router %v, err : %v",
+				gatewayRouter, err)
+		}
+		logicalRouter.LoadBalancerGroup = []string{lbGroups[0].UUID}
+	}
+
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model:          &logicalRouter,
@@ -68,6 +78,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			OnModelUpdates: []interface{}{
 				&logicalRouter.Options,
 				&logicalRouter.ExternalIDs,
+				&logicalRouter.LoadBalancerGroup,
 			},
 		},
 	}
