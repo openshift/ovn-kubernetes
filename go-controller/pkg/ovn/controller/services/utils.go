@@ -82,6 +82,7 @@ func deleteServiceFromLegacyLBs(service *v1.Service) error {
 // This is any load balancer with one of the following external ID keys
 // - k8s-worker-lb-<proto>
 // - k8s-cluster-lb-<proto>
+// - k8s-idling-lb-<proto>
 // - <PROTO>_lb_gateway_router
 func findLegacyLBs() ([]ovnlb.CachedLB, error) {
 	lbCache, err := ovnlb.GetLBCache()
@@ -90,7 +91,7 @@ func findLegacyLBs() ([]ovnlb.CachedLB, error) {
 	}
 	lbs := lbCache.Find(nil)
 
-	legacyLBPattern := regexp.MustCompile(`(k8s-(worker|cluster)-lb-(tcp|udp|sctp)|(TCP|UDP|SCTP)_lb_gateway_router)`)
+	legacyLBPattern := regexp.MustCompile(`(k8s-(worker|cluster|idling)-lb-(tcp|udp|sctp)|(TCP|UDP|SCTP)_lb_gateway_router)`)
 
 	out := []ovnlb.CachedLB{}
 	for _, lb := range lbs {
