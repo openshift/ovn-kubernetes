@@ -1,16 +1,16 @@
 package ovn
 
 import (
-	"fmt"
 	"context"
+	"fmt"
 
-	v1 "k8s.io/api/core/v1"
 	appsv1 "k8s.io/api/apps/v1"
-	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
-	kuberuntime "k8s.io/apimachinery/pkg/runtime"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	clientset "k8s.io/client-go/kubernetes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kuberuntime "k8s.io/apimachinery/pkg/runtime"
+	clientset "k8s.io/client-go/kubernetes"
+	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
