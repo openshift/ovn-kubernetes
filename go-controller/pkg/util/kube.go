@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,6 +29,7 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
+	aojea "github.com/aojea/client-go-alternative-services"
 	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -105,7 +107,25 @@ func NewKubernetesClientset(conf *config.KubernetesConfig) (*kubernetes.Clientse
 	}
 	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
 	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
-	clientset, err := kubernetes.NewForConfig(kconfig)
+
+	addr := []string{}
+	for _, apiAddress := range strings.Split(config.OvnSouth.GetURL(), ",") {
+		splits := strings.SplitN(apiAddress, ":", 2)
+		if len(splits) != 2 {
+			klog.Infof("DEBUG error parse api adddress %s", apiAddress)
+			continue
+		}
+
+		host, _, err := net.SplitHostPort(splits[1])
+		if err != nil {
+			klog.Infof("DEBUG error parse host port api adddress %s", splits[1])
+			continue
+		}
+
+		addr = append(addr, net.JoinHostPort(host, "6443"))
+	}
+	klog.Infof("DEBUG new clienset with addresses %v", addr)
+	clientset, err := aojea.NewForConfigWithAlternativeServices(kconfig, addr)
 	if err != nil {
 		return nil, err
 	}
