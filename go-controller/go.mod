@@ -6,6 +6,7 @@ require (
 	github.com/Mellanox/sriovnet v1.0.2
 	github.com/Microsoft/go-winio v0.4.15 // indirect
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
+	github.com/aojea/client-go-alternative-services v0.0.0-20211111082950-bf13849d49e2
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
 	github.com/cenkalti/rpc2 v0.0.0-20210604223624-c1acbc6ec984 // indirect
 	github.com/containernetworking/cni v0.8.0
@@ -13,7 +14,6 @@ require (
 	github.com/coreos/go-iptables v0.4.5
 	github.com/ebay/go-ovn v0.1.1-0.20210731003635-d96abc06b52c
 	github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/gorilla/mux v1.8.0
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
@@ -34,18 +34,18 @@ require (
 	github.com/stretchr/testify v1.6.1
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
-	golang.org/x/sys v0.0.0-20210112080510-489259a85091
-	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
+	golang.org/x/sys v0.0.0-20210820121016-41cdb8703e55
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	k8s.io/api v0.20.0
-	k8s.io/apimachinery v0.20.0
+	k8s.io/apimachinery v0.23.0-alpha.4.0.20211105203412-d7e096fd217f
 	k8s.io/client-go v0.20.0
 	k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92
-	k8s.io/klog/v2 v2.4.0
-	k8s.io/utils v0.0.0-20201110183641-67b214c5f920
+	k8s.io/klog/v2 v2.30.0
+	k8s.io/utils v0.0.0-20210930125809-cb0fa318a74b
 )
 
 replace (
