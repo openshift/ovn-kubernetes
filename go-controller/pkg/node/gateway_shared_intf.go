@@ -11,6 +11,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -494,7 +495,7 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 }
 
 func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf string,
-	nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig) (*gateway, error) {
+	nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig, watchFactory factory.NodeWatchFactory) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
@@ -562,7 +563,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			return err
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg)
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")

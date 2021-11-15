@@ -174,7 +174,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
 			ipv6:      nil,
 		}
-		
+
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
@@ -209,7 +209,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nodeAnnotator, k, &fakeMgmtPortConfig)
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())
