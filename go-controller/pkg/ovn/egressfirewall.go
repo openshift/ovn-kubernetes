@@ -107,7 +107,7 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 			fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
 		)
 		if err != nil {
-			klog.Errorf("Unable to list egress firewall logical router policies, cannot cleanup old stale data, stderr: %s, err: %v", stderr, err)
+			klog.Errorf("Unable to list egress firewall ACLs, cannot cleanup old stale data, stderr: %s, err: %v", stderr, err)
 			return
 		}
 		if egressFirewallACLIDs != "" {
@@ -131,7 +131,8 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 					logicalSwitch,
 				)
 				if err != nil {
-					klog.Errorf("Unable to remove egress firewall acl, cannot list ACLs on switch: %s, stderr: %s, err: %v", logicalSwitch, stderr, err)
+					klog.Errorf("Unable to remove egress firewall acl, cannot list ACLs on switch: %s, stderr: %s, err: %v",
+						logicalSwitch, stderr, err)
 				}
 				for _, egressFirewallACLID := range strings.Fields(egressFirewallACLIDs) {
 					if strings.Contains(switchACLs, egressFirewallACLID) {
@@ -143,7 +144,8 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 							egressFirewallACLID,
 						)
 						if err != nil {
-							klog.Errorf("Unable to remove egress firewall acl: %s on %s, cannot cleanup old stale data, stderr: %s, err: %v", egressFirewallACLID, logicalSwitch, stderr, err)
+							klog.Errorf("Unable to remove egress firewall acl: %s on %s, cannot cleanup old stale data, stderr: %s, err: %v",
+								egressFirewallACLID, logicalSwitch, stderr, err)
 						}
 					}
 				}
@@ -162,7 +164,7 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 		fmt.Sprintf("direction=%s", types.DirectionFromLPort),
 	)
 	if err != nil {
-		klog.Errorf("Unable to list egress firewall logical router policies, cannot convert old ACL data, stderr: %s, err: %v", stderr, err)
+		klog.Errorf("Unable to list egress firewall ACLs, cannot convert old ACL data, stderr: %s, err: %v", stderr, err)
 		return
 	}
 	if egressFirewallACLIDs != "" {
@@ -456,22 +458,30 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	return nil
 }
 
-// deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
+// deleteEgressFirewallRules delete the ACL identified by the given externalID from all logical switches.
 func (oc *Controller) deleteEgressFirewallRules(externalID string, txn *util.NBTxn) error {
 	logicalSwitches := []string{}
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		nodes, err := oc.watchFactory.GetNodes()
-		if err != nil {
-			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
-		}
-		for _, node := range nodes {
-			logicalSwitches = append(logicalSwitches, node.Name)
-		}
-	} else {
-		logicalSwitches = []string{types.OVNJoinSwitch}
+	stdout, stderr, err := util.RunOVNNbctl(
+		"--data=bare",
+		"--no-heading",
+		"--columns=name",
+		"--format=table",
+		"list",
+		"logical_switch",
+	)
+	if err != nil {
+		return fmt.Errorf("Unable to list logical switches, stderr: %s, err: %v", stderr, err)
 	}
+	logicalSwitches = strings.Fields(stdout)
 	sort.Strings(logicalSwitches)
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "--format=table", "find", "ACL",
+
+	stdout, stderr, err = util.RunOVNNbctl(
+		"--data=bare",
+		"--no-heading",
+		"--columns=_uuid",
+		"--format=table",
+		"find",
+		"ACL",
 		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
 	if err != nil {
 		return fmt.Errorf("error deleting egressFirewall with external-ids %s, cannot get ACL policies - %s:%s",
@@ -482,8 +492,17 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string, txn *util.NBT
 		for _, uuid := range uuids {
 			_, stderr, err = txn.AddOrCommit([]string{"remove", "logical_switch", logicalSwitch, "acls", uuid})
 			if err != nil {
-				return fmt.Errorf("failed to commit db changes for egressFirewall stderr: %q, err: %+v", stderr, err)
+				return fmt.Errorf("failed to commit db changes for egressFirewall stderr: %q, err: %+v",
+					stderr, err)
 			}
+		}
+	}
+	// make sure ACLs are deleted from ACL table as well
+	for _, uuid := range uuids {
+		_, stderr, err = txn.AddOrCommit([]string{"destroy", "acl", uuid})
+		if err != nil {
+			return fmt.Errorf("failed to commit db changes for removal of ACL %s stderr: %q, err: %+v",
+				uuid, stderr, err)
 		}
 	}
 	return nil
