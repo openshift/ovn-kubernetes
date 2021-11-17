@@ -279,6 +279,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
 
+	// To reduce the load on OVS during startup post Force Reboot, pause ovn-controller, clean up stale
+	// OVS interfaces then continue.
+	klog.Infof("Pausing ovn-controller to cleanup stale ovs interfaces")
+	util.RunOVSAppctl("ovn-appctl", "-t", "ovn-controller", "debug/pause")
+	CheckForStaleOVSInternalPorts()
+	klog.Infof("Restarting ovn-controller after cleaning up stale ovs interfaces")
+	util.RunOVSAppctl("ovn-appctl", "-t", "ovn-controller", "debug/pause")
+
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
 	var level klog.Level
