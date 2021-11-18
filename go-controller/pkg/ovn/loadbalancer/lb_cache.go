@@ -214,16 +214,16 @@ func newCache() (*LBCache, error) {
 		}
 	}
 
-    //TODO: what if LBG is not supported?
+	//TODO: what if LBG is not supported?
 	groups, err := findTableLBs("load_balancer_group")
 	if err != nil {
 		return nil, err
 	}
 
-	for grpname, lbuuids := range groups {
+	for _, lbuuids := range groups {
 		for _, lbuuid := range lbuuids {
 			if lb, ok := c.existing[lbuuid]; ok {
-				lb.Groups.Insert(grpname)
+				lb.Groups.Insert(lbuuid)
 			}
 		}
 	}
