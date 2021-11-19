@@ -320,7 +320,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			return err
 		}
 
-		nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
+		nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
 		waiter := newStartupWaiter()
 
 		// Initialize management port resources on the node
