@@ -379,7 +379,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to get node: %s", nodeName)
 	}
-	err = oc.kube.SetAnnotationsOnNode(node, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
+	err = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
 	if err != nil {
 		return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
 	}
@@ -925,7 +925,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		var hostAddrs sets.String
 		if config.Gateway.Mode == config.GatewayModeShared {
 			hostAddrs, err = util.ParseNodeHostAddresses(node)
-			if err != nil {
+			if err != nil && !util.IsAnnotationNotSetError(err) {
 				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
 			}
 		}
