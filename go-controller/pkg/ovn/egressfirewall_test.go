@@ -126,12 +126,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					ACLs: []string{purgeACL.UUID, keepACL.UUID},
 				}
 
+				InitialJoinSwitch := &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "join",
+					ACLs: []string{purgeACL.UUID, keepACL.UUID},
+				}
+
 				fakeOVN.dbSetup = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						otherACL,
 						purgeACL,
 						keepACL,
 						InitialNodeSwitch,
+						InitialJoinSwitch,
 					},
 				}
 
@@ -153,7 +160,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				fakeOVN.controller.WatchEgressFirewall()
 
-				// stale ACL will be removed from the switch
+				// Both ACLS will be removed from the join switch
+				finalJoinSwitch := &nbdb.LogicalSwitch{
+					UUID: InitialJoinSwitch.UUID,
+					Name: "join",
+				}
+
+				// stale ACL will be removed from the node switch
 				finalNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialNodeSwitch.UUID,
 					Name: node1Name,
@@ -167,6 +180,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					otherACL,
 					keepACL,
 					finalNodeSwitch,
+					finalJoinSwitch,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
