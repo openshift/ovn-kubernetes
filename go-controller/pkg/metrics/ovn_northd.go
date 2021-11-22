@@ -75,7 +75,7 @@ var ovnNorthdCoverageShowMetricsMap = map[string]*metricDetails{
 
 func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, "name=ovnkube-master", k8sNodeName, true)
+		return checkPodRunsOnGivenNode(clientset, "app=ovnkube-master", k8sNodeName, true)
 	})
 	if err != nil {
 		if err == wait.ErrWaitTimeout {
