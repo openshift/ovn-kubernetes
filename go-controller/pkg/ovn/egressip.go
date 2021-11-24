@@ -197,6 +197,11 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 				klog.Error(err)
 				continue
 			}
+		} else {
+			for _, eIPStatus := range eIP.Status.Items {
+				eNode, _ := oc.eIPC.allocator[eIPStatus.Node]
+				eNode.allocations[eIPStatus.EgressIP] = true
+			}
 		}
 		for _, eNode := range oc.eIPC.allocator {
 			eNode.tainted = false
