@@ -149,18 +149,18 @@ func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 // It takes a list of (proto:[vips]:port -> [endpoints]) configs and re-aggregates
 // them to a list of (proto:[vip:port -> [endpoint:port]])
 // This load balancer is attached to all node switches. In shared-GW mode, it is also on all routers
-func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, clusterLBGroup string) []ovnlb.LB {
+func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, useLBGroup bool) []ovnlb.LB {
 	var nodeSwitches []string
 	var nodeRouters []string
 	var groups []string
-	if clusterLBGroup != "" {
-		nodeSwitches = make([]string, 0, 0)
-		nodeRouters = make([]string, 0, 0)
-		groups = []string{clusterLBGroup}
+	if useLBGroup {
+		nodeSwitches = make([]string, 0)
+		nodeRouters = make([]string, 0)
+		groups = []string{types.ClusterLBGroupName}
 	} else {
-		nodeSwitches = make([]string, 0, 0)
-		nodeRouters = make([]string, 0, 0)
-		groups = []string{}
+		nodeSwitches = make([]string, 0)
+		nodeRouters = make([]string, 0)
+		groups = make([]string, 0)
 
 		for _, node := range nodeInfos {
 			nodeSwitches = append(nodeSwitches, node.switchName)
