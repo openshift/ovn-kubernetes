@@ -7,23 +7,29 @@ export KUBERNETES_CONFORMANCE_TEST=y
 export KUBECONFIG=${HOME}/admin.conf
 
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
-# (Note that netflow v5 is IPv4 only)
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
-Should validate flow data of br-int is sent to an external gateway with netflow v5|\
+should provide Internet connection continuously when master is killed|\
+should provide Internet connection continuously when ovn-k8s pod is killed|\
+Should validate connectivity from a pod to a non-node host address on same node|\
+Should validate connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate connectivity to multiple external gateways for an ECMP scenario|\
+Should validate connectivity without vxlan before and after updating the namespace annotation to a new external gateway|\
+Should validate ICMP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate ICMP connectivity to multiple external gateways for an ECMP scenario|\
+Should validate ingress connectivity from an external gateway|\
+Should validate NetFlow data of br-int is sent to an external gateway|\
+Should validate TCP/UDP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
+Should validate the egress firewall policy functionality against remote hosts|\
+Should validate the egress IP functionality against remote hosts|\
+recovering from deleting db files while maintain connectivity|\
 test tainting a node according to its defaults interface MTU size"
 
 SKIPPED_TESTS=""
-
-if [ "$KIND_IPV4_SUPPORT" == true ]; then
-    if  [ "$KIND_IPV6_SUPPORT" == true ]; then
-	# No support for these features in dual-stack yet
-	SKIPPED_TESTS="hybrid.overlay|external.gateway"
-    else
-	# Skip sflow in IPv4 since it's a long test (~5 minutes)
-	# We're validating netflow v5 with an ipv4 cluster, sflow with an ipv6 cluster
-	SKIPPED_TESTS="Should validate flow data of br-int is sent to an external gateway with sflow"
-    fi
+if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # No support for these features in dual-stack yet
+    SKIPPED_TESTS="hybrid.overlay|external.gateway"
 fi
 
 if [ "$OVN_HA" == false ]; then
@@ -32,7 +38,7 @@ if [ "$OVN_HA" == false ]; then
   fi
   # No support for these features in no-ha mode yet
   # TODO streamline the db delete tests
-  SKIPPED_TESTS+="recovering from deleting db files while maintaining connectivity|\
+  SKIPPED_TESTS+="recovering from deleting db files while maintain connectivity|\
 Should validate connectivity before and after deleting all the db-pods at once in HA mode"
 else 
   if [ "$SKIPPED_TESTS" != "" ]; then

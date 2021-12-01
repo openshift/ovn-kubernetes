@@ -27,14 +27,14 @@ func isOvnReady(podAnnotation map[string]string) bool {
 	return false
 }
 
-// isDPUReady is a wait condition which waits for OVN master to set pod-networks annotation and
-// ovnkube running on DPU to set connection-status pod annotation and its status is Ready
-func isDPUReady(podAnnotation map[string]string) bool {
+// isSmartNICReady is a wait condition smart-NIC: wait for OVN master to set pod-networks annotation and
+// ovnkube running on Smart-NIC to set connection-status pod annotation and its status is Ready
+func isSmartNICReady(podAnnotation map[string]string) bool {
 	if isOvnReady(podAnnotation) {
-		// check DPU connection status
-		status := util.DPUConnectionStatus{}
+		// check Smart-NIC connection status
+		status := util.SmartNICConnectionStatus{}
 		if err := status.FromPodAnnotation(podAnnotation); err == nil {
-			if status.Status == util.DPUConnectionStatusReady {
+			if status.Status == util.SmartNicConnectionStatusReady {
 				return true
 			}
 		}
@@ -57,7 +57,7 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 		// drop through
 	}
 
-	if pod == nil && kclient != nil {
+	if kclient != nil {
 		// If the pod wasn't in our local cache, ask for it directly
 		pod, err = kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	}
@@ -102,7 +102,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isDPU bool, podUID string) (
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool) (
 	*PodInterfaceInfo, error) {
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
 	if err != nil {
@@ -123,8 +123,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, is
 		Ingress:       ingress,
 		Egress:        egress,
 		CheckExtIDs:   checkExtIDs,
-		IsDPU:         isDPU,
-		PodUID:        podUID,
+		IsSmartNic:    isSmartNic,
 	}
 	return podInterfaceInfo, nil
 }

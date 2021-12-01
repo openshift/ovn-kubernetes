@@ -53,36 +53,36 @@ var _ = Describe("CNI Utils tests", func() {
 		})
 	})
 
-	Context("isDPUReady", func() {
-		It("Returns true if dpu.connection-status is present and Status is Ready", func() {
+	Context("isSmartNICReady", func() {
+		It("Returns true if smartnic.connection-status is present and Status is Ready", func() {
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:    `{"ip_address": "192.168.2.3/24"}`,
-				util.DPUConnetionStatusAnnot: `{"Status":"Ready"}`}
-			Expect(isDPUReady(podAnnot)).To(Equal(true))
+				util.OvnPodAnnotationName:         `{"ip_address": "192.168.2.3/24"}`,
+				util.SmartNicConnetionStatusAnnot: `{"Status":"Ready"}`}
+			Expect(isSmartNICReady(podAnnot)).To(Equal(true))
 		})
 
-		It("Returns false if dpu.connection-status is present and Status is not Ready", func() {
+		It("Returns false if smartnic.connection-status is present and Status is not Ready", func() {
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:    `{"ip_address": "192.168.2.3/24"}`,
-				util.DPUConnetionStatusAnnot: `{"Status":"NotReady"}`}
-			Expect(isDPUReady(podAnnot)).To(Equal(false))
+				util.OvnPodAnnotationName:         `{"ip_address": "192.168.2.3/24"}`,
+				util.SmartNicConnetionStatusAnnot: `{"Status":"NotReady"}`}
+			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
 		})
 
-		It("Returns false if dpu.connection-status Status is not present", func() {
+		It("Returns false if smartnic.connection-status Status is not present", func() {
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:    `{"ip_address": "192.168.2.3/24"}`,
-				util.DPUConnetionStatusAnnot: `{"Foo":"Bar"}`}
-			Expect(isDPUReady(podAnnot)).To(Equal(false))
+				util.OvnPodAnnotationName:         `{"ip_address": "192.168.2.3/24"}`,
+				util.SmartNicConnetionStatusAnnot: `{"Foo":"Bar"}`}
+			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
 		})
 
-		It("Returns false if dpu.connection-status is not present", func() {
+		It("Returns false if smartnic.connection-status is not present", func() {
 			podAnnot := map[string]string{util.OvnPodAnnotationName: `{"ip_address": "192.168.2.3/24"}`}
-			Expect(isDPUReady(podAnnot)).To(Equal(false))
+			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
 		})
 
 		It("Returns false if OVN pod-networks is not present", func() {
 			podAnnot := map[string]string{}
-			Expect(isDPUReady(podAnnot)).To(Equal(false))
+			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
 		})
 	})
 
@@ -215,27 +215,26 @@ var _ = Describe("CNI Utils tests", func() {
 "ip_address":"192.168.2.3/24",
 "gateway_ip":"192.168.2.1"}}`,
 		}
-		podUID := "4d06bae8-9c38-41f6-945c-f92320e782e4"
-		It("Creates PodInterfaceInfo with IsDPU false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID)
+		It("Creates PodInterfaceInfo with IsSmartNIC false", func() {
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsDPU).To(BeFalse())
+			Expect(pif.IsSmartNic).To(BeFalse())
 		})
 
-		It("Creates PodInterfaceInfo with IsDPU true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, true, podUID)
+		It("Creates PodInterfaceInfo with IsSmartNIC true", func() {
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, true)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsDPU).To(BeTrue())
+			Expect(pif.IsSmartNic).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, false)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})

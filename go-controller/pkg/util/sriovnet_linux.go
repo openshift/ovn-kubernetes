@@ -1,11 +1,8 @@
-//go:build linux
 // +build linux
 
 package util
 
 import (
-	"net"
-
 	"github.com/Mellanox/sriovnet"
 )
 
@@ -15,9 +12,7 @@ type SriovnetOps interface {
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
-	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
-	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
-	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
+	GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error)
 }
 
 type defaultSriovnetOps struct {
@@ -55,14 +50,6 @@ func (defaultSriovnetOps) GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	return sriovnet.GetPfPciFromVfPci(vfPciAddress)
 }
 
-func (defaultSriovnetOps) GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
-	return sriovnet.GetVfRepresentorDPU(pfID, vfIndex)
-}
-
-func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {
-	return sriovnet.GetRepresentorPeerMacAddress(netdev)
-}
-
-func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
-	return sriovnet.GetRepresentorPortFlavour(netdev)
+func (defaultSriovnetOps) GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error) {
+	return sriovnet.GetVfRepresentorSmartNIC(pfID, vfIndex)
 }

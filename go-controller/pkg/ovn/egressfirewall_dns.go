@@ -10,7 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 )
 
 type EgressDNS struct {

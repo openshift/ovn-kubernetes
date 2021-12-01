@@ -16,12 +16,11 @@ import (
 
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -66,8 +65,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
 	m["Master HA Options"] = config.MasterHAFlags
-	m["OVN Kube Node Options"] = config.OvnKubeNodeFlags
-	m["Monitoring Options"] = config.MonitoringFlags
+	m["OVN Kube Node flags"] = config.OvnKubeNodeFlags
 
 	return m
 }
@@ -228,23 +226,22 @@ func runOvnKube(ctx *cli.Context) error {
 			return err
 		}
 		watchFactory = masterWatchFactory
-		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+		var ovnNBClient, ovnSBClient goovn.Client
 
-		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
-			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
+		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
+			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
 		}
 
-		if libovsdbOvnSBClient, err = libovsdb.NewSBClient(stopChan); err != nil {
-			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
+		if ovnSBClient, err = util.NewOVNSBClient(); err != nil {
+			return fmt.Errorf("error when trying to initialize go-ovn SB client: %v", err)
 		}
 
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start
 		// since we capture some metrics in Start()
-		metrics.RegisterMasterMetrics(libovsdbOvnSBClient)
+		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
 		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
 			return err
 		}
@@ -284,8 +281,8 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	// start the prometheus server to serve OVN Metrics (default port: 9476)
-	// Note: for ovnkube node mode dpu-host no ovn metrics is required as ovn is not running on the node.
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Kubernetes.OVNMetricsBindAddress != "" {
+	// Note: for ovnkube node mode smart-nic-host no ovn metrics is required as ovn is not running on the node.
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && config.Kubernetes.OVNMetricsBindAddress != "" {
 		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
 		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}

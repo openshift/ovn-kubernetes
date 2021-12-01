@@ -29,8 +29,6 @@ type ObjectCacheInterface interface {
 type NodeWatchFactory interface {
 	Shutdownable
 
-	Start() error
-
 	AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemoveServiceHandler(handler *Handler)
@@ -44,8 +42,6 @@ type NodeWatchFactory interface {
 
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
-
-	GetNode(name string) (*kapi.Node, error)
 
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
