@@ -174,6 +174,9 @@ type Controller struct {
 	// Supports multicast?
 	multicastSupport bool
 
+	// Supports load balancer groups?
+	loadBalancerGroupSupport bool
+
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPController
 
@@ -1285,7 +1288,7 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
 		err := oc.svcController.Run(5, oc.stopChan, runRepair,
-			oc.clusterPortGroupUUID, oc.clusterLBGroupUUID)
+			oc.clusterPortGroupUUID, oc.loadBalancerGroupSupport)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}

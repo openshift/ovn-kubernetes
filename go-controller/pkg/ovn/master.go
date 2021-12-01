@@ -358,15 +358,17 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups. " +
 			"Disabling Load Balancer Groups")
 		oc.clusterLBGroupUUID = ""
+		oc.loadBalancerGroupSupport = false
 	} else {
-		oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("get", "Load_Balancer_Group", "clusterLBGroup", "_uuid")
+		oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("get", "Load_Balancer_Group", types.ClusterLBGroupName, "_uuid")
 		if err != nil || oc.clusterLBGroupUUID == "" {
-			oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("create", "Load_Balancer_Group", "name=clusterLBGroup")
+			oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("create", "Load_Balancer_Group", "name="+types.ClusterLBGroupName)
 			if err != nil {
-				klog.Errorf("Error creating clusterLBGroup "+
+				klog.Errorf("Error creating "+types.ClusterLBGroupName+" "+
 					"stdout: %q, stderr: %q (%v)", oc.clusterLBGroupUUID, stderr, err)
 			}
 		}
+		oc.loadBalancerGroupSupport = true
 	}
 
 	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
@@ -755,7 +757,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
-	if oc.clusterLBGroupUUID != "" {
+	if oc.loadBalancerGroupSupport {
 		lsArgs = append(lsArgs,
 			"--", "add", "logical_switch", nodeName,
 			"load_balancer_group", oc.clusterLBGroupUUID,
