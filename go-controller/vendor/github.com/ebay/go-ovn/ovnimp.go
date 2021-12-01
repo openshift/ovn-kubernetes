@@ -148,8 +148,6 @@ func (odbi *ovndb) getRowsMatchingUUID(table, field, uuid string) ([]string, err
 }
 
 func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.OperationResult, error) {
-	odbi.tranmutex.RLock()
-	defer odbi.tranmutex.RUnlock()
 	client, err := odbi.getClient()
 	if err != nil {
 		return nil, err
@@ -172,7 +170,7 @@ func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.Op
 			if i < len(ops) {
 				opsInfo = fmt.Sprintf("%v", ops[i])
 			}
-			odbi.close()
+			odbi.disconnect()
 			return nil, fmt.Errorf("Reconnecting...Transaction Failed due to an error: %v details: %v in %s",
 				o.Error, o.Details, opsInfo)
 		}
@@ -351,6 +349,53 @@ func (odbi *ovndb) getContext(dbName string) (*map[string][]string, *map[string]
 	return &odbi.tableCols, &odbi.cache, odbi.signalCreate, odbi.signalDelete
 }
 
+func (odbi *ovndb) deleteLSPFromUUIDCache(dbName, table, uuid string) {
+	if dbName == DBServer || table != TableLogicalSwitchPort {
+		return
+	}
+
+	oldRow, ok := odbi.cache[table][uuid]
+	if !ok {
+		return
+	}
+	oldName, ok := oldRow.Fields["name"]
+	if !ok {
+		return
+	}
+
+	if oldName != "" {
+		delete(odbi.lspUUIDCache, oldName.(string))
+	}
+}
+
+func (odbi *ovndb) updateLSPInUUIDCache(dbName, table, newUUID string, oldRow, newRow *libovsdb.Row) {
+	if dbName == DBServer || table != TableLogicalSwitchPort {
+		return
+	}
+
+	var oldName, newName string
+
+	if oldRow != nil {
+		if oldNameField, ok := oldRow.Fields["name"]; ok {
+			oldName = oldNameField.(string)
+		}
+	}
+	if newRow != nil {
+		if newNameField, ok := newRow.Fields["name"]; ok {
+			newName = newNameField.(string)
+		}
+	}
+
+	if oldName != newName {
+		if oldName != "" {
+			delete(odbi.lspUUIDCache, oldName)
+		}
+		if newName != "" {
+			odbi.lspUUIDCache[newName] = newUUID
+		}
+	}
+}
+
 func (odbi *ovndb) populateCache(dbName string, updates *libovsdb.TableUpdates, signal bool) {
 	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
 
@@ -371,16 +416,19 @@ func (odbi *ovndb) populateCache(dbName string, updates *libovsdb.TableUpdates, 
 			odbi.float64_to_int(row.New)
 
 			if !reflect.DeepEqual(row.New, empty) {
-				if reflect.DeepEqual(row.New, (*cache)[table][uuid]) {
+				oldRow := (*cache)[table][uuid]
+				if reflect.DeepEqual(row.New, oldRow) {
 					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
 					continue
 				}
 				(*cache)[table][uuid] = row.New
+				odbi.updateLSPInUUIDCache(dbName, table, uuid, &oldRow, &row.New)
 				if signal && signalCreate != nil {
 					signalCreate(table, uuid)
 				}
 			} else {
 				defer delete((*cache)[table], uuid)
+				odbi.deleteLSPFromUUIDCache(dbName, table, uuid)
 				if signal && signalDelete != nil {
 					defer signalDelete(table, uuid)
 				}
@@ -467,6 +515,7 @@ func (odbi *ovndb) modifySet(orig interface{}, elem interface{}) *libovsdb.OvsSe
 
 func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *libovsdb.Row, cache *map[string]map[string]libovsdb.Row) {
 	row := (*cache)[table][uuid]
+	oldRow := row
 
 	for column, value := range rowdiff.Fields {
 		columnSchema, ok := odbi.getSchema(db).Tables[table].Columns[column]
@@ -510,6 +559,7 @@ func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *lib
 	}
 
 	(*cache)[table][uuid] = row
+	odbi.updateLSPInUUIDCache(db, table, uuid, &oldRow, &row)
 }
 
 func (odbi *ovndb) populateCache2(dbName string, updates *libovsdb.TableUpdates2, signal bool) {
@@ -537,6 +587,7 @@ func (odbi *ovndb) populateCache2(dbName string, updates *libovsdb.TableUpdates2
 				}
 				odbi.initMissingColumnsWithDefaults(dbName, table, &row.Initial)
 				(*cache)[table][uuid] = row.Initial
+				odbi.updateLSPInUUIDCache(dbName, table, uuid, nil, &row.Initial)
 				if signal && signalCreate != nil {
 					signalCreate(table, uuid)
 				}
@@ -546,6 +597,7 @@ func (odbi *ovndb) populateCache2(dbName string, updates *libovsdb.TableUpdates2
 				// missing json number conversion in libovsdb
 				odbi.float64_to_int(row.Insert)
 				(*cache)[table][uuid] = row.Insert
+				odbi.updateLSPInUUIDCache(dbName, table, uuid, nil, &row.Insert)
 				if signal && signalCreate != nil {
 					signalCreate(table, uuid)
 				}
@@ -559,6 +611,7 @@ func (odbi *ovndb) populateCache2(dbName string, updates *libovsdb.TableUpdates2
 				}
 			case row.Delete.Fields != nil:
 				defer delete((*cache)[table], uuid)
+				odbi.deleteLSPFromUUIDCache(dbName, table, uuid)
 				if signal && signalDelete != nil {
 					signalDelete(table, uuid)
 				}

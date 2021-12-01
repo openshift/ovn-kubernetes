@@ -289,8 +289,9 @@ type ovndb struct {
 	clientLock   sync.RWMutex
 	disconnSig   chan struct{}
 	cache        map[string]map[string]libovsdb.Row
+	// Map of LSP Name to UUID
+	lspUUIDCache map[string]string
 	cachemutex   sync.RWMutex
-	tranmutex    sync.RWMutex
 	signalCB     OVNSignal
 	disconnectCB OVNDisconnectedCallback
 	db           string
@@ -391,6 +392,7 @@ func (c *ovndb) connectEndpoint() error {
 		// survives reconnections as the db server will send us changes
 		// since the last transaction
 		c.cache = make(map[string]map[string]libovsdb.Row)
+		c.lspUUIDCache = make(map[string]string)
 	}
 	c.tableCols = c.cfgTableCols
 	c.serverCache = make(map[string]map[string]libovsdb.Row)
@@ -479,8 +481,6 @@ func NewClient(cfg *Config) (Client, error) {
 func (c *ovndb) reconnect() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	go func() {
-		c.tranmutex.Lock()
-		defer c.tranmutex.Unlock()
 		klog.Infof("[%s] disconnected from %s; reconnecting ... ", c.db, c.endpoints[c.curEndpoint])
 		retry := 0
 		for range ticker.C {
@@ -587,11 +587,6 @@ func (c *ovndb) monitorTables(db string, jsonContext interface{}) (*libovsdb.Tab
 	return updates, err
 }
 
-func (c *ovndb) close() error {
-	c.client.Disconnect()
-	return nil
-}
-
 func (c *ovndb) disconnect() {
 	c.clientLock.Lock()
 	defer c.clientLock.Unlock()
@@ -612,9 +607,8 @@ func (odbi *ovndb) getClient() (*libovsdb.OvsdbClient, error) {
 
 // TODO return proper error
 func (c *ovndb) Close() error {
-	c.tranmutex.Lock()
-	defer c.tranmutex.Unlock()
-	return c.close()
+	c.disconnect()
+	return nil
 }
 
 func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
@@ -622,8 +616,6 @@ func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
 }
 
 func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
-	c.tranmutex.RLock()
-	defer c.tranmutex.RUnlock()
 	if client, _ := c.getClient(); client != nil {
 		return client.Schema[c.db]
 	}

@@ -49,6 +49,7 @@ type CachedLB struct {
 
 	Switches sets.String
 	Routers  sets.String
+	Groups   sets.String
 }
 
 // update the database with any existing LBs, along with any
@@ -73,6 +74,7 @@ func (c *LBCache) update(existing []LB, toDelete []string) {
 
 			Switches: sets.NewString(lb.Switches...),
 			Routers:  sets.NewString(lb.Routers...),
+			Groups:   sets.NewString(lb.Groups...),
 		}
 	}
 }
@@ -127,6 +129,7 @@ func (c *LBCache) addNewLB(lb *LB) {
 
 		Switches: sets.NewString(),
 		Routers:  sets.NewString(),
+		Groups:   sets.NewString(),
 	}
 }
 
@@ -211,6 +214,20 @@ func newCache() (*LBCache, error) {
 		}
 	}
 
+	//TODO: what if LBG is not supported?
+	groups, err := findTableLBs("load_balancer_group")
+	if err != nil {
+		return nil, err
+	}
+
+	for _, lbuuids := range groups {
+		for _, lbuuid := range lbuuids {
+			if lb, ok := c.existing[lbuuid]; ok {
+				lb.Groups.Insert(lbuuid)
+			}
+		}
+	}
+
 	return &c, nil
 }
 
@@ -244,6 +261,7 @@ func listLBs() ([]CachedLB, error) {
 			VIPs:     sets.String{},
 			Switches: sets.String{},
 			Routers:  sets.String{},
+			Groups:   sets.String{},
 		}
 		// parse the row
 

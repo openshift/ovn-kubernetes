@@ -67,7 +67,10 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 		"ovn-kubernetes-master",
 		oc.client.CoreV1(),
 		nil,
-		resourcelock.ResourceLockConfig{Identity: nodeName},
+		resourcelock.ResourceLockConfig{
+			Identity:      nodeName,
+			EventRecorder: oc.recorder,
+		},
 	)
 	if err != nil {
 		return err
@@ -351,6 +354,21 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
+	if _, stderr, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
+		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups. " +
+			"Disabling Load Balancer Groups")
+		oc.clusterLBGroupUUID = ""
+	} else {
+		oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("get", "Load_Balancer_Group", "clusterLBGroup", "_uuid")
+		if err != nil || oc.clusterLBGroupUUID == "" {
+			oc.clusterLBGroupUUID, stderr, err = util.RunOVNNbctl("create", "Load_Balancer_Group", "name=clusterLBGroup")
+			if err != nil {
+				klog.Errorf("Error creating clusterLBGroup "+
+					"stdout: %q, stderr: %q (%v)", oc.clusterLBGroupUUID, stderr, err)
+			}
+		}
+	}
+
 	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -597,7 +615,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	drLRPIPs, _ := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
-	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
+	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs, oc.clusterLBGroupUUID)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -737,6 +755,13 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
+	if oc.clusterLBGroupUUID != "" {
+		lsArgs = append(lsArgs,
+			"--", "add", "logical_switch", nodeName,
+			"load_balancer_group", oc.clusterLBGroupUUID,
+		)
+	}
+
 	// Create a logical switch and set its subnet.
 	stdout, stderr, err := util.RunOVNNbctl(lsArgs...)
 	if err != nil {
@@ -832,7 +857,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 
 	// Connect the switch to the router.
 	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
-		"router", nodeLRPMAC.String(), "router-port="+types.RouterToSwitchPrefix+nodeName)
+		"router", "router", "router-port="+types.RouterToSwitchPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
