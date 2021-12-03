@@ -3,12 +3,12 @@ package cni
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
@@ -17,6 +17,18 @@ const serverRunDir string = "/var/run/ovn-kubernetes/cni/"
 
 const serverSocketName string = "ovn-cni-server.sock"
 const serverSocketPath string = serverRunDir + "/" + serverSocketName
+
+// KubeAPIAuth contains information necessary to create a Kube API client
+type KubeAPIAuth struct {
+	// Kubeconfig is the path to a kubeconfig
+	Kubeconfig string `json:"kubeconfig,omitempty"`
+	// KubeAPIServer is the URL of a Kubernetes API server (not required if kubeconfig is given)
+	KubeAPIServer string `json:"kube-api-server,omitempty"`
+	// KubeAPIToken is a Kubernetes API token (not required if kubeconfig is given)
+	KubeAPIToken string `json:"kube-api-token,omitempty"`
+	// KubeCAData is the Base64-ed Kubernetes API CA certificate data (not required if kubeconfig is given)
+	KubeCAData string `json:"kube-ca-data,omitempty"`
+}
 
 // PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
 type PodInterfaceInfo struct {
@@ -61,6 +73,7 @@ type CNIRequestMetrics struct {
 type Response struct {
 	Result    *current.Result
 	PodIFInfo *PodInterfaceInfo
+	KubeAuth  *KubeAPIAuth
 }
 
 // PodRequest structure built from Request which is passed to the
@@ -72,6 +85,8 @@ type PodRequest struct {
 	PodNamespace string
 	// kubernetes pod name
 	PodName string
+	// kubernetes pod UID
+	PodUID string
 	// kubernetes container ID
 	SandboxID string
 	// kernel network namespace path
@@ -86,9 +101,12 @@ type PodRequest struct {
 	ctx context.Context
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
+
+	podLister corev1listers.PodLister
+	kclient   kubernetes.Interface
 }
 
-type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error)
+type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)
 
 // Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
@@ -97,8 +115,6 @@ type Server struct {
 	requestFunc cniRequestFunc
 	rundir      string
 	podLister   corev1listers.PodLister
-
-	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
-	runningSandboxAddsLock sync.Mutex
-	runningSandboxAdds     map[string]*PodRequest
+	kclient     kubernetes.Interface
+	kubeAuth    *KubeAPIAuth
 }
