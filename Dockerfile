@@ -34,6 +34,7 @@ RUN yum install -y  \
 
 ARG ovsver=2.16.0-15.el8fdp
 ARG ovnver=21.09.0-22.el8fdp
+COPY ovn21.12-21.12.0-24.el8fdp.x86_64.rpm ovn21.12-central-21.12.0-24.el8fdp.x86_64.rpm ovn21.12-host-21.12.0-24.el8fdp.x86_64.rpm ovn21.12-vtep-21.12.0-24.el8fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
@@ -46,6 +47,7 @@ RUN INSTALL_PKGS=" \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.16 = $ovsver" "openvswitch2.16-devel = $ovsver" "python3-openvswitch2.16 = $ovsver" "openvswitch2.16-ipsec = $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn21.09 = $ovnver" "ovn21.09-central = $ovnver" "ovn21.09-host = $ovnver" "ovn21.09-vtep = $ovnver" && \
+	rpm -Uhv --nodeps --force /root/*.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
