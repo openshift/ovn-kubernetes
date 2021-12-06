@@ -85,6 +85,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, lbs...)
 	if err != nil {
+		klog.Warningf("#### EnsureLBs() CreateOrUpdateLoadBalancersOps() failed: %v", err)
 		return err
 	}
 
@@ -102,12 +103,14 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	for k, v := range addLBsToSwitch {
 		ops, err = libovsdbops.AddLoadBalancersToSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
+			klog.Warningf("#### EnsureLBs() AddLoadBalancersToSwitchOps() failed: %v", err)
 			return err
 		}
 	}
 	for k, v := range removeLBsFromSwitch {
 		ops, err = libovsdbops.RemoveLoadBalancersFromSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
+			klog.Warningf("#### EnsureLBs() RemoveLoadBalancersFromSwitchOps() failed: %v", err)
 			return err
 		}
 	}
@@ -126,12 +129,14 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	for k, v := range addLBsToRouter {
 		ops, err = libovsdbops.AddLoadBalancersToRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
+			klog.Warningf("#### EnsureLBs() AddLoadBalancersToRouterOps() failed: %v", err)
 			return err
 		}
 	}
 	for k, v := range removesLBsFromRouter {
 		ops, err = libovsdbops.RemoveLoadBalancersFromRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
+			klog.Warningf("#### EnsureLBs() RemoveLoadBalancersFromRouterOps() failed: %v", err)
 			return err
 		}
 	}
@@ -166,11 +171,13 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	}
 	ops, err = libovsdbops.DeleteLoadBalancersOps(nbClient, ops, deleteLBs...)
 	if err != nil {
+		klog.Warningf("#### EnsureLBs() DeleteLoadBalancersOps() failed: %v", err)
 		return err
 	}
 
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, lbs, ops)
 	if err != nil {
+		klog.Warningf("#### EnsureLBs() TransactAndCheckAndSetUUIDs() failed: %v", err)
 		return err
 	}
 
@@ -179,7 +186,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	}
 
 	lbCache.update(LBs, toDelete.UnsortedList())
-	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(toDelete), externalIDs)
+	klog.Infof("Deleted %d stale LBs for %#v", len(toDelete), externalIDs)
 
 	return nil
 }

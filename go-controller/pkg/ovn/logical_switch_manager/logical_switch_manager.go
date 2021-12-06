@@ -467,6 +467,8 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 				}
 			}
 		}
+	} else {
+		klog.Warningf("#### getJoinLRPAddresses() err calling GetLRPAddrs(%s): %v", gwLrpName, err)
 	}
 
 	if len(gwLRPIPs) != len(joinSubnets) {

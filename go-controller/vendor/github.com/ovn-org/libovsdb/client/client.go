@@ -251,6 +251,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 				}
 			}
 		}
+		o.logger.V(3).Info("reconnected - done restarting monitors")
 	}
 
 	go o.handleDisconnectNotification()
@@ -264,7 +265,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 }
 
 func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) error {
-	o.logger.V(5).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
+	o.logger.Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
 	var dialer net.Dialer
 	var err error
 	var c net.Conn
@@ -349,6 +350,7 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) error {
 			}
 			db.api = newAPI(db.cache, o.logger)
 		} else {
+			o.logger.V(3).Info(fmt.Sprintf("##### [%s] purging cache", dbName))
 			db.cache.Purge(db.model)
 		}
 		db.cacheMutex.Unlock()
@@ -549,6 +551,7 @@ func (o *ovsdbClient) update(params []json.RawMessage, reply *[]interface{}) err
 
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
+	o.logger.V(3).Info(fmt.Sprintf("#### [%s] RPC processing Update()", cookie.DatabaseName))
 	err = db.cache.Update(cookie.ID, updates)
 	db.cacheMutex.RUnlock()
 
@@ -586,6 +589,7 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
+	o.logger.V(3).Info(fmt.Sprintf("#### [%s] RPC processing Update2()", cookie.DatabaseName))
 	err = db.cache.Update2(cookie, updates)
 	db.cacheMutex.RUnlock()
 
@@ -629,6 +633,7 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
+	o.logger.V(3).Info(fmt.Sprintf("#### [%s] RPC processing Update3()", cookie.DatabaseName))
 	err = db.cache.Update2(cookie, updates)
 	db.cacheMutex.RUnlock()
 
@@ -891,10 +896,14 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 	defer db.cacheMutex.Unlock()
 	if monitor.Method == ovsdb.MonitorRPC {
 		u := tableUpdates.(ovsdb.TableUpdates)
+		o.logger.V(3).Info(fmt.Sprintf("#### [%s] updating with monitor Populate reply", dbName))
 		err = db.cache.Populate(u)
+		o.logger.V(3).Info(fmt.Sprintf("#### [%s] DONE updating with monitor Populate reply", dbName))
 	} else {
 		u := tableUpdates.(ovsdb.TableUpdates2)
+		o.logger.V(3).Info(fmt.Sprintf("#### [%s] updating with monitor Populate2 reply", dbName))
 		err = db.cache.Populate2(u)
+		o.logger.V(3).Info(fmt.Sprintf("#### [%s] DONE updating with monitor Populate2 reply", dbName))
 	}
 
 	if err != nil {
@@ -905,15 +914,19 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 	db.deferUpdates = false
 	for _, update := range db.deferredUpdates {
 		if update.updates != nil {
+			o.logger.V(3).Info(fmt.Sprintf("#### [%s] processing deferred Populate()", dbName))
 			if err = db.cache.Populate(*update.updates); err != nil {
 				return err
 			}
+			o.logger.V(3).Info(fmt.Sprintf("#### [%s] DONE processing deferred Populate()", dbName))
 		}
 
 		if update.updates2 != nil {
+			o.logger.V(3).Info(fmt.Sprintf("#### [%s] processing deferred Populate2()", dbName))
 			if err = db.cache.Populate2(*update.updates2); err != nil {
 				return err
 			}
+			o.logger.V(3).Info(fmt.Sprintf("#### [%s] DONE processing deferred Populate2()", dbName))
 		}
 		if len(update.lastTxnID) > 0 {
 			db.monitors[cookie.ID].LastTransactionID = update.lastTxnID

@@ -247,7 +247,7 @@ func (c *Controller) syncService(key string) error {
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
-		klog.V(4).Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
+		klog.Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
 		metrics.MetricSyncServiceLatency.Observe(time.Since(startTime).Seconds())
 	}()
 
@@ -298,16 +298,16 @@ func (c *Controller) syncService(key string) error {
 
 	// Build the abstract LB configs for this service
 	perNodeConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices)
-	klog.V(5).Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
-	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
+	klog.Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
+	klog.Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
 
 	// Convert the LB configs in to load-balancer objects
 	nodeInfos := c.nodeTracker.allNodes()
 	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos, c.useLBGroups)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
-	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
-	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
-	klog.V(3).Infof("Service %s has %d cluster-wide and %d per-node configs, making %d and %d load balancers",
+	klog.Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
+	klog.Infof("Built service %s per-node LB %#v", key, perNodeLBs)
+	klog.Infof("Service %s has %d cluster-wide and %d per-node configs, making %d and %d load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(clusterLBs), len(perNodeLBs))
 	lbs := append(clusterLBs, perNodeLBs...)
 
@@ -316,9 +316,9 @@ func (c *Controller) syncService(key string) error {
 	existingLBs, ok := c.alreadyApplied[key]
 	c.alreadyAppliedLock.Unlock()
 	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) {
-		klog.V(3).Infof("Skipping no-op change for service %s", key)
+		klog.Infof("Skipping no-op change for service %s", key)
 	} else {
-		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
+		klog.Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.

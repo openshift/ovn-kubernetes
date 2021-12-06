@@ -15,6 +15,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
+
+	"k8s.io/klog/v2"
 )
 
 // gatewayInit creates a gateway router for the local chassis.
@@ -67,6 +69,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		},
 	}
 
+	klog.Warningf("##### Creating gatewayRouter %q", gatewayRouter)
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create logical router %v, err: %v", gatewayRouter, err)
 	}
