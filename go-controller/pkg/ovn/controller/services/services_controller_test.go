@@ -29,10 +29,7 @@ type serviceController struct {
 	serviceStore       cache.Store
 	endpointSliceStore cache.Store
 	libovsdbCleanup    *libovsdbtest.Cleanup
-}
-
-func newController() (*serviceController, error) {
-	return newControllerWithDBSetup(libovsdbtest.TestSetup{})
+	stopCh             chan struct{}
 }
 
 func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
@@ -55,10 +52,12 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 		informerFactory.Core().V1().Services().Informer().GetStore(),
 		informerFactory.Discovery().V1beta1().EndpointSlices().Informer().GetStore(),
 		cleanup,
+		make(<-chan struct{}),
 	}, nil
 }
 
 func (c *serviceController) close() {
+	close(c.stopCh)
 	c.libovsdbCleanup.Cleanup()
 }
 
@@ -615,12 +614,15 @@ func TestSyncServices(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Error creating controller: %v", err)
 			}
-			defer controller.close()
+			t.Cleanup(controller.close)
 			// Add objects to the Store
 			controller.endpointSliceStore.Add(tt.slice)
 			controller.serviceStore.Add(tt.service)
-
 			controller.nodeTracker.nodes = defaultNodes
+
+			if err := controller.Run(5, stopCh); err != nil {
+				t.Errorf("failed to start service controller: %v", err)
+			}
 
 			err = controller.syncService(ns + "/" + serviceName)
 			if err != nil {

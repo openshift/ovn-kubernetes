@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -193,7 +194,7 @@ var startMasterMetricUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics(sbClient client.Client) {
+func RegisterMasterMetrics(sbClient *libovsdb.Client) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
 		// the updater for this metric is activated
@@ -203,6 +204,10 @@ func RegisterMasterMetrics(sbClient client.Client) {
 		prometheus.MustRegister(metricPodCreationLatency)
 
 		scrapeOvnTimestamp := func() float64 {
+			if !sbClient.IsRunning() {
+				// Not listening to database updates because we're not the leader
+				return 0
+			}
 			sbGlobal, err := libovsdbops.FindSBGlobal(sbClient)
 			if err != nil {
 				klog.Errorf("Failed to get global options for the SB_Global table err: %v", err)

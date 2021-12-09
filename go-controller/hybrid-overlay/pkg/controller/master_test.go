@@ -14,11 +14,11 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -109,8 +109,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			dbSetup := libovsdbtest.TestSetup{}
-			var libovsdbOvnNBClient libovsdbclient.Client
+			var libovsdbOvnNBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			m, err := NewMaster(
@@ -214,8 +216,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: initialExpectedDB,
 			}
-			var libovsdbOvnNBClient libovsdbclient.Client
+			var libovsdbOvnNBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -343,8 +347,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: expectedDatabaseState,
 			}
-			var libovsdbOvnNBClient libovsdbclient.Client
+			var libovsdbOvnNBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -436,8 +442,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: expectedDatabaseState,
 			}
-			var libovsdbOvnNBClient libovsdbclient.Client
+			var libovsdbOvnNBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			m, err := NewMaster(
@@ -535,9 +543,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			// TODO(trozet) actually check some expected data in the DB?
 			dbSetup := libovsdbtest.TestSetup{}
-			var libovsdbOvnNBClient libovsdbclient.Client
+			var libovsdbOvnNBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
@@ -625,8 +636,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// TODO(trozet) actually check some expected data in the DB?
 			dbSetup := libovsdbtest.TestSetup{}
-			var libovsdbOvnNBClient libovsdbclient.Client
+			var libovsdbOvnNBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			k := &kube.Kube{KClient: fakeClient}

@@ -15,12 +15,12 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -68,7 +68,7 @@ type ACLLoggingLevels struct {
 // namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
 // or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
-// manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
+// manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)   dd
 type namespaceInfo struct {
 	sync.RWMutex
 
@@ -181,10 +181,10 @@ type Controller struct {
 	recorder record.EventRecorder
 
 	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
+	nbClient *libovsdb.Client
 
 	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
+	sbClient *libovsdb.Client
 
 	modelClient libovsdbops.ModelClient
 
@@ -238,7 +238,7 @@ func GetIPFullMask(ip string) string {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
+	libovsdbOvnNBClient *libovsdb.Client, libovsdbOvnSBClient *libovsdb.Client,
 	recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
@@ -1328,7 +1328,7 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client) (*svccontroller.Controller, informers.SharedInformerFactory) {
+func newServiceController(client clientset.Interface, nbClient *libovsdb.Client) (*svccontroller.Controller, informers.SharedInformerFactory) {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
