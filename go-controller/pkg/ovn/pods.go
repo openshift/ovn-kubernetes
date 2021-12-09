@@ -37,6 +37,10 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		if podScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
 			logicalPort := podLogicalPortName(pod)
 			expectedLogicalPorts[logicalPort] = true
+			if err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName); err != nil {
+				klog.Errorf("Failed to wait for node %s to be added to cache. IP allocation may fail!",
+					pod.Spec.NodeName)
+			}
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
 				klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
 					" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
