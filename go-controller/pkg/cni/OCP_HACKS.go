@@ -4,9 +4,10 @@ package cni
 
 import (
 	"fmt"
-	"github.com/containernetworking/plugins/pkg/ns"
 	"os/exec"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	ocpconfigapi "github.com/openshift/api/config/v1"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -19,15 +20,21 @@ var iptablesCommands = [][]string{
 	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22624", "--syn", "-j", "REJECT"},
 }
 
-var iptables4OnlyCommands = [][]string{
-	// Block cloud provider metadata IP except DNS
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
+func generateIPTables4OnlyCommands(platformType string) [][]string {
+	metadataServiceIP := "169.254.169.254"
+	if platformType == string(ocpconfigapi.AlibabaCloudPlatformType) {
+		metadataServiceIP = "100.100.100.200"
+	}
+	return [][]string{
+		// Block cloud provider metadata IP except DNS
+		{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
+		{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
+		{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
+		{"-A", "FORWARD", "-p", "udp", "-m", "udp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
+	}
 }
 
-func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
+func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo, platformType string) error {
 	return netns.Do(func(hostNS ns.NetNS) error {
 		var hasIPv4, hasIPv6 bool
 		for _, ip := range ifInfo.IPs {
@@ -54,7 +61,7 @@ func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
 			}
 		}
 		if hasIPv4 {
-			for _, args := range iptables4OnlyCommands {
+			for _, args := range generateIPTables4OnlyCommands(platformType) {
 				args = append([]string{"-w 5"}, args...)
 				out, err := exec.Command("iptables", args...).CombinedOutput()
 				if err != nil {

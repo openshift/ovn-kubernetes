@@ -1,8 +1,9 @@
 package types
 
 import (
-	"github.com/containernetworking/cni/pkg/types"
 	"net"
+
+	"github.com/containernetworking/cni/pkg/types"
 )
 
 // NetConf is CNI NetConf with DeviceID
@@ -23,6 +24,10 @@ type NetConf struct {
 	// LogFileMaxAge represents the maximum number
 	// of days to retain old log files
 	LogFileMaxAge int `json:"logfile-maxage"`
+	// OCP HACKS
+	// PlatformType indicates the platform OVN-Kubernetes is deployed on
+	PlatformType string `json:"platform-type"`
+	// END OCP HACK
 }
 
 // NetworkSelectionElement represents one element of the JSON format

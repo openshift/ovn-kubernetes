@@ -26,6 +26,9 @@ func WriteCNIConfig() error {
 		LogFileMaxSize:    Logging.LogFileMaxSize,
 		LogFileMaxBackups: Logging.LogFileMaxBackups,
 		LogFileMaxAge:     Logging.LogFileMaxAge,
+		// OCP HACKS
+		PlatformType: Kubernetes.PlatformType,
+		// END OCP HACK
 	}
 
 	bytes, err := json.Marshal(netConf)

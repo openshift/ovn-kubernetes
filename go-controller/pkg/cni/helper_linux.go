@@ -369,7 +369,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	}
 
 	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
-	err = setupIPTablesBlocks(netns, ifInfo)
+	err = setupIPTablesBlocks(netns, ifInfo, pr.CNIConf.PlatformType)
 	if err != nil {
 		return nil, err
 	}
