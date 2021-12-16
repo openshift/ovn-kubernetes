@@ -151,6 +151,7 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 		// create a new logger to log to stdout
 		l := stdr.NewWithOptions(log.New(os.Stderr, "", log.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("libovsdb").WithValues(
 			"database", ovs.primaryDBName,
+			"client", fmt.Sprintf("%p", ovs),
 		)
 		stdr.SetVerbosity(5)
 		ovs.logger = &l
@@ -159,6 +160,7 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 		// to make it easier to tell between different DBs (e.g. ovn nbdb vs. sbdb)
 		l := ovs.options.logger.WithValues(
 			"database", ovs.primaryDBName,
+			"client", fmt.Sprintf("%p", ovs),
 		)
 		ovs.logger = &l
 	}
@@ -214,6 +216,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 			return err
 		}
 		if err := o.tryEndpoint(ctx, u); err != nil {
+			o.logger.V(3).Info("failed to connect", "error", err)
 			connectErrors = append(connectErrors,
 				fmt.Errorf("failed to connect to %s: %w", endpoint, err))
 			continue
@@ -246,6 +249,8 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 			for id, request := range db.monitors {
 				err := o.monitor(ctx, MonitorCookie{DatabaseName: dbName, ID: id}, true, request)
 				if err != nil {
+					o.logger.V(3).Info("failed to start monitor", "error", err)
+					o.rpcClient.Close()
 					o.rpcClient = nil
 					return err
 				}
