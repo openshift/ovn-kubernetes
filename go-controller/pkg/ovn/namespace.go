@@ -39,6 +39,22 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
+// wrapper function to log if there are duplicate gateway IPs present in the cache
+func validateRoutingPodGWs(podGWs map[string]gatewayInfo) error {
+	// map to hold IP/podName
+	ipTracker := make(map[string]string)
+	for podName, gwInfo := range podGWs {
+		for gwIP := range gwInfo.gws {
+			if foundPod, ok := ipTracker[gwIP]; ok {
+				return fmt.Errorf("duplicate IP found in ECMP Pod route cache! IP: %q, first pod: %q, second "+
+					"pod: %q", gwIP, podName, foundPod)
+			}
+			ipTracker[gwIP] = podName
+		}
+	}
+	return nil
+}
+
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true)
 	if err != nil {
