@@ -91,6 +91,7 @@ type namespaceInfo struct {
 
 	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
 	// exgw IPs
+	// key is <namespace>_<pod name>
 	routingExternalPodGWs map[string]gatewayInfo
 
 	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
