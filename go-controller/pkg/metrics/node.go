@@ -37,6 +37,7 @@ var metricOvnNodePortEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 var registerNodeMetricsOnce sync.Once
 
 func RegisterNodeMetrics() {
+	RegisterOvsMetrics()
 	registerNodeMetricsOnce.Do(func() {
 		// ovnkube-node metrics
 		prometheus.MustRegister(MetricCNIRequestDuration)

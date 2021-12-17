@@ -1231,6 +1231,15 @@ func RegisterOvsMetrics() {
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 
+		prometheus.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{
+			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
+			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemVswitchd),
+		}))
+		prometheus.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{
+			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
+			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
+		}))
+
 		// OVS datapath metrics updater
 		go ovsDatapathMetricsUpdate()
 		// OVS bridge metrics updater
