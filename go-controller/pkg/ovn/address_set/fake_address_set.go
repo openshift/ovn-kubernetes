@@ -283,6 +283,10 @@ func (as *fakeAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, err
 	return ops, nil
 }
 
+func (as *fakeAddressSets) AddIPsOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	return []ovsdb.Operation{}, nil
+}
+
 func (as *fakeAddressSets) GetIPs() ([]string, []string) {
 	as.Lock()
 	defer as.Unlock()
@@ -329,6 +333,10 @@ func (as *fakeAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, 
 		}
 	}
 	return ops, nil
+}
+
+func (as *fakeAddressSets) DeleteIPsOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	return []ovsdb.Operation{}, nil
 }
 
 func (as *fakeAddressSets) Destroy() error {
