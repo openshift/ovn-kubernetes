@@ -322,8 +322,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
 
+	start1 := time.Now()
 	logicalSwitch := pod.Spec.NodeName
 	ls, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
+	waitLSTime := time.Since(start1)
 	if err != nil {
 		return err
 	}
@@ -345,8 +347,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
 	// will still have the old UUID.
+	start1 = time.Now()
 	getLSP := &nbdb.LogicalSwitchPort{Name: portName}
 	err = oc.nbClient.Get(ctx, getLSP)
+	getLSPTime := time.Since(start1)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
 	}
@@ -408,6 +412,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		// IP/MAC from the annotation.
 		lsp.DynamicAddresses = nil
 
+		start1 = time.Now()
 		// ensure we have reserved the IPs in the annotation
 		if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 			return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
@@ -424,6 +429,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
 				portName, logicalSwitch, err)
 		}
+		start1 = time.Now()
 		needsNewAllocation := false
 		// ensure we have reserved the IPs found in OVN
 		if len(podIfAddrs) == 0 {
@@ -454,6 +460,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	allOps = append(allOps, ops...)
 
+	var annoTime time.Duration
 	if needsIP {
 		network, err := util.GetK8sPodDefaultNetwork(pod)
 		// handle error cases separately first to ensure binding to err, otherwise the
@@ -493,9 +500,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
+		start1 = time.Now()
 		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
+		annoTime = time.Since(start1)
 		releaseIPs = false
 	}
 
@@ -592,7 +601,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		allOps = append(allOps, ops...)
 	}
 
-	results, err := libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, allOps)
+	results, err, rpcTime := libovsdbops.TransactAndCheckAndSetUUIDsTime(oc.nbClient, lsp, allOps)
 	if err != nil {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
@@ -621,6 +630,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
+	klog.Infof("[%s/%s] TROZETaddLogicalPort took %v, waitLS: %v, getLSP: %v, anno: %v, ovnRPC: %v",
+		pod.Namespace, pod.Name, time.Since(start), waitLSTime, getLSPTime, annoTime, rpcTime)
 	return nil
 }
 
