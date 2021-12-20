@@ -64,6 +64,7 @@ type AddressSet interface {
 	GetIPs() ([]string, []string)
 	// SetIPs sets the address set to the given array of addresses
 	SetIPs(ip []net.IP) error
+	// DeleteIPs removes the IPs from the address set
 	DeleteIPs(ip []net.IP) error
 	// DeleteIPsReturnOps returns the ops needed to delete the array of IPs from the address set
 	DeleteIPsReturnOps(ip []net.IP) ([]ovsdb.Operation, error)
