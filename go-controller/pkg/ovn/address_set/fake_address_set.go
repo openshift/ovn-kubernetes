@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -272,6 +273,28 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 	return nil
 }
 
+// TEMP
+func (as *fakeAddressSets) AddIPsReturnsOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+	as.Lock()
+	defer as.Unlock()
+
+	for _, ip := range ips {
+		if utilnet.IsIPv6(ip) {
+			ops, err = as.ipv6.addIPsReturnsOps(ip)
+		} else {
+			ops, err = as.ipv4.addIPsReturnsOps(ip)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return ops, nil
+}
+
+// TEMP
+
 func (as *fakeAddressSets) GetIPs() ([]string, []string) {
 	as.Lock()
 	defer as.Unlock()
@@ -337,6 +360,20 @@ func (as *fakeAddressSet) getName() string {
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	return as.name
 }
+
+// TEMP
+func (as *fakeAddressSet) addIPsReturnsOps(ip net.IP) ([]ovsdb.Operation, error) {
+	as.Lock()
+	defer as.Unlock()
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
+	ipStr := ip.String()
+	if _, ok := as.ips[ipStr]; !ok {
+		as.ips[ip.String()] = ip
+	}
+	return nil, nil
+}
+
+// TEMP
 
 func (as *fakeAddressSet) addIP(ip net.IP) error {
 	as.Lock()

@@ -504,6 +504,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		releaseIPs = false
 	}
 
+	// Ensure the namespace/nsInfo exists
+	// TEMP
+	routingExternalGWs, routingPodGWs, ops, err := oc.addPodToNamespaceReturnsOps(pod.Namespace, podIfAddrs)
+	if err != nil {
+		return err
+	}
+	allOps = append(allOps, ops...)
+	// TEMP
+
 	// if we have any external or pod Gateways, add routes
 	start1 = time.Now()
 	gateways := make([]*gatewayInfo, 0)

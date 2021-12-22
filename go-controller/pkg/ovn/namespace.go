@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -92,6 +93,28 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nil
 }
+
+// TEMP
+// addPodToNamespace adds the pod's IP to the namespace's address set and returns
+// pod's routing gateway info
+func (oc *Controller) addPodToNamespaceReturnsOps(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, []ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+	}
+
+	defer nsUnlock()
+
+	if ops, err = nsInfo.addressSet.AddIPsReturnsOps(createIPAddressSlice(ips)); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
+}
+
+// TEMP
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
