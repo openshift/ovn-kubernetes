@@ -56,6 +56,18 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 	if config.Gateway.Mode != config.GatewayModeShared {
 		for _, subnet := range config.Kubernetes.ServiceCIDRs {
 			if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
+				// ensure the route is not already configured if this was a shared gw mode -> local gw mode transition
+				if existingRoutes, err := util.GetRoutesBySubnet(subnet); err == nil {
+					for _, route := range existingRoutes {
+						if route.Gw.Equal(cfg.gwIP) {
+							continue
+						}
+						klog.Infof("Removing stale service route: %+v", route)
+						if err := util.RouteDel(&route); err != nil {
+							klog.Errorf("Failed to remove stale service route: %+v, error: %v", route, err)
+						}
+					}
+				}
 				cfg.allSubnets = append(cfg.allSubnets, subnet)
 			}
 		}

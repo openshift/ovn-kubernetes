@@ -30,6 +30,7 @@ type NetLinkOps interface {
 	AddrDel(link netlink.Link, addr *netlink.Addr) error
 	AddrAdd(link netlink.Link, addr *netlink.Addr) error
 	RouteList(link netlink.Link, family int) ([]netlink.Route, error)
+	RouteGet(destination net.IP) ([]netlink.Route, error)
 	RouteDel(route *netlink.Route) error
 	RouteAdd(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
@@ -105,6 +106,10 @@ func (defaultNetLinkOps) RouteList(link netlink.Link, family int) ([]netlink.Rou
 	return netlink.RouteList(link, family)
 }
 
+func (defaultNetLinkOps) RouteGet(destination net.IP) ([]netlink.Route, error) {
+	return netlink.RouteGet(destination)
+}
+
 func (defaultNetLinkOps) RouteDel(route *netlink.Route) error {
 	return netlink.RouteDel(route)
 }
@@ -135,6 +140,18 @@ func getFamily(ip net.IP) int {
 	} else {
 		return netlink.FAMILY_V4
 	}
+}
+
+// GetRoutesBySubnet gets all routes for a destination subnet
+func GetRoutesBySubnet(subnet *net.IPNet) ([]netlink.Route, error) {
+	routeFilter := &netlink.Route{Dst: subnet}
+	filterMask := netlink.RT_FILTER_DST
+
+	return netLinkOps.RouteListFiltered(getFamily(subnet.IP), routeFilter, filterMask)
+}
+
+func RouteDel(route *netlink.Route) error {
+	return netLinkOps.RouteDel(route)
 }
 
 // LinkSetUp returns the netlink device with its state marked up
