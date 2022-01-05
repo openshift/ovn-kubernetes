@@ -927,12 +927,6 @@ func (oc *Controller) WatchCloudPrivateIPConfig() {
 				klog.Errorf("Unable to update CloudPrivateIPConfig: %s, err: %v", newCloudPrivateIPConfig.Name, err)
 			}
 		},
-		DeleteFunc: func(obj interface{}) {
-			cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-			if err := oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil); err != nil {
-				klog.Errorf("Unable to delete CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfig.Name, err)
-			}
-		},
 	}, nil)
 }
 

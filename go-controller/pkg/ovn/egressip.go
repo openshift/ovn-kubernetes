@@ -128,29 +128,22 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 	}
 
+	if len(statusToRemove) > 0 {
+		if err := oc.deleteEgressIPAssignments(oldEIP.Name, statusToRemove, oldEIP.Spec.NamespaceSelector, oldEIP.Spec.PodSelector); err != nil {
+			return err
+		}
+	}
+
 	// Add only the diff between what is requested and valid and that which
 	// isn't already assigned.
 	ipsToAdd := validSpecIPs.Difference(validStatusIPs)
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
-		if len(statusToRemove) > 0 {
-			if err := oc.deleteEgressIPAssignments(oldEIP.Name, statusToRemove, oldEIP.Spec.NamespaceSelector, oldEIP.Spec.PodSelector); err != nil {
-				return err
-			}
-		}
 		if len(ipsToAdd) > 0 {
 			statusToAdd = oc.assignEgressIPs(newEIP.Name, ipsToAdd.List())
 			if err := oc.addEgressIPAssignments(newEIP.Name, statusToAdd, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
 				return err
 			}
 			statusToKeep = append(statusToKeep, statusToAdd...)
-		}
-		// Update the object only on an ADD/UPDATE. If we are processing a
-		// DELETE, new will be nil and we should not update the object.
-		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
-			if err := oc.updateEgressIPStatus(newEIP.Name, statusToKeep); err != nil {
-				return err
-			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		}
 	} else {
 		// If running on a public cloud we should not program OVN just yet, we
@@ -166,12 +159,20 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 	}
 
+	// Update the object only on an ADD/UPDATE. If we are processing a
+	// DELETE, new will be nil and we should not update the object.
+	if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
+		if err := oc.updateEgressIPStatus(newEIP.Name, statusToKeep); err != nil {
+			return err
+		}
+		metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
+	}
+
 	// If nothing has changed for what concerns the assignments, then check if
 	// the namespaceSelector and podSelector have changed. If they have changed
 	// then remove the setup for all pods which matched the old and add
 	// everything for all pods which match the new.
-	if len(ipsToAdd) == 0 &&
-		len(statusToRemove) == 0 {
+	if len(ipsToAdd) == 0 && len(statusToRemove) == 0 {
 		// Only the namespace selector changed: remove the setup for all pods
 		// matching the old and not matching the new, and add setup for the pod
 		// matching the new and which didn't match the old.
@@ -393,71 +394,25 @@ func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
 }
 
 func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi.CloudPrivateIPConfig) error {
-	oldCloudPrivateIPConfig, newCloudPrivateIPConfig := &ocpcloudnetworkapi.CloudPrivateIPConfig{}, &ocpcloudnetworkapi.CloudPrivateIPConfig{}
-	shouldDelete, shouldAdd := false, false
-	nodeToDelete := ""
+	newCloudPrivateIPConfig := &ocpcloudnetworkapi.CloudPrivateIPConfig{}
+	shouldAdd := false
 
-	if old != nil {
-		oldCloudPrivateIPConfig = old
-		// We need to handle two types of deletes, A) object UPDATE where the
-		// old egress IP <-> node assignment has been removed. This is indicated
-		// by the old object having a .status.node set and the new object having
-		// .status.node empty and the condition on the new being successful. B)
-		// object DELETE, for which the CloudPrivateIPConfig will not have a
-		// finalizer anymore
-		shouldDelete = oldCloudPrivateIPConfig.Status.Node != "" || !hasFinalizer(oldCloudPrivateIPConfig.Finalizers, cloudPrivateIPConfigFinalizer)
-		// On DELETE we need to delete the .spec.node for the old object
-		nodeToDelete = oldCloudPrivateIPConfig.Spec.Node
-	}
 	if new != nil {
 		newCloudPrivateIPConfig = new
 		// We should only proceed to setting things up for objects where the new
 		// object has the same .spec.node and .status.node, and assignment
 		// condition being true. This is how the cloud-network-config-controller
-		// indicates a successful cloud assignment.
+		// indicates a successful cloud assignment. If deletion timestamp is set do not proceed.
 		shouldAdd = newCloudPrivateIPConfig.Status.Node == newCloudPrivateIPConfig.Spec.Node &&
 			ocpcloudnetworkapi.CloudPrivateIPConfigConditionType(newCloudPrivateIPConfig.Status.Conditions[0].Type) == ocpcloudnetworkapi.Assigned &&
-			kapi.ConditionStatus(newCloudPrivateIPConfig.Status.Conditions[0].Status) == kapi.ConditionTrue
-		// See above explanation for the delete
-		shouldDelete = shouldDelete && newCloudPrivateIPConfig.Status.Node == "" &&
-			ocpcloudnetworkapi.CloudPrivateIPConfigConditionType(newCloudPrivateIPConfig.Status.Conditions[0].Type) == ocpcloudnetworkapi.Assigned &&
-			kapi.ConditionStatus(newCloudPrivateIPConfig.Status.Conditions[0].Status) == kapi.ConditionTrue
-		// On UPDATE we need to delete the old .status.node
-		if shouldDelete {
-			nodeToDelete = oldCloudPrivateIPConfig.Status.Node
-		}
+			kapi.ConditionStatus(newCloudPrivateIPConfig.Status.Conditions[0].Status) == kapi.ConditionTrue &&
+			newCloudPrivateIPConfig.DeletionTimestamp == nil
 	}
 
-	if shouldDelete {
+	if shouldAdd {
 		// There can only be one EgressIP object holding a given egress IP. If
 		// multiple objects specify the same egress IP the assignment algorithm
 		// invalidates it, hence: the following is safe.
-		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(oldCloudPrivateIPConfig.Name)
-		if err != nil {
-			return err
-		}
-		egressIPString := cloudPrivateIPConfigNameToIPString(oldCloudPrivateIPConfig.Name)
-		statusItem := egressipv1.EgressIPStatusItem{
-			Node:     nodeToDelete,
-			EgressIP: egressIPString,
-		}
-		if err := oc.deleteEgressIPAssignments(egressIP.Name, []egressipv1.EgressIPStatusItem{statusItem}, egressIP.Spec.NamespaceSelector, egressIP.Spec.PodSelector); err != nil {
-			return err
-		}
-		// Deleting here means updating the object with the statuses we want to
-		// keep
-		updatedStatus := []egressipv1.EgressIPStatusItem{}
-		for _, status := range egressIP.Status.Items {
-			if !reflect.DeepEqual(status, statusItem) {
-				updatedStatus = append(updatedStatus, status)
-			}
-		}
-		if err := oc.updateEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
-			return err
-		}
-	}
-	if shouldAdd {
-		// Same explanation as for delete above.
 		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(newCloudPrivateIPConfig.Name)
 		if err != nil {
 			return err
