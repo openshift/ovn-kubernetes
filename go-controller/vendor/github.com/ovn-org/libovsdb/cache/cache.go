@@ -704,8 +704,8 @@ func (o *OpTime) String() string {
 }
 
 func (t *TableCache) updateRow(table, uuid string, row *ovsdb.RowUpdate2, rCache *RowCache) (error, *OpTime) {
-	logger := t.logger.WithValues("uuid", uuid, "table", table)
-	logger.V(5).Info("processing update")
+//	logger := t.logger.WithValues("uuid", uuid, "table", table)
+//	logger.V(5).Info("processing update")
 
 	start := time.Now()
 	rCache.mutex.Lock()
@@ -722,7 +722,7 @@ func (t *TableCache) updateRow(table, uuid string, row *ovsdb.RowUpdate2, rCache
 		if err != nil {
 			return err, nil
 		}
-		logger.V(5).Info("creating row", "model", fmt.Sprintf("%+v", m))
+//		logger.V(5).Info("creating row", "model", fmt.Sprintf("%+v", m))
 		if err := rCache.CreateTime(uuid, m, false, opt); err != nil {
 			return err, nil
 		}
@@ -737,7 +737,7 @@ func (t *TableCache) updateRow(table, uuid string, row *ovsdb.RowUpdate2, rCache
 		if err != nil {
 			return err, nil
 		}
-		logger.V(5).Info("inserting row", "model", fmt.Sprintf("%+v", m))
+//		logger.V(5).Info("inserting row", "model", fmt.Sprintf("%+v", m))
 		if err := rCache.CreateTime(uuid, m, false, opt); err != nil {
 			return err, nil
 		}
@@ -763,7 +763,7 @@ func (t *TableCache) updateRow(table, uuid string, row *ovsdb.RowUpdate2, rCache
 		equal := model.Equal(modified, existing)
 		opt.eqTime = time.Since(start)
 		if !equal {
-			logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
+//			logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
 			if err := rCache.UpdateTime(uuid, modified, false, opt); err != nil {
 				return err, nil
 			}
@@ -783,7 +783,7 @@ func (t *TableCache) updateRow(table, uuid string, row *ovsdb.RowUpdate2, rCache
 		if m == nil {
 			return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid)), nil
 		}
-		logger.V(5).Info("deleting row", "model", fmt.Sprintf("%+v", m))
+//		logger.V(5).Info("deleting row", "model", fmt.Sprintf("%+v", m))
 		if err := rCache.DeleteUnlocked(uuid, opt); err != nil {
 			return err, nil
 		}
