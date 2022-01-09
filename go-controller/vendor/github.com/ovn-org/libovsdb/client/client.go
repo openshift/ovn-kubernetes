@@ -168,6 +168,7 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 		// create a new logger to log to stdout
 		l := stdr.NewWithOptions(log.New(os.Stderr, "", log.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("libovsdb").WithValues(
 			"database", ovs.primaryDBName,
+			"clientptr", fmt.Sprintf("%p", ovs),
 		)
 		stdr.SetVerbosity(5)
 		ovs.logger = &l
@@ -176,6 +177,7 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 		// to make it easier to tell between different DBs (e.g. ovn nbdb vs. sbdb)
 		l := ovs.options.logger.WithValues(
 			"database", ovs.primaryDBName,
+			"clientptr", fmt.Sprintf("%p", ovs),
 		)
 		ovs.logger = &l
 	}
@@ -291,7 +293,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 					o.resetRPCClient()
 					return err
 				}
-				o.logger.V(3).Info("monitor restarted", "time", time.Since(start1))
+				o.logger.V(3).Info("monitor restarted", "time", fmt.Sprintf("%v", time.Since(start1)))
 			}
 		}
 	}
@@ -313,10 +315,9 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 	return nil
 }
 
-// tryEndpoint connects to a single database endpoint. Returns the
 // server ID (if clustered) on success, or an error.
 func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, error) {
-	o.logger.V(5).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
+	o.logger.V(3).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
 	var dialer net.Dialer
 	var err error
 	var c net.Conn
@@ -872,8 +873,10 @@ func (o *ovsdbClient) Monitor(ctx context.Context, monitor *Monitor) (MonitorCoo
 func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconnecting bool, monitor *Monitor) error {
 	// if we're reconnecting, we already hold the rpcMutex
 	if !reconnecting {
+		start := time.Now()
 		o.rpcMutex.RLock()
 		defer o.rpcMutex.RUnlock()
+		o.logger.V(3).Info("monitor() rpcMutex lock", "time", fmt.Sprintf("%v", time.Since(start)))
 	}
 	if o.rpcClient == nil {
 		return ErrNotConnected
@@ -888,9 +891,11 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		}
 		return fmt.Errorf(strings.Join(errString, ". "))
 	}
+	start := time.Now()
 	dbName := cookie.DatabaseName
 	db := o.databases[dbName]
 	db.modelMutex.RLock()
+	o.logger.V(3).Info("monitor() modelMutex lock", "time", fmt.Sprintf("%v", time.Since(start)))
 	mmapper := db.model.Mapper
 	typeMap := db.model.Types()
 	requests := make(map[string]ovsdb.MonitorRequest)
@@ -929,6 +934,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 	var err error
 	var tableUpdates interface{}
 
+	start = time.Now()
 	switch monitor.Method {
 	case ovsdb.MonitorRPC:
 		var reply ovsdb.TableUpdates
@@ -948,6 +954,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 	default:
 		return fmt.Errorf("unsupported monitor method: %v", monitor.Method)
 	}
+	o.logger.V(3).Info("monitor() rpc Call()", "time", fmt.Sprintf("%v", time.Since(start)))
 
 	if err != nil {
 		if err == rpc2.ErrShutdown {
@@ -973,8 +980,11 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		o.metrics.numMonitors.Inc()
 	}
 
+	start = time.Now()
 	db.cacheMutex.Lock()
 	defer db.cacheMutex.Unlock()
+	o.logger.V(3).Info("monitor() cacheMutex lock", "time", fmt.Sprintf("%v", time.Since(start)))
+	start = time.Now()
 	if monitor.Method == ovsdb.MonitorRPC {
 		u := tableUpdates.(ovsdb.TableUpdates)
 		err = db.cache.Populate(u)
@@ -982,12 +992,14 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		u := tableUpdates.(ovsdb.TableUpdates2)
 		err = db.cache.Populate2(u)
 	}
+	o.logger.V(3).Info("monitor() Populate()", "time", fmt.Sprintf("%v", time.Since(start)))
 
 	if err != nil {
 		return err
 	}
 
 	// populate any deferred updates
+	start = time.Now()
 	db.deferUpdates = false
 	for _, update := range db.deferredUpdates {
 		if update.updates != nil {
@@ -1005,6 +1017,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 			db.monitors[cookie.ID].LastTransactionID = update.lastTxnID
 		}
 	}
+	o.logger.V(3).Info("monitor() deferred Populate()", "time", fmt.Sprintf("%v", time.Since(start)))
 	// clear deferred updates for next time
 	db.deferredUpdates = make([]*bufferedUpdate, 0)
 
