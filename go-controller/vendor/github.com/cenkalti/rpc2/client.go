@@ -4,10 +4,12 @@ package rpc2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"reflect"
 	"sync"
+	"time"
 )
 
 // Client represents an RPC Client.
@@ -91,19 +93,29 @@ func (c *Client) readLoop() {
 
 		if req.Method != "" {
 			// request comes to server
-			if err = c.readRequest(&req); err != nil {
+			setupTime, handleTime, err := c.readRequest(&req)
+			if err != nil {
 				debugln("rpc2: error reading request:", err.Error())
 			}
+			log.Println(fmt.Sprintf("@@@@ rpc2[%p] readRequest(%s/%d) setup: %v, handle: %v", c, req.Method, req.Seq, setupTime, handleTime))
 		} else {
 			// response comes to client
-			if err = c.readResponse(&resp); err != nil {
+			muTime, readTime, call, err := c.readResponse(&resp)
+			if err != nil {
 				debugln("rpc2: error reading response:", err.Error())
 			}
+			var method string
+			if call != nil {
+				method = call.Method
+			}
+			log.Println(fmt.Sprintf("@@@@ rpc2[%p] readResp(%p/%s/%d) lock: %v, readBody: %v", c, call, method, resp.Seq, muTime, readTime))
 		}
 	}
 	// Terminate pending calls.
+	log.Println(fmt.Sprintf("@@@@ rpc2[%p] readLoop shutting down", c))
 	c.sending.Lock()
 	c.mutex.Lock()
+	log.Println(fmt.Sprintf("@@@@ rpc2[%p] readLoop shutting down locks acquired", c))
 	c.shutdown = true
 	closing := c.closing
 	if err == io.EOF {
@@ -154,14 +166,15 @@ func (c *Client) handleRequest(req Request, method *handler, argv reflect.Value)
 	}
 }
 
-func (c *Client) readRequest(req *Request) error {
+func (c *Client) readRequest(req *Request) (time.Duration, time.Duration, error) {
+	start := time.Now()
 	method, ok := c.handlers[req.Method]
 	if !ok {
 		resp := &Response{
 			Seq:   req.Seq,
 			Error: "rpc2: can't find method " + req.Method,
 		}
-		return c.codec.WriteResponse(resp, resp)
+		return 0, 0, c.codec.WriteResponse(resp, resp)
 	}
 
 	// Decode the argument value.
@@ -175,29 +188,35 @@ func (c *Client) readRequest(req *Request) error {
 	}
 	// argv guaranteed to be a pointer now.
 	if err := c.codec.ReadRequestBody(argv.Interface()); err != nil {
-		return err
+		return 0, 0, err
 	}
 	if argIsValue {
 		argv = argv.Elem()
 	}
+	setupTime := time.Since(start)
 
+	start = time.Now()
 	if c.blocking {
 		c.handleRequest(*req, method, argv)
 	} else {
 		go c.handleRequest(*req, method, argv)
 	}
+	handleTime := time.Since(start)
 
-	return nil
+	return setupTime, handleTime, nil
 }
 
-func (c *Client) readResponse(resp *Response) error {
+func (c *Client) readResponse(resp *Response) (time.Duration, time.Duration, *Call, error) {
 	seq := resp.Seq
+	start := time.Now()
 	c.mutex.Lock()
 	call := c.pending[seq]
+	muTime := time.Since(start)
 	delete(c.pending, seq)
 	c.mutex.Unlock()
 
 	var err error
+	var readTime time.Duration
 	switch {
 	case call == nil:
 		// We've got no pending call. That usually means that
@@ -220,26 +239,32 @@ func (c *Client) readResponse(resp *Response) error {
 		}
 		call.done()
 	default:
+		start = time.Now()
 		err = c.codec.ReadResponseBody(call.Reply)
+		readTime = time.Since(start)
 		if err != nil {
 			call.Error = errors.New("reading body " + err.Error())
 		}
 		call.done()
 	}
 
-	return err
+	return muTime, readTime, call, err
 }
 
 // Close waits for active calls to finish and closes the codec.
 func (c *Client) Close() error {
+	log.Println(fmt.Sprintf("@@@@ rpc2[%p] close", c))
 	c.mutex.Lock()
+	log.Println(fmt.Sprintf("@@@@ rpc2[%p] close got lock", c))
 	if c.shutdown || c.closing {
 		c.mutex.Unlock()
 		return ErrShutdown
 	}
 	c.closing = true
 	c.mutex.Unlock()
-	return c.codec.Close()
+	err := c.codec.Close()
+	log.Println(fmt.Sprintf("@@@@ rpc2[%p] closed coded", c))
+	return err
 }
 
 // Go invokes the function asynchronously.  It returns the Call structure representing
@@ -317,10 +342,13 @@ type Call struct {
 }
 
 func (c *Client) send(call *Call) {
+	start := time.Now()
 	c.sending.Lock()
 	defer c.sending.Unlock()
+	sendLockTime := time.Since(start)
 
 	// Register this call.
+	start = time.Now()
 	c.mutex.Lock()
 	if c.shutdown || c.closing {
 		call.Error = ErrShutdown
@@ -332,11 +360,14 @@ func (c *Client) send(call *Call) {
 	c.seq++
 	c.pending[seq] = call
 	c.mutex.Unlock()
+	muLockTime := time.Since(start)
 
 	// Encode and send the request.
 	c.request.Seq = seq
 	c.request.Method = call.Method
+	start = time.Now()
 	err := c.codec.WriteRequest(&c.request, call.Args)
+	writeTime := time.Since(start)
 	if err != nil {
 		c.mutex.Lock()
 		call = c.pending[seq]
@@ -347,6 +378,7 @@ func (c *Client) send(call *Call) {
 			call.done()
 		}
 	}
+	log.Println(fmt.Sprintf("@@@@ rpc2[%p] send(%p/%s/%d) sendLock: %v, muLock: %v, write: %v", c, call, call.Method, seq, sendLockTime, muLockTime, writeTime))
 }
 
 // Notify sends a request to the receiver but does not wait for a return value.
