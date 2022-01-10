@@ -26,7 +26,7 @@ func TransactWithRetryTime(ctx context.Context, c client.Client, ops []ovsdb.Ope
 			return true, nil
 		}
 		if err != nil && errors.Is(err, client.ErrNotConnected) {
-			klog.V(5).Infof("Unable to execute transaction: %+v. Client is disconnected, will retry...", ops)
+			klog.V(3).Infof("Unable to execute transaction: %+v. Client is disconnected, will retry...", ops)
 			return false, nil
 		}
 		return false, err
