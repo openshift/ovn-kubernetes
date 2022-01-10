@@ -764,7 +764,7 @@ func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Opera
 	if o.rpcClient == nil || !o.connected {
 		o.rpcMutex.RUnlock()
 		if o.options.reconnect {
-			o.logger.V(5).Info("blocking transaction until reconnected", "operations",
+			o.logger.V(3).Info("blocking transaction until reconnected", "operations",
 				fmt.Sprintf("%+v", operation))
 			ticker := time.NewTicker(50 * time.Millisecond)
 			defer ticker.Stop()
