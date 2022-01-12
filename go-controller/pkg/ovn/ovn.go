@@ -421,7 +421,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 	err = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
 	if err != nil {
-		return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
+		return fmt.Errorf("failed to set topology annotation for node %s.", node.Name)
 	}
 
 	return nil
