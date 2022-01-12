@@ -574,15 +574,11 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		// traffic destined outside of cluster subnet go to GR
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr, "reroute",
+		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr, "reroute",
 			grJoinIfAddr.IP.String())
 		if err != nil {
-			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
-			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
-			if !strings.Contains(stderr, "already existed") {
-				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", matchStr, types.OVNClusterRouter, stderr, err)
-			}
+			return fmt.Errorf("failed to add policy route '%s' to %s "+
+				"stderr: %s, error: %v", matchStr, types.OVNClusterRouter, stderr, err)
 		}
 	}
 	return nil
@@ -622,6 +618,14 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string, forc
 		}
 	}
 	return nil
+}
+
+func delAllHybridRoutePolicies() {
+	_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.HybridOverlayReroutePriority)
+	if err != nil {
+		klog.Errorf("Failed to remove all hybrid policies on: %s, stderr: %s, err: %v",
+			types.OVNClusterRouter, stderr, err)
+	}
 }
 
 // cleanUpBFDEntry checks if the BFD table entry related to the associated
@@ -690,10 +694,20 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 		klog.Infof("Syncing exgw routes took %v", time.Since(start))
 	}()
 
+	// If shared gw mode, there should be no hybrid 501 policies
+	if config.Gateway.Mode == config.GatewayModeShared {
+		delAllHybridRoutePolicies()
+	}
+
 	// Get all ECMP routes in OVN and build cache
 	ovnRouteCache := buildOVNECMPCache()
 
 	if len(ovnRouteCache) == 0 {
+		// if no ECMP route cache then we should still ensure that all hybrid policies are removed
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			delAllHybridRoutePolicies()
+		}
+
 		// nothing in OVN, so no reason to search for stale routes
 		return
 	}
@@ -783,8 +797,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 		}
 
 		// if pod had no ECMP routes we need to make sure we remove any logical route policy for local gw mode
-		// for shared gateway mode, these LRPs shouldn't exist, so delete them all
-		if !podHasAnyECMPRoutes || config.Gateway.Mode == config.GatewayModeShared {
+		if !podHasAnyECMPRoutes && config.Gateway.Mode == config.GatewayModeLocal {
 			for _, ovnRoute := range ovnRoutes {
 				gr := strings.TrimPrefix(ovnRoute.router, types.GWRouterPrefix)
 				if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), gr, true); err != nil {
