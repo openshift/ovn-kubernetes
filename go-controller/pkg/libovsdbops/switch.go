@@ -3,9 +3,11 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -81,6 +83,10 @@ func DeleteLogicalSwitch(nbClient libovsdbclient.Client, swName string) error {
 // AddLoadBalancersToLogicalSwitchOps adds the provided load balancers to the
 // provided logical switch and returns the corresponding ops
 func AddLoadBalancersToLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished AddLoadBalancersToLogicalSwitchOps: %v", time.Since(startTime))
+	}()
 	sw.LoadBalancer = make([]string, 0, len(lbs))
 	for _, lb := range lbs {
 		sw.LoadBalancer = append(sw.LoadBalancer, lb.UUID)
@@ -100,6 +106,10 @@ func AddLoadBalancersToLogicalSwitchOps(nbClient libovsdbclient.Client, ops []li
 // RemoveLoadBalancersFromLogicalSwitchOps removes the provided load balancers from the
 // provided logical switch and returns the corresponding ops
 func RemoveLoadBalancersFromLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished RemoveLoadBalancersFromLogicalSwitchOps: %v", time.Since(startTime))
+	}()
 	sw.LoadBalancer = make([]string, 0, len(lbs))
 	for _, lb := range lbs {
 		sw.LoadBalancer = append(sw.LoadBalancer, lb.UUID)

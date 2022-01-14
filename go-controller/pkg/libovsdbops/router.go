@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 )
 
 // ROUTER OPs
@@ -622,6 +624,10 @@ func DeleteBFDs(nbClient libovsdbclient.Client, bfds ...*nbdb.BFD) error {
 // AddLoadBalancersToLogicalRouterOps adds the provided load balancers to the
 // provided logical router and returns the corresponding ops
 func AddLoadBalancersToLogicalRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished AddLoadBalancersToLogicalRouterOps: %v", time.Since(startTime))
+	}()
 	originalLBs := router.LoadBalancer
 	router.LoadBalancer = make([]string, 0, len(lbs))
 	for _, lb := range lbs {
@@ -644,6 +650,10 @@ func AddLoadBalancersToLogicalRouterOps(nbClient libovsdbclient.Client, ops []li
 // RemoveLoadBalancersFromLogicalRouterOps removes the provided load balancers from the
 // provided logical router and returns the corresponding ops
 func RemoveLoadBalancersFromLogicalRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished RemoveLoadBalancersFromLogicalRouterOps: %v", time.Since(startTime))
+	}()
 	originalLBs := router.LoadBalancer
 	router.LoadBalancer = make([]string, 0, len(lbs))
 	for _, lb := range lbs {
