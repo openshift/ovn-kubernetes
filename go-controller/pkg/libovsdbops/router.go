@@ -61,7 +61,7 @@ func AddLoadBalancersToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.
 
 	_, err := findRouter(nbClient, router)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't find router %+v: %v", *router, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))
@@ -96,7 +96,7 @@ func RemoveLoadBalancersFromRouterOps(nbClient libovsdbclient.Client, ops []libo
 
 	_, err := findRouter(nbClient, router)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't find router %+v: %v", *router, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))
