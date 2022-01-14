@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -39,6 +40,10 @@ import (
 // It is assumed that names are meaningful and somewhat stable, to minimize churn. This
 // function doesn't work with Load_Balancers without a name.
 func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB) error {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished EnsureLBs: %v", time.Since(startTime))
+	}()
 	externalIDs := util.ExternalIDsForObject(service)
 	lbCache, err := GetLBCache(nbClient)
 	if err != nil {

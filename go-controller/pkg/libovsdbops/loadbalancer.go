@@ -2,7 +2,10 @@ package libovsdbops
 
 import (
 	"context"
+	"time"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
@@ -61,6 +64,10 @@ func BuildLoadBalancer(name string, protocol nbdb.LoadBalancerProtocol, selectio
 // CreateLoadBalancersOps creates the provided load balancers returning the
 // corresponding ops
 func CreateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished CreateLoadBalancersOps: %v", time.Since(startTime))
+	}()
 	opModels := make([]operationModel, 0, len(lbs))
 	for i := range lbs {
 		lb := lbs[i]
@@ -80,6 +87,10 @@ func CreateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Opera
 // CreateOrUpdateLoadBalancersOps creates or updates the provided load balancers
 // returning the corresponding ops
 func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished CreateOrUpdateLoadBalancersOps: %v", time.Since(startTime))
+	}()
 	opModels := make([]operationModel, 0, len(lbs))
 	for i := range lbs {
 		// can't use i in the predicate, for loop replaces it in-memory
@@ -123,6 +134,10 @@ func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 // DeleteLoadBalancersOps deletes the provided load balancers and returns the
 // corresponding ops
 func DeleteLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished DeleteLoadBalancersOps: %v", time.Since(startTime))
+	}()
 	opModels := make([]operationModel, 0, len(lbs))
 	for i := range lbs {
 		// can't use i in the predicate, for loop replaces it in-memory
