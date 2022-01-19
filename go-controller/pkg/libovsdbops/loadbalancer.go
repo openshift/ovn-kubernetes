@@ -231,3 +231,36 @@ func ListLoadBalancers(nbClient libovsdbclient.Client) ([]nbdb.LoadBalancer, err
 	}
 	return *lbs, nil
 }
+
+// FindLoadBalancersByEcternalIDs find all load balancers whose ExternalIDs contain at least the
+// supplied externalIDs (i.e. they are a superset).
+// If no externalIDs are passed, returns all LoadBalancers
+func FindLoadBalancersByExternalIDs(nbClient libovsdbclient.Client, externalIDs map[string]string) []nbdb.LoadBalancer {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished FindLoadBalancersByExternalIDs: %v", time.Since(startTime))
+	}()
+	lbs := &[]nbdb.LoadBalancer{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	_ = nbClient.WhereCache(func(item *nbdb.LoadBalancer) bool {
+		return extIDsMatch(externalIDs, item.ExternalIDs)
+	}).List(ctx, lbs)
+	// can ignore error here; it just means that listing found no lbs
+	return *lbs
+}
+
+// extIDsMatch returns true if have is a superset of want.
+func extIDsMatch(want, have map[string]string) bool {
+	for k, v := range want {
+		actual, ok := have[k]
+		if !ok {
+			return false
+		}
+		if actual != v {
+			return false
+		}
+	}
+
+	return true
+}
