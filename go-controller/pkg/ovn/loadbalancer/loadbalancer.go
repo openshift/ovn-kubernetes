@@ -72,6 +72,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		existingSwitches := sets.String{}
 		existingGroups := sets.String{}
 		if existingLB != nil {
+			blb.UUID = existingLB.UUID
 			toDelete.Delete(existingLB.UUID)
 			existingRouters = existingLB.Routers
 			existingSwitches = existingLB.Switches
