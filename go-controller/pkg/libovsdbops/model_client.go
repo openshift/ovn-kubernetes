@@ -122,6 +122,10 @@ func (m *ModelClient) WithClient(client client.Client) *ModelClient {
 	return &cl
 }
 
+func onModelUpdatesNone() []interface{} {
+	return nil
+}
+
 /*
  CreateOrUpdate performs idempotent operations against libovsdb according to the
  following logic:
