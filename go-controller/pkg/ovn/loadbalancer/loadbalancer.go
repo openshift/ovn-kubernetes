@@ -68,8 +68,8 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 			delete(existingByName, lb.Name)
 			continue
 		}
-		existingByName[lb.Name] = lb
 		toDelete.Insert(lb.UUID)
+		existingByName[lb.Name] = lb
 	}
 
 	desired := make([]*nbdb.LoadBalancer, 0, len(LBs))
@@ -89,6 +89,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		existingSwitches := sets.String{}
 		existingGroups := sets.String{}
 		if exists {
+			blb.UUID = existingLB.UUID
 			toDelete.Delete(existingLB.UUID)
 			existingRouters = lbToRouterNames[existingLB.UUID]
 			existingSwitches = lbToSwitchNames[existingLB.UUID]
