@@ -595,8 +595,8 @@ func buildPerPodGRSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 	return nats, nil
 }
 
-// getExternalIPsGRSNAT returns all the externalIPs for a node(GR) from its l3 gateway annotation
-func getExternalIPsGRSNAT(watchFactory *factory.WatchFactory, nodeName string) ([]*net.IPNet, error) {
+// getExternalIPsGR returns all the externalIPs for a node(GR) from its l3 gateway annotation
+func getExternalIPsGR(watchFactory *factory.WatchFactory, nodeName string) ([]*net.IPNet, error) {
 	var err error
 	node, err := watchFactory.GetNode(nodeName)
 	if err != nil {

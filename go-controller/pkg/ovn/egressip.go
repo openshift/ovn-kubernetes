@@ -1602,7 +1602,7 @@ func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIP
 	if config.Gateway.DisableSNATMultipleGWs {
 		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
-			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
+			extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
 			if err != nil {
 				return err
 			}
@@ -1618,7 +1618,7 @@ func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIP
 func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPNet) error {
 	if config.Gateway.DisableSNATMultipleGWs {
 		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
-		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
+		extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
 		if err != nil {
 			return err
 		}

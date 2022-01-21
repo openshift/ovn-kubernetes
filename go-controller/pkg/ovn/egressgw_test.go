@@ -2224,7 +2224,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
-				extIPs, err := getExternalIPsGRSNAT(fakeOvn.controller.watchFactory, pod[0].Spec.NodeName)
+				extIPs, err := getExternalIPsGR(fakeOvn.controller.watchFactory, pod[0].Spec.NodeName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
