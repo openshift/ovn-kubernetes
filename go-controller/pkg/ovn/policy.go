@@ -135,18 +135,18 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			stalePGs = append(stalePGs, hashedLocalPortGroup)
 			// delete the address sets for this old policy from OVN
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				klog.Errorf(err.Error())
+				klog.Fatalf(err.Error())
 			}
 		}
 	})
 	if err != nil {
-		klog.Errorf("Error in syncing network policies: %v", err)
+		klog.Fatalf("Error in syncing network policies: %v", err)
 	}
 
 	if len(stalePGs) > 0 {
 		err = libovsdbops.DeletePortGroups(oc.nbClient, stalePGs...)
 		if err != nil {
-			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
+			klog.Fatalf("Error removing stale port groups %v: %v", stalePGs, err)
 		}
 	}
 }

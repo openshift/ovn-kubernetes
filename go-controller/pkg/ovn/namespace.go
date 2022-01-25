@@ -44,12 +44,12 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
 		if nameSuffix == "" && !expectedNs[namespaceName] {
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				klog.Errorf(err.Error())
+				klog.Fatalf(err.Error())
 			}
 		}
 	})
 	if err != nil {
-		klog.Errorf("Error in syncing namespaces: %v", err)
+		klog.Fatalf("Error in syncing namespaces: %v", err)
 	}
 }
 
