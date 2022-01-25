@@ -106,7 +106,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
 			err := deletePortGroup(oc.ovnNBClient, hashedLocalPortGroup)
 			if err != nil {
-				klog.Errorf("%v", err)
+				klog.Fatalf("%v", err)
 			}
 
 			// delete the address sets for this old policy from OVN

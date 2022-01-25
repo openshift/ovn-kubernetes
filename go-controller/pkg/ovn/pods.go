@@ -53,7 +53,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// get the list of logical ports from OVN
 	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
-		klog.Errorf("Failed to get nodes")
+		klog.Fatalf("Failed to get nodes")
 		return
 	}
 	for _, n := range nodes {
@@ -75,12 +75,12 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			klog.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
 			cmd, err := oc.ovnNBClient.LSPDel(existingPort)
 			if err != nil {
-				klog.Errorf("Error in getting the cmd to delete pod's logical port %s %v", existingPort, err)
+				klog.Fatalf("Error in getting the cmd to delete pod's logical port %s %v", existingPort, err)
 				continue
 			}
 			err = oc.ovnNBClient.Execute(cmd)
 			if err != nil {
-				klog.Errorf("Error deleting pod's logical port %s %v", existingPort, err)
+				klog.Fatalf("Error deleting pod's logical port %s %v", existingPort, err)
 				continue
 			}
 		}
