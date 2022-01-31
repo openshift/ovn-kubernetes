@@ -251,6 +251,16 @@ func (c *Controller) syncServices(key string) error {
 		c.serviceTracker.deleteService(name, namespace)
 		return nil
 	}
+
+	// OCP HACK
+	// Check if the service implicitly sets ipFamilyPolicy for DualStack services.
+	// This is deprecated in 4.8 and 4.9 as admins must set ipFamilyPolicy explicitly in 4.10 and beyond.
+	if isImplicitDualStackIpFamilyPolicy(service) {
+		c.eventRecorder.Eventf(service, v1.EventTypeWarning, "ImplicitDualStackIpFamilyPolicy",
+			"DualStack ipFamilyPolicy set implicitly for service %s/%s", namespace, name)
+	}
+	// END OCP HACK
+
 	klog.Infof("Creating service %s on namespace %s on OVN", name, namespace)
 	// The Service exists in the cache: update it in OVN
 	// Get the endpoint slices associated to the Service
