@@ -64,7 +64,7 @@ var (
 		EncapPort:         DefaultEncapPort,
 		InactivityProbe:   100000, // in Milliseconds
 		OpenFlowProbe:     180,    // in Seconds
-		MonitorAll:        true,
+		MonitorAll:        false,
 		LFlowCacheEnable:  true,
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
