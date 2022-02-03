@@ -274,6 +274,7 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 	}
 	as.uuid = uuid
 
+	joinedIPs := ipsToStringUnique(ips)
 	if uuid != "" {
 		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
 		// ovnAddressSet already exists in the database; just update IPs
@@ -288,7 +289,6 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 			"name=" + as.hashName,
 			"external-ids:name=" + as.name,
 		}
-		joinedIPs := joinIPs(ips)
 		if len(joinedIPs) > 0 {
 			args = append(args, "addresses="+joinedIPs)
 		}
@@ -299,7 +299,7 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 		}
 	}
 
-	klog.V(5).Infof("New(%s) with %v", asDetail(as), ips)
+	klog.V(5).Infof("New(%s) with IPs: %s", asDetail(as), joinedIPs)
 
 	return as, nil
 }
@@ -407,10 +407,11 @@ func (as *ovnAddressSets) Destroy() error {
 // setIPs updates the given address set in OVN to be only the given IPs, disregarding
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
+	joinedIPs := ipsToStringUnique(ips)
 	var err error
 	var stderr string
 	if len(ips) > 0 {
-		_, stderr, err = util.RunOVNNbctl("set", "address_set", as.uuid, "addresses="+joinIPs(ips))
+		_, stderr, err = util.RunOVNNbctl("set", "address_set", as.uuid, "addresses="+joinedIPs)
 	} else {
 		// cannot set an address_set to the empty set, must use clear
 		_, stderr, err = util.RunOVNNbctl("clear", "address_set", as.uuid, "addresses")
@@ -428,8 +429,7 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-
-	ipStr := joinIPs(ips)
+	ipStr := ipsToStringUnique(ips)
 
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), ipStr)
 	_, stderr, err := util.RunOVNNbctl("add", "address_set", as.uuid, "addresses", ipStr)
@@ -447,7 +447,7 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
 		return nil
 	}
 
-	ipStr := joinIPs(ips)
+	ipStr := ipsToStringUnique(ips)
 	klog.V(5).Infof("(%s) deleting IP %s from address set", asDetail(as), ipStr)
 
 	_, stderr, err := util.RunOVNNbctl("remove", "address_set", as.uuid, "addresses", ipStr)
@@ -492,10 +492,12 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 	return
 }
 
-func joinIPs(ips []net.IP) string {
-	list := make([]string, 0, len(ips))
+// Takes a slice of IPs and returns a string with unique IPs
+// in ovn-nbctl parsable format
+func ipsToStringUnique(ips []net.IP) string {
+	s := sets.NewString()
 	for _, ip := range ips {
-		list = append(list, `"`+ip.String()+`"`)
+		s.Insert(`"` + ip.String() + `"`)
 	}
-	return strings.Join(list, " ")
+	return strings.Join(s.UnsortedList(), " ")
 }
