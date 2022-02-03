@@ -145,7 +145,9 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 // coverageShowMetricsUpdater updates the metric
 // by obtaining values from getCoverageShowOutputMap for specified component.
 func coverageShowMetricsUpdater(component string) {
-	for range time.Tick(metricsUpdateInterval) {
+	ticker := time.NewTicker(metricsUpdateInterval)
+	defer ticker.Stop()
+	for range ticker.C {
 		coverageShowOutputMap, err := getCoverageShowOutputMap(component)
 		if err != nil {
 			klog.Errorf("%s", err.Error())
@@ -303,7 +305,9 @@ func parseStopwatchShowOutput(output string) map[string]stopwatchStatistics {
 // stopwatchShowMetricsUpdater updates the metric by obtaining the stopwatch/show
 // metrics for the specified component.
 func stopwatchShowMetricsUpdater(component string) {
-	for range time.Tick(metricsUpdateInterval) {
+	ticker := time.NewTicker(metricsUpdateInterval)
+	defer ticker.Stop()
+	for range ticker.C {
 		stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
 		if err != nil {
 			klog.Error(err)
