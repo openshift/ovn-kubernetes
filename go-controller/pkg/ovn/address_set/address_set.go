@@ -4,7 +4,6 @@ import (
 	"fmt"
 	goovn "github.com/ebay/go-ovn"
 	"net"
-	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -541,7 +540,5 @@ func joinIPs(ips []net.IP) string {
 	for _, ip := range ips {
 		list = append(list, `"`+ip.String()+`"`)
 	}
-	// so tests are predictable
-	sort.Strings(list)
 	return strings.Join(list, " ")
 }
