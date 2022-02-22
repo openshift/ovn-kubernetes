@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -32,10 +33,11 @@ const (
 // nodePortWatcher manages OpenfLow and iptables rules
 // to ensure that services using NodePorts are accessible
 type nodePortWatcher struct {
-	ofportPhys  string
-	ofportPatch string
-	gwBridge    string
-	ofm         *openflowManager
+	ofportPhys    string
+	ofportPatch   string
+	gwBridge      string
+	ofm           *openflowManager
+	nodeIPManager *addressManager
 }
 
 func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bool) {
@@ -228,10 +230,59 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 	}
 }
 
+// deleteConntrackForServiceVIP deletes the conntrack entries for the provided svcVIP:svcPort by comparing them to ConntrackOrigDstIP:ConntrackOrigDstPort
+func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []kapi.ServicePort, ns, name string) error {
+	for _, svcVIP := range svcVIPs {
+		for _, svcPort := range svcPorts {
+			err := util.DeleteConntrack(svcVIP, svcPort.Port, svcPort.Protocol, netlink.ConntrackOrigDstIP)
+			if err != nil {
+				return fmt.Errorf("failed to delete conntrack entry for service %s/%s with svcVIP %s, svcPort %d, protocol %s: %v",
+					ns, name, svcVIP, svcPort.Port, svcPort.Protocol, err)
+			}
+		}
+	}
+	return nil
+}
+
+// deleteConntrackForService deletes the conntrack entries corresponding to the service VIPs of the provided service
+func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) error {
+	// remove conntrack entries for LB VIPs and External IPs
+	externalIPs := util.GetExternalAndLBIPs(service)
+	if err := deleteConntrackForServiceVIP(externalIPs, service.Spec.Ports, service.Namespace, service.Name); err != nil {
+		return err
+	}
+	if util.ServiceTypeHasNodePort(service) {
+		// remove conntrack entries for NodePorts
+		nodeIPs := npw.nodeIPManager.ListAddresses()
+		for _, nodeIP := range nodeIPs {
+			for _, svcPort := range service.Spec.Ports {
+				err := util.DeleteConntrack(nodeIP.String(), svcPort.NodePort, svcPort.Protocol, netlink.ConntrackOrigDstIP)
+				if err != nil {
+					return fmt.Errorf("failed to delete conntrack entry for service %s/%s with nodeIP %s, nodePort %d, protocol %s: %v",
+						service.Namespace, service.Name, nodeIP, svcPort.Port, svcPort.Protocol, err)
+				}
+			}
+		}
+	}
+	// remove conntrack entries for ClusterIPs
+	clusterIPs := util.GetClusterIPs(service)
+	if err := deleteConntrackForServiceVIP(clusterIPs, service.Spec.Ports, service.Namespace, service.Name); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	// don't process headless service
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return
+	}
+	// Remove all conntrack entries for the serviceVIPs of this service irrespective of protocol stack
+	// since service deletion is considered as unplugging the network cable and hence graceful termination
+	// is not guaranteed. See https://github.com/kubernetes/kubernetes/issues/108523#issuecomment-1074044415.
+	err := npw.deleteConntrackForService(service)
+	if err != nil {
+		klog.Errorf("Failed to delete conntrack entry for service %v/%v: %v", service.Namespace, service.Name, err)
 	}
 	npw.updateServiceFlowCache(service, false)
 	npw.ofm.requestFlowSync()
@@ -612,7 +663,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(patchPort, bridgeName, uplinkName, gw.openflowManager)
+			gw.nodePortWatcher, err = newNodePortWatcher(patchPort, bridgeName, uplinkName, gw.openflowManager, gw.nodeIPManager)
 			if err != nil {
 				return err
 			}
@@ -627,7 +678,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	return gw, nil
 }
 
-func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ofm *openflowManager) (*nodePortWatcher, error) {
+func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ofm *openflowManager, nodeIPManager *addressManager) (*nodePortWatcher, error) {
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
@@ -654,10 +705,11 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ofm *openflowManager
 	}
 
 	npw := &nodePortWatcher{
-		ofportPhys:  ofportPhys,
-		ofportPatch: ofportPatch,
-		gwBridge:    gwBridge,
-		ofm:         ofm,
+		ofportPhys:    ofportPhys,
+		ofportPatch:   ofportPatch,
+		gwBridge:      gwBridge,
+		ofm:           ofm,
+		nodeIPManager: nodeIPManager,
 	}
 	return npw, nil
 }
