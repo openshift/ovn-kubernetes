@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"github.com/vishvananda/netlink"
 	kapi "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -310,8 +311,8 @@ func (n *OvnNode) WatchEndpoints() {
 			}
 			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
 			for item := range buildEndpointAddressMap(epOld.Subsets) {
-				if _, ok := newEpAddressMap[item]; !ok {
-					err := deleteConntrack(item.ip, item.port, item.protocol)
+				if _, ok := newEpAddressMap[item]; !ok && item.protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
+					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP)
 					if err != nil {
 						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 					}
@@ -321,11 +322,12 @@ func (n *OvnNode) WatchEndpoints() {
 		DeleteFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			for item := range buildEndpointAddressMap(ep.Subsets) {
-				err := deleteConntrack(item.ip, item.port, item.protocol)
-				if err != nil {
-					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+				if item.protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
+					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP)
+					if err != nil {
+						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+					}
 				}
-
 			}
 		},
 	}, nil)
