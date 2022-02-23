@@ -92,9 +92,9 @@ func (oc *Controller) deleteEgressIP(eIP *egressipv1.EgressIP) error {
 		return err
 	}
 	for _, namespace := range namespaces.Items {
-		if pH, exists := oc.eIPC.podHandlerCache[getNamespaceKey(&namespace)]; exists {
+		if pH, exists := oc.eIPC.podHandlerCache[getPodHandlerKey(eIP, &namespace)]; exists {
 			oc.watchFactory.RemovePodHandler(pH)
-			delete(oc.eIPC.podHandlerCache, getNamespaceKey(&namespace))
+			delete(oc.eIPC.podHandlerCache, getPodHandlerKey(eIP, &namespace))
 		}
 		if err := oc.deleteNamespacePodsEgressIP(eIP, &namespace); err != nil {
 			return err
@@ -408,7 +408,7 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 	if err != nil {
 		return fmt.Errorf("invalid podSelector on EgressIP %s: %v", eIP.Name, err)
 	}
-	if _, exists := oc.eIPC.podHandlerCache[getNamespaceKey(namespace)]; !exists {
+	if _, exists := oc.eIPC.podHandlerCache[getPodHandlerKey(eIP, namespace)]; !exists {
 		h := oc.watchFactory.AddFilteredPodHandler(namespace.Name, sel,
 			cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
@@ -443,9 +443,9 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 					}
 				},
 			}, nil)
-		oc.eIPC.podHandlerCache[getNamespaceKey(namespace)] = h
+		oc.eIPC.podHandlerCache[getPodHandlerKey(eIP, namespace)] = h
 	} else {
-		klog.Errorf("The pod handler cache for egress IPs is de-synchronized: a pod handler already exists for namespace: %s", getNamespaceKey(namespace))
+		klog.Errorf("The pod handler cache for egress IPs is de-synchronized: a pod handler already exists for: %s", getPodHandlerKey(eIP, namespace))
 	}
 	return nil
 }
@@ -453,9 +453,9 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 func (oc *Controller) deleteNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
 	oc.eIPC.podHandlerMutex.Lock()
 	defer oc.eIPC.podHandlerMutex.Unlock()
-	if pH, exists := oc.eIPC.podHandlerCache[getNamespaceKey(namespace)]; exists {
+	if pH, exists := oc.eIPC.podHandlerCache[getPodHandlerKey(eIP, namespace)]; exists {
 		oc.watchFactory.RemovePodHandler(pH)
-		delete(oc.eIPC.podHandlerCache, getNamespaceKey(namespace))
+		delete(oc.eIPC.podHandlerCache, getPodHandlerKey(eIP, namespace))
 	}
 	if err := oc.deleteNamespacePodsEgressIP(eIP, namespace); err != nil {
 		return err
@@ -1312,8 +1312,8 @@ func getEgressIPKey(eIP *egressipv1.EgressIP) string {
 	return eIP.Name
 }
 
-func getNamespaceKey(namespace *kapi.Namespace) string {
-	return namespace.Name
+func getPodHandlerKey(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) string {
+	return fmt.Sprintf("%s_%s", namespace.Name, eIP.Name)
 }
 
 func getPodKey(pod *kapi.Pod) string {
