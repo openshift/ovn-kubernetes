@@ -542,7 +542,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 					EgressIP: eIPC.String(),
 					Node:     assignableNodes[i].name,
 				})
-				klog.V(5).Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, assignableNodes[i])
+				klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, assignableNodes[i])
 				break
 			}
 		}
