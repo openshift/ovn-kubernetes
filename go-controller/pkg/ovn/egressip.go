@@ -377,9 +377,13 @@ func (oc *Controller) generatePodIPCacheForEgressIP(eIPs []interface{}) (map[str
 				continue
 			}
 			for _, pod := range pods {
-				for _, podIP := range pod.Status.PodIPs {
-					ip := net.ParseIP(podIP.IP)
-					egressIPToPodIPCache[egressIP.Name].Insert(ip.String())
+				podIPs, err := oc.eIPC.getPodIPs(pod)
+				if err != nil {
+					klog.Errorf("Unable to retrieve pod %s IPs, err: %v", pod.Name, err)
+					continue
+				}
+				for _, podIP := range podIPs {
+					egressIPToPodIPCache[egressIP.Name].Insert(podIP.String())
 				}
 			}
 		}
