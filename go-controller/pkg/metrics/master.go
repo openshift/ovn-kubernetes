@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/cache"
-	"github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -229,7 +229,7 @@ var startMasterMetricUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics(sbClient client.Client) {
+func RegisterMasterMetrics(sbClient libovsdbclient.Client) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
 		// the updater for this metric is activated
@@ -302,7 +302,6 @@ func RegisterMasterMetrics(sbClient client.Client) {
 		prometheus.MustRegister(metricEgressFirewallRuleCount)
 		prometheus.MustRegister(metricIPsecEnabled)
 		prometheus.MustRegister(metricEgressFirewallCount)
-		registerControlPlaneRecorderMetrics()
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
@@ -310,7 +309,7 @@ func RegisterMasterMetrics(sbClient client.Client) {
 // StartMasterMetricUpdater adds a goroutine that updates a "timestamp" value in the
 // nbdb every 30 seconds. This is so we can determine freshness of the database.
 // Also, update IPsec enabled or disable metric.
-func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient client.Client) {
+func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient libovsdbclient.Client) {
 	startMasterMetricUpdaterOnce.Do(func() {
 		addIPSecMetricHandler(nbClient)
 		go func() {
@@ -371,7 +370,7 @@ func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
 }
 
-func updateE2ETimestampMetric(ovnNBClient client.Client) {
+func updateE2ETimestampMetric(ovnNBClient libovsdbclient.Client) {
 	currentTime := time.Now().Unix()
 	// assumption that only first row is relevant in NB_Global table
 	if err := libovsdbops.UpdateNBGlobalOptions(ovnNBClient, map[string]string{"e2e_timestamp": fmt.Sprintf("%d", currentTime)}); err != nil {
@@ -382,7 +381,7 @@ func updateE2ETimestampMetric(ovnNBClient client.Client) {
 	metricE2ETimestamp.Set(float64(currentTime))
 }
 
-func addIPSecMetricHandler(ovnNBClient client.Client) {
+func addIPSecMetricHandler(ovnNBClient libovsdbclient.Client) {
 	ovnNBClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
 			ipsecMetricHandler(table, model)
@@ -418,13 +417,6 @@ func DecrementEgressFirewallCount() {
 	metricEgressFirewallCount.Dec()
 }
 
-func registerControlPlaneRecorderMetrics() {
-	prometheus.MustRegister(metricFirstSeenLSPLatency)
-	prometheus.MustRegister(metricLSPPortBindingLatency)
-	prometheus.MustRegister(metricPortBindingUpLatency)
-	prometheus.MustRegister(metricPortBindingChassisLatency)
-}
-
 type timestampType int
 
 const (
@@ -449,19 +441,29 @@ type ControlPlaneRecorder struct {
 	podRecords map[kapimtypes.UID]*record
 }
 
-func NewControlPlaneRecorder(sbClient client.Client) *ControlPlaneRecorder {
-	recorder := ControlPlaneRecorder{sync.Mutex{}, make(map[kapimtypes.UID]*record)}
+func NewControlPlaneRecorder() *ControlPlaneRecorder {
+	return &ControlPlaneRecorder{
+		podRecords: make(map[kapimtypes.UID]*record),
+	}
+}
+
+func (ps *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client) {
+	// only register the metrics when we want them
+	prometheus.MustRegister(metricFirstSeenLSPLatency)
+	prometheus.MustRegister(metricLSPPortBindingLatency)
+	prometheus.MustRegister(metricPortBindingUpLatency)
+	prometheus.MustRegister(metricPortBindingChassisLatency)
+
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
-			go recorder.AddPortBindingEvent(table, model)
+			go ps.AddPortBindingEvent(table, model)
 		},
 		UpdateFunc: func(table string, old model.Model, new model.Model) {
-			go recorder.UpdatePortBindingEvent(table, old, new)
+			go ps.UpdatePortBindingEvent(table, old, new)
 		},
 		DeleteFunc: func(table string, model model.Model) {
 		},
 	})
-	return &recorder
 }
 
 func (ps *ControlPlaneRecorder) AddPodEvent(podUID kapimtypes.UID) {
