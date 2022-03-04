@@ -647,6 +647,9 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	); err != nil {
 		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
 	}
+
+	oc.eIPC.assignmentRetryMutex.Lock()
+	defer oc.eIPC.assignmentRetryMutex.Unlock()
 	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list egressIPs, err: %v", err)
