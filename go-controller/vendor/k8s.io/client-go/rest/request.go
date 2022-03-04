@@ -946,6 +946,8 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 		client = http.DefaultClient
 	}
 
+	klog.Infof("#### R(%p): %s!%s!%s [%s/%s] %s %s %s", r, r.verb, r.pathPrefix, r.subpath, r.namespace, r.resource, r.resourceName, r.subresource)
+
 	// Throttle the first try before setting up the timeout configured on the
 	// client. We don't want a throttled client to return timeouts to callers
 	// before it makes a single request.
