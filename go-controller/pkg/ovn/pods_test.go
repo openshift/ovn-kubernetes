@@ -26,7 +26,6 @@ import (
 	"github.com/onsi/gomega"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -116,6 +115,7 @@ type testPod struct {
 }
 
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) (to testPod) {
+	portName := util.GetLogicalPortName(namespace, podName)
 	to = testPod{
 		nodeName:   nodeName,
 		nodeSubnet: nodeSubnet,
@@ -125,8 +125,8 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 		podIP:      podIP,
 		podMAC:     podMAC,
 		namespace:  namespace,
-		portName:   util.GetLogicalPortName(namespace, podName),
-		portUUID:   libovsdbops.BuildNamedUUID(),
+		portName:   portName,
+		portUUID:   portName + "-UUID",
 	}
 	return
 }
@@ -167,16 +167,17 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 	nodeslsps := make(map[string][]string)
 	var logicalSwitchPorts []*nbdb.LogicalSwitchPort
 	for _, pod := range pods {
+		portName := util.GetLogicalPortName(pod.namespace, pod.podName)
 		var lspUUID string
 		if len(pod.portUUID) == 0 {
-			lspUUID = libovsdbops.BuildNamedUUID()
+			lspUUID = portName + "-UUID"
 		} else {
 			lspUUID = pod.portUUID
 		}
 		podAddr := fmt.Sprintf("%s %s", pod.podMAC, pod.podIP)
 		lsp := &nbdb.LogicalSwitchPort{
 			UUID:      lspUUID,
-			Name:      util.GetLogicalPortName(pod.namespace, pod.podName),
+			Name:      portName,
 			Addresses: []string{podAddr},
 			ExternalIDs: map[string]string{
 				"pod":       "true",
@@ -198,7 +199,7 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 	var logicalSwitches []*nbdb.LogicalSwitch
 	for _, node := range nodes {
 		logicalSwitches = append(logicalSwitches, &nbdb.LogicalSwitch{
-			UUID:  libovsdbops.BuildNamedUUID(),
+			UUID:  node + "-UUID",
 			Name:  node,
 			Ports: nodeslsps[node],
 		})

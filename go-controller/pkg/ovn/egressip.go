@@ -1760,8 +1760,6 @@ type egressIPController struct {
 	allocator allocator
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
-	// modelClient for performing idempotent NB operations
-	modelClient libovsdbops.ModelClient
 	// watchFactory watching k8s objects
 	watchFactory *factory.WatchFactory
 }
