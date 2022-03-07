@@ -315,7 +315,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcController:            svcController,
 		svcFactory:               svcFactory,
 		modelClient:              modelClient,
-		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
+		metricsRecorder:          metrics.NewControlPlaneRecorder(),
 	}
 }
 
@@ -616,7 +616,7 @@ func (oc *Controller) WatchPods() {
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.AddPodEvent(pod.UID)
+			oc.metricsRecorder.AddPodEvent(pod.UID)
 			oc.initRetryAddPod(pod)
 			oc.checkAndSkipRetryPod(pod)
 			if retryEntry := oc.getPodRetryEntry(pod); retryEntry != nil && retryEntry.needsDel != nil {
@@ -686,7 +686,7 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.CleanPodRecord(pod.UID)
+			oc.metricsRecorder.CleanPodRecord(pod.UID)
 			oc.initRetryDelPod(pod)
 			// we have a copy of portInfo in the retry cache now, we can remove it from
 			// logicalPortCache so that we don't race with a new add pod that comes with
