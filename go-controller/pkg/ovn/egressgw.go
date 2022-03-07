@@ -167,7 +167,7 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 // addPodExternalGWForNamespace handles adding routes to all pods in that namespace for a pod GW
 func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.Pod, egress gatewayInfo) error {
 	tmpPodGWs := oc.getRoutingPodGWs(namespace)
-	tmpPodGWs[pod.Name] = egress
+	tmpPodGWs[makePodGWKey(pod)] = egress
 	if err := validateRoutingPodGWs(tmpPodGWs); err != nil {
 		return fmt.Errorf("unable to add pod: %s/%s as external gateway for namespace: %s, error: %v",
 			pod.Namespace, pod.Name, namespace, err)
