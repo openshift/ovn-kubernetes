@@ -351,7 +351,11 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 // addOrModifyACLAllow adds or modifies an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int, aclLogging string) error {
 	var direction, action, aclName, ipBlockCIDRString string
-	direction = types.DirectionToLPort
+	if gp.policyType == knet.PolicyTypeIngress {
+		direction = types.DirectionToLPort
+	} else {
+		direction = types.DirectionFromLPort
+	}
 	action = "allow-related"
 	aclName = fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
 
@@ -383,7 +387,7 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 
 	if uuid != "" {
 		// We already have an ACL. We will update it.
-		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
+		aclSetCMD := []string{"set", "acl", uuid,
 			match,
 			fmt.Sprintf("priority=%s", types.DefaultAllowPriority),
 			fmt.Sprintf("direction=%s", direction),
@@ -391,8 +395,11 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 			fmt.Sprintf("log=%t", aclLogging != ""),
 			fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
 			fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
-			fmt.Sprintf("name=%.63s", aclName),
-		)
+			fmt.Sprintf("name=%.63s", aclName)}
+		if gp.policyType == knet.PolicyTypeEgress {
+			aclSetCMD = append(aclSetCMD, "options:apply-after-lb=true")
+		}
+		_, stderr, err = util.RunOVNNbctl(aclSetCMD...)
 		if err != nil {
 			return fmt.Errorf("failed to modify the allow-from rule for "+
 				"namespace=%s, policy=%s, stderr: %q (%v)",
@@ -401,7 +408,7 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		return nil
 	}
 
-	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create",
+	aclCreateCMD := []string{"--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", types.DefaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction),
 		match,
@@ -415,8 +422,12 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
-		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType),
-		"--", "add", "port_group", portGroupUUID, "acls", "@acl")
+		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType)}
+	if gp.policyType == knet.PolicyTypeEgress {
+		aclCreateCMD = append(aclCreateCMD, "options:apply-after-lb=true")
+	}
+	aclCreateCMD = append(aclCreateCMD, "--", "add", "port_group", portGroupUUID, "acls", "@acl")
+	_, stderr, err = util.RunOVNNbctl(aclCreateCMD...)
 	if err != nil {
 		return fmt.Errorf("failed to create the acl allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)", gp.policyNamespace,
