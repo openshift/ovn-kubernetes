@@ -451,6 +451,7 @@ type record struct {
 // item is the data structure for ControlPlaneRecorders queue
 type item struct {
 	op     operation
+	t      time.Time
 	old    model.Model
 	new    model.Model
 	podUID kapimtypes.UID
@@ -482,13 +483,13 @@ func (cpr *ControlPlaneRecorder) Run(sbClient client.Client, stop <-chan struct{
 			if table != portBindingTable {
 				return
 			}
-			cpr.queue.Add(item{op: addPortBinding, old: model})
+			cpr.queue.Add(item{op: addPortBinding, old: model, t: time.Now()})
 		},
 		UpdateFunc: func(table string, old model.Model, new model.Model) {
 			if table != portBindingTable {
 				return
 			}
-			cpr.queue.Add(item{op: updatePortBinding, old: old, new: new})
+			cpr.queue.Add(item{op: updatePortBinding, old: old, new: new, t: time.Now()})
 		},
 		DeleteFunc: func(table string, model model.Model) {
 		},
@@ -502,12 +503,12 @@ func (cpr *ControlPlaneRecorder) Run(sbClient client.Client, stop <-chan struct{
 
 func (cpr *ControlPlaneRecorder) AddPod(podUID kapimtypes.UID) {
 	if cpr.queue != nil {
-		cpr.queue.Add(item{op: addPod, podUID: podUID})
+		cpr.queue.Add(item{op: addPod, podUID: podUID, t: time.Now()})
 	}
 }
 
-func (cpr *ControlPlaneRecorder) addPod(podUID kapimtypes.UID) {
-	cpr.podRecords[podUID] = &record{timestamp: time.Now(), timestampType: firstSeen}
+func (cpr *ControlPlaneRecorder) addPod(podUID kapimtypes.UID, t time.Time) {
+	cpr.podRecords[podUID] = &record{timestamp: t, timestampType: firstSeen}
 }
 
 func (cpr *ControlPlaneRecorder) CleanPod(podUID kapimtypes.UID) {
@@ -522,12 +523,11 @@ func (cpr *ControlPlaneRecorder) cleanPod(podUID kapimtypes.UID) {
 
 func (cpr *ControlPlaneRecorder) AddLSP(podUID kapimtypes.UID) {
 	if cpr.queue != nil {
-		cpr.queue.Add(item{op: addLogicalSwitchPort, podUID: podUID})
+		cpr.queue.Add(item{op: addLogicalSwitchPort, podUID: podUID, t: time.Now()})
 	}
 }
 
-func (cpr *ControlPlaneRecorder) addLSP(podUID kapimtypes.UID) {
-	now := time.Now()
+func (cpr *ControlPlaneRecorder) addLSP(podUID kapimtypes.UID, t time.Time) {
 	var r *record
 	if r = cpr.getRecord(podUID); r == nil {
 		klog.V(5).Infof("Add Logical Switch Port event expected pod with UID %q in cache", podUID)
@@ -537,14 +537,13 @@ func (cpr *ControlPlaneRecorder) addLSP(podUID kapimtypes.UID) {
 		klog.V(5).Infof("Unexpected last event type (%d) in cache for pod with UID %q", r.timestampType, podUID)
 		return
 	}
-	metricFirstSeenLSPLatency.Observe(now.Sub(r.timestamp).Seconds())
-	r.timestamp = now
+	metricFirstSeenLSPLatency.Observe(t.Sub(r.timestamp).Seconds())
+	r.timestamp = t
 	r.timestampType = logicalSwitchPort
 }
 
-func (cpr *ControlPlaneRecorder) addPortBinding(m model.Model) {
+func (cpr *ControlPlaneRecorder) addPortBinding(m model.Model, t time.Time) {
 	var r *record
-	now := time.Now()
 	row := m.(*sbdb.PortBinding)
 	podUID := getPodUIDFromPortBinding(row)
 	if podUID == "" {
@@ -558,16 +557,15 @@ func (cpr *ControlPlaneRecorder) addPortBinding(m model.Model) {
 		klog.V(5).Infof("Unexpected last event entry (%d) in cache for pod with UID %q", r.timestampType, podUID)
 		return
 	}
-	metricLSPPortBindingLatency.Observe(now.Sub(r.timestamp).Seconds())
-	r.timestamp = now
+	metricLSPPortBindingLatency.Observe(t.Sub(r.timestamp).Seconds())
+	r.timestamp = t
 	r.timestampType = portBinding
 }
 
-func (cpr *ControlPlaneRecorder) updatePortBinding(old, new model.Model) {
+func (cpr *ControlPlaneRecorder) updatePortBinding(old, new model.Model, t time.Time) {
 	var r *record
 	oldRow := old.(*sbdb.PortBinding)
 	newRow := new.(*sbdb.PortBinding)
-	now := time.Now()
 	podUID := getPodUIDFromPortBinding(newRow)
 	if podUID == "" {
 		return
@@ -577,12 +575,12 @@ func (cpr *ControlPlaneRecorder) updatePortBinding(old, new model.Model) {
 		return
 	}
 	if oldRow.Chassis == nil && newRow.Chassis != nil && r.timestampType == portBinding {
-		metricPortBindingChassisLatency.Observe(now.Sub(r.timestamp).Seconds())
-		r.timestamp = now
+		metricPortBindingChassisLatency.Observe(t.Sub(r.timestamp).Seconds())
+		r.timestamp = t
 		r.timestampType = portBindingChassis
 	}
 	if oldRow.Up != nil && !*oldRow.Up && newRow.Up != nil && *newRow.Up && r.timestampType == portBindingChassis {
-		metricPortBindingUpLatency.Observe(now.Sub(r.timestamp).Seconds())
+		metricPortBindingUpLatency.Observe(t.Sub(r.timestamp).Seconds())
 	}
 }
 
@@ -604,15 +602,15 @@ func (cpr *ControlPlaneRecorder) processNextItem() bool {
 func (cpr *ControlPlaneRecorder) processItem(i item) {
 	switch i.op {
 	case addPortBinding:
-		cpr.addPortBinding(i.old)
+		cpr.addPortBinding(i.old, i.t)
 	case updatePortBinding:
-		cpr.updatePortBinding(i.old, i.new)
+		cpr.updatePortBinding(i.old, i.new, i.t)
 	case addPod:
-		cpr.addPod(i.podUID)
+		cpr.addPod(i.podUID, i.t)
 	case cleanPod:
 		cpr.cleanPod(i.podUID)
 	case addLogicalSwitchPort:
-		cpr.addLSP(i.podUID)
+		cpr.addLSP(i.podUID, i.t)
 	}
 }
 
