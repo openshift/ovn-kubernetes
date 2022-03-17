@@ -211,20 +211,25 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 		}
 	}
 	policyIDs, err := findLegacyReroutePolicyIDs()
-	if err != nil {
+	if err == nil {
+		numLegacyPolicies := len(policyIDs)
+		if numLegacyPolicies > 0 {
+			klog.Infof("Removing %d legacy logical router policies", numLegacyPolicies)
+		}
+	} else {
 		klog.Errorf("Unable to clean up legacy egress IP setup, err: %v", err)
 	}
+	txn := util.NewNBTxn()
 	for _, policyID := range policyIDs {
-		_, stderr, err := util.RunOVNNbctl(
-			"remove",
-			"logical_router",
-			types.OVNClusterRouter,
-			"policies",
-			policyID,
-		)
+		args := []string{"remove", "logical_router", types.OVNClusterRouter, "policies", policyID}
+		_, stderr, err := txn.AddOrCommit(args)
 		if err != nil {
 			klog.Errorf("Unable to delete legacy logical router policy: %s, stderr: %s, err: %v", policyID, stderr, err)
 		}
+	}
+	_, stderr, err := txn.Commit()
+	if err != nil {
+		klog.Errorf("Unable to delete legacy logical router policies, stderr: %s, err: %v", stderr, err)
 	}
 
 	// This part will take of syncing stale data which we might have in OVN if
