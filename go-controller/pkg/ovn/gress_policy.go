@@ -293,7 +293,7 @@ func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 // localPodSetACL adds or updates an ACL that implements the gress policy's rules to the
 // given Port Group (which should contain all pod logical switch ports selected
 // by the parent NetworkPolicy)
-func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLogging string) {
+func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLogging string) error {
 	l3Match := gp.getL3MatchFromAddressSet()
 	var lportMatch string
 	var cidrMatches []string
@@ -312,7 +312,7 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for i, cidrMatch := range cidrMatches {
 				if err := gp.addOrModifyACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
-					klog.Warningf(err.Error())
+					return fmt.Errorf("failed to add/update ACL allow rule for IPBlock CIDR: %w", err)
 				}
 			}
 		}
@@ -320,7 +320,7 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
 			if err := gp.addOrModifyACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
-				klog.Warningf(err.Error())
+				return fmt.Errorf("failed to add/update ACL allow rule for all sources: %w", err)
 			}
 		}
 	}
@@ -335,16 +335,17 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for i, cidrMatch := range cidrMatches {
 				if err := gp.addOrModifyACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
-					klog.Warningf(err.Error())
+					return fmt.Errorf("failed to add/update ACL allow rule for IPBlock CIDR: %w", err)
 				}
 			}
 		}
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
 			if err := gp.addOrModifyACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
-				klog.Warningf(err.Error())
+				return fmt.Errorf("failed to add/update ACL allow rule for all sources: %w", err)
 			}
 		}
 	}
+	return nil
 }
 
 // addOrModifyACLAllow adds or modifies an ACL with a given match to the given Port Group

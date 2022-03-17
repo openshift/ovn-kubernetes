@@ -4,7 +4,6 @@ import (
 	"fmt"
 	goovn "github.com/ebay/go-ovn"
 	"net"
-	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -249,13 +248,14 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 		nb:       nb,
 	}
 
+	uniqIPs := ipsToStringUnique(ips)
 	ovnAs, err := nb.ASGet(as.hashName)
 	if err != nil {
 		if err != goovn.ErrorNotFound && err != goovn.ErrorSchema {
 			return nil, fmt.Errorf("failed to get address set %q: %v", name, err)
 		}
 		// ovnAddressSet has not been created yet. Create it.
-		cmd, err := nb.ASAdd(as.hashName, ipsToStringArray(ips), map[string]string{"name": name})
+		cmd, err := nb.ASAdd(as.hashName, uniqIPs, map[string]string{"name": name})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address set cmd: %q: %v", name, err)
 		}
@@ -275,7 +275,7 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 		}
 	}
 
-	klog.V(5).Infof("New(%s) with %v", asDetail(as), ips)
+	klog.V(5).Infof("New(%s) with IPs: %s", asDetail(as), strings.Join(uniqIPs, " "))
 
 	return as, nil
 }
@@ -420,7 +420,7 @@ func (as *ovnAddressSets) Destroy() error {
 // setIP updates the given address set in OVN to be only the given IPs, disregarding
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
-	newIPs := ipsToStringArray(ips)
+	newIPs := ipsToStringUnique(ips)
 	cmd, err := as.nb.ASUpdate(as.hashName, as.uuid, newIPs, map[string]string{"name": as.name})
 	if err != nil {
 		return fmt.Errorf("failed to create update for address set %q: %v", asDetail(as), err)
@@ -450,14 +450,11 @@ func (as *ovnAddressSet) addIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
 	if len(ips) == 0 {
 		return nil, nil
 	}
-	uniqIPs := make([]string, 0, len(ips))
-	for _, ip := range ips {
-		uniqIPs = append(uniqIPs, ip.String())
-	}
-
+	uniqIPs := ipsToStringUnique(ips)
+	ipStr := strings.Join(uniqIPs, " ")
 	cmd, err := as.nb.ASAddIPs(as.hashName, as.uuid, uniqIPs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create add ips cmd for address set %q: %v", asDetail(as), err)
+		return nil, fmt.Errorf("failed to create add ips cmd for address set %q, ips: %s: %v", asDetail(as), ipStr, err)
 	}
 
 	return cmd, nil
@@ -481,15 +478,12 @@ func (as *ovnAddressSet) deleteIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
 	if len(ips) == 0 {
 		return nil, nil
 	}
-	uniqIPs := make([]string, 0, len(ips))
-	for _, ip := range ips {
-		uniqIPs = append(uniqIPs, ip.String())
-	}
-	ipStr := joinIPs(ips)
+	uniqIPs := ipsToStringUnique(ips)
+	ipStr := strings.Join(uniqIPs, " ")
 
 	cmd, err := as.nb.ASDelIPs(as.hashName, as.uuid, uniqIPs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create add ips cmd for address set %q, ips: %s: %v", asDetail(as), ipStr, err)
+		return nil, fmt.Errorf("failed to create delete ips cmd for address set %q, ips: %s: %v", asDetail(as), ipStr, err)
 	}
 	return cmd, nil
 }
@@ -504,14 +498,6 @@ func (as *ovnAddressSet) destroy() error {
 		return fmt.Errorf("failed to destroy address set %q: %v", asDetail(as), err)
 	}
 	return nil
-}
-
-func ipsToStringArray(ips []net.IP) []string {
-	out := make([]string, 0, len(ips))
-	for _, ip := range ips {
-		out = append(out, ip.String())
-	}
-	return out
 }
 
 func MakeAddressSetName(name string) (string, string) {
@@ -536,12 +522,11 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 	return
 }
 
-func joinIPs(ips []net.IP) string {
-	list := make([]string, 0, len(ips))
+// Takes a slice of IPs and returns a slice with unique IPs
+func ipsToStringUnique(ips []net.IP) []string {
+	s := sets.NewString()
 	for _, ip := range ips {
-		list = append(list, `"`+ip.String()+`"`)
+		s.Insert(ip.String())
 	}
-	// so tests are predictable
-	sort.Strings(list)
-	return strings.Join(list, " ")
+	return s.UnsortedList()
 }
