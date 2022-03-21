@@ -35,6 +35,7 @@ RUN yum install -y  \
 ARG ovsver=2.16.0-53.el8fdp
 ARG ovnver=21.12.0-30.el8fdp
 
+RUN yum info openvswitch2.16 --showduplicates
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
