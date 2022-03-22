@@ -275,7 +275,10 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, initialPodUID string) error {
+	namespace, name, initialPodUID string, durationMap *durationMap) error {
+	start := time.Now()
+	defer addDuration(durationMap, "waitForPodInterface", start)
+
 	var detail string
 
 	if checkExternalIDs {
