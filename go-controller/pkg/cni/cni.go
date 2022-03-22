@@ -3,6 +3,7 @@ package cni
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
@@ -24,6 +25,14 @@ var (
 )
 
 type direction int
+
+type durationMap map[string]time.Duration
+
+func addDuration(durationMap *durationMap, tag string, since time.Time) {
+	if durationMap != nil {
+		(*durationMap)[tag] = time.Since(since)
+	}
+}
 
 func (d direction) String() string {
 	if d == Egress {
@@ -108,6 +117,13 @@ func (pr *PodRequest) getVFNetdevName() (string, error) {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) (*Response, error) {
+	durationMap := durationMap{}
+	start := time.Now()
+	defer func() {
+		durationMap["cmdAdd"] = time.Since(start)
+		klog.Infof("SCALE TIMING cmdAdd [%s/%s/%s]: %+v", pr.PodNamespace, pr.PodName, pr.PodUID, durationMap)
+	}()
+
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
 
@@ -132,7 +148,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
+	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn, &durationMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -140,14 +156,14 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		return nil, err
 	}
 
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName, &durationMap)
 	if err != nil {
 		return nil, err
 	}
 
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
-		response.Result, err = pr.getCNIResult(podLister, kclient, podInterfaceInfo)
+		response.Result, err = pr.getCNIResult(podLister, kclient, podInterfaceInfo, &durationMap)
 		if err != nil {
 			return nil, err
 		}
@@ -256,8 +272,8 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 }
 
 // getCNIResult get result from pod interface info.
-func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient kubernetes.Interface, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
-	interfacesArray, err := pr.ConfigureInterface(podLister, kclient, podInterfaceInfo)
+func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient kubernetes.Interface, podInterfaceInfo *PodInterfaceInfo, durationMap *durationMap) (*current.Result, error) {
+	interfacesArray, err := pr.ConfigureInterface(podLister, kclient, podInterfaceInfo, durationMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}
