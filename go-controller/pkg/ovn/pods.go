@@ -638,11 +638,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	durationMap["createOrUpdateLSPOps"] = time.Since(createOrUpdateLSPOpsTime)
 
 	transactStart := time.Now()
-	results, err := libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, allOps)
+	results, err, rpcTime := libovsdbops.TransactAndCheckAndSetUUIDsTime(oc.nbClient, lsp, allOps)
 	libovsdbExecuteTime = time.Since(transactStart)
 	durationMap["TransactAndCheckAndSetUUIDs"] = libovsdbExecuteTime
+	durationMap["LibovsdbRPC"] = rpcTime
 	if err != nil {
-
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
 
