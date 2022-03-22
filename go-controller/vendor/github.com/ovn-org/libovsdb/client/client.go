@@ -61,6 +61,7 @@ type Client interface {
 	DisconnectNotify() chan struct{}
 	Echo(context.Context) error
 	Transact(context.Context, ...ovsdb.Operation) ([]ovsdb.OperationResult, error)
+	TransactTime(context.Context, ...ovsdb.Operation) ([]ovsdb.OperationResult, error, time.Duration)
 	Monitor(context.Context, *Monitor) (MonitorCookie, error)
 	MonitorAll(context.Context) (MonitorCookie, error)
 	MonitorCancel(ctx context.Context, cookie MonitorCookie) error
@@ -293,11 +294,13 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 			// Restart all monitors; each monitor will handle purging
 			// the cache if necessary
 			for id, request := range db.monitors {
+				start1 := time.Now()
 				err := o.monitor(ctx, MonitorCookie{DatabaseName: dbName, ID: id}, true, request)
 				if err != nil {
 					o.resetRPCClient()
 					return err
 				}
+				o.logger.V(3).Info("monitor restarted", "time", time.Since(start1))
 			}
 		}
 	}
@@ -387,7 +390,7 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, erro
 
 		db.cacheMutex.Lock()
 		if db.cache == nil {
-			db.cache, err = cache.NewTableCache(db.model, nil, o.logger)
+			db.cache, err = cache.NewTableCache(dbName, db.model, nil, o.logger)
 			if err != nil {
 				db.cacheMutex.Unlock()
 				return "", err
@@ -650,6 +653,7 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 
 // update3 handling from ovsdb-server.7
 func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) error {
+	foo := time.Now()
 	cookie := MonitorCookie{}
 	*reply = []interface{}{}
 	if len(params) > 3 {
@@ -675,6 +679,7 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
 
+	start := time.Now()
 	db.cacheMutex.Lock()
 	if db.deferUpdates {
 		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{nil, &updates, lastTransactionID})
@@ -682,19 +687,36 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 		return nil
 	}
 	db.cacheMutex.Unlock()
+	deferTime := time.Since(start)
 
 	// Update the local DB cache with the tableUpdates
+	start = time.Now()
 	db.cacheMutex.RLock()
-	err = db.cache.Update2(cookie, updates)
+	rlockTime := time.Since(start)
+	start = time.Now()
+	err, uLockTime, uPopTime, uOpTimes := db.cache.Update2Time(cookie, updates)
+	updateTime := time.Since(start)
 	db.cacheMutex.RUnlock()
 
+	start = time.Now()
 	if err == nil {
 		db.monitorsMutex.Lock()
 		mon := db.monitors[cookie.ID]
 		mon.LastTransactionID = lastTransactionID
 		db.monitorsMutex.Unlock()
 	}
+	monTime := time.Since(start)
 
+	var opTimeStr string
+	for _, opt := range uOpTimes {
+		if opTimeStr != "" {
+			opTimeStr = opTimeStr + ","
+		}
+		opTimeStr = opTimeStr + opt.String()
+	}
+
+	o.logger.V(3).Info(fmt.Sprintf("##### UPDATE3: took %v; defer: %v, rlock: %v, update: %v, uLock: %v, uPop: %v, %s, monitor: %v",
+		time.Since(foo), deferTime, rlockTime, updateTime, uLockTime, uPopTime, opTimeStr, monTime))
 	return err
 }
 
@@ -729,9 +751,14 @@ func (o *ovsdbClient) listDbs(ctx context.Context) ([]string, error) {
 	return dbs, err
 }
 
+func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	res, err, _ := o.TransactTime(ctx, operation...)
+	return res, err
+}
+
 // Transact performs the provided Operations on the database
 // RFC 7047 : transact
-func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error, time.Duration) {
 	o.rpcMutex.RLock()
 	if o.rpcClient == nil || !o.connected {
 		o.rpcMutex.RUnlock()
@@ -744,7 +771,7 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 			for {
 				select {
 				case <-ctx.Done():
-					return nil, fmt.Errorf("%w: while awaiting reconnection", ctx.Err())
+					return nil, fmt.Errorf("%w: while awaiting reconnection", ctx.Err()), 0
 				case <-ticker.C:
 					o.rpcMutex.RLock()
 					if o.rpcClient != nil && o.connected {
@@ -754,39 +781,49 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 				}
 			}
 		} else {
-			return nil, ErrNotConnected
+			return nil, ErrNotConnected, 0
 		}
 	}
 	defer o.rpcMutex.RUnlock()
-	return o.transact(ctx, o.primaryDBName, operation...)
+	res, err, rpcTime := o.transactTime(ctx, o.primaryDBName, operation...)
+	return res, err, rpcTime
 }
 
 func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	res, err, _ := o.transactTime(ctx, dbName, operation...)
+	return res, err
+}
+
+func (o *ovsdbClient) transactTime(ctx context.Context, dbName string, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error, time.Duration) {
 	var reply []ovsdb.OperationResult
 	db := o.databases[dbName]
 	db.modelMutex.RLock()
 	schema := o.databases[dbName].model.Schema
 	db.modelMutex.RUnlock()
+
 	if reflect.DeepEqual(schema, ovsdb.DatabaseSchema{}) {
-		return nil, fmt.Errorf("cannot transact to database %s: schema unknown", dbName)
+		return nil, fmt.Errorf("cannot transact to database %s: schema unknown", dbName), 0
 	}
 	if ok := schema.ValidateOperations(operation...); !ok {
-		return nil, fmt.Errorf("validation failed for the operation")
+		return nil, fmt.Errorf("validation failed for the operation"), 0
 	}
 
 	args := ovsdb.NewTransactArgs(dbName, operation...)
 	if o.rpcClient == nil {
-		return nil, ErrNotConnected
+		return nil, ErrNotConnected, 0
 	}
+
 	o.logger.V(5).Info("transacting operations", "database", dbName, "operations", fmt.Sprintf("%+v", operation))
+	start := time.Now()
 	err := o.rpcClient.CallWithContext(ctx, "transact", args, &reply)
+	rpcTime := time.Since(start)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
-			return nil, ErrNotConnected
+			return nil, ErrNotConnected, 0
 		}
-		return nil, err
+		return nil, err, 0
 	}
-	return reply, nil
+	return reply, nil, rpcTime
 }
 
 // MonitorAll is a convenience method to monitor every table/column
