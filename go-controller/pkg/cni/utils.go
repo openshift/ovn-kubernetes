@@ -67,7 +67,9 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 }
 
 // GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
-func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
+func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string, annotCond podAnnotWaitCond, durationMap *durationMap) (string, map[string]string, error) {
+	start := time.Now()
+	defer addDuration(durationMap, "GetPodAnnotations", start)
 	var notFoundCount uint
 
 	for {
@@ -103,8 +105,11 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID, vfNetdevname string) (
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID, vfNetdevname string, durationMap *durationMap) (
 	*PodInterfaceInfo, error) {
+	start := time.Now()
+	defer addDuration(durationMap, "PodAnnotation2PodInfo", start)
+
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
 	if err != nil {
 		return nil, err

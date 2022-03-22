@@ -46,7 +46,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "")
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "", nil)
 				if err != nil {
 					retryPods.Store(pod.UID, true)
 					return
@@ -82,7 +82,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					klog.Infof("Failed to get rep name, %s. retrying", err)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "")
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "", nil)
 				if err != nil {
 					return
 				}
@@ -134,7 +134,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 		return fmt.Errorf("failed to get dpu annotation. %v", err)
 	}
 
-	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient)
+	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient, nil)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)

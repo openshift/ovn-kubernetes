@@ -115,7 +115,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			uid, annot, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			uid, annot, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(annot).To(Equal(podAnnot))
 			Expect(uid).To(Equal(string(pod.UID)))
@@ -135,7 +135,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond, nil)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -154,7 +154,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond, nil)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -168,7 +168,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, fmt.Errorf("failed to list pods"))
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to list pods"))
 		})
@@ -188,7 +188,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond, nil)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -202,7 +202,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{}})
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("timed out waiting for pod after 1s"))
 		})
@@ -220,40 +220,40 @@ var _ = Describe("CNI Utils tests", func() {
 		podUID := "4d06bae8-9c38-41f6-945c-f92320e782e4"
 		It("Creates PodInterfaceInfo in NodeModeFull mode", func() {
 			config.OvnKubeNode.Mode = ovntypes.NodeModeFull
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsDPUHostMode).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo in NodeModeDPUHost mode", func() {
 			config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsDPUHostMode).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, podUID, "")
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, podUID, "", nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with EnableUDPAggregation", func() {
 			config.Default.EnableUDPAggregation = true
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.EnableUDPAggregation).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo without EnableUDPAggregation", func() {
 			config.Default.EnableUDPAggregation = false
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.EnableUDPAggregation).To(BeFalse())
 		})

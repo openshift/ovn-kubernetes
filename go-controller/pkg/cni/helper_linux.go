@@ -182,7 +182,10 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	return nil
 }
 
-func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo) (*current.Interface, *current.Interface, error) {
+func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, durationMap *durationMap) (*current.Interface, *current.Interface, error) {
+	start := time.Now()
+	defer addDuration(durationMap, "setupInterface", start)
+
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 
@@ -321,7 +324,10 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
-	kclient kubernetes.Interface) error {
+	kclient kubernetes.Interface, durationMap *durationMap) error {
+	start := time.Now()
+	defer addDuration(durationMap, "ConfigureOVS", start)
+
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
 	ifaceID := util.GetIfaceId(namespace, podName)
 	initialPodUID := ifInfo.PodUID
@@ -379,7 +385,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 
 	if err := waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName,
 		ifaceID, ifInfo.CheckExtIDs, podLister, kclient, namespace, podName,
-		initialPodUID); err != nil {
+		initialPodUID, durationMap); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
 		klog.Warningf("[%s/%s %s] pod uid %s: %v", namespace, podName, sandboxID, initialPodUID, err)
@@ -389,7 +395,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 }
 
 // ConfigureInterface sets up the container interface
-func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kclient kubernetes.Interface, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kclient kubernetes.Interface, ifInfo *PodInterfaceInfo, durationMap *durationMap) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
@@ -408,7 +414,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 				"device ID must be provided")
 		}
 		// General case
-		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, ifInfo)
+		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, ifInfo, durationMap)
 	}
 	if err != nil {
 		return nil, err
@@ -416,7 +422,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 
 	if !ifInfo.IsDPUHostMode {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
-			podLister, kclient)
+			podLister, kclient, durationMap)
 		if err != nil {
 			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
@@ -424,7 +430,9 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	}
 
 	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
+	setupIPTablesBlocksTime := time.Now()
 	err = setupIPTablesBlocks(netns, ifInfo)
+	addDuration(durationMap, "setupIPTablesBlocks", setupIPTablesBlocksTime)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +456,10 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 			}
 		}
 
-		return ip.SettleAddresses(contIface.Name, 10)
+		settleAddressesTime := time.Now()
+		err = ip.SettleAddresses(contIface.Name, 10)
+		addDuration(durationMap, "settleAddresses", settleAddressesTime)
+		return err
 	})
 	if err != nil {
 		klog.Warningf("Failed to settle addresses: %q", err)

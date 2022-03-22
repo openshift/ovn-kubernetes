@@ -208,7 +208,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		}
 		defer pr.cancel()
 
-		result, err = pr.getCNIResult(nil, kclient, response.PodIFInfo)
+		result, err = pr.getCNIResult(nil, kclient, response.PodIFInfo, nil)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
 			klog.Error(err.Error())
