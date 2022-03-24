@@ -627,6 +627,7 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 		"logical_switch_port",
 		types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+egressNode.Name,
 		"options:nat-addresses=router",
+		"options:exclude-lb-vips-from-garp=true",
 	); err != nil {
 		klog.Errorf("Unable to configure GARP on external logical switch port for egress node: %s, "+
 			"this will result in packet drops during egress IP re-assignment, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
@@ -665,6 +666,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 		types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+egressNode.Name,
 		"options",
 		"nat-addresses=router",
+		"exclude-lb-vips-from-garp=true",
 	); err != nil {
 		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
 	}
