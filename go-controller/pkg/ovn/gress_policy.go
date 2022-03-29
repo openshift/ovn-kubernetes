@@ -339,7 +339,11 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string) {
 // addOrModifyACLAllow adds or modifies an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int) error {
 	var direction, action, ipBlockCIDRString string
-	direction = toLport
+	if gp.policyType == knet.PolicyTypeIngress {
+		direction = toLport
+	} else {
+		direction = fromLport
+	}
 	action = "allow-related"
 
 	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for
@@ -370,12 +374,15 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 
 	if uuid != "" {
 		// We already have an ACL. We will update it.
-		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
+		aclSetCMD := []string{"set", "acl", uuid,
 			match,
 			fmt.Sprintf("priority=%s", defaultAllowPriority),
 			fmt.Sprintf("direction=%s", direction),
-			fmt.Sprintf("action=%s", action),
-		)
+			fmt.Sprintf("action=%s", action)}
+		if gp.policyType == knet.PolicyTypeEgress {
+			aclSetCMD = append(aclSetCMD, "options:apply-after-lb=true")
+		}
+		_, stderr, err = util.RunOVNNbctl(aclSetCMD...)
 		if err != nil {
 			return fmt.Errorf("failed to modify the allow-from rule for "+
 				"namespace=%s, policy=%s, stderr: %q (%v)",
@@ -384,7 +391,7 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		return nil
 	}
 
-	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create",
+	aclCreateCMD := []string{"--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction),
 		match,
@@ -394,8 +401,12 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
-		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType),
-		"--", "add", "port_group", portGroupUUID, "acls", "@acl")
+		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType)}
+	if gp.policyType == knet.PolicyTypeEgress {
+		aclCreateCMD = append(aclCreateCMD, "options:apply-after-lb=true")
+	}
+	aclCreateCMD = append(aclCreateCMD, "--", "add", "port_group", portGroupUUID, "acls", "@acl")
+	_, stderr, err = util.RunOVNNbctl(aclCreateCMD...)
 	if err != nil {
 		return fmt.Errorf("failed to create the acl allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)", gp.policyNamespace,
