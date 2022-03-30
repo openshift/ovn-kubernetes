@@ -25,12 +25,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
-func (oc *Controller) syncPods(pods []interface{}) {
-	oc.syncWithRetry("syncPods", func() error { return oc.syncPodsRetriable(pods) })
-}
-
-// This function implements the main body of work of syncPods.
-// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	var allOps []ovsdb.Operation
 	// get the list of logical switch ports (equivalent to pods)
