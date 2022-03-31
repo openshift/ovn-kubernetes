@@ -184,7 +184,15 @@ func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.P
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	nsInfo.routingExternalPodGWs[pod.Name] = egress
+	tmpPodGWs := oc.getRoutingPodGWs(nsInfo)
+	tmpPodGWs[makePodGWKey(pod)] = egress
+	if err = validateRoutingPodGWs(tmpPodGWs); err != nil {
+		nsUnlock()
+		return fmt.Errorf("unable to add pod: %s/%s as external gateway for namespace: %s, error: %v",
+			pod.Namespace, pod.Name, namespace, err)
+	}
+
+	nsInfo.routingExternalPodGWs[makePodGWKey(pod)] = egress
 	nsUnlock()
 
 	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
@@ -247,19 +255,20 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pod.Name,
 		podRoutingNamespaceAnno)
 	for _, namespace := range strings.Split(podRoutingNamespaceAnno, ",") {
-		oc.deletePodGWRoutesForNamespace(pod.Name, namespace)
+		oc.deletePodGWRoutesForNamespace(pod, namespace)
 	}
 }
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
-func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
+func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace string) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
+	podGWKey := makePodGWKey(pod)
 	// check if any gateways were stored for this pod
-	foundGws, ok := nsInfo.routingExternalPodGWs[pod]
-	delete(nsInfo.routingExternalPodGWs, pod)
+	foundGws, ok := nsInfo.routingExternalPodGWs[podGWKey]
+	delete(nsInfo.routingExternalPodGWs, podGWKey)
 	nsUnlock()
 
 	if !ok || len(foundGws.gws) == 0 {
@@ -952,4 +961,8 @@ func buildOVNECMPCache() map[string][]*ovnRoute {
 		}
 	}
 	return ovnRouteCache
+}
+
+func makePodGWKey(pod *kapi.Pod) string {
+	return fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 }
