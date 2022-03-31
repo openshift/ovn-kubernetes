@@ -304,15 +304,9 @@ func AddACLToNodeSwitch(nbClient libovsdbclient.Client, nodeName string, nodeACL
 		Name: nodeName,
 	}
 
-	aclName := ""
-	if nodeACL.Name != nil {
-		aclName = *nodeACL.Name
-	}
-
 	// Here we either need to create the ACL and add to the LS or simply add to the LS
 	opModels := []OperationModel{
 		{
-			Name:           aclName,
 			Model:          nodeACL,
 			ModelPredicate: func(acl *nbdb.ACL) bool { return IsEquivalentACL(acl, nodeACL) },
 			DoAfter: func() {
@@ -321,7 +315,6 @@ func AddACLToNodeSwitch(nbClient libovsdbclient.Client, nodeName string, nodeACL
 			},
 		},
 		{
-			Name:           nodeSwitch.Name,
 			Model:          &nodeSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 			OnModelMutations: []interface{}{
