@@ -45,7 +45,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "5.35.1",
+  "version": "5.33.1",
   "tables": {
     "ACL": {
       "columns": {
@@ -125,18 +125,6 @@ var schema = `{
             },
             "min": 0,
             "max": 1
-          }
-        },
-        "options": {
-          "type": {
-            "key": {
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            },
-            "min": 0,
-            "max": "unlimited"
           }
         },
         "priority": {
@@ -1106,9 +1094,6 @@ var schema = `{
             "min": 0,
             "max": 1
           }
-        },
-        "route_table": {
-          "type": "string"
         }
       }
     },

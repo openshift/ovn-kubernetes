@@ -24,7 +24,6 @@ type LogicalRouterStaticRoute struct {
 	Options     map[string]string               `ovsdb:"options"`
 	OutputPort  *string                         `ovsdb:"output_port"`
 	Policy      *LogicalRouterStaticRoutePolicy `ovsdb:"policy"`
-	RouteTable  string                          `ovsdb:"route_table"`
 }
 
 func copyLogicalRouterStaticRouteBFD(a *string) *string {
@@ -165,8 +164,7 @@ func (a *LogicalRouterStaticRoute) Equals(b *LogicalRouterStaticRoute) bool {
 		a.Nexthop == b.Nexthop &&
 		equalLogicalRouterStaticRouteOptions(a.Options, b.Options) &&
 		equalLogicalRouterStaticRouteOutputPort(a.OutputPort, b.OutputPort) &&
-		equalLogicalRouterStaticRoutePolicy(a.Policy, b.Policy) &&
-		a.RouteTable == b.RouteTable
+		equalLogicalRouterStaticRoutePolicy(a.Policy, b.Policy)
 }
 
 func (a *LogicalRouterStaticRoute) EqualsModel(b model.Model) bool {

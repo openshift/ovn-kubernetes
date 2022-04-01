@@ -37,7 +37,6 @@ type ACL struct {
 	Match       string            `ovsdb:"match"`
 	Meter       *string           `ovsdb:"meter"`
 	Name        *string           `ovsdb:"name"`
-	Options     map[string]string `ovsdb:"options"`
 	Priority    int               `ovsdb:"priority"`
 	Severity    *ACLSeverity      `ovsdb:"severity"`
 }
@@ -104,32 +103,6 @@ func equalACLName(a, b *string) bool {
 	return *a == *b
 }
 
-func copyACLOptions(a map[string]string) map[string]string {
-	if a == nil {
-		return nil
-	}
-	b := make(map[string]string, len(a))
-	for k, v := range a {
-		b[k] = v
-	}
-	return b
-}
-
-func equalACLOptions(a, b map[string]string) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if w, ok := b[k]; !ok || v != w {
-			return false
-		}
-	}
-	return true
-}
-
 func copyACLSeverity(a *ACLSeverity) *ACLSeverity {
 	if a == nil {
 		return nil
@@ -153,7 +126,6 @@ func (a *ACL) DeepCopyInto(b *ACL) {
 	b.ExternalIDs = copyACLExternalIDs(a.ExternalIDs)
 	b.Meter = copyACLMeter(a.Meter)
 	b.Name = copyACLName(a.Name)
-	b.Options = copyACLOptions(a.Options)
 	b.Severity = copyACLSeverity(a.Severity)
 }
 
@@ -182,7 +154,6 @@ func (a *ACL) Equals(b *ACL) bool {
 		a.Match == b.Match &&
 		equalACLMeter(a.Meter, b.Meter) &&
 		equalACLName(a.Name, b.Name) &&
-		equalACLOptions(a.Options, b.Options) &&
 		a.Priority == b.Priority &&
 		equalACLSeverity(a.Severity, b.Severity)
 }
