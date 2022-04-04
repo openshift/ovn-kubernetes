@@ -566,11 +566,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
-		if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
-			return err
-		} else if err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podIfAddrs); err != nil {
+		getExternalIPsGRSNATTime := time.Now()
+		extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName)
+		if err != nil {
 			return err
 		}
+		durationMap["getExternalIPsGRSNATTime"] = time.Since(getExternalIPsGRSNATTime)
+		addOrUpdatePerPodGRSNATTime := time.Now()
+		err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podIfAddrs)
+		if err != nil {
+			return err
+		}
+		durationMap["addOrUpdatePerPodGRSNATTime"] = time.Since(addOrUpdatePerPodGRSNATTime)
 	}
 	
 	// check if this pod is serving as an external GW
