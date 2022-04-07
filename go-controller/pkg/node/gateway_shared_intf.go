@@ -758,7 +758,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 //    the return traffic can be steered back to OVN logical topology
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) (*openflowManager, error) {
 	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
 		gwBridge.ofPortHost, gwBridge.ips)
 	if err != nil {
@@ -1160,13 +1160,13 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+func newSharedGateway(nodeName string, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig, watchFactory factory.NodeWatchFactory) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
 	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, subnets, gwNextHops, gwIPs, nodeAnnotator)
+		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
@@ -1224,7 +1224,9 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				return err
 			}
 		}
-		gw.openflowManager, err = newSharedGatewayOpenFlowManager(gwBridge, exGwBridge)
+
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge)
 		if err != nil {
 			return err
 		}

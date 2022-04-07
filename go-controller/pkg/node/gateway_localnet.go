@@ -5,23 +5,21 @@ package node
 
 import (
 	"fmt"
-	"net"
-	"strings"
-	"sync"
-
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"net"
+	"strings"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
-func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string,
-	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory) (*gateway, error) {
+func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
+	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory) (*gateway, error) {
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 
@@ -43,8 +41,8 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 	}
 
-	gwBridge, _, err := gatewayInitInternal(
-		nodeName, gwIntf, "", hostSubnets, gwNextHops, nil, nodeAnnotator)
+	gwBridge, exGwBridge, err := gatewayInitInternal(
+		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
@@ -70,8 +68,22 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	}
 	// END OCP HACK
 
-	gw.readyFunc = func() (bool, error) {
-		return gatewayReady(gwBridge.patchPort)
+	if exGwBridge != nil {
+		gw.readyFunc = func() (bool, error) {
+			ready, err := gatewayReady(gwBridge.patchPort)
+			if err != nil {
+				return false, err
+			}
+			exGWReady, err := gatewayReady(exGwBridge.patchPort)
+			if err != nil {
+				return false, err
+			}
+			return ready && exGWReady, nil
+		}
+	} else {
+		gw.readyFunc = func() (bool, error) {
+			return gatewayReady(gwBridge.patchPort)
+		}
 	}
 
 	gw.initFunc = func() error {
@@ -80,7 +92,16 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		if err != nil {
 			return err
 		}
-		gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge)
+		if exGwBridge != nil {
+			err = setBridgeOfPorts(exGwBridge)
+			if err != nil {
+				return err
+			}
+		}
+
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge)
 		if err != nil {
 			return err
 		}
@@ -151,36 +172,4 @@ func cleanupLocalnetGateway(physnet string) error {
 		}
 	}
 	return err
-}
-
-// since we share the host's k8s node IP, add OpenFlow flows
-// -- to steer the NodePort traffic arriving on the host to the OVN logical topology and
-// -- to also connection track the outbound north-south traffic through l3 gateway so that
-//    the return traffic can be steered back to OVN logical topology
-// -- to handle host -> service access, via masquerading from the host to OVN GR
-// -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowManager, error) {
-	var dftFlows []string
-
-	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost, gwBridge.ips)
-	if err != nil {
-		return nil, err
-	}
-
-	dftCommonFlows := commonFlows(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost)
-	dftFlows = append(dftFlows, dftCommonFlows...)
-
-	// add health check function to check default OpenFlow flows are on the shared gateway bridge
-	ofm := &openflowManager{
-		defaultBridge: gwBridge,
-		flowCache:     make(map[string][]string),
-		flowMutex:     sync.Mutex{},
-		flowChan:      make(chan struct{}, 1),
-	}
-	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-	ofm.updateFlowCacheEntry("DEFAULT", dftFlows)
-	ofm.requestFlowSync()
-	return ofm, nil
 }

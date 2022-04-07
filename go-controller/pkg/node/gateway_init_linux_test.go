@@ -187,7 +187,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
+			sharedGw, err := newSharedGateway(nodeName, gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
 				&fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
@@ -357,7 +357,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get Interface " + hostRep + " Name",
 			Output: hostRep,
 		})
-		// newSharedGatewayOpenFlowManager
+		// newGatewayOpenFlowManager
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-" + brphys + "_node1-to-br-int ofport",
 			Output: "5",
@@ -379,7 +379,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get Interface pf0hpf Name",
 			Output: hostRep,
 		})
-		// newSharedGatewayOpenFlowManager
+		// newGatewayOpenFlowManager
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get interface " + hostRep + " ofport",
 			Output: "9",
@@ -463,8 +463,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			// provide host IP as GR IP
 			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, nil)
+			sharedGw, err := newSharedGateway(nodeName, gatewayNextHops,
+				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
 
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
@@ -771,7 +771,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nil,
+			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil,
 				nodeAnnotator, &fakeMgmtPortConfig, k, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(wf)

@@ -182,7 +182,7 @@ func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	}
 }
 
-func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*net.IPNet, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
+func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
 	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
 	if err != nil {
