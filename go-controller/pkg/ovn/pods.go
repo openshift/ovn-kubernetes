@@ -556,7 +556,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 
-	gwRoutesAndNatsForPodTime := time.Now()
 	if len(gateways) > 0 {
 		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 		err = oc.addGWRoutesForPod(gateways, podIfAddrs, podNsName, pod.Spec.NodeName)
@@ -573,19 +572,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 		durationMap["getExternalIPsGRSNATTime"] = time.Since(getExternalIPsGRSNATTime)
 		addOrUpdatePerPodGRSNATTime := time.Now()
-		err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podIfAddrs)
+		ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs)
 		if err != nil {
 			return err
 		}
+		allOps = append(allOps, ops...)
 		durationMap["addOrUpdatePerPodGRSNATTime"] = time.Since(addOrUpdatePerPodGRSNATTime)
 	}
-	
-	// check if this pod is serving as an external GW
-	err = oc.addPodExternalGW(pod)
-	if err != nil {
-		return fmt.Errorf("failed to handle external GW check: %v", err)
-	}
-	durationMap["gwRoutesAndNatsForPod"] = time.Since(gwRoutesAndNatsForPodTime)
 
 	// set addresses on the port
 	// LSP addresses in OVN are a single space-separated value
@@ -652,6 +645,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
+
+	addPodExternalGWTime := time.Now()
+	// check if this pod is serving as an external GW
+	err = oc.addPodExternalGW(pod)
+	if err != nil {
+		return fmt.Errorf("failed to handle external GW check: %v", err)
+	}
+	durationMap["addPodExternalGW"] = time.Since(addPodExternalGWTime)
 
 	afterLSPAddedTime := time.Now()
 	defer func() {
