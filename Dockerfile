@@ -43,9 +43,9 @@ RUN INSTALL_PKGS=" \
 	libreswan \
 	ethtool conntrack-tools \
 	" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.16 = $ovsver" "openvswitch2.16-devel = $ovsver" "python3-openvswitch2.16 = $ovsver" "openvswitch2.16-ipsec = $ovsver" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn-2021 = $ovnver" "ovn-2021-central = $ovnver" "ovn-2021-host = $ovnver" "ovn-2021-vtep = $ovnver" && \
+	yum install --nobest -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
+	yum install --nobest -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.16 = $ovsver" "openvswitch2.16-devel = $ovsver" "python3-openvswitch2.16 = $ovsver" "openvswitch2.16-ipsec = $ovsver" && \
+	yum install --nobest -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn-2021 = $ovnver" "ovn-2021-central = $ovnver" "ovn-2021-host = $ovnver" "ovn-2021-vtep = $ovnver" && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
