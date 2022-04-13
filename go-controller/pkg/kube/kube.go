@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
@@ -70,14 +71,17 @@ func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[st
 	}
 
 	podDesc := namespace + "/" + podName
-	klog.Infof("Setting annotations %v on pod %s", annotations, podDesc)
+	marshalStart := time.Now()
 	patchData, err = json.Marshal(&patch)
+	klog.Infof("Setting annotations %v on pod %s; took %v", annotations, podDesc, time.Since(marshalStart))
 	if err != nil {
 		klog.Errorf("Error in setting annotations on pod %s: %v", podDesc, err)
 		return err
 	}
 
+	patchStart := time.Now()
 	_, err = k.KClient.CoreV1().Pods(namespace).Patch(context.TODO(), podName, types.MergePatchType, patchData, metav1.PatchOptions{})
+	klog.Infof("Patching annotations %v on pod %s; took %v", annotations, podDesc, time.Since(patchStart))
 	if err != nil {
 		klog.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
 	}
