@@ -94,7 +94,10 @@ func CreateDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 		}
 
 		// Create a COPP with the above meter and protocols
-		copp := &nbdb.Copp{Meters: metersToAdd}
+		copp := &nbdb.Copp{
+			Name:   "ovnkube-default",
+			Meters: metersToAdd,
+		}
 		opModels = append(opModels, []OperationModel{
 			{
 				Model: copp,
