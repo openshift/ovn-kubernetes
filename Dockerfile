@@ -35,7 +35,7 @@ RUN yum install -y  \
 ARG ovsver=2.17.0-8.el8fdp
 ARG ovnver=21.12.0-32.el8fdp
 
-COPY openvswitch2.17-2.17.0-9.el8fdp.x86_64.rpm python3-openvswitch2.17-2.17.0-9.el8fdp.x86_64.rpm openvswitch2.17-test-2.17.0-9.el8fdp.noarch.rpm /root/
+# COPY openvswitch2.17-2.17.0-9.el8fdp.x86_64.rpm python3-openvswitch2.17-2.17.0-9.el8fdp.x86_64.rpm openvswitch2.17-test-2.17.0-9.el8fdp.noarch.rpm /root/
 COPY ovn-2021-21.12.0-40pvt.el8fdp.x86_64.rpm ovn-2021-central-21.12.0-40pvt.el8fdp.x86_64.rpm ovn-2021-host-21.12.0-40pvt.el8fdp.x86_64.rpm ovn-2021-vtep-21.12.0-40pvt.el8fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
