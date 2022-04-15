@@ -175,6 +175,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 	copp := &nbdb.Copp{
 		UUID:   "copp-UUID",
+		Name:   "ovnkube-default",
 		Meters: meters,
 	}
 	testData = append(testData, copp)
