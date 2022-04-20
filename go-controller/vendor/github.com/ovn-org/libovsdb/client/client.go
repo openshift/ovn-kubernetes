@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -85,7 +86,7 @@ type epInfo struct {
 type ovsdbClient struct {
 	options   *options
 	metrics   metrics
-	connected bool
+	connected uint32
 	rpcClient *rpc2.Client
 	rpcMutex  sync.RWMutex
 	// endpoints contains all possible endpoints; the first element is
@@ -248,6 +249,18 @@ func (o *ovsdbClient) rpcMutexUnlock(reason string) {
 	o.rpcMutex.Unlock()
 }
 
+func (o *ovsdbClient) isConnected() bool {
+	return atomic.LoadUint32(&o.connected) == 1
+}
+
+func (o *ovsdbClient) setConnected(connected bool) {
+	if connected {
+		atomic.CompareAndSwapUint32(&o.connected, 0, 1)
+	} else {
+		atomic.CompareAndSwapUint32(&o.connected, 1, 0)
+	}
+}
+
 func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 	o.rpcMutexLock("connect")
 	defer o.rpcMutexUnlock("connect")
@@ -319,7 +332,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		}(db)
 	}
 
-	o.connected = true
+	o.setConnected(true)
 	return nil
 }
 
@@ -541,7 +554,7 @@ func (o *ovsdbClient) SetOption(opt Option) error {
 func (o *ovsdbClient) Connected() bool {
 	o.rpcMutex.RLock()
 	defer o.rpcMutex.RUnlock()
-	return o.connected
+	return o.isConnected()
 }
 
 func (o *ovsdbClient) CurrentEndpoint() string {
@@ -763,12 +776,9 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 // RFC 7047 : transact
 func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error, time.Duration) {
 	rpcMutexTime := time.Now()
-	o.rpcMutex.RLock()
-	if o.rpcClient == nil || !o.connected {
-		o.rpcMutex.RUnlock()
+	if !o.isConnected() {
 		if o.options.reconnect {
-			o.logger.V(4).Info("blocking transaction until reconnected", "operations",
-				fmt.Sprintf("%+v", operation))
+			o.logger.V(4).Info("blocking transaction until reconnected", "operations", fmt.Sprintf("%+v", operation))
 			ticker := time.NewTicker(50 * time.Millisecond)
 			defer ticker.Stop()
 		ReconnectWaitLoop:
@@ -777,18 +787,15 @@ func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Opera
 				case <-ctx.Done():
 					return nil, fmt.Errorf("%w: while awaiting reconnection", ctx.Err()), 0
 				case <-ticker.C:
-					o.rpcMutex.RLock()
-					if o.rpcClient != nil && o.connected {
+					if o.isConnected() {
 						break ReconnectWaitLoop
 					}
-					o.rpcMutex.RUnlock()
 				}
 			}
 		} else {
 			return nil, ErrNotConnected, 0
 		}
 	}
-	defer o.rpcMutex.RUnlock()
 	o.logger.V(4).Info("Finished rpcMutexTime", "rpcMutexTime", time.Since(rpcMutexTime))
 	res, err, rpcTime := o.transactTime(ctx, o.primaryDBName, operation...)
 	return res, err, rpcTime
@@ -1098,7 +1105,7 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 			}
 
 			o.rpcMutexLock("watchForLeaderChange")
-			if !dbInfo.Leader && o.connected {
+			if !dbInfo.Leader && o.isConnected() {
 				activeEndpoint := o.endpoints[0]
 				if sid == activeEndpoint.serverID {
 					o.logger.V(3).Info("endpoint lost leader, reconnecting",
@@ -1159,8 +1166,10 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 	// wait for client related handlers to shutdown
 	o.handlerShutdown.Wait()
 	o.rpcMutexLock("handleDisconnectNotification")
+	// clear connection state
+	o.setConnected(false)
+	o.rpcClient = nil
 	if o.options.reconnect && !o.shutdown {
-		o.rpcClient = nil
 		o.rpcMutexUnlock("handleDisconnectNotification")
 		suppressionCounter := 1
 		connect := func() error {
@@ -1196,8 +1205,6 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 		return
 	}
 
-	// clear connection state
-	o.rpcClient = nil
 	o.rpcMutexUnlock("handleDisconnectNotification")
 
 	for _, db := range o.databases {
@@ -1234,7 +1241,7 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 // If the client was created with WithReconnect then the client
 // will reconnect afterwards. Assumes rpcMutex is held.
 func (o *ovsdbClient) _disconnect() {
-	o.connected = false
+	o.setConnected(false)
 	if o.rpcClient == nil {
 		return
 	}
@@ -1256,7 +1263,7 @@ func (o *ovsdbClient) Disconnect() {
 func (o *ovsdbClient) Close() {
 	o.rpcMutexLock("Close")
 	defer o.rpcMutexUnlock("Close")
-	o.connected = false
+	o.setConnected(false)
 	if o.rpcClient == nil {
 		return
 	}
