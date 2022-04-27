@@ -68,7 +68,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 			if podEntry.needsAdd {
 				klog.Infof("%s retry pod setup", podDesc)
 				if err := oc.ensurePod(nil, pod, true); err != nil {
-					klog.Infof("%s setup retry failed; will try again later", podDesc)
+					klog.Infof("%s setup retry failed; will try again later: %v", podDesc, err)
 					podEntry.timeStamp = time.Now()
 				} else {
 					klog.Infof("%s pod setup successful", podDesc)

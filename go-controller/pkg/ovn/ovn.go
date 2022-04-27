@@ -720,6 +720,12 @@ func (oc *Controller) WatchPods() {
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.metricsRecorder.CleanPod(pod.UID)
+			// If object is in terminal state, we would have already deleted it during update.
+			// No reason to attempt to delete it here again.
+			if util.PodCompleted(pod) {
+				klog.Infof("Ignoring delete event for completed pod %s/%s", pod.Namespace, pod.Name)
+				return
+			}
 			oc.initRetryDelPod(pod)
 			// we have a copy of portInfo in the retry cache now, we can remove it from
 			// logicalPortCache so that we don't race with a new add pod that comes with
@@ -1240,8 +1246,18 @@ func (oc *Controller) WatchNodes() {
 			if err != nil {
 				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
 			} else {
-				oc.addRetryPods(pods.Items)
-				oc.requestRetryPods()
+				filteredPods := make([]kapi.Pod, 0)
+				for _, pod := range pods.Items {
+					pod := pod
+					if util.PodCompleted(&pod) {
+						continue
+					}
+					filteredPods = append(filteredPods, pod)
+				}
+				if len(filteredPods) > 0 {
+					oc.addRetryPods(filteredPods)
+					oc.requestRetryPods()
+				}
 			}
 
 		},
