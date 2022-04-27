@@ -1166,6 +1166,12 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 					return
 				}
 				klog.Infof("Delete event received for resource %v %s", objectsToRetry.oType, key)
+				// If object is in terminal state, we would have already deleted it during update.
+				// No reason to attempt to delete it here again.
+				if oc.isObjectInTerminalState(objectsToRetry.oType, obj) {
+					klog.Infof("Ignoring delete event for completed resource %v %s", objectsToRetry.oType, key)
+					return
+				}
 				objectsToRetry.skipRetryObj(key)
 				internalCacheEntry := oc.getInternalCacheEntry(objectsToRetry.oType, obj)
 				objectsToRetry.initRetryObjWithDelete(obj, key, internalCacheEntry) // set up the retry obj for deletion
