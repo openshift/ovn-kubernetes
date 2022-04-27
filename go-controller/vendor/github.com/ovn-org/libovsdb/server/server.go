@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -31,6 +32,7 @@ type OvsdbServer struct {
 	monitors     map[*rpc2.Client]*connectionMonitors
 	monitorMutex sync.RWMutex
 	logger       logr.Logger
+	txnMutex     sync.Mutex
 }
 
 // NewOvsdbServer returns a new OvsdbServer
@@ -100,6 +102,16 @@ func (o *OvsdbServer) Serve(protocol string, path string) error {
 	}
 }
 
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+	}
+
+	return false
+}
+
 // Close closes the OvsdbServer
 func (o *OvsdbServer) Close() {
 	o.readyMutex.Lock()
@@ -107,9 +119,13 @@ func (o *OvsdbServer) Close() {
 	o.readyMutex.Unlock()
 	// Only close the listener if Serve() has been called
 	if o.listener != nil {
-		o.listener.Close()
+		if err := o.listener.Close(); err != nil {
+			o.logger.Error(err, "failed to close listener")
+		}
 	}
-	close(o.done)
+	if !isClosed(o.done) {
+		close(o.done)
+	}
 }
 
 // Ready returns true if a server is ready to handle connections
@@ -173,6 +189,12 @@ func (o *OvsdbServer) NewTransaction(model model.DatabaseModel, dbName string, d
 
 // Transact issues a new database transaction and returns the results
 func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, reply *[]ovsdb.OperationResult) error {
+	// While allowing other rpc handlers to run in parallel, this ovsdb server expects transactions
+	// to be serialized. The following mutex ensures that.
+	// Ref: https://github.com/cenkalti/rpc2/blob/c1acbc6ec984b7ae6830b6a36b62f008d5aefc4c/client.go#L187
+	o.txnMutex.Lock()
+	defer o.txnMutex.Unlock()
+
 	if len(args) < 2 {
 		return fmt.Errorf("not enough args")
 	}
@@ -215,6 +237,12 @@ func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, repl
 	}
 	response, updates := o.transact(db, ops)
 	*reply = response
+	for i, operResult := range response {
+		if operResult.Error != "" {
+			o.logger.Error(errors.New("failed to process operation"), "Skipping transaction DB commit due to error", "operations", ops, "failed operation", ops[i], "operation error", operResult.Error)
+			return nil
+		}
+	}
 	transactionID := uuid.New()
 	o.processMonitors(transactionID, updates)
 	return o.db.Commit(db, transactionID, updates)

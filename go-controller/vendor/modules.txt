@@ -67,10 +67,10 @@ github.com/davecgh/go-spew/spew
 github.com/evanphx/json-patch
 # github.com/fsnotify/fsnotify v1.4.9
 github.com/fsnotify/fsnotify
-# github.com/go-logr/logr v1.1.0
+# github.com/go-logr/logr v1.2.2
 github.com/go-logr/logr
 github.com/go-logr/logr/funcr
-# github.com/go-logr/stdr v1.1.0
+# github.com/go-logr/stdr v1.2.2
 github.com/go-logr/stdr
 # github.com/gogo/protobuf v1.3.2 => github.com/gogo/protobuf v1.3.2
 github.com/gogo/protobuf/gogoproto
@@ -183,7 +183,7 @@ github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetw
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/internalinterfaces
 github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1
-# github.com/ovn-org/libovsdb v0.6.1-0.20220127023511-a619f0fd93be
+# github.com/ovn-org/libovsdb v0.6.1-0.20220427123326-d7b273399db4
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
 github.com/ovn-org/libovsdb/mapper
