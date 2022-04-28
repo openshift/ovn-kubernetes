@@ -21,8 +21,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	core "k8s.io/client-go/testing"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -731,6 +733,57 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(pod).To(gomega.BeNil())
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("reverts OVN changes on annotation failure", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				// Setup an unassigned pod, perform an update later on which assigns it.
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+						},
+					},
+				)
+				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+
+				// Create a reactor to reject all Pod patch/update requests
+				fakeOvn.fakeClientset.PrependReactor("patch", "pods", func(action core.Action) (bool, runtime.Object, error) {
+					ginkgo.GinkgoT().Logf("########### patch called")
+					return true, nil, fmt.Errorf("failed to patch")
+				})
+				fakeOvn.fakeClientset.PrependReactor("update", "pods", func(action core.Action) (bool, runtime.Object, error) {
+					ginkgo.GinkgoT().Logf("########### update called")
+					return true, nil, fmt.Errorf("failed to update")
+				})
+
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+
+				// Should not have any logical switch ports
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})))
 				return nil
 			}
 

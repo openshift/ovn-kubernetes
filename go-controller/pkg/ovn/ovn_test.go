@@ -33,6 +33,8 @@ const (
 )
 
 type FakeOVN struct {
+	fakeClientset *fake.Clientset
+
 	fakeClient   *util.OVNClientset
 	watcher      *factory.WatchFactory
 	controller   *Controller
@@ -69,8 +71,9 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			v1Objects = append(v1Objects, object)
 		}
 	}
+	o.fakeClientset = fake.NewSimpleClientset(v1Objects...)
 	o.fakeClient = &util.OVNClientset{
-		KubeClient:           fake.NewSimpleClientset(v1Objects...),
+		KubeClient:           o.fakeClientset,
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 	}

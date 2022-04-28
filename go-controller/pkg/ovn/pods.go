@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -352,7 +353,30 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// the rest of the functionality of addLogicalPort. It is important to use a
 	// named return variable for defer to work correctly.
 
+	var annoErr error
+	annoWait := &sync.WaitGroup{}
+	var podUUID string
 	defer func() {
+		annoWait.Wait()
+		klog.Infof("#### waited for annotation, err %v", annoErr)
+		if annoErr == nil {
+			releaseIPs = false
+		} else {
+			if err == nil {
+				err = annoErr
+			}
+			if podUUID != "" {
+				// If the annotation failed we have to back out the OVN changes
+				// that use the pod's IP addresses
+				if delErr := oc.deleteLogicalPort(pod, &lpInfo{
+					uuid: podUUID,
+					ips:  podIfAddrs,
+				}); delErr != nil {
+					klog.Errorf("Failed to undo pod %s/%s OVN transaction on annotation failure: %v", pod.Namespace, pod.Name, delErr)
+				}
+			}
+		}
+
 		if releaseIPs && err != nil {
 			if relErr := oc.lsManager.ReleaseIPs(logicalSwitch, podIfAddrs); relErr != nil {
 				klog.Errorf("Error when releasing IPs for node: %s, err: %q",
@@ -455,13 +479,57 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
-		annoStart := time.Now()
-		err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
-		podAnnoTime = time.Since(annoStart)
-		if err != nil {
-			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
-		}
-		releaseIPs = false
+
+		annoWait.Add(1)
+		go func() {
+			defer annoWait.Done()
+			annoStart := time.Now()
+			annoErr = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
+			if annoErr != nil {
+				klog.Errorf("Failed to set %s/%s annotations: %v", pod.Namespace, pod.Name, annoErr)
+			}
+			podAnnoTime = time.Since(annoStart)
+		}()
+	}
+
+	// set addresses on the port
+	// LSP addresses in OVN are a single space-separated value
+	addresses = []string{podMac.String()}
+	for _, podIfAddr := range podIfAddrs {
+		addresses[0] = addresses[0] + " " + podIfAddr.IP.String()
+	}
+
+	lsp.Addresses = addresses
+
+	// add external ids
+	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
+
+	// CNI depends on the flows from port security, delay setting it until end
+	lsp.PortSecurity = addresses
+
+	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(oc.nbClient, ops, ls, lsp)
+	if err != nil {
+		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
+	}
+
+	transactStart := time.Now()
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, ops)
+	libovsdbExecuteTime = time.Since(transactStart)
+	if err != nil {
+		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
+	}
+	oc.metricsRecorder.AddLSP(pod.UID)
+	podUUID = lsp.UUID
+
+	annoWait.Wait()
+	klog.Infof("########### done waiting for annotation")
+	if annoErr != nil {
+		return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, annoErr)
+	}
+
+	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
+	if len(lsp.UUID) == 0 {
+		return fmt.Errorf("UUID is empty from LSP: %+v", *lsp)
 	}
 
 	// if we have any external or pod Gateways, add routes
@@ -501,39 +569,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	err = oc.addPodExternalGW(pod)
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
-	}
-
-	// set addresses on the port
-	// LSP addresses in OVN are a single space-separated value
-	addresses = []string{podMac.String()}
-	for _, podIfAddr := range podIfAddrs {
-		addresses[0] = addresses[0] + " " + podIfAddr.IP.String()
-	}
-
-	lsp.Addresses = addresses
-
-	// add external ids
-	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
-
-	// CNI depends on the flows from port security, delay setting it until end
-	lsp.PortSecurity = addresses
-
-	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(oc.nbClient, ops, ls, lsp)
-	if err != nil {
-		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
-	}
-
-	transactStart := time.Now()
-	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, ops)
-	libovsdbExecuteTime = time.Since(transactStart)
-	if err != nil {
-		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
-	}
-	oc.metricsRecorder.AddLSP(pod.UID)
-
-	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
-	if len(lsp.UUID) == 0 {
-		return fmt.Errorf("UUID is empty from LSP: %+v", *lsp)
 	}
 
 	// Add the pod's logical switch port to the port cache
