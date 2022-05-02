@@ -7,36 +7,8 @@ import "github.com/ovn-org/libovsdb/model"
 
 // Copp defines an object in Copp table
 type Copp struct {
-	UUID        string            `ovsdb:"_uuid"`
-	ExternalIDs map[string]string `ovsdb:"external_ids"`
-	Meters      map[string]string `ovsdb:"meters"`
-	Name        string            `ovsdb:"name"`
-}
-
-func copyCoppExternalIDs(a map[string]string) map[string]string {
-	if a == nil {
-		return nil
-	}
-	b := make(map[string]string, len(a))
-	for k, v := range a {
-		b[k] = v
-	}
-	return b
-}
-
-func equalCoppExternalIDs(a, b map[string]string) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if w, ok := b[k]; !ok || v != w {
-			return false
-		}
-	}
-	return true
+	UUID   string            `ovsdb:"_uuid"`
+	Meters map[string]string `ovsdb:"meters"`
 }
 
 func copyCoppMeters(a map[string]string) map[string]string {
@@ -67,7 +39,6 @@ func equalCoppMeters(a, b map[string]string) bool {
 
 func (a *Copp) DeepCopyInto(b *Copp) {
 	*b = *a
-	b.ExternalIDs = copyCoppExternalIDs(a.ExternalIDs)
 	b.Meters = copyCoppMeters(a.Meters)
 }
 
@@ -88,9 +59,7 @@ func (a *Copp) CloneModel() model.Model {
 
 func (a *Copp) Equals(b *Copp) bool {
 	return a.UUID == b.UUID &&
-		equalCoppExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
-		equalCoppMeters(a.Meters, b.Meters) &&
-		a.Name == b.Name
+		equalCoppMeters(a.Meters, b.Meters)
 }
 
 func (a *Copp) EqualsModel(b model.Model) bool {

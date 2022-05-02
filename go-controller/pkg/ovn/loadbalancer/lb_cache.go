@@ -7,7 +7,6 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -170,10 +169,7 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		c.existing[lbs[i].UUID] = &lbs[i]
 	}
 
-	ps := func(item *nbdb.LogicalSwitch) bool {
-		return len(item.LoadBalancer) > 0
-	}
-	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
+	switches, err := libovsdbops.ListSwitchesWithLoadBalancers(nbClient)
 	if err != nil {
 		return nil, err
 	}
@@ -186,10 +182,7 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		}
 	}
 
-	pr := func(item *nbdb.LogicalRouter) bool {
-		return len(item.LoadBalancer) > 0
-	}
-	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
+	routers, err := libovsdbops.ListRoutersWithLoadBalancers(nbClient)
 	if err != nil {
 		return nil, err
 	}
@@ -202,11 +195,7 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		}
 	}
 
-	// Get non-empty LB groups
-	pg := func(item *nbdb.LoadBalancerGroup) bool {
-		return len(item.LoadBalancer) > 0
-	}
-	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
+	groups, err := libovsdbops.ListGroupsWithLoadBalancers(nbClient)
 	if err != nil {
 		return nil, err
 	}

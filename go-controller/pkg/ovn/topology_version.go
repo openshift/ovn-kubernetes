@@ -6,7 +6,6 @@ import (
 	"math"
 	"strconv"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -20,8 +19,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func (oc *Controller) ovnTopologyCleanup() error {
-	ver, err := oc.determineOVNTopoVersionFromOVN()
+func (oc *Controller) ovnTopologyCleanup(ctx context.Context) error {
+	ver, err := oc.determineOVNTopoVersionFromOVN(ctx)
 	if err != nil {
 		return err
 	}
@@ -38,12 +37,30 @@ func (oc *Controller) ovnTopologyCleanup() error {
 // - a ConfigMap. This is used by nodes to determine the cluster's topology
 func (oc *Controller) reportTopologyVersion(ctx context.Context) error {
 	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
+	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(ctx, ovntypes.OVSDBTimeout)
+	defer cancel()
+	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+		return lr.Name == ovntypes.OVNClusterRouter
+	}).List(ctx, &logicalRouterRes); err != nil {
+		return fmt.Errorf("failed in retrieving %s, error: %v", ovntypes.OVNClusterRouter, err)
+	}
+	// Update topology version on distributed cluster router
+	logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
 	logicalRouter := nbdb.LogicalRouter{
 		Name:        ovntypes.OVNClusterRouter,
-		ExternalIDs: map[string]string{"k8s-ovn-topo-version": currentTopologyVersion},
+		ExternalIDs: logicalRouterRes[0].ExternalIDs,
 	}
-	err := libovsdbops.UpdateLogicalRouterSetExternalIDs(oc.nbClient, &logicalRouter)
-	if err != nil {
+	opModel := libovsdbops.OperationModel{
+		Name:           &logicalRouter.Name,
+		Model:          &logicalRouter,
+		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+		OnModelUpdates: []interface{}{
+			&logicalRouter.ExternalIDs,
+		},
+		ErrNotFound: true,
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
 		return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)
 	}
 	klog.Infof("Updated Logical_Router %s topology version to %s", ovntypes.OVNClusterRouter, currentTopologyVersion)
@@ -103,20 +120,25 @@ func (oc *Controller) cleanTopologyAnnotation() error {
 // determineOVNTopoVersionFromOVN determines what OVN Topology version is being used
 // If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
 // and therefore set version number to OvnCurrentTopologyVersion
-func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
-	logicalRouter := &nbdb.LogicalRouter{Name: ovntypes.OVNClusterRouter}
-	logicalRouter, err := libovsdbops.GetLogicalRouter(oc.nbClient, logicalRouter)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		return 0, fmt.Errorf("error getting router %s: %v", ovntypes.OVNClusterRouter, err)
+func (oc *Controller) determineOVNTopoVersionFromOVN(ctx context.Context) (int, error) {
+	ver := 0
+	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(ctx, ovntypes.OVSDBTimeout)
+	defer cancel()
+	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+		return lr.Name == ovntypes.OVNClusterRouter
+	}).List(ctx, &logicalRouterRes); err != nil {
+		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+			"error: %v", ovntypes.OVNClusterRouter, err)
 	}
-	if err == libovsdbclient.ErrNotFound {
+	if len(logicalRouterRes) == 0 {
 		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
 		return math.MaxInt32, nil
 	}
-	v, exists := logicalRouter.ExternalIDs["k8s-ovn-topo-version"]
+	v, exists := logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"]
 	if !exists {
 		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-		return 0, nil
+		return ver, nil
 	}
 	ver, err := strconv.Atoi(v)
 	if err != nil {

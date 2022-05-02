@@ -45,7 +45,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "6.1.0",
+  "version": "5.35.1",
   "tables": {
     "ACL": {
       "columns": {
@@ -363,18 +363,6 @@ var schema = `{
     },
     "Copp": {
       "columns": {
-        "external_ids": {
-          "type": {
-            "key": {
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            },
-            "min": 0,
-            "max": "unlimited"
-          }
-        },
         "meters": {
           "type": {
             "key": {
@@ -386,16 +374,8 @@ var schema = `{
             "min": 0,
             "max": "unlimited"
           }
-        },
-        "name": {
-          "type": "string"
         }
-      },
-      "indexes": [
-        [
-          "name"
-        ]
-      ]
+      }
     },
     "DHCP_Options": {
       "columns": {

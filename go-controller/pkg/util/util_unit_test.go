@@ -254,14 +254,13 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 		expectedNbdb            libovsdbtest.TestSetup
 	}{
 		{
-			desc: "IPv6 CIDR, excludes ips empty",
+			desc: "IPv6 CIDR, never excludes",
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						Name:        nodeName,
-						UUID:        nodeName + "-uuid",
-						Ports:       []string{fakeManagementPort.UUID, fakeHoPort.UUID},
-						OtherConfig: map[string]string{"ipv6_prefix": "ipv6_prefix"},
+						Name:  nodeName,
+						UUID:  nodeName + "-uuid",
+						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
 					},
 					fakeManagementPort,
 					fakeHoPort,
@@ -270,10 +269,9 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						Name:        nodeName,
-						UUID:        nodeName + "-uuid",
-						Ports:       []string{fakeManagementPort.UUID, fakeHoPort.UUID},
-						OtherConfig: map[string]string{"ipv6_prefix": "ipv6_prefix"},
+						Name:  nodeName,
+						UUID:  nodeName + "-uuid",
+						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
 					},
 					fakeManagementPort,
 					fakeHoPort,
@@ -282,7 +280,7 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			inpSubnetStr: "fd04:3e42:4a4e:3381::/64",
 		},
 		{
-			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=true, haveHybridOverlayPort=true and haveManagementPort=true, excludes ips empty",
+			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=true, sets haveMangementPort=true, ovn-nbctl command excludeIPs list empty",
 			inpSubnetStr:            "192.168.1.0/24",
 			setCfgHybridOvlyEnabled: true,
 			initialNbdb: libovsdbtest.TestSetup{
@@ -291,10 +289,6 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 						UUID:  nodeName + "-uuid",
 						Name:  nodeName,
 						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2..192.168.1.3",
-						},
 					},
 					fakeManagementPort,
 					fakeHoPort,
@@ -306,9 +300,6 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 						UUID:  nodeName + "-uuid",
 						Name:  nodeName,
 						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet": "subnet",
-						},
 					},
 					fakeManagementPort,
 					fakeHoPort,
@@ -316,7 +307,7 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			},
 		},
 		{
-			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=true, haveHybridOverlayPort=false and haveManagementPort=false, excludes HO and MP ips",
+			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=true, sets haveMangementPort=true, ovn-nbctl command excludeIPs list empty leaves existing otherConfig alone",
 			inpSubnetStr:            "192.168.1.0/24",
 			setCfgHybridOvlyEnabled: true,
 			initialNbdb: libovsdbtest.TestSetup{
@@ -324,63 +315,33 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 					&nbdb.LogicalSwitch{
 						UUID:  nodeName + "-uuid",
 						Name:  nodeName,
-						Ports: []string{},
+						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
 						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2..192.168.1.3",
-						},
-					},
-				},
-			},
-			expectedNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
-						Ports: []string{},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2..192.168.1.3",
-						},
-					},
-				},
-			},
-		},
-		{
-			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=true, sets haveHybridOverlayPort=false and haveManagementPort=true, excludes HO ip",
-			inpSubnetStr:            "192.168.1.0/24",
-			setCfgHybridOvlyEnabled: true,
-			initialNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
-						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2..192.168.1.3",
-						},
-					},
-					fakeManagementPort,
-				},
-			},
-			expectedNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
-						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
 							"exclude_ips": "192.168.1.3",
+							"mac_only":    "false",
 						},
 					},
 					fakeManagementPort,
+					fakeHoPort,
+				},
+			},
+			expectedNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:  nodeName + "-uuid",
+						Name:  nodeName,
+						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
+						OtherConfig: map[string]string{
+							"mac_only": "false",
+						},
+					},
+					fakeManagementPort,
+					fakeHoPort,
 				},
 			},
 		},
 		{
-			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=true, sets haveHybridOverlayPort=true and haveManagementPort=false, excludes MP ip",
+			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=true, sets haveHybridOverlayPort=false, ovn-nbctl command excludeIPs list populated",
 			inpSubnetStr:            "192.168.1.0/24",
 			setCfgHybridOvlyEnabled: true,
 			initialNbdb: libovsdbtest.TestSetup{
@@ -389,43 +350,6 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 						UUID:  nodeName + "-uuid",
 						Name:  nodeName,
 						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2..192.168.1.3",
-						},
-					},
-					fakeHoPort,
-				},
-			},
-			expectedNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
-						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2",
-						},
-					},
-					fakeHoPort,
-				},
-			},
-		},
-		{
-			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=false, haveManagementPort=true, excludes ips empty",
-			inpSubnetStr:            "192.168.1.0/24",
-			setCfgHybridOvlyEnabled: false,
-			initialNbdb: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
-						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2",
-						},
 					},
 					fakeManagementPort,
 				},
@@ -433,44 +357,60 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
-						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet": "subnet",
-						},
+						UUID:        nodeName + "-uuid",
+						Name:        nodeName,
+						Ports:       []string{fakeManagementPort.UUID},
+						OtherConfig: map[string]string{"exclude_ips": "192.168.1.3"},
 					},
 					fakeManagementPort,
 				},
 			},
 		},
 		{
-			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=false, haveManagementPort=false, excludes MP ip",
-			inpSubnetStr:            "192.168.1.0/24",
-			setCfgHybridOvlyEnabled: false,
+			desc:         "IPv4 CIDR, haveMangementPort=false, ovn-nbctl command with excludeIPs list populated, returns error ",
+			inpSubnetStr: "192.168.1.0/24",
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
 						UUID:  nodeName + "-uuid",
 						Name:  nodeName,
-						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2",
-						},
+						Ports: []string{fakeHoPort.UUID},
+					},
+					fakeHoPort,
+				},
+			},
+			expectedNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:        nodeName + "-uuid",
+						Name:        nodeName,
+						Ports:       []string{fakeHoPort.UUID},
+						OtherConfig: map[string]string{"exclude_ips": "192.168.1.2"},
+					},
+					fakeHoPort,
+				},
+			},
+		},
+		{
+			desc:                    "IPv4 CIDR, config.HybridOverlayEnable=false, sets haveHybridOverlayPort=false and haveManagementPort=false ovn-nbctl command excludeIPs list populated",
+			inpSubnetStr:            "192.168.1.0/24",
+			setCfgHybridOvlyEnabled: true,
+			initialNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:  nodeName + "-uuid",
+						Name:  nodeName,
+						Ports: []string{},
 					},
 				},
 			},
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
-						Ports: []string{fakeManagementPort.UUID},
-						OtherConfig: map[string]string{
-							"subnet":      "subnet",
-							"exclude_ips": "192.168.1.2",
-						},
+						UUID:        nodeName + "-uuid",
+						Name:        nodeName,
+						Ports:       []string{},
+						OtherConfig: map[string]string{"exclude_ips": "192.168.1.2..192.168.1.3"},
 					},
 				},
 			},

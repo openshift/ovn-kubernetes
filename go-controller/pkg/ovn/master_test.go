@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -981,8 +982,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -1180,8 +1179,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -1362,8 +1359,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -1416,11 +1411,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// sleep long enough for TransactWithRetry to fail, causing node Add to fail
+			time.Sleep(types.OVSDBTimeout + time.Second)
 			ginkgo.By("update should have failed with a retry present")
 			// check to see if the retry cache has an entry for this node
 			gomega.Eventually(func() *retryObjEntry {
 				return clusterController.retryNodes.getObjRetryEntry(testNode.Name)
-			}, "60s").ShouldNot(gomega.BeNil())
+			}).ShouldNot(gomega.BeNil())
 			retryEntry := clusterController.retryNodes.getObjRetryEntry(testNode.Name)
 			ginkgo.By("retry entry new obj should not be nil")
 			gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())

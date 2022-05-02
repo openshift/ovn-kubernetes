@@ -33,6 +33,13 @@ const (
 	sbdbServerSock = "unix:/var/run/ovn/ovnsb_db.sock"
 )
 
+type dbProperties struct {
+	appCtl        func(timeout int, args ...string) (string, string, error)
+	dbAlias       string
+	dbName        string
+	electionTimer int
+}
+
 func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	klog.Info("Starting DB Checker to ensure cluster membership and DB consistency")
@@ -78,11 +85,7 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 			}
 		}
 	}
-	dbProperties, err := util.GetOvsDbProperties(db)
-	if err != nil {
-		klog.Fatalf("Failed to init db properties: %s", err)
-		os.Exit(1)
-	}
+	dbProperties := propertiesForDB(db)
 
 	var dbRetry int32
 
@@ -106,7 +109,7 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 			} else {
 				dbRetry = 0
 			}
-			if dbProperties.ElectionTimer != 0 {
+			if dbProperties.electionTimer != 0 {
 				if err := ensureElectionTimeout(dbProperties); err != nil {
 					klog.Error(err)
 					if errors.Is(err, DBError) {
@@ -123,7 +126,7 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 	}
 }
 
-func updateDBRetryCounter(retryCounter *int32, db *util.OvsDbProperties) {
+func updateDBRetryCounter(retryCounter *int32, db *dbProperties) {
 	if *retryCounter > maxDBRetry {
 		//delete the db file and start master
 		err := resetRaftDB(db)
@@ -138,25 +141,25 @@ func updateDBRetryCounter(retryCounter *int32, db *util.OvsDbProperties) {
 }
 
 // ensureLocalRaftServerID is used to ensure there is no stale member in the Raft cluster with our address
-func ensureLocalRaftServerID(db *util.OvsDbProperties) error {
-	out, stderr, err := db.AppCtl(5, "cluster/sid", db.DbName)
+func ensureLocalRaftServerID(db *dbProperties) error {
+	out, stderr, err := db.appCtl(5, "cluster/sid", db.dbName)
 	if err != nil {
-		return fmt.Errorf("%w: unable to get db server ID for: %s, stderr: %v, err: %v", DBError, db.DbAlias, stderr, err)
+		return fmt.Errorf("%w: unable to get db server ID for: %s, stderr: %v, err: %v", DBError, db.dbAlias, stderr, err)
 	}
 	if len(out) < 4 {
-		return fmt.Errorf("%w: invalid db id found: %s for db: %s", DBError, out, db.DbAlias)
+		return fmt.Errorf("%w: invalid db id found: %s for db: %s", DBError, out, db.dbAlias)
 	}
 	// server ID in raft membership is only first 4 char prefix
 	serverID := out[:4]
-	out, stderr, err = db.AppCtl(5, "cluster/status", db.DbName)
+	out, stderr, err = db.appCtl(5, "cluster/status", db.dbName)
 	if err != nil {
-		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.DbAlias, stderr, err)
+		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.dbAlias, stderr, err)
 	}
 
 	r := regexp.MustCompile(`Address: *((ssl|tcp):[?[a-z0-9\-.:]+]?)`)
 	matches := r.FindStringSubmatch(out)
 	if len(matches) < 2 {
-		return fmt.Errorf("unable to parse Address for db: %s, output: %s", db.DbAlias, out)
+		return fmt.Errorf("unable to parse Address for db: %s, output: %s", db.dbAlias, out)
 	}
 	addr := matches[1]
 
@@ -169,15 +172,15 @@ func ensureLocalRaftServerID(db *util.OvsDbProperties) error {
 	members := r.FindAllStringSubmatch(out, -1)
 	for _, member := range members {
 		if len(member) < 2 {
-			return fmt.Errorf("unable to find server id submatch in %s from %s", member, db.DbName)
+			return fmt.Errorf("unable to find server id submatch in %s from %s", member, db.dbName)
 		}
 		if member[1] != serverID {
 			// stale entry found for this node with same address, need to kick
-			klog.Infof("Previous stale member found in %s: %s... kicking", db.DbName, member[1])
-			_, stderr, err = db.AppCtl(5, "cluster/kick", db.DbName, member[1])
+			klog.Infof("Previous stale member found in %s: %s... kicking", db.dbName, member[1])
+			_, stderr, err = db.appCtl(5, "cluster/kick", db.dbName, member[1])
 			if err != nil {
 				return fmt.Errorf("error while kicking old Raft member: %s, for address: %s in db: %s,"+
-					"stderr: %v, error: %v", member[1], addr, db.DbAlias, stderr, err)
+					"stderr: %v, error: %v", member[1], addr, db.dbAlias, stderr, err)
 			}
 		}
 	}
@@ -185,7 +188,7 @@ func ensureLocalRaftServerID(db *util.OvsDbProperties) error {
 }
 
 // ensureClusterRaftMembership ensures there are no unknown members in the current Raft cluster
-func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interface) error {
+func ensureClusterRaftMembership(db *dbProperties, kclient kube.Interface) error {
 	var knownMembers, knownServers []string
 
 	// IPv4 example: tcp:172.18.0.2:6641
@@ -193,30 +196,30 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 	dbServerRegexp := `(ssl|tcp):(\[?([a-z0-9\-.:]+)\]?:\d+)`
 	r := regexp.MustCompile(dbServerRegexp)
 
-	if db.DbName == "OVN_Northbound" {
+	if db.dbName == "OVN_Northbound" {
 		knownMembers = strings.Split(config.OvnNorth.Address, ",")
-	} else if db.DbName == "OVN_Southbound" {
+	} else if db.dbName == "OVN_Southbound" {
 		knownMembers = strings.Split(config.OvnSouth.Address, ",")
 	} else {
-		return fmt.Errorf("invalid database name %s for database %s", db.DbName, db.DbAlias)
+		return fmt.Errorf("invalid database name %s for database %s", db.dbName, db.dbAlias)
 	}
 	for _, knownMember := range knownMembers {
 		match := r.FindStringSubmatch(knownMember)
 		if len(match) < 4 {
-			klog.Warningf("Failed to parse known %s member: %s", db.DbName, knownMember)
+			klog.Warningf("Failed to parse known %s member: %s", db.dbName, knownMember)
 			continue
 		}
 		server := match[3]
 		if !(utilnet.IsIPv4String(server) || utilnet.IsIPv6String(server) || govalidator.IsDNSName(server)) {
 			klog.Warningf("Found invalid value for IP address of known %s member %s: %s",
-				db.DbName, knownMember, server)
+				db.dbName, knownMember, server)
 			continue
 		}
 		knownServers = append(knownServers, server)
 	}
-	out, stderr, err := db.AppCtl(5, "cluster/status", db.DbName)
+	out, stderr, err := db.appCtl(5, "cluster/status", db.dbName)
 	if err != nil {
-		return fmt.Errorf("%w: Unable to get cluster status for: %s, stderr: %s, err: %v", DBError, db.DbAlias, stderr, err)
+		return fmt.Errorf("%w: Unable to get cluster status for: %s, stderr: %s, err: %v", DBError, db.dbAlias, stderr, err)
 	}
 
 	r = regexp.MustCompile(`([a-z0-9]{4}) at ` + dbServerRegexp)
@@ -232,7 +235,7 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 	}
 	for _, member := range members {
 		if len(member) < 5 {
-			return fmt.Errorf("unable to parse member in %s: %s", db.DbName, member)
+			return fmt.Errorf("unable to parse member in %s: %s", db.dbName, member)
 		}
 		matchedServer := member[4]
 		if !(utilnet.IsIPv4String(matchedServer) || utilnet.IsIPv6String(matchedServer) || govalidator.IsDNSName(matchedServer)) {
@@ -260,12 +263,12 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 		}
 		if !memberFound && (len(members)-kickedMembersCount) > 3 {
 			// unknown member and we have enough members its safe to kick the unknown address
-			klog.Infof("Unknown Raft member found in %s: %s, %s... kicking", db.DbName, member[1], member[3])
-			_, stderr, err = db.AppCtl(5, "cluster/kick", db.DbName, member[1])
+			klog.Infof("Unknown Raft member found in %s: %s, %s... kicking", db.dbName, member[1], member[3])
+			_, stderr, err = db.appCtl(5, "cluster/kick", db.dbName, member[1])
 			if err != nil {
 				// warn only: we might fail to kick since other nodes will also be trying to kick the member
 				klog.Warningf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
-					"stderr: %v, err: %v", member[1], member[3], db.DbAlias, stderr, err)
+					"stderr: %v, err: %v", member[1], member[3], db.dbAlias, stderr, err)
 				continue
 			}
 			kickedMembersCount = kickedMembersCount + 1
@@ -276,10 +279,10 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 
 // ensureElectionTimeout ensures that the election timer is increased on the leader only
 // the election timer can be raised to max 2 times the current election timer per call of this function
-func ensureElectionTimeout(db *util.OvsDbProperties) error {
-	out, stderr, err := db.AppCtl(5, "cluster/status", db.DbName)
+func ensureElectionTimeout(db *dbProperties) error {
+	out, stderr, err := db.appCtl(5, "cluster/status", db.dbName)
 	if err != nil {
-		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.DbName, stderr, err)
+		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.dbName, stderr, err)
 	}
 
 	if !strings.Contains(out, "Role: leader") { // we only update on the leader
@@ -289,26 +292,26 @@ func ensureElectionTimeout(db *util.OvsDbProperties) error {
 	r := regexp.MustCompile(`Election timer: (\d+)`)
 	match := r.FindStringSubmatch(out)
 	if len(match) < 2 {
-		return fmt.Errorf("failed to get current election timer for %s from status", db.DbName)
+		return fmt.Errorf("failed to get current election timer for %s from status", db.dbName)
 	}
 	currentElectionTimer, err := strconv.Atoi(match[1])
 	if err != nil {
-		return fmt.Errorf("failed to convert election timer %v for %s", match[2], db.DbName)
+		return fmt.Errorf("failed to convert election timer %v for %s", match[2], db.dbName)
 	}
-	if currentElectionTimer == db.ElectionTimer {
+	if currentElectionTimer == db.electionTimer {
 		return nil
 	}
 
 	maxElectionTimer := currentElectionTimer * 2
-	if db.ElectionTimer <= maxElectionTimer {
-		_, stderr, err := db.AppCtl(5, "cluster/change-election-timer", db.DbName, fmt.Sprint(db.ElectionTimer))
+	if db.electionTimer <= maxElectionTimer {
+		_, stderr, err := db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(db.electionTimer))
 		if err != nil {
-			return fmt.Errorf("failed to change election timer for %s, %v, %v", db.DbName, err, stderr)
+			return fmt.Errorf("failed to change election timer for %s, %v, %v", db.dbName, err, stderr)
 		}
 	} else {
-		_, stderr, err = db.AppCtl(5, "cluster/change-election-timer", db.DbName, fmt.Sprint(maxElectionTimer))
+		_, stderr, err = db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(maxElectionTimer))
 		if err != nil {
-			return fmt.Errorf("failed to change election timer for %s, %v, %v", db.DbName, err, stderr)
+			return fmt.Errorf("failed to change election timer for %s, %v, %v", db.dbName, err, stderr)
 		}
 	}
 	return nil
@@ -316,25 +319,42 @@ func ensureElectionTimeout(db *util.OvsDbProperties) error {
 
 // resetRaftDB backs up the db by renaming it and then stops the nb/sb ovsdb process.
 // Returns an error if anything goes wrong.
-func resetRaftDB(db *util.OvsDbProperties) error {
-	dbFile := filepath.Base(db.DbAlias)
+func resetRaftDB(db *dbProperties) error {
+	dbFile := filepath.Base(db.dbAlias)
 	backupFile := strings.TrimSuffix(dbFile, filepath.Ext(dbFile)) +
 		time.Now().UTC().Format("2006-01-02_150405") + "db_bak"
-	backupDB := filepath.Join(filepath.Dir(db.DbAlias), backupFile)
-	err := os.Rename(db.DbAlias, backupDB)
+	backupDB := filepath.Join(filepath.Dir(db.dbAlias), backupFile)
+	err := os.Rename(db.dbAlias, backupDB)
 	if err != nil {
 		return fmt.Errorf("failed to back up the db to backupFile: %s, error: %s", backupDB, err)
 	}
 
 	klog.Infof("Backed up the db to backupFile: %s", backupFile)
-	_, stderr, err := db.AppCtl(5, "exit")
+	_, stderr, err := db.appCtl(5, "exit")
 	if err != nil {
 		return fmt.Errorf("unable to restart the ovn db: %s ,"+
-			"stderr: %v, err: %v", db.DbName, stderr, err)
+			"stderr: %v, err: %v", db.dbName, stderr, err)
 	}
-	klog.Infof("Stopped %s db after backing up the db: %s", db.DbName, backupFile)
+	klog.Infof("Stopped %s db after backing up the db: %s", db.dbName, backupFile)
 
 	return nil
+}
+
+func propertiesForDB(db string) *dbProperties {
+	if strings.Contains(db, "ovnnb") {
+		return &dbProperties{
+			electionTimer: int(config.OvnNorth.ElectionTimer) * 1000,
+			appCtl:        util.RunOVNNBAppCtlWithTimeout,
+			dbName:        "OVN_Northbound",
+			dbAlias:       db,
+		}
+	}
+	return &dbProperties{
+		electionTimer: int(config.OvnSouth.ElectionTimer) * 1000,
+		appCtl:        util.RunOVNSBAppCtlWithTimeout,
+		dbName:        "OVN_Southbound",
+		dbAlias:       db,
+	}
 }
 
 func upgradeNBDBSchema() error {

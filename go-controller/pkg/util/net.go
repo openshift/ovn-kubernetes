@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -9,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -38,10 +39,13 @@ func intToIP(i *big.Int) net.IP {
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
 func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr, []net.IP, error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	lsp, err := libovsdbops.GetLogicalSwitchPort(nbClient, lsp)
-	if err == client.ErrNotFound {
-		return nil, nil, nil
-	} else if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.Get(ctx, lsp)
+	if err != nil {
+		if err == client.ErrNotFound {
+			return nil, nil, nil
+		}
 		return nil, nil, err
 	}
 
@@ -78,10 +82,12 @@ func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr
 
 // GetLRPAddrs returns the addresses for the given logical router port
 func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) {
-	lrp := &nbdb.LogicalRouterPort{Name: portName}
-	lrp, err := libovsdbops.GetLogicalRouterPort(nbClient, lrp)
+	lrp := nbdb.LogicalRouterPort{Name: portName}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.Get(ctx, &lrp)
 	if err != nil {
-		return nil, fmt.Errorf("unable to find router port %s: %v", portName, err)
+		return nil, fmt.Errorf("unable to find router port: %s, err: %v", portName, err)
 	}
 	gwLRPIPs := []*net.IPNet{}
 	for _, network := range lrp.Networks {

@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -9,44 +10,51 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// ListChassis looks up all chassis from the cache
-func ListChassis(sbClient libovsdbclient.Client) ([]*sbdb.Chassis, error) {
+// ListChassis returns all the logical chassis
+func ListChassis(sbClient libovsdbclient.Client) ([]sbdb.Chassis, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
-	searchedChassis := []*sbdb.Chassis{}
+	searchedChassis := []sbdb.Chassis{}
 	err := sbClient.List(ctx, &searchedChassis)
-	return searchedChassis, err
-}
-
-// DeleteChassis deletes the provided chassis
-func DeleteChassis(sbClient libovsdbclient.Client, chassis ...*sbdb.Chassis) error {
-	opModels := make([]operationModel, 0, len(chassis))
-	for i := range chassis {
-		opModel := operationModel{
-			Model:       chassis[i],
-			ErrNotFound: false,
-			BulkOp:      false,
-		}
-		opModels = append(opModels, opModel)
+	if err != nil {
+		return nil, fmt.Errorf("failed listing chassis err: %v", err)
 	}
 
-	m := newModelClient(sbClient)
-	err := m.Delete(opModels...)
-	return err
+	return searchedChassis, nil
 }
 
-type chassisPredicate func(*sbdb.Chassis) bool
+func DeleteChassis(sbClient libovsdbclient.Client, chassisNames ...string) error {
+	var opModels []OperationModel
 
-// DeleteChassisWithPredicate looks up chassis from the cache based on a given
-// predicate and deletes them
-func DeleteChassisWithPredicate(sbClient libovsdbclient.Client, p chassisPredicate) error {
-	opModel := operationModel{
-		Model:          &sbdb.Chassis{},
-		ModelPredicate: p,
-		ErrNotFound:    false,
-		BulkOp:         true,
+	for _, chassisName := range chassisNames {
+		opModels = append(opModels, OperationModel{
+			Model: &sbdb.Chassis{
+				Name: chassisName,
+			},
+		})
 	}
-	m := newModelClient(sbClient)
-	err := m.Delete(opModel)
-	return err
+
+	m := NewModelClient(sbClient)
+	if err := m.Delete(opModels...); err != nil {
+		return err
+	}
+	return nil
+}
+
+func DeleteNodeChassis(sbClient libovsdbclient.Client, nodeNames ...string) error {
+	var opModels []OperationModel
+
+	for _, nodeName := range nodeNames {
+		opModels = append(opModels, OperationModel{
+			Model: &sbdb.Chassis{},
+			// we must use a predicate here since chassis are not indexed by hostname
+			ModelPredicate: func(chass *sbdb.Chassis) bool { return chass.Hostname == nodeName },
+		})
+	}
+
+	m := NewModelClient(sbClient)
+	if err := m.Delete(opModels...); err != nil {
+		return err
+	}
+	return nil
 }

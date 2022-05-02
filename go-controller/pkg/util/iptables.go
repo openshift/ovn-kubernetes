@@ -96,7 +96,6 @@ func newFakeWithProtocol(protocol iptables.Protocol) *FakeIPTables {
 	// Prepopulate some common tables
 	ipt.tables["nat"] = newFakeTable()
 	ipt.tables["filter"] = newFakeTable()
-	ipt.tables["mangle"] = newFakeTable()
 	return ipt
 }
 

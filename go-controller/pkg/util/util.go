@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -200,21 +201,6 @@ ipLoop:
 	return out
 }
 
-// IsClusterIP checks if the provided IP is a clusterIP
-func IsClusterIP(svcVIP string) bool {
-	ip := net.ParseIP(svcVIP)
-	is4 := ip.To4() != nil
-	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
-		if is4 && svcCIDR.IP.To4() != nil && svcCIDR.Contains(ip) {
-			return true
-		}
-		if !is4 && svcCIDR.IP.To4() == nil && svcCIDR.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
 func GetLogicalPortName(podNamespace, podName string) string {
 	return composePortName(podNamespace, podName)
 }
@@ -258,25 +244,27 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	updateNodeSwitchLock.Lock()
 	defer updateNodeSwitchLock.Unlock()
 
-	// Only query the cache for mp0 and HO LSPs
-	haveManagementPort := true
 	managmentPort := &nbdb.LogicalSwitchPort{Name: types.K8sPrefix + nodeName}
-	_, err := libovsdbops.GetLogicalSwitchPort(nbClient, managmentPort)
-	if err == libovsdbclient.ErrNotFound {
+	HOPort := &nbdb.LogicalSwitchPort{Name: types.HybridOverlayPrefix + nodeName}
+	haveManagementPort := true
+	haveHybridOverlayPort := true
+	// Only Query The cache for mp0 and HO LSPs
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	if err := nbClient.Get(ctx, managmentPort); err != nil {
+		if err != libovsdbclient.ErrNotFound {
+			return fmt.Errorf("failed to get management port for node %s error: %v", nodeName, err)
+		}
 		klog.V(5).Infof("Management port does not exist for node %s", nodeName)
 		haveManagementPort = false
-	} else if err != nil {
-		return fmt.Errorf("failed to get management port for node %s error: %v", nodeName, err)
 	}
 
-	haveHybridOverlayPort := true
-	HOPort := &nbdb.LogicalSwitchPort{Name: types.HybridOverlayPrefix + nodeName}
-	_, err = libovsdbops.GetLogicalSwitchPort(nbClient, HOPort)
-	if err == libovsdbclient.ErrNotFound {
+	if err := nbClient.Get(ctx, HOPort); err != nil {
+		if err != libovsdbclient.ErrNotFound {
+			return fmt.Errorf("failed to get hybrid overlay port for node %s error: %v", nodeName, err)
+		}
 		klog.V(5).Infof("Hybridoverlay port does not exist for node %s", nodeName)
 		haveHybridOverlayPort = false
-	} else if err != nil {
-		return fmt.Errorf("failed to get hybrid overlay port for node %s error: %v", nodeName, err)
 	}
 
 	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
@@ -302,13 +290,33 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 		excludeIPs = mgmtIfAddr.IP.String()
 	}
 
-	sw := nbdb.LogicalSwitch{
+	logicalSwitchDes := nbdb.LogicalSwitch{
 		Name:        nodeName,
 		OtherConfig: map[string]string{"exclude_ips": excludeIPs},
 	}
-	err = libovsdbops.UpdateLogicalSwitchSetOtherConfig(nbClient, &sw)
-	if err != nil {
-		return fmt.Errorf("failed to update exclude_ips %+v: %v", sw, err)
+
+	opModels := []libovsdbops.OperationModel{
+		{
+			Name:           &logicalSwitchDes.Name,
+			Model:          &logicalSwitchDes,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
+			OnModelMutations: []interface{}{
+				&logicalSwitchDes.OtherConfig,
+			},
+			ErrNotFound: true,
+		},
+	}
+
+	m := libovsdbops.NewModelClient(nbClient)
+	// If excludeIPs is empty ensure that we have no excludeIPs in the Switch's OtherConfig
+	if len(excludeIPs) == 0 {
+		if err := m.Delete(opModels...); err != nil {
+			return fmt.Errorf("failed to delete otherConfig:exclude_ips from logical switch %s, error: %v", nodeName, err)
+		}
+	} else {
+		if _, err := m.CreateOrUpdate(opModels...); err != nil {
+			return fmt.Errorf("failed to configure otherConfig:exclude_ips from logical switch %s, error: %v", nodeName, err)
+		}
 	}
 
 	return nil

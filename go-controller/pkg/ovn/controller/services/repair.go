@@ -9,7 +9,6 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 
@@ -68,12 +67,9 @@ func (r *repair) runBeforeSync() {
 	}()
 
 	// Ensure unidling is enabled
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"controller_event": "true"},
-	}
 	if globalconfig.Kubernetes.OVNEmptyLbEvents {
-		if err := libovsdbops.UpdateNBGlobalSetOptions(r.nbClient, &nbGlobal); err != nil {
-			klog.Errorf("Unable to enable controller events, unidling not possible: %v", err)
+		if err := libovsdbops.UpdateNBGlobalOptions(r.nbClient, map[string]string{"controller_event": "true"}); err != nil {
+			klog.Error("Unable to enable controller events. Unidling not possible")
 		}
 	}
 
@@ -118,17 +114,13 @@ func (r *repair) runBeforeSync() {
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
-	p := func(item *nbdb.ACL) bool {
-		return item.Action == nbdb.ACLActionReject
-	}
-	acls, err := libovsdbops.FindACLsWithPredicate(r.nbClient, p)
+	acls, err := libovsdbops.FindRejectACLs(r.nbClient)
 	if err != nil {
 		klog.Errorf("Error while finding reject ACLs error: %v", err)
 	}
 
 	if len(acls) > 0 {
-		p := func(item *nbdb.LogicalSwitch) bool { return true }
-		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(r.nbClient, p, acls...)
+		err = libovsdbops.RemoveACLsFromAllSwitches(r.nbClient, acls)
 		if err != nil {
 			klog.Errorf("Failed to purge existing reject rules: %v", err)
 		}

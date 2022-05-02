@@ -1,64 +1,62 @@
 package libovsdbops
 
 import (
+	"context"
+	"fmt"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// GetNBGlobal looks up the NB Global entry from the cache
-func GetNBGlobal(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBGlobal) (*nbdb.NBGlobal, error) {
-	found := []*nbdb.NBGlobal{}
-	opModel := operationModel{
-		Model:          nbGlobal,
-		ModelPredicate: func(item *nbdb.NBGlobal) bool { return true },
-		ExistingResult: &found,
-		ErrNotFound:    true,
-		BulkOp:         false,
-	}
-
-	m := newModelClient(nbClient)
-	err := m.Lookup(opModel)
+// findNBGlobal returns the NBGlobal table entry
+func FindNBGlobal(nbClient libovsdbclient.Client) (*nbdb.NBGlobal, error) {
+	nbGlobal := []nbdb.NBGlobal{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.List(ctx, &nbGlobal)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed listing nbGlobal table entires err: %v", err)
+	}
+	// We should error if the nbGlobal table entry does not exist
+	if len(nbGlobal) == 0 {
+		return nil, libovsdbclient.ErrNotFound
+	}
+	// The nbGlobal table should only have one row
+	if len(nbGlobal) != 1 {
+		return nil, fmt.Errorf("multible NBGlobal rows found")
 	}
 
-	return found[0], nil
+	return &nbGlobal[0], nil
 }
 
-// UpdateNBGlobalSetOptions sets options on the NB Global entry adding any
-// missing, removing the ones set to an empty value and updating existing
-func UpdateNBGlobalSetOptions(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBGlobal) error {
+// UpdateNBGlobalOptions updates the options on the NBGlobal table, adding any newly specified options in the process
+func UpdateNBGlobalOptions(nbClient libovsdbclient.Client, options map[string]string) error {
 	// find the nbGlobal table's UUID, we don't have any other way to reliably look this table entry since it can
 	// only be indexed by UUID
-	updatedNbGlobal, err := GetNBGlobal(nbClient, nbGlobal)
+	nbGlobal, err := FindNBGlobal(nbClient)
 	if err != nil {
 		return err
 	}
 
-	if updatedNbGlobal.Options == nil {
-		updatedNbGlobal.Options = map[string]string{}
-	}
-
-	for k, v := range nbGlobal.Options {
-		if v == "" {
-			delete(updatedNbGlobal.Options, k)
-		} else {
-			updatedNbGlobal.Options[k] = v
-		}
+	for k, v := range options {
+		nbGlobal.Options[k] = v
 	}
 
 	// Update the options column in the nbGlobal entry since we already performed a lookup
-	opModel := operationModel{
-		Model: updatedNbGlobal,
+	opModel := OperationModel{
+		Model: nbGlobal,
 		OnModelUpdates: []interface{}{
-			&updatedNbGlobal.Options,
+			&nbGlobal.Options,
 		},
 		ErrNotFound: true,
-		BulkOp:      false,
 	}
 
-	m := newModelClient(nbClient)
-	_, err = m.CreateOrUpdate(opModel)
-	return err
+	m := NewModelClient(nbClient)
+	if _, err := m.CreateOrUpdate(opModel); err != nil {
+		return fmt.Errorf("error while updating NBGlobal Options: %v error %v", options, err)
+	}
+
+	return nil
 }

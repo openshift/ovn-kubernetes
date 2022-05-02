@@ -6,33 +6,24 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 )
 
-// CreateOrUpdateMacBinding creates or updates the provided mac binding
+// Create or UpdateMacBinding either create a new mac binding or ensure the existing one has the
+// correct datapath, logical_port, ip, and mac column entries
 func CreateOrUpdateMacBinding(sbClient libovsdbclient.Client, mb *sbdb.MACBinding) error {
-	opModel := operationModel{
-		Model:          mb,
-		OnModelUpdates: onModelUpdatesAll(),
-		ErrNotFound:    false,
-		BulkOp:         false,
+	opModel := OperationModel{
+		// no predicate needed, ip and logical_port columns are indexes
+		Model: mb,
+		OnModelUpdates: []interface{}{
+			&mb.Datapath,
+			&mb.LogicalPort,
+			&mb.IP,
+			&mb.MAC,
+		},
 	}
 
-	m := newModelClient(sbClient)
-	_, err := m.CreateOrUpdate(opModel)
-	return err
-}
-
-type macBindingPredicate func(*sbdb.MACBinding) bool
-
-// DeleteMacBindingWithPredicate looks up mac bindings from the cache based on a
-// given predicate and deletes them
-func DeleteMacBindingWithPredicate(sbClient libovsdbclient.Client, p macBindingPredicate) error {
-	deleted := []*sbdb.MACBinding{}
-	opModel := operationModel{
-		ModelPredicate: p,
-		ExistingResult: &deleted,
-		ErrNotFound:    false,
-		BulkOp:         true,
+	m := NewModelClient(sbClient)
+	if _, err := m.CreateOrUpdate(opModel); err != nil {
+		return err
 	}
 
-	m := newModelClient(sbClient)
-	return m.Delete(opModel)
+	return nil
 }
