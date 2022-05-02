@@ -37,8 +37,7 @@ func (c *portCache) get(logicalPort string) (*lpInfo, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if info, ok := c.cache[logicalPort]; ok {
-		x := *info
-		return &x, nil
+		return info, nil
 	}
 	return nil, fmt.Errorf("logical port %s not found in cache", logicalPort)
 }

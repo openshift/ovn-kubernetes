@@ -126,14 +126,6 @@ type Options struct {
 	// called for key-value pairs passed directly to Info and Error.  See
 	// RenderBuiltinsHook for more details.
 	RenderArgsHook func(kvList []interface{}) []interface{}
-
-	// MaxLogDepth tells funcr how many levels of nested fields (e.g. a struct
-	// that contains a struct, etc.) it may log.  Every time it finds a struct,
-	// slice, array, or map the depth is increased by one.  When the maximum is
-	// reached, the value will be converted to a string indicating that the max
-	// depth has been exceeded.  If this field is not specified, a default
-	// value will be used.
-	MaxLogDepth int
 }
 
 // MessageClass indicates which category or categories of messages to consider.
@@ -201,16 +193,11 @@ func NewFormatterJSON(opts Options) Formatter {
 	return newFormatter(opts, outputJSON)
 }
 
-// Defaults for Options.
-const defaultTimestampFormat = "2006-01-02 15:04:05.000000"
-const defaultMaxLogDepth = 16
+const defaultTimestampFmt = "2006-01-02 15:04:05.000000"
 
 func newFormatter(opts Options, outfmt outputFormat) Formatter {
 	if opts.TimestampFormat == "" {
-		opts.TimestampFormat = defaultTimestampFormat
-	}
-	if opts.MaxLogDepth == 0 {
-		opts.MaxLogDepth = defaultMaxLogDepth
+		opts.TimestampFormat = defaultTimestampFmt
 	}
 	f := Formatter{
 		outputFormat: outfmt,
@@ -334,7 +321,7 @@ func (f Formatter) flatten(buf *bytes.Buffer, kvList []interface{}, continuing b
 }
 
 func (f Formatter) pretty(value interface{}) string {
-	return f.prettyWithFlags(value, 0, 0)
+	return f.prettyWithFlags(value, 0)
 }
 
 const (
@@ -342,11 +329,7 @@ const (
 )
 
 // TODO: This is not fast. Most of the overhead goes here.
-func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) string {
-	if depth > f.opts.MaxLogDepth {
-		return `"<max-log-depth-exceeded>"`
-	}
-
+func (f Formatter) prettyWithFlags(value interface{}, flags uint32) string {
 	// Handle types that take full control of logging.
 	if v, ok := value.(logr.Marshaler); ok {
 		// Replace the value with what the type wants to get logged.
@@ -411,7 +394,7 @@ func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) s
 			// arbitrary keys might need escaping
 			buf.WriteString(prettyString(v[i].(string)))
 			buf.WriteByte(':')
-			buf.WriteString(f.prettyWithFlags(v[i+1], 0, depth+1))
+			buf.WriteString(f.pretty(v[i+1]))
 		}
 		if flags&flagRawStruct == 0 {
 			buf.WriteByte('}')
@@ -481,7 +464,7 @@ func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) s
 				buf.WriteByte(',')
 			}
 			if fld.Anonymous && fld.Type.Kind() == reflect.Struct && name == "" {
-				buf.WriteString(f.prettyWithFlags(v.Field(i).Interface(), flags|flagRawStruct, depth+1))
+				buf.WriteString(f.prettyWithFlags(v.Field(i).Interface(), flags|flagRawStruct))
 				continue
 			}
 			if name == "" {
@@ -492,7 +475,7 @@ func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) s
 			buf.WriteString(name)
 			buf.WriteByte('"')
 			buf.WriteByte(':')
-			buf.WriteString(f.prettyWithFlags(v.Field(i).Interface(), 0, depth+1))
+			buf.WriteString(f.pretty(v.Field(i).Interface()))
 		}
 		if flags&flagRawStruct == 0 {
 			buf.WriteByte('}')
@@ -505,7 +488,7 @@ func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) s
 				buf.WriteByte(',')
 			}
 			e := v.Index(i)
-			buf.WriteString(f.prettyWithFlags(e.Interface(), 0, depth+1))
+			buf.WriteString(f.pretty(e.Interface()))
 		}
 		buf.WriteByte(']')
 		return buf.String()
@@ -530,7 +513,7 @@ func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) s
 				keystr = prettyString(keystr)
 			} else {
 				// prettyWithFlags will produce already-escaped values
-				keystr = f.prettyWithFlags(it.Key().Interface(), 0, depth+1)
+				keystr = f.prettyWithFlags(it.Key().Interface(), 0)
 				if t.Key().Kind() != reflect.String {
 					// JSON only does string keys.  Unlike Go's standard JSON, we'll
 					// convert just about anything to a string.
@@ -539,7 +522,7 @@ func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) s
 			}
 			buf.WriteString(keystr)
 			buf.WriteByte(':')
-			buf.WriteString(f.prettyWithFlags(it.Value().Interface(), 0, depth+1))
+			buf.WriteString(f.pretty(it.Value().Interface()))
 			i++
 		}
 		buf.WriteByte('}')
@@ -548,7 +531,7 @@ func (f Formatter) prettyWithFlags(value interface{}, flags uint32, depth int) s
 		if v.IsNil() {
 			return "null"
 		}
-		return f.prettyWithFlags(v.Elem().Interface(), 0, depth)
+		return f.pretty(v.Elem().Interface())
 	}
 	return fmt.Sprintf(`"<unhandled-%s>"`, t.Kind().String())
 }
@@ -739,16 +722,15 @@ func (f *Formatter) AddName(name string) {
 func (f *Formatter) AddValues(kvList []interface{}) {
 	// Three slice args forces a copy.
 	n := len(f.values)
-	f.values = append(f.values[:n:n], kvList...)
-
-	vals := f.values
+	vals := f.values[:n:n]
+	vals = append(vals, kvList...)
 	if hook := f.opts.RenderValuesHook; hook != nil {
 		vals = hook(f.sanitize(vals))
 	}
 
 	// Pre-render values, so we don't have to do it on each Info/Error call.
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
-	f.flatten(buf, vals, false, true) // escape user-provided keys
+	f.values = f.flatten(buf, vals, false, true) // escape user-provided keys
 	f.valuesStr = buf.String()
 }
 

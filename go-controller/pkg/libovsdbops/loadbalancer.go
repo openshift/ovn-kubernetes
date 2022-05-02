@@ -3,7 +3,6 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -107,16 +106,15 @@ func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsd
 	// If LoadBalancer does not exist, create it
 	if err == libovsdbclient.ErrNotFound {
 		timeout := types.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    &lb.Name,
-			Function: libovsdb.ConditionEqual,
-			Value:    lb.Name,
-		}
-		waitOps, err := nbClient.Where(lb, condition).Wait(libovsdb.WaitConditionNotEqual, &timeout, lb, &lb.Name)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, waitOps...)
+		ops = append(ops, libovsdb.Operation{
+			Op:      libovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Load_Balancer",
+			Where:   []libovsdb.Condition{{Column: "name", Function: libovsdb.ConditionEqual, Value: lb.Name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []libovsdb.Row{{"name": lb.Name}},
+		})
 
 		ensureLoadBalancerUUID(lb)
 		op, err := nbClient.Create(lb)

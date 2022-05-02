@@ -114,16 +114,15 @@ func ensureOvnAddressSet(nbClient libovsdbclient.Client, name string) (*ovnAddre
 	if len(addrSet.UUID) == 0 {
 		ops := make([]ovsdb.Operation, 0, 2)
 		timeout := types.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    &addrSet.Name,
-			Function: ovsdb.ConditionEqual,
-			Value:    addrSet.Name,
-		}
-		waitOps, err := as.nbClient.Where(addrSet, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, addrSet, &addrSet.Name)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, waitOps...)
+		ops = append(ops, ovsdb.Operation{
+			Op:      ovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Address_Set",
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: addrSet.Name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []ovsdb.Row{{"name": addrSet.Name}},
+		})
 		// hack used to make TransactAndCheckAndSetUUIDs track the model correctly
 		addrSet.UUID = libovsdbops.BuildNamedUUID()
 		// create the address_set with no IPs
@@ -366,16 +365,15 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 	} else {
 		ops := make([]ovsdb.Operation, 0, 2)
 		timeout := types.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    &addrSet.Name,
-			Function: ovsdb.ConditionEqual,
-			Value:    addrSet.Name,
-		}
-		waitOps, err := as.nbClient.Where(addrSet, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, addrSet, &addrSet.Name)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, waitOps...)
+		ops = append(ops, ovsdb.Operation{
+			Op:      ovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Address_Set",
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []ovsdb.Row{{"name": name}},
+		})
 		if addrSet.UUID == "" {
 			// hack used to make TransactAndCheckAndSetUUIDs track the model correctly
 			addrSet.UUID = libovsdbops.BuildNamedUUID()

@@ -2,7 +2,6 @@ package libovsdbops
 
 import (
 	"context"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
@@ -67,16 +66,15 @@ func createOrUpdatePortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 	if err == libovsdbclient.ErrNotFound {
 		timeout := types.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    &pg.Name,
-			Function: libovsdb.ConditionEqual,
-			Value:    pg.Name,
-		}
-		waitOps, err := nbClient.Where(pg, condition).Wait(libovsdb.WaitConditionNotEqual, &timeout, pg, &pg.Name)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, waitOps...)
+		ops = append(ops, libovsdb.Operation{
+			Op:      libovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Port_Group",
+			Where:   []libovsdb.Condition{{Column: "name", Function: libovsdb.ConditionEqual, Value: pg.Name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []libovsdb.Row{{"name": pg.Name}},
+		})
 		op, err := nbClient.Create(pg)
 		if err != nil {
 			return nil, err

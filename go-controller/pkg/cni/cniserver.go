@@ -73,10 +73,9 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 		podLister:         corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 		kclient:           kclient,
 		kubeAuth: &KubeAPIAuth{
-			Kubeconfig:       config.Kubernetes.Kubeconfig,
-			KubeAPIServer:    config.Kubernetes.APIServer,
-			KubeAPIToken:     config.Kubernetes.Token,
-			KubeAPITokenFile: config.Kubernetes.TokenFile,
+			Kubeconfig:    config.Kubernetes.Kubeconfig,
+			KubeAPIServer: config.Kubernetes.APIServer,
+			KubeAPIToken:  config.Kubernetes.Token,
 		},
 	}
 

@@ -150,7 +150,6 @@ func kubeClientsetFromConfig(auth *KubeAPIAuth) (*kubernetes.Clientset, error) {
 		Kubeconfig: auth.Kubeconfig,
 		APIServer:  auth.KubeAPIServer,
 		Token:      auth.KubeAPIToken,
-		TokenFile:  auth.KubeAPITokenFile,
 		CAData:     caData,
 	})
 }
