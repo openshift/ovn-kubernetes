@@ -27,7 +27,7 @@ var _ = ginkgo.Describe("Services", func() {
 		serviceName = "testservice"
 	)
 
-	f := wrappedTestFramework("services")
+	f := framework.NewDefaultFramework("services")
 
 	var cs clientset.Interface
 

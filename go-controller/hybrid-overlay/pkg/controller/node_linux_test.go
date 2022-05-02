@@ -226,7 +226,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		Expect(testutils.UnmountNS(netns)).To(Succeed())
 	})
 
-	ovntest.OnSupportedPlatformsIt("does not set up tunnels for non-hybrid-overlay nodes without annotations", func() {
+	It("does not set up tunnels for non-hybrid-overlay nodes without annotations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				node1Name string = "node1"
@@ -273,7 +273,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		appRun(app, netns)
 	})
 
-	ovntest.OnSupportedPlatformsIt("does not set up tunnels for non-hybrid-overlay nodes with subnet annotations", func() {
+	It("does not set up tunnels for non-hybrid-overlay nodes with subnet annotations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				node1Name   string = "node1"
@@ -322,7 +322,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		appRun(app, netns)
 	})
 
-	ovntest.OnSupportedPlatformsIt("sets up local node hybrid overlay bridge", func() {
+	It("sets up local node hybrid overlay bridge", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				thisDrMAC string = "22:33:44:55:66:77"
@@ -366,7 +366,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		}
 		appRun(app, netns)
 	})
-	ovntest.OnSupportedPlatformsIt("sets up local linux pod", func() {
+	It("sets up local linux pod", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				thisDrMAC string = "22:33:44:55:66:77"
@@ -418,7 +418,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		appRun(app, netns)
 	})
 
-	ovntest.OnSupportedPlatformsIt("sets up tunnels for Windows nodes", func() {
+	It("sets up tunnels for Windows nodes", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				node1Name   string = "node1"
@@ -474,7 +474,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		appRun(app, netns)
 	})
 
-	ovntest.OnSupportedPlatformsIt("removes stale node flows on initial sync", func() {
+	It("removes stale node flows on initial sync", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				node1Name string = "node1"
@@ -526,7 +526,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		appRun(app, netns)
 	})
 
-	ovntest.OnSupportedPlatformsIt("removes stale pod flows on initial sync", func() {
+	It("removes stale pod flows on initial sync", func() {
 		app.Action = func(ctx *cli.Context) error {
 			fakeClient := fake.NewSimpleClientset()
 
@@ -581,7 +581,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		appRun(app, netns)
 	})
 
-	ovntest.OnSupportedPlatformsIt("sets up local pod flows", func() {
+	It("sets up local pod flows", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				pod1IP   string = "1.2.3.5"

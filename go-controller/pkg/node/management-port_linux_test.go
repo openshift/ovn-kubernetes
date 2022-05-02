@@ -450,7 +450,7 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 clusters", func() {
+		It("sets up the management port for IPv4 clusters", func() {
 			app.Action = func(ctx *cli.Context) error {
 				testManagementPort(ctx, fexec, testNS,
 					[]managementPortTestConfig{
@@ -474,7 +474,7 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv6 clusters", func() {
+		It("sets up the management port for IPv6 clusters", func() {
 			app.Action = func(ctx *cli.Context) error {
 				testManagementPort(ctx, fexec, testNS,
 					[]managementPortTestConfig{
@@ -500,7 +500,7 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for dual-stack clusters", func() {
+		It("sets up the management port for dual-stack clusters", func() {
 			app.Action = func(ctx *cli.Context) error {
 				testManagementPort(ctx, fexec, testNS,
 					[]managementPortTestConfig{
@@ -551,7 +551,7 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 dpu clusters", func() {
+		It("sets up the management port for IPv4 dpu clusters", func() {
 			app.Action = func(ctx *cli.Context) error {
 				testManagementPortDPU(ctx, fexec, testNS,
 					[]managementPortTestConfig{
@@ -592,7 +592,7 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 dpu-host clusters", func() {
+		It("sets up the management port for IPv4 dpu-host clusters", func() {
 			app.Action = func(ctx *cli.Context) error {
 				testManagementPortDPUHost(ctx, fexec, testNS,
 					[]managementPortTestConfig{
