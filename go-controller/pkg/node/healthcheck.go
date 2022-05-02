@@ -1,7 +1,6 @@
 package node
 
 import (
-	"net"
 	"os"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -110,18 +110,17 @@ func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
 // hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint
 // in the provided list that is local to this node.
 // It returns false if none of the endpoints are local host-networked endpoints or if ep.Subsets is nil.
-func hasLocalHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses []net.IP) bool {
+func hasLocalHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses *sets.String) bool {
 	for i := range ep.Subsets {
 		ss := &ep.Subsets[i]
 		for i := range ss.Addresses {
 			addr := &ss.Addresses[i]
-			for _, nodeIP := range nodeAddresses {
-				if nodeIP.String() == addr.IP {
-					return true
-				}
+			if nodeAddresses.Has(addr.IP) {
+				return true
 			}
 		}
 	}
+
 	return false
 }
 

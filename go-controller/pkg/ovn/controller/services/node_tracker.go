@@ -48,7 +48,7 @@ func (ni *nodeInfo) nodeSubnets() []net.IPNet {
 	out := append([]net.IPNet{}, ni.podSubnets...)
 	for _, ipStr := range ni.nodeIPs {
 		ip := net.ParseIP(ipStr)
-		if ipv4 := ip.To4(); ipv4 != nil {
+		if ip := ip.To4(); ip != nil {
 			out = append(out, net.IPNet{
 				IP:   ip,
 				Mask: net.CIDRMask(32, 32),

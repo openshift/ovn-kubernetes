@@ -11,8 +11,6 @@ jobs:
   report:
     runs-on: ubuntu-latest
     steps:
-    - uses: hmarr/debug-action@v2
-    
     - uses: dawidd6/action-download-artifact@v2
       with:
         workflow: ${{ github.event.workflow_run.workflow_id }}

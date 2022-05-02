@@ -223,7 +223,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -236,7 +235,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -288,7 +286,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -301,7 +298,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -351,7 +347,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -364,7 +359,6 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -429,7 +423,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -438,14 +431,11 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
-						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"filter": {},
@@ -510,7 +500,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -526,7 +515,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -583,7 +571,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -592,19 +579,14 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
-						},
-						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"filter": {},
@@ -675,7 +657,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -691,7 +672,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-ETP": []string{},
 					},
 					"filter": {},
 				}
@@ -720,7 +700,7 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("inits iptables rules and openflows with LoadBalancer where ETP=local, SGW mode", func() {
+		It("inits iptables rules and openflows with LoadBalancer where ETP=local, SGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				config.Gateway.Mode = config.GatewayModeShared
@@ -770,7 +750,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -779,19 +758,14 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
-						},
-						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"filter": {},
@@ -867,7 +841,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables4 := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -880,7 +853,6 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -951,7 +923,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables4 := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -964,7 +935,6 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1030,7 +1000,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1041,7 +1010,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1096,7 +1064,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1107,7 +1074,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1168,7 +1134,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1181,7 +1146,6 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1197,7 +1161,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1206,7 +1169,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1254,7 +1216,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1267,7 +1228,6 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1283,7 +1243,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1292,7 +1251,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1357,7 +1315,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1366,14 +1323,11 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
-						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"filter": {},
@@ -1392,7 +1346,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1401,7 +1354,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1470,7 +1422,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1479,14 +1430,11 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
-						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"filter": {},
@@ -1510,7 +1458,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1519,7 +1466,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1593,7 +1539,6 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1602,11 +1547,10 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %d -j REDIRECT --to-port %d", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}
@@ -1630,7 +1574,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-NODEPORT":   []string{},
 						"PREROUTING": []string{
-							"-j OVN-KUBE-ETP",
 							"-j OVN-KUBE-EXTERNALIP",
 							"-j OVN-KUBE-NODEPORT",
 						},
@@ -1639,7 +1582,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
 					},
 					"filter": {},
 				}

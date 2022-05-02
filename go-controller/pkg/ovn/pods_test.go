@@ -581,7 +581,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				connCtx, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
 
 				defer cancel()
-				resetNBClient(connCtx, fakeOvn.controller.nbClient)
+				fakeOvn.resetNBClient(connCtx)
 				fakeOvn.controller.requestRetryPods() // retry the failed entry
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(context.TODO(), podTest.podName, metav1.GetOptions{})
@@ -655,7 +655,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				connCtx, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
 
 				defer cancel()
-				resetNBClient(connCtx, fakeOvn.controller.nbClient)
+				fakeOvn.resetNBClient(connCtx)
 				fakeOvn.controller.requestRetryPods() // retry the failed entry
 
 				fakeOvn.asf.ExpectEmptyAddressSet(podTest.namespace)
