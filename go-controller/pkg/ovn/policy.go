@@ -361,7 +361,7 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 		return fmt.Errorf("failed to create default deny ACL for port group %v", err)
 	}
 
-	match = getACLMatch(portGroupName, "arp", policyType)
+	match = getACLMatch(portGroupName, "(arp || nd)", policyType)
 	err = addACLPortGroup(ns, portGroupUUID, direction,
 		types.DefaultAllowPriority, match, "allow", policyType, "", "ARPallowPolicy")
 	if err != nil {
