@@ -1141,7 +1141,9 @@ func (oc *Controller) WatchNodes() {
 				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
 				if err != nil {
 					klog.Errorf("Error creating logical switch cache for node %s: %v", node.Name, err)
+					return
 				}
+				oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 				return
 			}
 
