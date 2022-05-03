@@ -351,9 +351,11 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 	var field interface{}
 	var value string
 	switch t := m.(type) {
+	/*
 	case *nbdb.LoadBalancer:
 		field = &t.Name
 		value = t.Name
+	*/
 	case *nbdb.LogicalRouter:
 		field = &t.Name
 		value = t.Name
