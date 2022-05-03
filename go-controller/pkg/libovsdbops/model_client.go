@@ -157,6 +157,8 @@ func (m *ModelClient) CreateOrUpdateOps(ops []ovsdb.Operation, opModels ...Opera
 }
 
 func (m *ModelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
+	hasGuardOp := len(ops) > 0 && isGuardOp(&ops[0])
+	guardOp := []ovsdb.Operation{}
 	doWhenFound := func(model interface{}, opModel *OperationModel) ([]ovsdb.Operation, error) {
 		if opModel.OnModelUpdates != nil {
 			return m.update(model, opModel)
@@ -166,9 +168,25 @@ func (m *ModelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...Opera
 		return nil, nil
 	}
 	doWhenNotFound := func(model interface{}, opModel *OperationModel) ([]ovsdb.Operation, error) {
+		if !hasGuardOp {
+			// for the first insert of certain models, build a wait operation
+			// that checks for duplicates as a guard op to prevent against
+			// duplicate transactions
+			var err error
+			guardOp, err = buildFailOnDuplicateOps(m.client, opModel.Model)
+			if err != nil {
+				return nil, err
+			}
+			hasGuardOp = len(guardOp) > 0
+		}
 		return m.create(opModel)
 	}
-	return m.buildOps(ops, doWhenFound, doWhenNotFound, opModels...)
+	created, ops, err := m.buildOps(ops, doWhenFound, doWhenNotFound, opModels...)
+	if len(guardOp) > 0 {
+		// set the guard op as the first of the list
+		ops = append(guardOp, ops...)
+	}
+	return created, ops, err
 }
 
 /*
@@ -281,16 +299,10 @@ func (m *ModelClient) create(opModel *OperationModel) ([]ovsdb.Operation, error)
 		setUUID(opModel.Model, BuildNamedUUID())
 	}
 
-	ops, err := buildFailOnDuplicateOps(m.client, opModel.Model)
+	ops, err := m.client.Create(opModel.Model)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create model, err: %v", err)
 	}
-
-	op, err := m.client.Create(opModel.Model)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create model, err: %v", err)
-	}
-	ops = append(ops, op...)
 
 	klog.V(5).Infof("Create operations generated as: %+v", ops)
 	return ops, nil
@@ -377,4 +389,8 @@ func addToExistingResult(model interface{}, existingResult interface{}) {
 	resultPtr := reflect.ValueOf(existingResult)
 	resultVal := reflect.Indirect(resultPtr)
 	resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(model))))
+}
+
+func isGuardOp(op *ovsdb.Operation) bool {
+	return op != nil && op.Op == ovsdb.OperationWait && op.Timeout != nil && *op.Timeout == types.OVSDBWaitTimeout
 }
