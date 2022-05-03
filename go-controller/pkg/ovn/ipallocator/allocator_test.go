@@ -114,7 +114,9 @@ func TestAllocate(t *testing.T) {
 			t.Fatal(err)
 		}
 		released := net.ParseIP(tc.released)
-		r.Release(released)
+		if err := r.Release(released); err != nil {
+			t.Fatal(err)
+		}
 		if f := r.Free(); f != 1 {
 			t.Errorf("Test %s unexpected free %d", tc.name, f)
 		}
@@ -129,7 +131,9 @@ func TestAllocate(t *testing.T) {
 			t.Errorf("Test %s unexpected %s : %s", tc.name, ip, released)
 		}
 
-		r.Release(released)
+		if err := r.Release(released); err != nil {
+			t.Fatal(err)
+		}
 		for _, outOfRange := range tc.outOfRange {
 			err = r.Allocate(net.ParseIP(outOfRange))
 			if _, ok := err.(*ErrNotInRange); !ok {

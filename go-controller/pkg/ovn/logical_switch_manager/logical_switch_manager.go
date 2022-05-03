@@ -215,8 +215,9 @@ func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			// iterate over range of already allocated indices and release
 			// ips allocated before the error occurred.
 			for relIdx, relIPNet := range allocated {
-				lsi.ipams[relIdx].Release(relIPNet.IP)
-				if relIPNet.IP != nil {
+				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
+					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
+				} else if relIPNet.IP != nil {
 					klog.Warningf("Reserved IP: %s was released", relIPNet.IP.String())
 				}
 			}
@@ -270,8 +271,9 @@ func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 			// iterate over range of already allocated indices and release
 			// ips allocated before the error occurred.
 			for relIdx, relIPNet := range ipnets {
-				lsi.ipams[relIdx].Release(relIPNet.IP)
-				if relIPNet.IP != nil {
+				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
+					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
+				} else if relIPNet.IP != nil {
 					klog.Warningf("Reserved IP: %s was released", relIPNet.IP.String())
 				}
 			}
@@ -313,46 +315,14 @@ func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 		for _, ipam := range lsi.ipams {
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
-				ipam.Release(ipnet.IP)
+				if err := ipam.Release(ipnet.IP); err != nil {
+					return err
+				}
 				break
 			}
 		}
 	}
 	return nil
-}
-
-// ConditionalIPRelease determines if any IP is available to be released from an IPAM conditionally if func is true.
-// It guarantees state of the allocator will not change while executing the predicate function
-// TODO(trozet): add unit testing for this function
-func (manager *LogicalSwitchManager) ConditionalIPRelease(nodeName string, ipnets []*net.IPNet, predicate func() (bool, error)) (bool, error) {
-	manager.RLock()
-	defer manager.RUnlock()
-	if ipnets == nil || nodeName == "" {
-		klog.V(5).Infof("Node name is empty or ip slice to release is nil")
-		return false, nil
-	}
-	lsi, ok := manager.cache[nodeName]
-	if !ok {
-		return false, nil
-	}
-	if len(lsi.ipams) == 0 {
-		return false, nil
-	}
-
-	// check if ipam has one of the ip addresses, and then execute the predicate function to determine
-	// if this IP should be released or not
-	for _, ipnet := range ipnets {
-		for _, ipam := range lsi.ipams {
-			cidr := ipam.CIDR()
-			if cidr.Contains(ipnet.IP) {
-				if ipam.Has(ipnet.IP) {
-					return predicate()
-				}
-			}
-		}
-	}
-
-	return false, nil
 }
 
 // IP allocator manager for join switch's IPv4 and IPv6 subnets.

@@ -639,7 +639,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 	} else {
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
-			if util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) {
+			if !pod.Spec.HostNetwork {
 				podIPs, err := util.GetAllPodIPs(pod)
 				if err != nil {
 					klog.Warningf(err.Error())

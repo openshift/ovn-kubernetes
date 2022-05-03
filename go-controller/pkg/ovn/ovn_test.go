@@ -2,16 +2,12 @@ package ovn
 
 import (
 	"context"
-	"sync"
-
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -47,14 +43,12 @@ type FakeOVN struct {
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
 	nbsbCleanup  *libovsdbtest.Cleanup
-	egressQoSWg  *sync.WaitGroup
 }
 
 func NewFakeOVN() *FakeOVN {
 	return &FakeOVN{
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
-		egressQoSWg:  &sync.WaitGroup{},
 	}
 }
 
@@ -65,15 +59,12 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
-	egressQoSObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
 			egressIPObjects = append(egressIPObjects, object)
 		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
 			egressFirewallObjects = append(egressFirewallObjects, object)
-		} else if _, isEgressQoSObject := object.(*egressqos.EgressQoSList); isEgressQoSObject {
-			egressQoSObjects = append(egressQoSObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -82,7 +73,6 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		KubeClient:           fake.NewSimpleClientset(v1Objects...),
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		EgressQoSClient:      egressqosfake.NewSimpleClientset(egressQoSObjects...),
 	}
 	o.init()
 }
@@ -95,7 +85,6 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
-	o.egressQoSWg.Wait()
 	o.nbsbCleanup.Cleanup()
 }
 

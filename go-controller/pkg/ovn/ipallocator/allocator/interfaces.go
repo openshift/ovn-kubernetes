@@ -21,7 +21,7 @@ package allocator
 type Interface interface {
 	Allocate(int) (bool, error)
 	AllocateNext() (int, bool, error)
-	Release(int)
+	Release(int) error
 	ForEach(func(int))
 
 	// For testing

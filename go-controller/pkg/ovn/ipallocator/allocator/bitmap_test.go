@@ -75,7 +75,9 @@ func TestRelease(t *testing.T) {
 		t.Errorf("expect offset %v allocated", offset)
 	}
 
-	m.Release(offset)
+	if err := m.Release(offset); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 
 	if m.Has(offset) {
 		t.Errorf("expect offset %v not allocated", offset)
@@ -194,7 +196,9 @@ func TestRoundRobinAllocationOrdering(t *testing.T) {
 	}
 
 	// Release one of the pre-allocated entries
-	m.Release(0)
+	if err := m.Release(0); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Next allocation should be after the most recently allocated entry,
 	// not one of the just-released ones
@@ -260,7 +264,9 @@ func TestRoundRobinRelease(t *testing.T) {
 		t.Fatalf("expect offset %d allocated", offset)
 	}
 
-	m.Release(offset)
+	if err := m.Release(offset); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if m.Has(offset) {
 		t.Fatalf("expect offset %d not allocated", offset)
@@ -283,7 +289,9 @@ func TestRoundRobinWrapAround(t *testing.T) {
 			t.Fatalf("got offset %d but expected offset %d", offset, i)
 		}
 
-		m.Release(offset)
+		if err := m.Release(offset); err != nil {
+			t.Fatalf("unexpected release error: %v", err)
+		}
 	}
 }
 

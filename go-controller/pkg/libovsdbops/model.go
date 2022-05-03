@@ -52,13 +52,9 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *sbdb.Chassis:
 		return t.UUID
-	case *sbdb.ChassisPrivate:
-		return t.UUID
 	case *sbdb.MACBinding:
 		return t.UUID
 	case *sbdb.SBGlobal:
-		return t.UUID
-	case *nbdb.QoS:
 		return t.UUID
 	default:
 		panic(fmt.Sprintf("getUUID: unknown model %T", t))
@@ -105,13 +101,9 @@ func setUUID(model model.Model, uuid string) {
 		t.UUID = uuid
 	case *sbdb.Chassis:
 		t.UUID = uuid
-	case *sbdb.ChassisPrivate:
-		t.UUID = uuid
 	case *sbdb.MACBinding:
 		t.UUID = uuid
 	case *sbdb.SBGlobal:
-		t.UUID = uuid
-	case *nbdb.QoS:
 		t.UUID = uuid
 	default:
 		panic(fmt.Sprintf("setUUID: unknown model %T", t))
@@ -207,11 +199,6 @@ func copyIndexes(model model.Model) model.Model {
 			UUID: t.UUID,
 			Name: t.Name,
 		}
-	case *sbdb.ChassisPrivate:
-		return &sbdb.ChassisPrivate{
-			UUID: t.UUID,
-			Name: t.Name,
-		}
 	case *sbdb.MACBinding:
 		return &sbdb.MACBinding{
 			UUID:        t.UUID,
@@ -220,10 +207,6 @@ func copyIndexes(model model.Model) model.Model {
 		}
 	case *sbdb.SBGlobal:
 		return &sbdb.SBGlobal{
-			UUID: t.UUID,
-		}
-	case *nbdb.QoS:
-		return &nbdb.QoS{
 			UUID: t.UUID,
 		}
 	default:
@@ -271,12 +254,8 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*nbdb.Meter{}
 	case *sbdb.Chassis:
 		return &[]*sbdb.Chassis{}
-	case *sbdb.ChassisPrivate:
-		return &[]*sbdb.ChassisPrivate{}
 	case *sbdb.MACBinding:
 		return &[]*sbdb.MACBinding{}
-	case *nbdb.QoS:
-		return &[]nbdb.QoS{}
 	default:
 		panic(fmt.Sprintf("getModelList: unknown model %T", t))
 	}

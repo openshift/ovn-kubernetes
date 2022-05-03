@@ -279,8 +279,7 @@ func runOvnKube(ctx *cli.Context) error {
 	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
 	// start the prometheus server to serve OVN K8s Metrics (default master port: 9409, node port: 9410)
 	if config.Metrics.BindAddress != "" {
-		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey)
+		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof)
 	}
 
 	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
@@ -290,8 +289,7 @@ func runOvnKube(ctx *cli.Context) error {
 			metrics.RegisterOvsMetricsWithOvnMetrics()
 		}
 		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
-		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey)
+		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress)
 	}
 
 	// run until cancelled
