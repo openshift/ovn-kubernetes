@@ -15,6 +15,7 @@ import (
 	goovn "github.com/ebay/go-ovn"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -50,6 +51,22 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	if err != nil {
 		klog.Errorf("Error in syncing namespaces: %v", err)
 	}
+}
+
+// wrapper function to log if there are duplicate gateway IPs present in the cache
+func validateRoutingPodGWs(podGWs map[string]gatewayInfo) error {
+	// map to hold IP/podName
+	ipTracker := make(map[string]string)
+	for podName, gwInfo := range podGWs {
+		for _, gwIP := range gwInfo.gws {
+			if foundPod, ok := ipTracker[gwIP.String()]; ok {
+				return fmt.Errorf("duplicate IP found in ECMP Pod route cache! IP: %q, first pod: %q, second "+
+					"pod: %q", gwIP, podName, foundPod)
+			}
+			ipTracker[gwIP.String()] = podName
+		}
+	}
+	return nil
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
@@ -174,11 +191,17 @@ func (nsInfo *namespaceInfo) updateNamespacePortGroup(ovnNBClient goovn.Client, 
 
 func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
 	var routingExternalGWs []net.IP
+	ipTracker := sets.NewString()
 	for _, v := range strings.Split(annotation, ",") {
 		parsedAnnotation := net.ParseIP(v)
 		if parsedAnnotation == nil {
 			return nil, fmt.Errorf("could not parse routing external gw annotation value %s", v)
 		}
+		if ipTracker.Has(parsedAnnotation.String()) {
+			klog.Warningf("Duplicate IP detected in routing external gw annotation: %s", annotation)
+			continue
+		}
+		ipTracker.Insert(parsedAnnotation.String())
 		routingExternalGWs = append(routingExternalGWs, parsedAnnotation)
 	}
 	return routingExternalGWs, nil

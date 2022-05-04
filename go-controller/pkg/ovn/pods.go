@@ -268,7 +268,7 @@ func (oc *Controller) getRoutingExternalGWs(ns string) *gatewayInfo {
 	return &res
 }
 
-func (oc *Controller) getRoutingPodGWs(ns string) map[string]*gatewayInfo {
+func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil
@@ -276,9 +276,9 @@ func (oc *Controller) getRoutingPodGWs(ns string) map[string]*gatewayInfo {
 	defer nsUnlock()
 	// return a copy of the object so it can be handled without the
 	// namespace locked
-	res := make(map[string]*gatewayInfo)
+	res := make(map[string]gatewayInfo)
 	for k, v := range nsInfo.routingExternalPodGWs {
-		item := &gatewayInfo{
+		item := gatewayInfo{
 			bfdEnabled: v.bfdEnabled,
 			gws:        make([]net.IP, len(v.gws)),
 		}
@@ -529,14 +529,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	routingPodGWs := oc.getRoutingPodGWs(pod.Namespace)
 
 	// if we have any external or pod Gateways, add routes
-	gateways := make([]*gatewayInfo, 0)
+	gateways := make([]*gatewayInfo, 0, len(routingExternalGWs.gws)+len(routingPodGWs))
 
 	if len(routingExternalGWs.gws) > 0 {
 		gateways = append(gateways, routingExternalGWs)
 	}
 	for _, gw := range routingPodGWs {
 		if len(gw.gws) > 0 {
-			gateways = append(gateways, gw)
+			if err = validateRoutingPodGWs(routingPodGWs); err != nil {
+				klog.Error(err)
+			}
+			gateways = append(gateways, &gw)
 		} else {
 			klog.Warningf("Found routingPodGW with no gateways ip set for namespace %s", pod.Namespace)
 		}
