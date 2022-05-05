@@ -260,6 +260,10 @@ func ovnDBSizeMetricsUpdater(basePath, direction, database string) {
 	}
 }
 
+func resetOvnDbSizeMetric() {
+	metricDBSize.Reset()
+}
+
 // isOvnDBFoundViaPath attempts to find the OVN DBs, return false if not found.
 func isOvnDBFoundViaPath(basePath string, dirDbMap map[string]string) bool {
 	enabled := true
@@ -345,6 +349,11 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			}
 		}
 	}
+}
+
+func resetOvnDbMemoryMetrics() {
+	metricOVNDBMonitor.Reset()
+	metricOVNDBSessions.Reset()
 }
 
 var (
@@ -454,6 +463,14 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 				ovnE2eTimeStampUpdater(direction, database)
 			}
 			time.Sleep(30 * time.Second)
+			// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+			if dbIsClustered {
+				resetOvnDbClusterMetrics()
+			}
+			if dbFoundViaPath {
+				resetOvnDbSizeMetric()
+			}
+			resetOvnDbMemoryMetrics()
 		}
 	}()
 }
@@ -598,4 +615,22 @@ func ovnDBClusterStatusMetricsUpdater(direction, database string) {
 		clusterStatus.sid).Set(clusterStatus.connInErr)
 	metricDBClusterConnOutErr.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connOutErr)
+}
+
+func resetOvnDbClusterMetrics() {
+	metricDBClusterCID.Reset()
+	metricDBClusterSID.Reset()
+	metricDBClusterServerStatus.Reset()
+	metricDBClusterTerm.Reset()
+	metricDBClusterServerRole.Reset()
+	metricDBClusterServerVote.Reset()
+	metricDBClusterElectionTimer.Reset()
+	metricDBClusterLogIndexStart.Reset()
+	metricDBClusterLogIndexNext.Reset()
+	metricDBClusterLogNotCommitted.Reset()
+	metricDBClusterLogNotApplied.Reset()
+	metricDBClusterConnIn.Reset()
+	metricDBClusterConnOut.Reset()
+	metricDBClusterConnInErr.Reset()
+	metricDBClusterConnOutErr.Reset()
 }
