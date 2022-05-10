@@ -85,7 +85,7 @@ COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
 
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
-      summary="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
+      summary="This is a component of OpenShift Container Platform that provides an overlay network using ovnkkkkk." \
       io.openshift.tags="openshift" \
       maintainer="Tim Rozet <trozet@redhat.com>"
 
