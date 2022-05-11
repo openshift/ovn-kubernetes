@@ -41,7 +41,7 @@ func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	go func() {
 		defer wg.Done()
 		if err := upgradeNBDBSchema(); err != nil {
-			klog.Fatalf("NBDB Upgrade failed: %w", err)
+			klog.Fatalf("NBDB Upgrade failed: %v", err)
 		}
 		ensureOvnDBState(util.OvnNbdbLocation, kclient, stopCh)
 	}()
@@ -50,7 +50,7 @@ func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	go func() {
 		defer wg.Done()
 		if err := upgradeSBDBSchema(); err != nil {
-			klog.Fatalf("SBDB Upgrade failed: %w", err)
+			klog.Fatalf("SBDB Upgrade failed: %v", err)
 		}
 		ensureOvnDBState(util.OvnSbdbLocation, kclient, stopCh)
 	}()
@@ -338,11 +338,22 @@ func resetRaftDB(db *util.OvsDbProperties) error {
 }
 
 func upgradeNBDBSchema() error {
-	return upgradeDBSchema(nbdbSchema, nbdbServerSock, "OVN_Northbound")
+	return upgradeDBSchemaWithRetries(nbdbSchema, nbdbServerSock, "OVN_Northbound")
 }
 
 func upgradeSBDBSchema() error {
-	return upgradeDBSchema(sbdbSchema, sbdbServerSock, "OVN_Southbound")
+	return upgradeDBSchemaWithRetries(sbdbSchema, sbdbServerSock, "OVN_Southbound")
+}
+
+func upgradeDBSchemaWithRetries(schemaFile, serverSock, dbName string) error {
+	for try := 1; ; try++ {
+		if err := upgradeDBSchema(schemaFile, serverSock, dbName); err != nil {
+			klog.ErrorS(err, dbName+" scheme upgrade failed, retrying", "try", strconv.Itoa(try))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		return nil
+	}
 }
 
 func upgradeDBSchema(schemaFile, serverSock, dbName string) error {
