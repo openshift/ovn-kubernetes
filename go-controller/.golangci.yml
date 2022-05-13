@@ -21,3 +21,4 @@ linters:
     - typecheck
     - unused
     - varcheck
+    - exportloopref
