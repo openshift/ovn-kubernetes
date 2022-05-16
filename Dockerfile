@@ -35,6 +35,8 @@ RUN yum install -y  \
 ARG ovsver=2.17.0-8.el8fdp
 ARG ovnver=22.03.0-24.el8fdp
 
+COPY ovn22.03-22.03.90-1_tst.el8fdp.x86_64.rpm ovn22.03-central-22.03.90-1_tst.el8fdp.x86_64.rpm ovn22.03-host-22.03.90-1_tst.el8fdp.x86_64.rpm /root/
+
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
@@ -45,8 +47,9 @@ RUN INSTALL_PKGS=" \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "openvswitch2.17-devel = $ovsver" "python3-openvswitch2.17 = $ovsver" "openvswitch2.17-ipsec = $ovsver" && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.03 = $ovnver" "ovn22.03-central = $ovnver" "ovn22.03-host = $ovnver" "ovn22.03-vtep = $ovnver" && \
 	yum clean all && rm -rf /var/cache/*
+
+RUN yum install -y /root/ovn*.rpm
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
@@ -54,6 +57,8 @@ RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /opt/cni/bin && \
     mkdir -p /usr/libexec/cni/ && \
     mkdir -p /root/windows/
+
+RUN rm -f /root/ovn*.rpm
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
