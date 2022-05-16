@@ -33,7 +33,8 @@ RUN yum install -y  \
 	yum clean all
 
 ARG ovsver=2.17.0-8.el8fdp
-ARG ovnver=22.03.0-37.el8fdp
+ARG ovnver=22.03.0-24.el8fdp
+COPY ovn22.06-22.06.0-preview.6.el8fdp.x86_64.rpm ovn22.06-central-22.06.0-preview.6.el8fdp.x86_64.rpm ovn22.06-host-22.06.0-preview.6.el8fdp.x86_64.rpm ovn22.06-vtep-22.06.0-preview.6.el8fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
@@ -46,6 +47,8 @@ RUN INSTALL_PKGS=" \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "openvswitch2.17-devel = $ovsver" "python3-openvswitch2.17 = $ovsver" "openvswitch2.17-ipsec = $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.03 = $ovnver" "ovn22.03-central = $ovnver" "ovn22.03-host = $ovnver" "ovn22.03-vtep = $ovnver" && \
+	rpm -e ovn22.03 ovn22.03-central ovn22.03-host ovn22.03-vtep && \
+	rpm -Uhv /root/ovn22.06* && \
 	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
