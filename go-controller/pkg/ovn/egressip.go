@@ -1355,30 +1355,44 @@ func deleteDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4Cluster
 func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
 	for _, podIP := range podIPs {
 		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
-			natIDs, err := findNatIDs(egressIPName, podIP.String(), status.EgressIP)
+			natIDEntries, err := findNatIDs(egressIPName, podIP.String(), status.EgressIP)
 			if err != nil {
 				return err
 			}
-			if natIDs == nil {
-				_, stderr, err := util.RunOVNNbctl(
-					"--id=@nat",
-					"create",
-					"nat",
-					"type=snat",
-					fmt.Sprintf("logical_port=k8s-%s", status.Node),
-					fmt.Sprintf("external_ip=\"%s\"", status.EgressIP),
-					fmt.Sprintf("logical_ip=\"%s\"", podIP),
-					fmt.Sprintf("external_ids:name=%s", egressIPName),
-					"--",
-					"add",
-					"logical_router",
-					util.GetGatewayRouterFromNode(status.Node),
-					"nat",
-					"@nat",
-				)
-				if err != nil {
-					return fmt.Errorf("unable to create nat rule, stderr: %s, err: %v", stderr, err)
+
+			logicalPort := fmt.Sprintf("k8s-%s", status.Node)
+			routerName := util.GetGatewayRouterFromNode(status.Node)
+			if len(natIDEntries) == 1 && natIDEntries[0].logicalPort == logicalPort && natIDEntries[0].routerName == routerName {
+				// Noop: nat is already present and has the proper values
+				continue
+			}
+
+			// Remove unexpected nats. This should never happen.
+			if natIDEntries != nil {
+				klog.Errorf("Will remove unexpected nat entries found for egressIP %s: %v", egressIPName, natIDEntries)
+				if err := deleteNATRule(podIPs, status, egressIPName); err != nil {
+					return err
 				}
+			}
+
+			_, stderr, err := util.RunOVNNbctl(
+				"--id=@nat",
+				"create",
+				"nat",
+				"type=snat",
+				fmt.Sprintf("logical_port=%s", logicalPort),
+				fmt.Sprintf("external_ip=\"%s\"", status.EgressIP),
+				fmt.Sprintf("logical_ip=\"%s\"", podIP),
+				fmt.Sprintf("external_ids:name=%s", egressIPName),
+				"--",
+				"add",
+				"logical_router",
+				routerName,
+				"nat",
+				"@nat",
+			)
+			if err != nil {
+				return fmt.Errorf("unable to create nat rule, stderr: %s, err: %v", stderr, err)
 			}
 		}
 	}
@@ -1388,20 +1402,30 @@ func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egress
 func deleteNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
 	for _, podIP := range podIPs {
 		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
-			natIDs, err := findNatIDs(egressIPName, podIP.String(), status.EgressIP)
+			natIDEntries, err := findNatIDs(egressIPName, podIP.String(), status.EgressIP)
 			if err != nil {
 				return err
 			}
-			for _, natID := range natIDs {
+			for _, natIDEntry := range natIDEntries {
 				_, stderr, err := util.RunOVNNbctl(
 					"remove",
 					"logical_router",
-					util.GetGatewayRouterFromNode(status.Node),
+					natIDEntry.routerName,
 					"nat",
-					natID,
+					natIDEntry.natID,
 				)
 				if err != nil {
 					return fmt.Errorf("unable to remove nat from logical_router, stderr: %s, err: %v", stderr, err)
+				}
+
+				// Sanity checks
+				expectedRouterName := util.GetGatewayRouterFromNode(status.Node)
+				if natIDEntry.routerName != expectedRouterName {
+					klog.Warningf("Removed nat %s from router %s instead of expected %s", natIDEntry.natID, natIDEntry.routerName, expectedRouterName)
+				}
+				expectedLogicalPort := fmt.Sprintf("k8s-%s", status.Node)
+				if natIDEntry.logicalPort != expectedLogicalPort {
+					klog.Warningf("Removed nat %s using logical port %s instead of expected %s", natIDEntry.natID, natIDEntry.logicalPort, expectedLogicalPort)
 				}
 			}
 		}
@@ -1409,12 +1433,18 @@ func deleteNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egress
 	return nil
 }
 
-func findNatIDs(egressIPName, podIP, egressIP string) ([]string, error) {
-	natIDs, stderr, err := util.RunOVNNbctl(
+type natIDEntry struct {
+	natID       string
+	logicalPort string
+	routerName  string
+}
+
+func findNatIDs(egressIPName, podIP, egressIP string) ([]natIDEntry, error) {
+	nats, stderr, err := util.RunOVNNbctl(
 		"--format=csv",
 		"--data=bare",
 		"--no-heading",
-		"--columns=_uuid",
+		"--columns=_uuid,logical_port",
 		"find",
 		"nat",
 		fmt.Sprintf("external_ids:name=%s", egressIPName),
@@ -1424,10 +1454,40 @@ func findNatIDs(egressIPName, podIP, egressIP string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to find nat ID, stderr: %s, err: %v", stderr, err)
 	}
-	if natIDs == "" {
+	if nats == "" {
 		return nil, nil
 	}
-	return strings.Split(natIDs, "\n"), nil
+
+	// Locate router for the nats
+	natItems := strings.Split(nats, "\n")
+	natIDEntries := make([]natIDEntry, 0, len(natItems))
+	for _, natItem := range natItems {
+		if natItem == "" {
+			continue
+		}
+		natFields := strings.Split(natItem, ",")
+
+		natID := natFields[0]
+		logicalPort := ""
+		if len(natFields) > 1 {
+			logicalPort = natFields[1]
+		}
+		routerName, stderr, err := util.RunOVNNbctl(
+			"--format=csv",
+			"--data=bare",
+			"--no-heading",
+			"--columns=name",
+			"find",
+			"logical_router",
+			fmt.Sprintf("nat{>=}%s", natID),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to find router for nat ID, stderr: %s, err: %v", stderr, err)
+		}
+
+		natIDEntries = append(natIDEntries, natIDEntry{natID: natID, logicalPort: logicalPort, routerName: routerName})
+	}
+	return natIDEntries, nil
 }
 
 func getEgressIPKey(eIP *egressipv1.EgressIP) string {
