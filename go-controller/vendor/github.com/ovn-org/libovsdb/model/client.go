@@ -14,9 +14,22 @@ type ColumnKey struct {
 	Key    interface{}
 }
 
+// IndexType is the type of client index
+type IndexType uint
+
+const (
+	// PrimaryIndexType are client indexes for which uniqueness is optionally
+	// enforced in the context of a specific client instance transaction before
+	// it is sent to the server.
+	PrimaryIndexType IndexType = iota
+	// SecondaryIndexType are indexes for which uniqueness is not enforced.
+	SecondaryIndexType
+)
+
 // ClientIndex defines a client index by a set of columns
 type ClientIndex struct {
 	Columns []ColumnKey
+	Type    IndexType
 }
 
 // ClientDBModel contains the client information needed to build a DatabaseModel
@@ -161,6 +174,7 @@ func copyIndexes(src map[string][]ClientIndex) map[string][]ClientIndex {
 		dst[table] = make([]ClientIndex, 0, len(indexSets))
 		for _, indexSet := range indexSets {
 			indexSetCopy := ClientIndex{
+				Type:    indexSet.Type,
 				Columns: make([]ColumnKey, len(indexSet.Columns)),
 			}
 			copy(indexSetCopy.Columns, indexSet.Columns)

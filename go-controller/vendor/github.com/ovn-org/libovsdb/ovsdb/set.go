@@ -19,20 +19,21 @@ type OvsSet struct {
 
 // NewOvsSet creates a new OVSDB style set from a Go interface (object)
 func NewOvsSet(obj interface{}) (OvsSet, error) {
-	ovsSet := make([]interface{}, 0)
 	var v reflect.Value
 	if reflect.TypeOf(obj).Kind() == reflect.Ptr {
 		v = reflect.ValueOf(obj).Elem()
 		if v.Kind() == reflect.Invalid {
 			// must be a nil pointer, so just return an empty set
-			return OvsSet{ovsSet}, nil
+			return OvsSet{[]interface{}{}}, nil
 		}
 	} else {
 		v = reflect.ValueOf(obj)
 	}
 
+	var ovsSet []interface{}
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array:
+		ovsSet = make([]interface{}, 0, v.Len())
 		for i := 0; i < v.Len(); i++ {
 			ovsSet = append(ovsSet, v.Index(i).Interface())
 		}
@@ -40,9 +41,11 @@ func NewOvsSet(obj interface{}) (OvsSet, error) {
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64, reflect.Bool:
+		ovsSet = make([]interface{}, 0, 1)
 		ovsSet = append(ovsSet, v.Interface())
 	case reflect.Struct:
 		if v.Type() == reflect.TypeOf(UUID{}) {
+			ovsSet = make([]interface{}, 0, 1)
 			ovsSet = append(ovsSet, v.Interface())
 		} else {
 			return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid or pointers to those types")
