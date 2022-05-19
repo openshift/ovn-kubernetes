@@ -120,7 +120,8 @@ func NewMaster(kube kube.Interface,
 	if err != nil {
 		return nil, fmt.Errorf("error in initializing/fetching subnets: %v", err)
 	}
-	for _, node := range existingNodes.Items {
+	for _, node := range existingNodes {
+		node := *node
 		hostsubnet, err := houtil.ParseHybridOverlayHostSubnet(&node)
 		if err != nil {
 			klog.Warningf(err.Error())

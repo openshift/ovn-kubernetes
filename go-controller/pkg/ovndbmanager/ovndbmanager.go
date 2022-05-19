@@ -13,6 +13,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -223,11 +224,9 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 	r = regexp.MustCompile(`([a-z0-9]{4}) at ` + dbServerRegexp)
 	members := r.FindAllStringSubmatch(out, -1)
 	kickedMembersCount := 0
-	dbAppLabel := map[string]string{"ovn-db-pod": "true"}
-	dbPods, err := kclient.GetPods(config.Kubernetes.OVNConfigNamespace,
-		metav1.LabelSelector{
-			MatchLabels: dbAppLabel,
-		})
+	dbPods, err := kclient.GetPods(config.Kubernetes.OVNConfigNamespace, metav1.ListOptions{
+		LabelSelector: labels.Set(map[string]string{"ovn-db-pod": "true"}).String(),
+	})
 	if err != nil {
 		return fmt.Errorf("unable to get db pod list from kubeclient: %v", err)
 	}
@@ -250,7 +249,7 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 		}
 		// check if there's a db pod with the same IP address, then it's a match
 		if !memberFound {
-			for _, dbPod := range dbPods.Items {
+			for _, dbPod := range dbPods {
 				for _, ip := range dbPod.Status.PodIPs {
 					if ip.IP == matchedServer {
 						memberFound = true

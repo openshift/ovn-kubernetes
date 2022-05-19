@@ -135,7 +135,7 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 }
 
 // cleanup obsolete *gressDefaultDeny port groups
-func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology() error {
 	err := libovsdbops.DeletePortGroups(oc.nbClient, "ingressDefaultDeny", "egressDefaultDeny")
 	if err != nil {
 		klog.Errorf("%v", err)
@@ -145,9 +145,9 @@ func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kap
 
 // delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
 // OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
-func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList []*kapi.Node) error {
 	existingNodes := make(map[string]bool)
-	for _, node := range existingNodeList.Items {
+	for _, node := range existingNodeList {
 		existingNodes[node.Name] = true
 
 		// delete the obsoleted node-join-subnets annotation
@@ -184,7 +184,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 	return nil
 }
 
-func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
+func (oc *Controller) upgradeOVNTopology(existingNodes []*kapi.Node) error {
 	ver, err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
@@ -197,7 +197,7 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	}
 	if err == nil && ver < types.OvnNamespacedDenyPGTopoVersion {
 		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
-		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
+		err = oc.upgradeToNamespacedDenyPGOVNTopology()
 	}
 	// If version is less than Host -> Service with OpenFlow, we need to remove and cleanup DGP
 	if err == nil && ((ver < types.OvnHostToSvcOFTopoVersion && config.Gateway.Mode == config.GatewayModeShared) ||
@@ -248,7 +248,7 @@ func (oc *Controller) StartClusterMaster() error {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
 	}
-	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes.Items))
+	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
 		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", types.OvnCurrentTopologyVersion, err)
@@ -266,7 +266,7 @@ func (oc *Controller) StartClusterMaster() error {
 		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
 	nodeNames := []string{}
-	for _, node := range existingNodes.Items {
+	for _, node := range existingNodes {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
@@ -1154,9 +1154,9 @@ func (oc *Controller) syncNodesPeriodic() {
 		return
 	}
 
-	nodeNames := make([]string, 0, len(nodes.Items))
+	nodeNames := make([]string, 0, len(nodes))
 
-	for _, node := range nodes.Items {
+	for _, node := range nodes {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
@@ -1382,14 +1382,14 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	if _, gwFailed := oc.gatewaysFailed.Load(node.Name); !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
 		if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
 			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+			pods, err := oc.kube.GetPods(metav1.NamespaceAll, options)
 			if err != nil {
 				errs = append(errs, err)
 				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
 			} else {
-				klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
-				for _, pod := range pods.Items {
-					pod := pod
+				klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods))
+				for _, pod := range pods {
+					pod := *pod
 					if util.PodCompleted(&pod) {
 						continue
 					}

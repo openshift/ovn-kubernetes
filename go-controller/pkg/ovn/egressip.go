@@ -717,8 +717,9 @@ func (oc *Controller) removePendingOpsAndGetResyncs(egressIPName, egressIP strin
 	if err != nil {
 		return nil, fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	resyncs := make([]egressipv1.EgressIP, 0, len(egressIPs.Items))
-	for _, egressIP := range egressIPs.Items {
+	resyncs := make([]egressipv1.EgressIP, 0, len(egressIPs))
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		// Do not process the egress IP object which owns the
 		// CloudPrivateIPConfig for which we are currently processing the
 		// deletion for.
@@ -1630,7 +1631,8 @@ func (oc *Controller) addEgressNode(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
 			// Send a "synthetic update" on all egress IPs which are not fully
 			// assigned, the reconciliation loop for WatchEgressIP will try to
@@ -1676,7 +1678,8 @@ func (oc *Controller) deleteEgressNode(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		for _, status := range egressIP.Status.Items {
 			if status.Node == nodeName {
 				// Send a "synthetic update" on all egress IPs which have an
