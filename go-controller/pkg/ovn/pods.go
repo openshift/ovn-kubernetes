@@ -216,24 +216,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	return nil
 }
 
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSwitch, error) {
-	// Wait for the node logical switch to be created by the ClusterController and be present
-	// in libovsdb's cache. The node switch will be created when the node's logical network infrastructure
-	// is created by the node watch
-	ls := &nbdb.LogicalSwitch{Name: nodeName}
-	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
-		if lsUUID, ok := oc.lsManager.GetUUID(nodeName); !ok {
-			return false, fmt.Errorf("error getting logical switch for node %s: %s", nodeName, "switch not in logical switch cache")
-		} else {
-			ls.UUID = lsUUID
-			return true, nil
-		}
-	}); err != nil {
-		return nil, fmt.Errorf("timed out waiting for logical switch in logical switch cache %q subnet: %v", nodeName, err)
-	}
-	return ls, nil
-}
-
 func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
@@ -355,9 +337,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
-	ls, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
-	if err != nil {
-		return err
+	ls := &nbdb.LogicalSwitch{Name: logicalSwitch}
+	var ok bool
+	ls.UUID, ok = oc.lsManager.GetUUID(logicalSwitch)
+	if !ok {
+		return fmt.Errorf("error getting logical switch for node %s: switch not in logical switch cache", logicalSwitch)
 	}
 
 	portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
@@ -370,6 +354,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	lspExist := false
 	needsIP := true
 
+	start2 := time.Now()
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
@@ -380,6 +365,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
 	lspExist = err != libovsdbclient.ErrNotFound
+	getPortTime := time.Since(start2)
 
 	lsp.Options = make(map[string]string)
 	// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
@@ -423,6 +409,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}()
 
+	start2 = time.Now()
 	if err == nil {
 		podMac = annotation.MAC
 		podIfAddrs = annotation.IPs
@@ -470,15 +457,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 
 		releaseIPs = true
-
 	}
+	allocateIPTime := time.Since(start2)
 
 	// Ensure the namespace/nsInfo exists
+	start2 = time.Now()
 	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, ops, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
+	addToNSTime := time.Since(start2)
 
+	var addRoutesGWTime time.Duration
 	if needsIP {
 		network, err := util.GetK8sPodDefaultNetwork(pod)
 		// handle error cases separately first to ensure binding to err, otherwise the
@@ -500,6 +490,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			IPs: podIfAddrs,
 			MAC: podMac,
 		}
+		start2 = time.Now()
 		var nodeSubnets []*net.IPNet
 		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
@@ -509,6 +500,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return err
 		}
+		addRoutesGWTime = time.Since(start2)
 
 		var marshalledAnnotation map[string]interface{}
 		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
@@ -530,6 +522,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// if we have any external or pod Gateways, add routes
 	gateways := make([]*gatewayInfo, 0, len(routingExternalGWs.gws)+len(routingPodGWs))
 
+	start2 = time.Now()
 	if len(routingExternalGWs.gws) > 0 {
 		gateways = append(gateways, routingExternalGWs)
 	}
@@ -545,12 +538,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 
+	var addGWRoutesTime, GRSNATTime time.Duration
 	if len(gateways) > 0 {
 		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 		err = oc.addGWRoutesForPod(gateways, podIfAddrs, podNsName, pod.Spec.NodeName)
 		if err != nil {
 			return err
 		}
+		addGWRoutesTime = time.Since(start2)
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
@@ -559,6 +554,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		} else if ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
 			return err
 		}
+		GRSNATTime = time.Since(start2)
 	}
 
 	// set addresses on the port
@@ -581,11 +577,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
 
+	start2 = time.Now()
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "pod", pod.Namespace,
 		pod.Name)
 	if err != nil {
 		klog.Errorf("Config duration recorder: %v", err)
 	}
+	metricsTime := time.Since(start2)
 	ops = append(ops, recordOps...)
 
 	transactStart := time.Now()
@@ -595,10 +593,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
 	txOkCallBack()
+	start2 = time.Now()
 	oc.podRecorder.AddLSP(pod.UID)
+	podRecTime := time.Since(start2)
 
 	// check if this pod is serving as an external GW
+	start2 = time.Now()
 	err = oc.addPodExternalGW(pod)
+	addPodExtGWTime := time.Since(start2)
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
@@ -609,7 +611,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
+	start2 = time.Now()
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+	pcTime := time.Since(start2)
+
+	klog.Infof("##### addLogicalPort took %v; getPort %v, allocIP %v, addToNS %v, addRouteGW %v, addGWRoute %v, GRSNAT %v, podExtGW %v, metrics %v, podRec %v, cache %v",
+		time.Since(start), getPortTime, allocateIPTime, addToNSTime, addRoutesGWTime, addGWRoutesTime, GRSNATTime, addPodExtGWTime, metricsTime, podRecTime, pcTime)
 
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
