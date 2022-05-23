@@ -409,7 +409,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}()
 
-	start2 = time.Now()
 	if err == nil {
 		podMac = annotation.MAC
 		podIfAddrs = annotation.IPs
@@ -458,17 +457,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		releaseIPs = true
 	}
-	allocateIPTime := time.Since(start2)
 
 	// Ensure the namespace/nsInfo exists
-	start2 = time.Now()
 	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, ops, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
-	addToNSTime := time.Since(start2)
 
-	var addRoutesGWTime time.Duration
 	if needsIP {
 		network, err := util.GetK8sPodDefaultNetwork(pod)
 		// handle error cases separately first to ensure binding to err, otherwise the
@@ -500,7 +495,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return err
 		}
-		addRoutesGWTime = time.Since(start2)
 
 		var marshalledAnnotation map[string]interface{}
 		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
@@ -538,14 +532,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 
-	var addGWRoutesTime, GRSNATTime time.Duration
+	var GRSNATTime time.Duration
 	if len(gateways) > 0 {
 		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 		err = oc.addGWRoutesForPod(gateways, podIfAddrs, podNsName, pod.Spec.NodeName)
 		if err != nil {
 			return err
 		}
-		addGWRoutesTime = time.Since(start2)
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
@@ -577,30 +570,24 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
 
-	start2 = time.Now()
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "pod", pod.Namespace,
 		pod.Name)
 	if err != nil {
 		klog.Errorf("Config duration recorder: %v", err)
 	}
-	metricsTime := time.Since(start2)
 	ops = append(ops, recordOps...)
 
 	transactStart := time.Now()
-	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, ops)
+	retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, _, err := libovsdbops.TransactAndCheckAndSetUUIDsTime(oc.nbClient, lsp, ops)
 	libovsdbExecuteTime = time.Since(transactStart)
 	if err != nil {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
 	txOkCallBack()
-	start2 = time.Now()
 	oc.podRecorder.AddLSP(pod.UID)
-	podRecTime := time.Since(start2)
 
 	// check if this pod is serving as an external GW
-	start2 = time.Now()
 	err = oc.addPodExternalGW(pod)
-	addPodExtGWTime := time.Since(start2)
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
@@ -611,17 +598,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	start2 = time.Now()
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
-	pcTime := time.Since(start2)
-
-	klog.Infof("##### addLogicalPort took %v; getPort %v, allocIP %v, addToNS %v, addRouteGW %v, addGWRoute %v, GRSNAT %v, podExtGW %v, metrics %v, podRec %v, cache %v",
-		time.Since(start), getPortTime, allocateIPTime, addToNSTime, addRoutesGWTime, addGWRoutesTime, GRSNATTime, addPodExtGWTime, metricsTime, podRecTime, pcTime)
 
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
 	// it's rare and easily worked around for now.
+	start2 = time.Now()
 	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
+	mcGetNS := time.Since(start2)
 	if err != nil {
 		return err
 	}
@@ -632,6 +616,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
+
+	klog.Infof("##### addLogicalPort [%s/%s] took %v; getPort %v, annoTime: %v, GRSNAT %v, OVN: %v [transRetry: %v, transRlock: %v, recon: %v, modelLock: %v, reply: %v, sendLock: %v, mutLock: %v, write: %v], mcNS: %v",
+		pod.Namespace, pod.Name,
+		time.Since(start), getPortTime, podAnnoTime, GRSNATTime, libovsdbExecuteTime, retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, mcGetNS)
+
 	return nil
 }
 
