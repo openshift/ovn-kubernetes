@@ -102,6 +102,8 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 	}
 
+	klog.Infof("Stale Egress IPs are: %v", staleEgressIPs)
+
 	// We do not initialize a nothing selector for the podSelector, because
 	// these are allowed to be empty (i.e: matching all pods in a namespace), as
 	// supposed to the namespaceSelector
@@ -179,6 +181,8 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		ipsToAssign = ipsToAssign.Intersection(ipsToRemove)
 	}
 
+	klog.Infof("Egress IPs to remove are: %v", ipsToRemove)
+
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
 		if len(statusToRemove) > 0 {
 			// Delete the statusToRemove from the allocator cache. If we don't
@@ -240,13 +244,14 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			}
 			staleEgressIPs.Delete(toRemove.EgressIP)
 		}
+		klog.Infof("Stale Egress IPs to remove are: %v", staleEgressIPs)
 		for staleEgressIP := range staleEgressIPs {
-			if oc.deleteAllocatorEgressIPAssignmentIfExists(name, staleEgressIP) {
+			if nodeName := oc.deleteAllocatorEgressIPAssignmentIfExists(name, staleEgressIP); nodeName != "" {
 				statusToRemove = append(statusToRemove,
-					egressipv1.EgressIPStatusItem{EgressIP: staleEgressIP})
+					egressipv1.EgressIPStatusItem{EgressIP: staleEgressIP, Node: nodeName})
 			}
 		}
-
+		klog.Infof("statusToRemove for cloud private ip config change: %v", statusToRemove)
 		// Execute CloudPrivateIPConfig changes for assignments which need to be
 		// added/removed, assignments which don't change do not require any
 		// further setup.
@@ -779,6 +784,7 @@ func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toA
 
 func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops map[string]*cloudPrivateIPConfigOp) error {
 	for egressIP, op := range ops {
+		klog.Infof("executeCloudPrivateIPConfigOps %s: %v", egressIP, op)
 		cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(egressIP)
 		cloudPrivateIPConfig, err := oc.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
 		// toAdd and toDelete is non-empty, this indicates an UPDATE for which
@@ -1030,16 +1036,19 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 
 // deleteAllocatorEgressIPAssignmentIfExists deletes egressIP config from node allocations map
 // if the entry is available and returns true, otherwise returns false.
-func (oc *Controller) deleteAllocatorEgressIPAssignmentIfExists(name, egressIP string) bool {
+func (oc *Controller) deleteAllocatorEgressIPAssignmentIfExists(name, egressIP string) string {
 	oc.eIPC.allocator.Lock()
 	defer oc.eIPC.allocator.Unlock()
-	for _, eNode := range oc.eIPC.allocator.cache {
+	for nodeName, eNode := range oc.eIPC.allocator.cache {
+		klog.Infof("removing egress ip %s: %s from enode allocator cache", name, egressIP)
 		if egressIPName, exists := eNode.allocations[egressIP]; exists && egressIPName == name {
+			klog.Infof("foud an egress ip match %s: %s deleting it", name, egressIP)
 			delete(eNode.allocations, egressIP)
-			return true
+			return nodeName
 		}
 	}
-	return false
+	klog.Infof("egress ip match not found for %s: %s", name, egressIP)
+	return ""
 }
 
 // deleteAllocatorEgressIPAssignments deletes the allocation as to keep the
