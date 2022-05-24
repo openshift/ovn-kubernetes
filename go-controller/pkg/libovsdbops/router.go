@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
@@ -809,32 +810,37 @@ func FindNATsWithPredicate(nbClient libovsdbclient.Client, predicate natPredicat
 
 // getRouterNATs looks up NATs associated to the provided logical router from
 // the cache
-func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
+func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (time.Duration, time.Duration, []*nbdb.NAT, error) {
+	start := time.Now()
 	router, err := GetLogicalRouter(nbClient, router)
+	getRouterTime := time.Since(start)
 	if err != nil {
-		return nil, err
+		return 0, 0, nil, err
 	}
 
 	nats := []*nbdb.NAT{}
+	start = time.Now()
 	for _, uuid := range router.Nat {
 		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
 		if err != nil {
-			return nil, err
+			return 0, 0, nil, err
 		}
 		nats = append(nats, nat)
 	}
+	getNatsTime := time.Since(start)
 
-	return nats, nil
+	return getRouterTime, getNatsTime, nats, nil
 }
 
 // CreateOrUpdateNATsOps creates or updates the provided NATs, adds them to
 // the provided logical router and returns the corresponding ops
-func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
-	routerNats, err := getRouterNATs(nbClient, router)
+func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) (time.Duration, time.Duration, time.Duration, []libovsdb.Operation, error) {
+	getRouterTime, getNatsTime, routerNats, err := getRouterNATs(nbClient, router)
 	if err != nil {
-		return ops, fmt.Errorf("unable to get NAT entries for router %+v: %w", router, err)
+		return 0, 0, 0, ops, fmt.Errorf("unable to get NAT entries for router %+v: %w", router, err)
 	}
 
+	start := time.Now()
 	originalNats := router.Nat
 	router.Nat = make([]string, 0, len(nats))
 	opModels := make([]operationModel, 0, len(nats)+1)
@@ -866,13 +872,14 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	m := newModelClient(nbClient)
 	ops, err = m.CreateOrUpdateOps(ops, opModels...)
 	router.Nat = originalNats
-	return ops, err
+	createOpsTime := time.Since(start)
+	return getRouterTime, getNatsTime, createOpsTime, ops, err
 }
 
 // CreateOrUpdateNATs creates or updates the provided NATs and adds them to
 // the provided logical router
 func CreateOrUpdateNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) error {
-	ops, err := CreateOrUpdateNATsOps(nbClient, nil, router, nats...)
+	_, _, _, ops, err := CreateOrUpdateNATsOps(nbClient, nil, router, nats...)
 	if err != nil {
 		return err
 	}
@@ -884,7 +891,7 @@ func CreateOrUpdateNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRout
 // DeleteNATsOps deletes the provided NATs, removes them from the provided
 // logical router and returns the corresponding ops
 func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
-	routerNats, err := getRouterNATs(nbClient, router)
+	_, _, routerNats, err := getRouterNATs(nbClient, router)
 	if err == libovsdbclient.ErrNotFound {
 		return ops, nil
 	}
