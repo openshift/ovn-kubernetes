@@ -532,7 +532,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 
-	var GRSNATTime time.Duration
+	var GRSNAT1Time, GRSNAT2Time time.Duration
 	if len(gateways) > 0 {
 		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 		err = oc.addGWRoutesForPod(gateways, podIfAddrs, podNsName, pod.Spec.NodeName)
@@ -542,12 +542,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
-		if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
-			return err
-		} else if ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
+		start2 = time.Now()
+		extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName)
+		if err != nil {
 			return err
 		}
-		GRSNATTime = time.Since(start2)
+		GRSNAT1Time = time.Since(start2)
+		start2 = time.Now()
+		if ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
+			return err
+		}
+		GRSNAT2Time = time.Since(start2)
 	}
 
 	// set addresses on the port
@@ -578,7 +583,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	ops = append(ops, recordOps...)
 
 	transactStart := time.Now()
-	retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, _, err := libovsdbops.TransactAndCheckAndSetUUIDsTime(oc.nbClient, lsp, ops)
+	retryTime, rlockTime, callTime, respTime, _, err := libovsdbops.TransactAndCheckAndSetUUIDsTime(oc.nbClient, lsp, ops)
 	libovsdbExecuteTime = time.Since(transactStart)
 	if err != nil {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
@@ -603,9 +608,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
 	// it's rare and easily worked around for now.
-	start2 = time.Now()
 	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
-	mcGetNS := time.Since(start2)
 	if err != nil {
 		return err
 	}
@@ -617,9 +620,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
 
-	klog.Infof("##### addLogicalPort [%s/%s] took %v; getPort %v, annoTime: %v, GRSNAT %v, OVN: %v [transRetry: %v, transRlock: %v, recon: %v, modelLock: %v, reply: %v, sendLock: %v, mutLock: %v, write: %v], mcNS: %v",
+	klog.Infof("##### addLogicalPort [%s/%s] took %v; getPort %v, annoTime: %v, GRSNAT1: %v, GRSNAT2: %v, libovsdb: %v [transRetry: %v, transRlock: %v, call: %v, resp: %v]",
 		pod.Namespace, pod.Name,
-		time.Since(start), getPortTime, podAnnoTime, GRSNATTime, libovsdbExecuteTime, retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, mcGetNS)
+		time.Since(start), getPortTime, podAnnoTime, GRSNAT1Time, GRSNAT2Time, libovsdbExecuteTime, retryTime, rlockTime, callTime, respTime)
 
 	return nil
 }

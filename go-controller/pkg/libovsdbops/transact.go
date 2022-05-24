@@ -17,19 +17,19 @@ import (
 // TransactWithRetry will attempt a transaction several times if it receives an error indicating that the client
 // was not connected when the transaction occurred.
 func TransactWithRetry(ctx context.Context, c client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
-	_, _, _, _, _, _, _, _, results, err := TransactWithRetryTime(ctx, c, ops)
+	_, _, _, _, results, err := TransactWithRetryTime(ctx, c, ops)
 	return results, err
 }
 
 // TransactWithRetry will attempt a transaction several times if it receives an error indicating that the client
 // was not connected when the transaction occurred.
-func TransactWithRetryTime(ctx context.Context, c client.Client, ops []ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
+func TransactWithRetryTime(ctx context.Context, c client.Client, ops []ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
 	start := time.Now()
 	var results []ovsdb.OperationResult
-	var rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime time.Duration
+	var rlockTime, callTime, respTime time.Duration
 	resultErr := wait.PollImmediateUntilWithContext(ctx, 200*time.Millisecond, func(ctx context.Context) (bool, error) {
 		var err error
-		rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, err = c.TransactTime(ctx, ops...)
+		rlockTime, callTime, respTime, results, err = c.TransactTime(ctx, ops...)
 		if err == nil {
 			return true, nil
 		}
@@ -39,17 +39,17 @@ func TransactWithRetryTime(ctx context.Context, c client.Client, ops []ovsdb.Ope
 		}
 		return false, err
 	})
-	return time.Since(start), rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, resultErr
+	return time.Since(start), rlockTime, callTime, respTime, results, resultErr
 }
 
 func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
-	_, _, _, _, _, _, _, _, results, err := TransactAndCheckTime(c, ops)
+	_, _, _, _, results, err := TransactAndCheckTime(c, ops)
 	return results, err
 }
 
-func TransactAndCheckTime(c client.Client, ops []ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
+func TransactAndCheckTime(c client.Client, ops []ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
 	if len(ops) <= 0 {
-		return 0, 0, 0, 0, 0, 0, 0, 0, []ovsdb.OperationResult{{}}, nil
+		return 0, 0, 0, 0, []ovsdb.OperationResult{{}}, nil
 	}
 
 	klog.Infof("Configuring OVN: %+v", ops)
@@ -57,17 +57,17 @@ func TransactAndCheckTime(c client.Client, ops []ovsdb.Operation) (time.Duration
 	ctx, cancel := context.WithTimeout(context.TODO(), types.OVSDBTimeout)
 	defer cancel()
 
-	retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, err := TransactWithRetryTime(ctx, c, ops)
+	retryTime, rlockTime, callTime, respTime, results, err := TransactWithRetryTime(ctx, c, ops)
 	if err != nil {
-		return 0, 0, 0, 0, 0, 0, 0, 0, nil, fmt.Errorf("error in transact with ops %+v: %v", ops, err)
+		return 0, 0, 0, 0, nil, fmt.Errorf("error in transact with ops %+v: %v", ops, err)
 	}
 
 	opErrors, err := ovsdb.CheckOperationResults(results, ops)
 	if err != nil {
-		return 0, 0, 0, 0, 0, 0, 0, 0, nil, fmt.Errorf("error in transact with ops %+v results %+v and errors %+v: %v", ops, results, opErrors, err)
+		return 0, 0, 0, 0, nil, fmt.Errorf("error in transact with ops %+v results %+v and errors %+v: %v", ops, results, opErrors, err)
 	}
 
-	return retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, nil
+	return retryTime, rlockTime, callTime, respTime, results, nil
 }
 
 // TransactAndCheckAndSetUUIDs transacts the given ops against client and returns
@@ -75,7 +75,7 @@ func TransactAndCheckTime(c client.Client, ops []ovsdb.Operation) (time.Duration
 // the passed models if they were inserted and have a named-uuid (as built by
 // BuildNamedUUID)
 func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
-	_, _, _, _, _, _, _, _, results, err := TransactAndCheckAndSetUUIDsTime(client, models, ops)
+	_, _, _, _, results, err := TransactAndCheckAndSetUUIDsTime(client, models, ops)
 	return results, err
 }
 
@@ -83,10 +83,10 @@ func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops [
 // results if no error occurred or an error otherwise. It sets the real uuids for
 // the passed models if they were inserted and have a named-uuid (as built by
 // BuildNamedUUID)
-func TransactAndCheckAndSetUUIDsTime(client client.Client, models interface{}, ops []ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
-	retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, err := TransactAndCheckTime(client, ops)
+func TransactAndCheckAndSetUUIDsTime(client client.Client, models interface{}, ops []ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
+	retryTime, rlockTime, callTime, respTime, results, err := TransactAndCheckTime(client, ops)
 	if err != nil {
-		return 0, 0, 0, 0, 0, 0, 0, 0, nil, err
+		return 0, 0, 0, 0, nil, err
 	}
 
 	namedModelMap := map[string]model.Model{}
@@ -99,7 +99,7 @@ func TransactAndCheckAndSetUUIDsTime(client client.Client, models interface{}, o
 	})
 
 	if len(namedModelMap) == 0 {
-		return retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, nil
+		return retryTime, rlockTime, callTime, respTime, results, nil
 	}
 
 	for i, op := range ops {
@@ -116,5 +116,5 @@ func TransactAndCheckAndSetUUIDsTime(client client.Client, models interface{}, o
 		}
 	}
 
-	return retryTime, rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, nil
+	return retryTime, rlockTime, callTime, respTime, results, nil
 }

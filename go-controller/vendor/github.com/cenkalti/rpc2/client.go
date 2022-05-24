@@ -221,7 +221,9 @@ func (c *Client) readResponse(resp *Response) error {
 		}
 		call.done()
 	default:
+		start := time.Now()
 		err = c.codec.ReadResponseBody(call.Reply)
+		call.resp = time.Since(start)
 		if err != nil {
 			call.Error = errors.New("reading body " + err.Error())
 		}
@@ -243,16 +245,11 @@ func (c *Client) Close() error {
 	return c.codec.Close()
 }
 
-func (c *Client) Go(method string, args interface{}, reply interface{}, done chan *Call) *Call {
-	_, _, _, call := c.GoTime(method, args, reply, done)
-	return call
-}
-
 // Go invokes the function asynchronously.  It returns the Call structure representing
 // the invocation.  The done channel will signal when the call is complete by returning
 // the same Call object.  If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
-func (c *Client) GoTime(method string, args interface{}, reply interface{}, done chan *Call) (time.Duration, time.Duration, time.Duration, *Call) {
+func (c *Client) Go(method string, args interface{}, reply interface{}, done chan *Call) *Call {
 	call := new(Call)
 	call.Method = method
 	call.Args = args
@@ -269,29 +266,29 @@ func (c *Client) GoTime(method string, args interface{}, reply interface{}, done
 		}
 	}
 	call.Done = done
-	sendLockTime, mutLockTime, writeTime := c.send(call)
-	return sendLockTime, mutLockTime, writeTime, call
+	c.send(call)
+	return call
 }
 
 // CallWithContext invokes the named function, waits for it to complete, and
 // returns its error status, or an error from Context timeout.
 func (c *Client) CallWithContext(ctx context.Context, method string, args interface{}, reply interface{}) error {
-	_, _, _, _, err := c.CallWithContextTime(ctx, method, args, reply)
+	_, _, err := c.CallWithContextTime(ctx, method, args, reply)
 	return err
 }
 
 // CallWithContext invokes the named function, waits for it to complete, and
 // returns its error status, or an error from Context timeout.
-func (c *Client) CallWithContextTime(ctx context.Context, method string, args interface{}, reply interface{}) (time.Duration, time.Duration, time.Duration, time.Duration, error) {
-	sendLockTime, mutLockTime, writeTime, call := c.GoTime(method, args, reply, make(chan *Call, 1))
+func (c *Client) CallWithContextTime(ctx context.Context, method string, args interface{}, reply interface{}) (time.Duration, time.Duration, error) {
 	start := time.Now()
+	call := c.Go(method, args, reply, make(chan *Call, 1))
 	select {
 	case <-call.Done:
-		return time.Since(start), sendLockTime, mutLockTime, writeTime, call.Error
+		return time.Since(start), call.resp, call.Error
 	case <-ctx.Done():
-		return 0, 0, 0, 0, ctx.Err()
+		return 0, 0, ctx.Err()
 	}
-	return 0, 0, 0, 0, nil
+	return 0, 0, nil
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
@@ -328,23 +325,20 @@ type Call struct {
 	Reply  interface{} // The reply from the function (*struct).
 	Error  error       // After completion, the error status.
 	Done   chan *Call  // Strobes when call is complete.
+	resp   time.Duration
 }
 
-func (c *Client) send(call *Call) (time.Duration, time.Duration, time.Duration) {
-	start := time.Now()
+func (c *Client) send(call *Call) {
 	c.sending.Lock()
 	defer c.sending.Unlock()
-	sendLockTime := time.Since(start)
 
 	// Register this call.
-	start = time.Now()
 	c.mutex.Lock()
-	mutLockTime := time.Since(start)
 	if c.shutdown || c.closing {
 		call.Error = ErrShutdown
 		c.mutex.Unlock()
 		call.done()
-		return 0, 0, 0
+		return
 	}
 	seq := c.seq
 	c.seq++
@@ -352,11 +346,9 @@ func (c *Client) send(call *Call) (time.Duration, time.Duration, time.Duration) 
 	c.mutex.Unlock()
 
 	// Encode and send the request.
-	start = time.Now()
 	c.request.Seq = seq
 	c.request.Method = call.Method
 	err := c.codec.WriteRequest(&c.request, call.Args)
-	writeTime := time.Since(start)
 	if err != nil {
 		c.mutex.Lock()
 		call = c.pending[seq]
@@ -367,7 +359,6 @@ func (c *Client) send(call *Call) (time.Duration, time.Duration, time.Duration) 
 			call.done()
 		}
 	}
-	return sendLockTime, mutLockTime, writeTime
 }
 
 // Notify sends a request to the receiver but does not wait for a return value.

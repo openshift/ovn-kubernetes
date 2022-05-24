@@ -61,7 +61,7 @@ type Client interface {
 	DisconnectNotify() chan struct{}
 	Echo(context.Context) error
 	Transact(context.Context, ...ovsdb.Operation) ([]ovsdb.OperationResult, error)
-	TransactTime(context.Context, ...ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error)
+	TransactTime(context.Context, ...ovsdb.Operation) (time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error)
 	Monitor(context.Context, *Monitor) (MonitorCookie, error)
 	MonitorAll(context.Context) (MonitorCookie, error)
 	MonitorCancel(ctx context.Context, cookie MonitorCookie) error
@@ -733,17 +733,16 @@ func (o *ovsdbClient) listDbs(ctx context.Context) ([]string, error) {
 // Transact performs the provided Operations on the database
 // RFC 7047 : transact
 func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
-	_, _, _, _, _, _, _, results, err := o.TransactTime(ctx, operation...)
+	_, _, _, results, err := o.TransactTime(ctx, operation...)
 	return results, err
 }
 
 // Transact performs the provided Operations on the database
 // RFC 7047 : transact
-func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
+func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Operation) (time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
 	start := time.Now()
 	o.rpcMutex.RLock()
 	rlockTime := time.Since(start)
-	start = time.Now()
 	if o.rpcClient == nil || !o.connected {
 		o.rpcMutex.RUnlock()
 		if o.options.reconnect {
@@ -755,7 +754,7 @@ func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Opera
 			for {
 				select {
 				case <-ctx.Done():
-					return 0, 0, 0, 0, 0, 0, 0, nil, fmt.Errorf("%w: while awaiting reconnection", ctx.Err())
+					return 0, 0, 0, nil, fmt.Errorf("%w: while awaiting reconnection", ctx.Err())
 				case <-ticker.C:
 					o.rpcMutex.RLock()
 					if o.rpcClient != nil && o.connected {
@@ -765,48 +764,45 @@ func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Opera
 				}
 			}
 		} else {
-			return 0, 0, 0, 0, 0, 0, 0, nil, ErrNotConnected
+			return 0, 0, 0, nil, ErrNotConnected
 		}
 	}
-	reconTime := time.Since(start)
 	defer o.rpcMutex.RUnlock()
-	modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, err := o.transactTime(ctx, o.primaryDBName, operation...)
-	return rlockTime, reconTime, modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, results, err
+	callTime, respTime, results, err := o.transactTime(ctx, o.primaryDBName, operation...)
+	return rlockTime, callTime, respTime, results, err
 }
 
 func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
-	_, _, _, _, _, results, err := o.transactTime(ctx, dbName, operation...)
+	_, _, results, err := o.transactTime(ctx, dbName, operation...)
 	return results, err
 }
 
-func (o *ovsdbClient) transactTime(ctx context.Context, dbName string, operation ...ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.OperationResult, error) {
+func (o *ovsdbClient) transactTime(ctx context.Context, dbName string, operation ...ovsdb.Operation) (time.Duration, time.Duration, []ovsdb.OperationResult, error) {
 	var reply []ovsdb.OperationResult
 	db := o.databases[dbName]
-	start := time.Now()
 	db.modelMutex.RLock()
-	modelLockTime := time.Since(start)
 	schema := o.databases[dbName].model.Schema
 	db.modelMutex.RUnlock()
 	if reflect.DeepEqual(schema, ovsdb.DatabaseSchema{}) {
-		return 0, 0, 0, 0, 0, nil, fmt.Errorf("cannot transact to database %s: schema unknown", dbName)
+		return 0, 0, nil, fmt.Errorf("cannot transact to database %s: schema unknown", dbName)
 	}
 	if ok := schema.ValidateOperations(operation...); !ok {
-		return 0, 0, 0, 0, 0, nil, fmt.Errorf("validation failed for the operation")
+		return 0, 0, nil, fmt.Errorf("validation failed for the operation")
 	}
 
 	args := ovsdb.NewTransactArgs(dbName, operation...)
 	if o.rpcClient == nil {
-		return 0, 0, 0, 0, 0, nil, ErrNotConnected
+		return 0, 0, nil, ErrNotConnected
 	}
 	o.logger.V(5).Info("transacting operations", "database", dbName, "operations", fmt.Sprintf("%+v", operation))
-	replyTime, sendLockTime, mutLockTime, writeTime, err := o.rpcClient.CallWithContextTime(ctx, "transact", args, &reply)
+	callTime, respTime, err := o.rpcClient.CallWithContextTime(ctx, "transact", args, &reply)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
-			return 0, 0, 0, 0, 0, nil, ErrNotConnected
+			return 0, 0, nil, ErrNotConnected
 		}
-		return 0, 0, 0, 0, 0, nil, err
+		return 0, 0, nil, err
 	}
-	return modelLockTime, replyTime, sendLockTime, mutLockTime, writeTime, reply, nil
+	return callTime, respTime, reply, nil
 }
 
 // MonitorAll is a convenience method to monitor every table/column
