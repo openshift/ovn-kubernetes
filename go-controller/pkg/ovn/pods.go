@@ -532,7 +532,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 
-	var GRSNATTime, SNATBuildTime, SNATgetRouterTime, SNATgetNatsTime, SNATcreateOpsTime time.Duration
+	var SNATgetRouterTime, SNATgetNatsTime time.Duration
 	if len(gateways) > 0 {
 		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 		err = oc.addGWRoutesForPod(gateways, podIfAddrs, podNsName, pod.Spec.NodeName)
@@ -542,13 +542,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
-		start2 = time.Now()
-		extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName)
-		if err != nil {
+		if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		}
-		GRSNATTime = time.Since(start2)
-		if SNATBuildTime, SNATgetRouterTime, SNATgetNatsTime, SNATcreateOpsTime, ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
+		} else if SNATgetRouterTime, SNATgetNatsTime, ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
 			return err
 		}
 	}
@@ -618,9 +614,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
 
-	klog.Infof("##### addLogicalPort [%s/%s] took %v; getPort %v, annoTime: %v, GRSNAT: %v, SNATbuild: %v, SNATgetRouter: %v, SNATgetNats: %v, SNATops: %v, libovsdb: %v [transRetry: %v, transRlock: %v, call: %v, resp: %v]",
+	klog.Infof("##### addLogicalPort [%s/%s] took %v; getPort %v, annoTime: %v, SNATgetRouter: %v, SNATgetNats: %v, libovsdb: %v [transRetry: %v, transRlock: %v, call: %v, resp: %v]",
 		pod.Namespace, pod.Name,
-		time.Since(start), getPortTime, podAnnoTime, GRSNATTime, SNATBuildTime, SNATgetRouterTime, SNATgetNatsTime, SNATcreateOpsTime, libovsdbExecuteTime, retryTime, rlockTime, callTime, respTime)
+		time.Since(start), getPortTime, podAnnoTime, SNATgetRouterTime, SNATgetNatsTime, libovsdbExecuteTime, retryTime, rlockTime, callTime, respTime)
 
 	return nil
 }

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/klog/v2"
+
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cenkalti/rpc2"
 	"github.com/cenkalti/rpc2/jsonrpc"
@@ -620,7 +622,9 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 		return err
 	}
 	var updates ovsdb.TableUpdates2
+	start := time.Now()
 	err = json.Unmarshal(params[1], &updates)
+	unmarshalTime := time.Since(start)
 	if err != nil {
 		return err
 	}
@@ -629,7 +633,9 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
 
+	start = time.Now()
 	db.cacheMutex.Lock()
+	cacheLockTime := time.Since(start)
 	if db.deferUpdates {
 		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{nil, &updates, ""})
 		db.cacheMutex.Unlock()
@@ -638,9 +644,14 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 	db.cacheMutex.Unlock()
 
 	// Update the local DB cache with the tableUpdates
+	start = time.Now()
 	db.cacheMutex.RLock()
-	err = db.cache.Update2(cookie, updates)
+	cacheRLockTime := time.Since(start)
+	tLockTime, updateTime, err := db.cache.Update2Time(cookie, updates)
 	db.cacheMutex.RUnlock()
+
+	klog.Infof("#### update2(%s) unmarshal: %v, cachelock: %v, cacheRlock: %v, tableLock: %v, update: %v",
+		cookie.DatabaseName, unmarshalTime, cacheLockTime, cacheRLockTime, tLockTime, updateTime)
 
 	if err != nil {
 		o.errorCh <- err
@@ -666,7 +677,9 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 		return err
 	}
 	var updates ovsdb.TableUpdates2
+	start := time.Now()
 	err = json.Unmarshal(params[2], &updates)
+	unmarshalTime := time.Since(start)
 	if err != nil {
 		return err
 	}
@@ -676,7 +689,9 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
 
+	start = time.Now()
 	db.cacheMutex.Lock()
+	cacheLockTime := time.Since(start)
 	if db.deferUpdates {
 		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{nil, &updates, lastTransactionID})
 		db.cacheMutex.Unlock()
@@ -685,16 +700,26 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 	db.cacheMutex.Unlock()
 
 	// Update the local DB cache with the tableUpdates
+	start = time.Now()
 	db.cacheMutex.RLock()
+	cacheRLockTime := time.Since(start)
+	start = time.Now()
 	err = db.cache.Update2(cookie, updates)
+	updateTime := time.Since(start)
 	db.cacheMutex.RUnlock()
 
+	var monLockTime time.Duration
 	if err == nil {
+		start = time.Now()
 		db.monitorsMutex.Lock()
+		monLockTime = time.Since(start)
 		mon := db.monitors[cookie.ID]
 		mon.LastTransactionID = lastTransactionID
 		db.monitorsMutex.Unlock()
 	}
+
+	fmt.Printf("#### update3(%s) unmarshal: %v, lock: %v, rlock: %v, update: %v, monLock: %v",
+		cookie.DatabaseName, unmarshalTime, cacheLockTime, cacheRLockTime, updateTime, monLockTime)
 
 	return err
 }

@@ -588,21 +588,19 @@ func addOrUpdatePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, ex
 	return nil
 }
 
-func (oc *Controller) addOrUpdatePerPodGRSNATReturnOps(nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) (time.Duration, time.Duration, time.Duration, time.Duration, []ovsdb.Operation, error) {
+func (oc *Controller) addOrUpdatePerPodGRSNATReturnOps(nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) (time.Duration, time.Duration, []ovsdb.Operation, error) {
 	gr := types.GWRouterPrefix + nodeName
 	router := &nbdb.LogicalRouter{Name: gr}
-	start := time.Now()
 	nats, err := buildPerPodGRSNAT(extIPs, podIfAddrs)
-	buildTime := time.Since(start)
 	if err != nil {
-		return 0, 0, 0, 0, nil, err
+		return 0, 0, nil, err
 	}
-	var getRouterTime, getNatsTime, createOpsTime time.Duration
-	getRouterTime, getNatsTime, createOpsTime, ops, err = libovsdbops.CreateOrUpdateNATsOps(oc.nbClient, ops, router, nats...)
+	var getRouterTime, getNatsTime time.Duration
+	getRouterTime, getNatsTime, ops, err = libovsdbops.CreateOrUpdateNATsOps(oc.nbClient, ops, router, nats...)
 	if err != nil {
-		return 0, 0, 0, 0, nil, fmt.Errorf("failed to create SNAT ops for pods of router: %s, error: %v", router.Name, err)
+		return 0, 0, nil, fmt.Errorf("failed to create SNAT ops for pods of router: %s, error: %v", router.Name, err)
 	}
-	return buildTime, getRouterTime, getNatsTime, createOpsTime, ops, nil
+	return getRouterTime, getNatsTime, ops, nil
 }
 
 // addHybridRoutePolicyForPod handles adding a higher priority allow policy to allow traffic to be routed normally

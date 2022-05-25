@@ -11,6 +11,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"k8s.io/klog/v2"
 )
 
 // ROUTER OPs
@@ -779,15 +781,21 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 
 type natPredicate func(*nbdb.NAT) bool
 
-// GetNAT looks up an NAT from the cache
-func GetNAT(nbClient libovsdbclient.Client, nat *nbdb.NAT) (*nbdb.NAT, error) {
+// GetNAT looks up one or more NATs from the cache
+func GetNATs(nbClient libovsdbclient.Client, nats... *nbdb.NAT) ([]*nbdb.NAT, error) {
 	found := []*nbdb.NAT{}
 	opModel := operationModel{
-		Model:          nat,
-		ModelPredicate: func(item *nbdb.NAT) bool { return isEquivalentNAT(item, nat) },
+		ModelPredicate: func(item *nbdb.NAT) bool {
+			for i := range nats {
+				if isEquivalentNAT(item, nats[i]) {
+					return true
+				}
+			}
+			return false
+		},
 		ExistingResult: &found,
-		ErrNotFound:    true,
-		BulkOp:         false,
+		ErrNotFound:    false,
+		BulkOp:         true,
 	}
 
 	m := newModelClient(nbClient)
@@ -796,7 +804,11 @@ func GetNAT(nbClient libovsdbclient.Client, nat *nbdb.NAT) (*nbdb.NAT, error) {
 		return nil, err
 	}
 
-	return found[0], nil
+	if len(found) != len(nats) {
+		klog.Warningf("################### expected %d NATs, only found %d", len(nats), len(found))
+	}
+
+	return found, nil
 }
 
 // FindNATsWithPredicate looks up NATs from the cache based on a given predicate
@@ -821,26 +833,25 @@ func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (
 	nats := []*nbdb.NAT{}
 	start = time.Now()
 	for _, uuid := range router.Nat {
-		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
-		if err != nil {
-			return 0, 0, nil, err
-		}
-		nats = append(nats, nat)
+		nats = append(nats, &nbdb.NAT{UUID: uuid})
+	}
+	realNats, err := GetNATs(nbClient, nats...)
+	if err != nil {
+		return 0, 0, nil, err
 	}
 	getNatsTime := time.Since(start)
 
-	return getRouterTime, getNatsTime, nats, nil
+	return getRouterTime, getNatsTime, realNats, nil
 }
 
 // CreateOrUpdateNATsOps creates or updates the provided NATs, adds them to
 // the provided logical router and returns the corresponding ops
-func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) (time.Duration, time.Duration, time.Duration, []libovsdb.Operation, error) {
+func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) (time.Duration, time.Duration, []libovsdb.Operation, error) {
 	getRouterTime, getNatsTime, routerNats, err := getRouterNATs(nbClient, router)
 	if err != nil {
-		return 0, 0, 0, ops, fmt.Errorf("unable to get NAT entries for router %+v: %w", router, err)
+		return 0, 0, ops, fmt.Errorf("unable to get NAT entries for router %+v: %w", router, err)
 	}
 
-	start := time.Now()
 	originalNats := router.Nat
 	router.Nat = make([]string, 0, len(nats))
 	opModels := make([]operationModel, 0, len(nats)+1)
@@ -872,14 +883,13 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	m := newModelClient(nbClient)
 	ops, err = m.CreateOrUpdateOps(ops, opModels...)
 	router.Nat = originalNats
-	createOpsTime := time.Since(start)
-	return getRouterTime, getNatsTime, createOpsTime, ops, err
+	return getRouterTime, getNatsTime, ops, err
 }
 
 // CreateOrUpdateNATs creates or updates the provided NATs and adds them to
 // the provided logical router
 func CreateOrUpdateNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) error {
-	_, _, _, ops, err := CreateOrUpdateNATsOps(nbClient, nil, router, nats...)
+	_, _, ops, err := CreateOrUpdateNATsOps(nbClient, nil, router, nats...)
 	if err != nil {
 		return err
 	}
