@@ -577,7 +577,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	ops = append(ops, recordOps...)
 
 	transactStart := time.Now()
-	retryTime, rlockTime, callTime, respTime, _, err := libovsdbops.TransactAndCheckAndSetUUIDsTime(oc.nbClient, lsp, ops)
+	retryTime, rlockTime, callTime, _, err := libovsdbops.TransactAndCheckAndSetUUIDsTime(oc.nbClient, lsp, ops)
 	libovsdbExecuteTime = time.Since(transactStart)
 	if err != nil {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
@@ -614,9 +614,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
 
-	klog.Infof("##### addLogicalPort [%s/%s] took %v; getPort %v, annoTime: %v, SNATgetRouter: %v, SNATgetNats: %v, libovsdb: %v [transRetry: %v, transRlock: %v, call: %v, resp: %v]",
+	klog.Infof("##### addLogicalPort [%s/%s] took %v; getPort %v, annoTime: %v, SNATgetRouter: %v, SNATgetNats: %v, libovsdb: %v [transRetry: %v, transRlock: %v, call: %v]",
 		pod.Namespace, pod.Name,
-		time.Since(start), getPortTime, podAnnoTime, SNATgetRouterTime, SNATgetNatsTime, libovsdbExecuteTime, retryTime, rlockTime, callTime, respTime)
+		time.Since(start), getPortTime, podAnnoTime, SNATgetRouterTime, SNATgetNatsTime, libovsdbExecuteTime, retryTime, rlockTime, callTime)
 
 	return nil
 }

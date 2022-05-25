@@ -273,22 +273,14 @@ func (c *Client) Go(method string, args interface{}, reply interface{}, done cha
 // CallWithContext invokes the named function, waits for it to complete, and
 // returns its error status, or an error from Context timeout.
 func (c *Client) CallWithContext(ctx context.Context, method string, args interface{}, reply interface{}) error {
-	_, _, err := c.CallWithContextTime(ctx, method, args, reply)
-	return err
-}
-
-// CallWithContext invokes the named function, waits for it to complete, and
-// returns its error status, or an error from Context timeout.
-func (c *Client) CallWithContextTime(ctx context.Context, method string, args interface{}, reply interface{}) (time.Duration, time.Duration, error) {
-	start := time.Now()
 	call := c.Go(method, args, reply, make(chan *Call, 1))
 	select {
 	case <-call.Done:
-		return time.Since(start), call.resp, call.Error
+		return call.Error
 	case <-ctx.Done():
-		return 0, 0, ctx.Err()
+		return ctx.Err()
 	}
-	return 0, 0, nil
+	return nil
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.

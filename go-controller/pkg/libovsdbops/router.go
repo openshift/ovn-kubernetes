@@ -782,7 +782,7 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 type natPredicate func(*nbdb.NAT) bool
 
 // GetNAT looks up one or more NATs from the cache
-func GetNATs(nbClient libovsdbclient.Client, nats... *nbdb.NAT) ([]*nbdb.NAT, error) {
+func GetNATs(nbClient libovsdbclient.Client, nats ...*nbdb.NAT) ([]*nbdb.NAT, error) {
 	found := []*nbdb.NAT{}
 	opModel := operationModel{
 		ModelPredicate: func(item *nbdb.NAT) bool {
