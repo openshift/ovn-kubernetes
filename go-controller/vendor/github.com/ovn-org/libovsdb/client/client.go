@@ -622,9 +622,7 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 		return err
 	}
 	var updates ovsdb.TableUpdates2
-	start := time.Now()
 	err = json.Unmarshal(params[1], &updates)
-	unmarshalTime := time.Since(start)
 	if err != nil {
 		return err
 	}
@@ -633,9 +631,7 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
 
-	start = time.Now()
 	db.cacheMutex.Lock()
-	cacheLockTime := time.Since(start)
 	if db.deferUpdates {
 		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{nil, &updates, ""})
 		db.cacheMutex.Unlock()
@@ -644,14 +640,9 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 	db.cacheMutex.Unlock()
 
 	// Update the local DB cache with the tableUpdates
-	start = time.Now()
 	db.cacheMutex.RLock()
-	cacheRLockTime := time.Since(start)
-	tLockTime, updateTime, err := db.cache.Update2Time(cookie, updates)
+	_, _, err = db.cache.Update2Time(cookie, updates)
 	db.cacheMutex.RUnlock()
-
-	klog.Infof("#### update2(%s) unmarshal: %v, cachelock: %v, cacheRlock: %v, tableLock: %v, update: %v",
-		cookie.DatabaseName, unmarshalTime, cacheLockTime, cacheRLockTime, tLockTime, updateTime)
 
 	if err != nil {
 		o.errorCh <- err
@@ -718,8 +709,10 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 		db.monitorsMutex.Unlock()
 	}
 
-	klog.Infof("#### update3(%s) unmarshal: %v, lock: %v, rlock: %v, update: %v, monLock: %v",
-		cookie.DatabaseName, unmarshalTime, cacheLockTime, cacheRLockTime, updateTime, monLockTime)
+	if cookie.DatabaseName == "OVN_Northbound" {
+		klog.Infof("#### update3(%s) unmarshal: %v, lock: %v, rlock: %v, update: %v, monLock: %v",
+			cookie.DatabaseName, unmarshalTime, cacheLockTime, cacheRLockTime, updateTime, monLockTime)
+	}
 
 	return err
 }
@@ -1340,6 +1333,14 @@ func (o *ovsdbClient) Get(ctx context.Context, model model.Model) error {
 	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
 	defer primaryDB.cacheMutex.RUnlock()
 	return primaryDB.api.Get(ctx, model)
+}
+
+//Get implements the API interface's Get function
+func (o *ovsdbClient) GetMany(ctx context.Context, models []model.Model) error {
+	primaryDB := o.primaryDB()
+	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
+	defer primaryDB.cacheMutex.RUnlock()
+	return primaryDB.api.GetMany(ctx, models)
 }
 
 //Create implements the API interface's Create function

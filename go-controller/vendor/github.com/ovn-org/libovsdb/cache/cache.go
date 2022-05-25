@@ -113,6 +113,43 @@ func (r *RowCache) Row(uuid string) model.Model {
 	return r.rowByUUID(uuid)
 }
 
+// RowsByModel searches the cache using the indexes for a provided models
+func (r *RowCache) RowsByModel(models []model.Model) ([]model.Model, error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	found := make([]model.Model, 0, len(models))
+	for i := range models {
+		if reflect.TypeOf(models[i]) != r.dataType {
+			return nil, fmt.Errorf("model type mismatch")
+		}
+		info, _ := r.dbModel.NewModelInfo(models[i])
+		uuid, err := info.FieldByColumn("_uuid")
+		if err != nil {
+			return nil, fmt.Errorf("failed to get _uuid column")
+		}
+		if uuid.(string) != "" {
+			if item := r.rowByUUID(uuid.(string)); item != nil {
+				found = append(found, item)
+			}
+			continue
+		}
+		for index, vals := range r.indexes {
+			val, err := valueFromIndex(info, index)
+			if err != nil {
+				continue
+			}
+			if uuid, ok := vals[val]; ok {
+				if item := r.rowByUUID(uuid); item != nil {
+					found = append(found, item)
+					break
+				}
+			}
+		}
+	}
+	return found, nil
+}
+
 // RowByModel searches the cache using a the indexes for a provided model
 func (r *RowCache) RowByModel(m model.Model) model.Model {
 	r.mutex.RLock()

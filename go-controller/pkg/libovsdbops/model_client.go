@@ -130,6 +130,8 @@ type operationModel struct {
 	// Model are used for mutations and updates as well. If this Model is
 	// looked up or created, it will have its UUID set after the operation.
 	Model interface{}
+	// Models is like Model but for batched lookups
+	Models []interface{}
 	// ModelPredicate specifies a predicate to look up models in the cache.
 	ModelPredicate interface{}
 	// ExistingResult is where the results of the look up are added to.
@@ -387,13 +389,52 @@ func (m *modelClient) lookup(opModel *operationModel) error {
 		}
 	}
 
-	if opModel.ModelPredicate != nil {
+	if len(opModel.Models) > 0 {
+		err = m.getMany(opModel)
+		if err == nil || err != client.ErrNotFound {
+			return err
+		}
+	} else if opModel.ModelPredicate != nil {
 		err = m.whereCache(opModel)
 	} else if opModel.BulkOp {
 		panic("Expected a ModelPredicate with BulkOp==true")
 	}
 
 	return err
+}
+
+/*
+ get copies the model, since this function ends up being called from update /
+ mutate, and Get'ing the model will modify the object to the one currently
+ existing in the DB, thus overridding all new fields we are trying to set. Do
+ return the retrived object though, in case the caller needs to act on the
+ object's UUID
+*/
+func (m *modelClient) getMany(opModel *operationModel) error {
+	copies := make([]model.Model, 0, len(opModel.Models))
+	for i := range opModel.Models {
+		copies = append(copies, copyIndexes(opModel.Models[i]))
+	}
+	if reflect.ValueOf(copies[0]).Elem().IsZero() {
+		// no indexes available
+		return client.ErrNotFound
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	if err := m.client.GetMany(ctx, copies); err != nil {
+		return err
+	}
+	for i := range opModel.Models {
+		uuid := getUUID(opModel.Models[i])
+		if uuid == "" || isNamedUUID(uuid) {
+			setUUID(opModel.Models[i], getUUID(copies[i]))
+		}
+		if err := addToExistingResult(copies[i], opModel.ExistingResult); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 /*

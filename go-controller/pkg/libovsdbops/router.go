@@ -11,8 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	"k8s.io/klog/v2"
 )
 
 // ROUTER OPs
@@ -782,17 +780,17 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 type natPredicate func(*nbdb.NAT) bool
 
 // GetNAT looks up one or more NATs from the cache
-func GetNATs(nbClient libovsdbclient.Client, nats ...*nbdb.NAT) ([]*nbdb.NAT, error) {
+func GetNATs(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]*nbdb.NAT, error) {
+	if len(nats) == 0 {
+		return nil, nil
+	}
 	found := []*nbdb.NAT{}
+	intfs := make([]interface{}, 0, len(nats))
+	for i := range nats {
+		intfs = append(intfs, nats[i])
+	}
 	opModel := operationModel{
-		ModelPredicate: func(item *nbdb.NAT) bool {
-			for i := range nats {
-				if isEquivalentNAT(item, nats[i]) {
-					return true
-				}
-			}
-			return false
-		},
+		Models:         intfs,
 		ExistingResult: &found,
 		ErrNotFound:    false,
 		BulkOp:         true,
@@ -802,10 +800,6 @@ func GetNATs(nbClient libovsdbclient.Client, nats ...*nbdb.NAT) ([]*nbdb.NAT, er
 	err := m.Lookup(opModel)
 	if err != nil {
 		return nil, err
-	}
-
-	if len(found) != len(nats) {
-		klog.Warningf("################### expected %d NATs, only found %d", len(nats), len(found))
 	}
 
 	return found, nil
@@ -835,7 +829,7 @@ func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (
 	for _, uuid := range router.Nat {
 		nats = append(nats, &nbdb.NAT{UUID: uuid})
 	}
-	realNats, err := GetNATs(nbClient, nats...)
+	realNats, err := GetNATs(nbClient, nats)
 	if err != nil {
 		return 0, 0, nil, err
 	}

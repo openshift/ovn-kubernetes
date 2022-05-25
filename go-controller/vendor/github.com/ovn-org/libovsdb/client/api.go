@@ -43,6 +43,13 @@ type API interface {
 	// preferred way is Where({condition}).List()
 	Get(context.Context, model.Model) error
 
+	// GetMany retrieves models from the cache
+	// The way the object will be fetch depends on the data contained in the
+	// provided model and the indexes defined in the associated schema
+	// For more complex ways of searching for elements in the cache, the
+	// preferred way is Where({condition}).List()
+	GetMany(context.Context, []model.Model) error
+
 	// Create returns the operation needed to add the model(s) to the Database
 	// Only fields with non-default values will be added to the transaction
 	// If the field associated with column "_uuid" has some content, it will be
@@ -246,6 +253,37 @@ func (a api) Get(ctx context.Context, m model.Model) error {
 	}
 
 	model.CloneInto(found, m)
+
+	return nil
+}
+
+func (a api) GetMany(ctx context.Context, models []model.Model) error {
+	if len(models) == 0 {
+		return nil
+	}
+
+	table, err := a.getTableFromModel(models[0])
+	if err != nil {
+		return err
+	}
+
+	tableCache := a.cache.Table(table)
+	if tableCache == nil {
+		return ErrNotFound
+	}
+
+	found, err := tableCache.RowsByModel(models)
+	if err != nil {
+		return err
+	} else if len(found) == 0 {
+		return ErrNotFound
+	} else if len(found) != len(models) {
+		return fmt.Errorf("found %d items but expected %d", len(found), len(models))
+	}
+
+	for i := range models {
+		model.CloneInto(found[i], models[i])
+	}
 
 	return nil
 }
