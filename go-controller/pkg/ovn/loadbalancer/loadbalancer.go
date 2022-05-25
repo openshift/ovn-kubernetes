@@ -47,35 +47,25 @@ func EnsureLBs(externalIDs map[string]string, LBs []LB) error {
 		toDelete.Insert(lb.UUID)
 	}
 
-	createdUUIDs := sets.NewString()
+	//lbs := make([]*LB, 0, len(LBs))
+	//for _, lb := range LBs {
+	//	lbs = append(lbs, &lb)
+	//}
 
-	txn := util.NewNBTxn()
-
-	// create or update each LB, logging UUID created (so we can clean up)
-	// missing load balancers will be created immediately
-	// existing load-balancers will be updated in the transaction
-	for i, lb := range LBs {
-		uuid, err := ensureLB(txn, lbCache, &lb, existingByName[lb.Name])
-		if err != nil {
-			return err
-		}
-		createdUUIDs.Insert(uuid)
-		toDelete.Delete(uuid)
-		LBs[i].UUID = uuid
+	uuids, err := ensureLBs(lbCache, LBs, existingByName)
+	if err != nil {
+		return fmt.Errorf("failed to ensure load balancers for %#v: %w", externalIDs, err)
 	}
+	toDelete.Delete(uuids...)
 
 	uuidsToDelete := make([]string, 0, len(toDelete))
 	for uuid := range toDelete {
 		uuidsToDelete = append(uuidsToDelete, uuid)
 	}
-	if err := DeleteLBs(txn, uuidsToDelete); err != nil {
+
+	if err := DeleteLBs(nil, uuidsToDelete); err != nil {
 		return fmt.Errorf("failed to delete %d stale load balancers for %#v: %w",
 			len(uuidsToDelete), externalIDs, err)
-	}
-
-	_, _, err = txn.Commit()
-	if err != nil {
-		return fmt.Errorf("failed to commit load balancer changes for %#v: %w", externalIDs, err)
 	}
 	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(uuidsToDelete), externalIDs)
 
@@ -83,82 +73,122 @@ func EnsureLBs(externalIDs map[string]string, LBs []LB) error {
 	return nil
 }
 
-// ensureLB creates or updates a load balancer as necessary.
+// ensureLB creates or updates load balancers as necessary.
 // TODO: make this use libovsdb and generally be more efficient
 // returns the uuid of the LB
-func ensureLB(txn *util.NBTxn, lbCache *LBCache, lb *LB, existing *CachedLB) (string, error) {
-	uuid := ""
-	if existing == nil {
+func ensureLBs(lbCache *LBCache, lbs []LB, existingByName map[string]*CachedLB) ([]string, error) {
+	// on a first pass we create new LBs
+	txn := util.NewNBTxn()
+	uuids := make([]string, 0, len(lbs))
+	createdLBs := make([]*LB, 0, len(lbs))
+	for i := range lbs {
+		lb := &lbs[i]
+		existing := existingByName[lb.Name]
+		if existing != nil {
+			continue
+		}
+
 		cmds := []string{
 			"create", "load_balancer",
 		}
 		cmds = append(cmds, lbToColumns(lb)...)
-		// note: load-balancer creation is not in the transaction
-		stdout, _, err := util.RunOVNNbctl(cmds...)
+		stdout, stderr, err := txn.AddOrCommit(cmds)
 		if err != nil {
-			return "", fmt.Errorf("failed to create load_balancer %s: %w", lb.Name, err)
+			return nil, fmt.Errorf("failed to create load_balancer %s: %w, %s", lb.Name, err, stderr)
 		}
-		uuid = stdout
-		lb.UUID = uuid
-
-		// Since this short-cut the transation, immediately add it to the cache.
-		lbCache.addNewLB(lb)
-	} else {
-		cmds := []string{
-			"set", "load_balancer", existing.UUID,
+		if stdout != "" {
+			uuids = append(uuids, strings.Split(stdout, "\n")...)
 		}
-		cmds = append(cmds, lbToColumns(lb)...)
-		_, _, err := txn.AddOrCommit(cmds)
-		if err != nil {
-			return "", fmt.Errorf("failed to update load_balancer %s: %w", lb.Name, err)
-		}
-		uuid = existing.UUID
-		lb.UUID = uuid
+		createdLBs = append(createdLBs, lb)
 	}
 
-	// List existing routers and switches, to see if there are any for which we should remove
-	existingRouters := sets.String{}
-	existingSwitches := sets.String{}
-	if existing != nil {
-		existingRouters = existing.Routers
-		existingSwitches = existing.Switches
+	stdout, _, err := txn.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("failed to commit new load balancers: %w", err)
+	}
+	if stdout != "" {
+		uuids = append(uuids, strings.Split(stdout, "\n")...)
 	}
 
-	wantRouters := sets.NewString(lb.Routers...)
-	wantSwitches := sets.NewString(lb.Switches...)
+	if len(uuids) != len(createdLBs) {
+		return nil, fmt.Errorf("failed to match uuids to created load balancers, num uuids %d, num created LBs %d, uuids %v", len(uuids), len(createdLBs), uuids)
+	}
 
-	// add missing switches
-	for _, sw := range wantSwitches.Difference(existingSwitches).List() {
-		_, _, err := txn.AddOrCommit([]string{"--may-exist", "ls-lb-add", sw, uuid})
-		if err != nil {
-			return uuid, fmt.Errorf("failed to synchronize LB %s switches / routers: %w", lb.Name, err)
+	// set the UUID for created LBs and add them to the cache
+	txn = util.NewNBTxn()
+	for i := range uuids {
+		createdLBs[i].UUID = uuids[i]
+		lbCache.addNewLB(createdLBs[i])
+	}
+
+	// on a second pass we update LBs, switches and routers
+	for i := range lbs {
+		lb := &lbs[i]
+		existing := existingByName[lb.Name]
+		if existing != nil {
+			cmds := []string{
+				"set", "load_balancer", existing.UUID,
+			}
+			cmds = append(cmds, lbToColumns(lb)...)
+			_, stderr, err := txn.AddOrCommit(cmds)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update load_balancer %s: %w, %s", lb.Name, err, stderr)
+			}
+			uuid := existing.UUID
+			lb.UUID = uuid
+			uuids = append(uuids, uuid)
+		}
+
+		uuid := lb.UUID
+
+		// List existing routers and switches, to see if there are any for which we should remove
+		existingRouters := sets.String{}
+		existingSwitches := sets.String{}
+		if existing != nil {
+			existingRouters = existing.Routers
+			existingSwitches = existing.Switches
+		}
+
+		wantRouters := sets.NewString(lb.Routers...)
+		wantSwitches := sets.NewString(lb.Switches...)
+
+		// add missing switches
+		for _, sw := range wantSwitches.Difference(existingSwitches).List() {
+			_, stderr, err := txn.AddOrCommit([]string{"--may-exist", "ls-lb-add", sw, uuid})
+			if err != nil {
+				return nil, fmt.Errorf("failed to synchronize LB %s switches / routers: %w, %s", lb.Name, err, stderr)
+			}
+		}
+		// remove old switches
+		for _, sw := range existingSwitches.Difference(wantSwitches).List() {
+			_, stderr, err := txn.AddOrCommit([]string{"--if-exists", "ls-lb-del", sw, uuid})
+			if err != nil {
+				return nil, fmt.Errorf("failed to synchronize LB %s switches / routers: %w, %s", lb.Name, err, stderr)
+			}
+		}
+
+		// add missing routers
+		for _, rtr := range wantRouters.Difference(existingRouters).List() {
+			_, stderr, err := txn.AddOrCommit([]string{"--may-exist", "lr-lb-add", rtr, uuid})
+			if err != nil {
+				return nil, fmt.Errorf("failed to synchronize LB %s switches / routers: %w, %s", lb.Name, err, stderr)
+			}
+		}
+		// remove old routers
+		for _, rtr := range existingRouters.Difference(wantRouters).List() {
+			_, stderr, err := txn.AddOrCommit([]string{"--if-exists", "lr-lb-del", rtr, uuid})
+			if err != nil {
+				return nil, fmt.Errorf("failed to synchronize LB %s switches / routers: %w, %s", lb.Name, err, stderr)
+			}
 		}
 	}
-	// remove old switches
-	for _, sw := range existingSwitches.Difference(wantSwitches).List() {
-		_, _, err := txn.AddOrCommit([]string{"--if-exists", "ls-lb-del", sw, uuid})
-		if err != nil {
-			return uuid, fmt.Errorf("failed to synchronize LB %s switches / routers: %w", lb.Name, err)
-		}
+
+	_, stderr, err := txn.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("failed to commit load balancer updates: %w, %s", err, stderr)
 	}
 
-	// add missing routers
-	for _, rtr := range wantRouters.Difference(existingRouters).List() {
-		_, _, err := txn.AddOrCommit([]string{"--may-exist", "lr-lb-add", rtr, uuid})
-		if err != nil {
-			return uuid, fmt.Errorf("failed to synchronize LB %s switches / routers: %w", lb.Name, err)
-		}
-	}
-	// remove old routers
-	for _, rtr := range existingRouters.Difference(wantRouters).List() {
-		_, _, err := txn.AddOrCommit([]string{"--if-exists", "lr-lb-del", rtr, uuid})
-		if err != nil {
-
-			return uuid, fmt.Errorf("failed to synchronize LB %s switches / routers: %w", lb.Name, err)
-		}
-	}
-
-	return uuid, nil
+	return uuids, nil
 }
 
 // lbToColumns turns a load balancer in to a set of column arguments
