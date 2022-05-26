@@ -592,23 +592,23 @@ func (t *TableCache) Update(context interface{}, tableUpdates ovsdb.TableUpdates
 }
 
 func (t *TableCache) Update2(context interface{}, tableUpdates ovsdb.TableUpdates2) error {
-	_, _, err := t.Update2Time(context, tableUpdates)
+	_, _, _, err := t.Update2Time(context, tableUpdates)
 	return err
 }
 
 // Update2 implements the update method of the NotificationHandler interface
 // this populates a channel with updates so they can be processed after the initial
 // state has been Populated
-func (t *TableCache) Update2Time(context interface{}, tableUpdates ovsdb.TableUpdates2) (time.Duration, time.Duration, error) {
+func (t *TableCache) Update2Time(context interface{}, tableUpdates ovsdb.TableUpdates2) (time.Duration, time.Duration, []*PopOp, error) {
 	if len(tableUpdates) == 0 {
-		return 0, 0, nil
+		return 0, 0, nil, nil
 	}
-	tLockTime, updateTime, err := t.Populate2Time(tableUpdates)
+	tLockTime, updateTime, ops, err := t.Populate2Time(tableUpdates)
 	if err != nil {
 		t.logger.Error(err, "during libovsdb cache populate2")
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
-	return tLockTime, updateTime, nil
+	return tLockTime, updateTime, ops, nil
 }
 
 // Locked implements the locked method of the NotificationHandler interface
@@ -682,17 +682,32 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) error {
 
 // Populate2 adds data to the cache and places an event on the channel
 func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
-	_, _, err := t.Populate2Time(tableUpdates)
+	_, _, _, err := t.Populate2Time(tableUpdates)
 	return err
 }
 
+type PopOp struct {
+	Table      string
+	Op         string
+	ModelTime  time.Duration
+	CreateTime time.Duration
+	RowTime    time.Duration
+	CloneTime  time.Duration
+	ApplyTime  time.Duration
+	EqualTime  time.Duration
+	UpdateTime time.Duration
+	DelTime    time.Duration
+	EventTime  time.Duration
+}
+
 // Populate2 adds data to the cache and places an event on the channel
-func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Duration, time.Duration, error) {
+func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Duration, time.Duration, []*PopOp, error) {
 	start := time.Now()
 	t.mutex.Lock()
 	tLockTime := time.Since(start)
 	defer t.mutex.Unlock()
 	start = time.Now()
+	var ops []*PopOp
 	for table := range t.dbModel.Types() {
 		updates, ok := tableUpdates[table]
 		if !ok {
@@ -700,65 +715,102 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 		}
 		tCache := t.cache[table]
 		for uuid, row := range updates {
+			op := &PopOp{Table: table}
 			logger := t.logger.WithValues("uuid", uuid, "table", table)
 			logger.V(5).Info("processing update")
 			switch {
 			case row.Initial != nil:
+				op.Op = "INI"
+				start = time.Now()
 				m, err := t.CreateModel(table, row.Initial, uuid)
+				op.ModelTime = time.Since(start)
 				if err != nil {
-					return 0, 0, err
+					return 0, 0, nil, err
 				}
 				logger.V(5).Info("creating row", "model", fmt.Sprintf("%+v", m))
+				start = time.Now()
 				if err := tCache.Create(uuid, m, false); err != nil {
-					return 0, 0, err
+					return 0, 0, nil, err
 				}
+				op.CreateTime = time.Since(start)
+				start = time.Now()
 				t.eventProcessor.AddEvent(addEvent, table, nil, m)
+				op.EventTime = time.Since(start)
 			case row.Insert != nil:
+				op.Op = "INS"
+				start = time.Now()
 				m, err := t.CreateModel(table, row.Insert, uuid)
+				op.ModelTime = time.Since(start)
 				if err != nil {
-					return 0, 0, err
+					return 0, 0, nil, err
 				}
 				logger.V(5).Info("inserting row", "model", fmt.Sprintf("%+v", m))
+				start = time.Now()
 				if err := tCache.Create(uuid, m, false); err != nil {
-					return 0, 0, err
+					return 0, 0, nil, err
 				}
+				op.CreateTime = time.Since(start)
+				start = time.Now()
 				t.eventProcessor.AddEvent(addEvent, table, nil, m)
+				op.EventTime = time.Since(start)
 			case row.Modify != nil:
+				op.Op = "MOD"
+				start = time.Now()
 				existing := tCache.Row(uuid)
+				op.RowTime = time.Since(start)
 				if existing == nil {
-					return 0, 0, NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
+					return 0, 0, nil, NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
 				}
+				start = time.Now()
 				modified := model.Clone(existing)
+				op.CloneTime = time.Since(start)
+				start = time.Now()
 				err := t.ApplyModifications(table, modified, *row.Modify)
+				op.ApplyTime = time.Since(start)
 				if err != nil {
-					return 0, 0, fmt.Errorf("unable to apply row modifications: %w", err)
+					return 0, 0, nil, fmt.Errorf("unable to apply row modifications: %w", err)
 				}
-				if !model.Equal(modified, existing) {
+				start = time.Now()
+				eq := model.Equal(modified, existing)
+				op.EqualTime = time.Since(start)
+				if !eq {
 					logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
+					start = time.Now()
 					if err := tCache.Update(uuid, modified, false); err != nil {
-						return 0, 0, err
+						return 0, 0, nil, err
 					}
+					op.UpdateTime = time.Since(start)
+					start = time.Now()
 					t.eventProcessor.AddEvent(updateEvent, table, existing, modified)
+					op.EventTime = time.Since(start)
 				}
 			case row.Delete != nil:
+				op.Op = "DEL"
 				fallthrough
 			default:
 				// If everything else is nil (including Delete because it's a key with
 				// no value on the wire), then process a delete
+				start = time.Now()
 				m := tCache.Row(uuid)
+				op.RowTime = time.Since(start)
 				if m == nil {
-					return 0, 0, NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
+					return 0, 0, nil, NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
 				}
 				logger.V(5).Info("deleting row", "model", fmt.Sprintf("%+v", m))
+				start = time.Now()
 				if err := tCache.Delete(uuid); err != nil {
-					return 0, 0, err
+					return 0, 0, nil, err
 				}
+				op.DelTime = time.Since(start)
+				start = time.Now()
 				t.eventProcessor.AddEvent(deleteEvent, table, m, nil)
+				op.EventTime = time.Since(start)
 			}
+			ops = append(ops, op)
 		}
 	}
 	updateTime := time.Since(start)
-	return tLockTime, updateTime, nil
+	return tLockTime, updateTime, ops, nil
 }
 
 // Purge drops all data in the cache and reinitializes it using the

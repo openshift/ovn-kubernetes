@@ -641,7 +641,7 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
-	_, _, err = db.cache.Update2Time(cookie, updates)
+	_, _, _, err = db.cache.Update2Time(cookie, updates)
 	db.cacheMutex.RUnlock()
 
 	if err != nil {
@@ -668,9 +668,7 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 		return err
 	}
 	var updates ovsdb.TableUpdates2
-	start := time.Now()
 	err = json.Unmarshal(params[2], &updates)
-	unmarshalTime := time.Since(start)
 	if err != nil {
 		return err
 	}
@@ -680,9 +678,7 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
 
-	start = time.Now()
 	db.cacheMutex.Lock()
-	cacheLockTime := time.Since(start)
 	if db.deferUpdates {
 		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{nil, &updates, lastTransactionID})
 		db.cacheMutex.Unlock()
@@ -691,27 +687,31 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 	db.cacheMutex.Unlock()
 
 	// Update the local DB cache with the tableUpdates
-	start = time.Now()
 	db.cacheMutex.RLock()
-	cacheRLockTime := time.Since(start)
-	start = time.Now()
-	err = db.cache.Update2(cookie, updates)
-	updateTime := time.Since(start)
+	tLockTime, updateTime, ops, err := db.cache.Update2Time(cookie, updates)
 	db.cacheMutex.RUnlock()
 
-	var monLockTime time.Duration
 	if err == nil {
-		start = time.Now()
 		db.monitorsMutex.Lock()
-		monLockTime = time.Since(start)
 		mon := db.monitors[cookie.ID]
 		mon.LastTransactionID = lastTransactionID
 		db.monitorsMutex.Unlock()
 	}
 
 	if cookie.DatabaseName == "OVN_Northbound" {
-		klog.Infof("#### update3(%s) unmarshal: %v, lock: %v, rlock: %v, update: %v, monLock: %v",
-			cookie.DatabaseName, unmarshalTime, cacheLockTime, cacheRLockTime, updateTime, monLockTime)
+		var opStr []string
+		for _, op := range ops {
+			if op.Op == "INS" || op.Op == "INI" {
+				opStr = append(opStr, fmt.Sprintf("[%s %s: model: %v, create: %v, evt: %v]", op.Op, op.Table, op.ModelTime, op.CreateTime, op.EventTime))
+			} else if op.Op == "MOD" {
+				opStr = append(opStr, fmt.Sprintf("[%s %s: row: %v, clone: %v, apply: %v, eq: %v, update: %v, evt: %v]", op.Op, op.Table, op.RowTime, op.CloneTime, op.ApplyTime, op.EqualTime, op.UpdateTime, op.EventTime))
+			} else if op.Op == "DEL" {
+				opStr = append(opStr, fmt.Sprintf("[%s %s: row: %v, del: %v, evt: %v]", op.Op, op.Table, op.RowTime, op.DelTime, op.EventTime))
+			}
+		}
+
+		klog.Infof("#### update3(%s) tLock: %v, update: %v === %s",
+			cookie.DatabaseName, tLockTime, updateTime, strings.Join(opStr, " "))
 	}
 
 	return err
