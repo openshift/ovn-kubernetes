@@ -875,7 +875,12 @@ var schema = `{
             "max": "unlimited"
           }
         }
-      }
+      },
+      "indexes": [
+        [
+          "name"
+        ]
+      ]
     },
     "Logical_Router_Policy": {
       "columns": {
