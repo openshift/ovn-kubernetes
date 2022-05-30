@@ -41,6 +41,7 @@ const (
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
 	routeCommand       = "route"
+	sysctlCommand      = "sysctl"
 	osRelease          = "/etc/os-release"
 	rhel               = "RHEL"
 	ubuntu             = "Ubuntu"
@@ -168,6 +169,7 @@ type execHelper struct {
 	powershellPath  string
 	netshPath       string
 	routePath       string
+	sysctlPath      string
 }
 
 var runner *execHelper
@@ -291,6 +293,10 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 			return err
 		}
 		runner.arpingPath, err = exec.LookPath(arpingCommand)
+		if err != nil {
+			return err
+		}
+		runner.sysctlPath, err = exec.LookPath(sysctlCommand)
 		if err != nil {
 			return err
 		}
@@ -626,6 +632,12 @@ func RunIP(args ...string) (string, string, error) {
 // RunArping runs a command via the "arping" utility
 func RunArping(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.arpingPath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// RunSysctl runs a command via the procps "sysctl" utility
+func RunSysctl(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.sysctlPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
