@@ -686,6 +686,14 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 	return err
 }
 
+type ApplyOp struct {
+	Col   string
+	Kind  string
+	Time  time.Duration
+	NVLen int
+	BVLen int
+}
+
 type PopOp struct {
 	Table      string
 	Op         string
@@ -694,6 +702,7 @@ type PopOp struct {
 	RowTime    time.Duration
 	CloneTime  time.Duration
 	ApplyTime  time.Duration
+	ApplyOps   []*ApplyOp
 	EqualTime  time.Duration
 	UpdateTime time.Duration
 	DelTime    time.Duration
@@ -708,6 +717,7 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 	defer t.mutex.Unlock()
 	start = time.Now()
 	var ops []*PopOp
+	start2 := time.Now()
 	for table := range t.dbModel.Types() {
 		updates, ok := tableUpdates[table]
 		if !ok {
@@ -765,7 +775,8 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 				modified := model.Clone(existing)
 				op.CloneTime = time.Since(start)
 				start = time.Now()
-				err := t.ApplyModifications(table, modified, *row.Modify)
+				var err error
+				op.ApplyOps, err = t.ApplyModifications(table, modified, *row.Modify)
 				op.ApplyTime = time.Since(start)
 				if err != nil {
 					return 0, 0, nil, fmt.Errorf("unable to apply row modifications: %w", err)
@@ -809,7 +820,7 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 			ops = append(ops, op)
 		}
 	}
-	updateTime := time.Since(start)
+	updateTime := time.Since(start2)
 	return tLockTime, updateTime, ops, nil
 }
 
@@ -989,22 +1000,23 @@ func (t *TableCache) CreateModel(tableName string, row *ovsdb.Row, uuid string) 
 
 // ApplyModifications applies the contents of a RowUpdate2.Modify to a model
 // nolint: gocyclo
-func (t *TableCache) ApplyModifications(tableName string, base model.Model, update ovsdb.Row) error {
+func (t *TableCache) ApplyModifications(tableName string, base model.Model, update ovsdb.Row) ([]*ApplyOp, error) {
 	if !t.dbModel.Valid() {
-		return fmt.Errorf("database model not valid")
+		return nil, fmt.Errorf("database model not valid")
 	}
 	table := t.dbModel.Schema.Table(tableName)
 	if table == nil {
-		return fmt.Errorf("table %s not found", tableName)
+		return nil, fmt.Errorf("table %s not found", tableName)
 	}
 	schema := t.dbModel.Schema.Table(tableName)
 	if schema == nil {
-		return fmt.Errorf("no schema for table %s", tableName)
+		return nil, fmt.Errorf("no schema for table %s", tableName)
 	}
 	info, err := t.dbModel.NewModelInfo(base)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	ops := make([]*ApplyOp, 0, len(update))
 	for k, v := range update {
 		if k == "_uuid" {
 			continue
@@ -1012,7 +1024,12 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 
 		current, err := info.FieldByColumn(k)
 		if err != nil {
-			return err
+			return nil, err
+		}
+
+		op := &ApplyOp{
+			Col:  k,
+			Kind: reflect.ValueOf(current).Kind().String(),
 		}
 
 		var value interface{}
@@ -1023,7 +1040,7 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 			value, err = ovsdb.OvsToNativeSlice(schema.Column(k).TypeObj.Key.Type, v)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		nv := reflect.ValueOf(value)
 
@@ -1031,22 +1048,29 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 		case reflect.Slice, reflect.Array:
 			// The difference between two sets are all elements that only belong to one of the sets.
 			// Iterate new values
+			op.NVLen = nv.Len()
+			start := time.Now()
 			for i := 0; i < nv.Len(); i++ {
+				realNv := nv.Index(i).Interface()
+
 				// search for match in base values
 				baseValue, err := info.FieldByColumn(k)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				bv := reflect.ValueOf(baseValue)
+				if op.BVLen == 0 {
+					op.BVLen = bv.Len()
+				}
 				var found bool
 				for j := 0; j < bv.Len(); j++ {
-					if bv.Index(j).Interface() == nv.Index(i).Interface() {
+					if bv.Index(j).Interface() == realNv {
 						// found a match, delete from slice
 						found = true
 						newValue := reflect.AppendSlice(bv.Slice(0, j), bv.Slice(j+1, bv.Len()))
 						err = info.SetField(k, newValue.Interface())
 						if err != nil {
-							return err
+							return nil, err
 						}
 						break
 					}
@@ -1055,34 +1079,38 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 					newValue := reflect.Append(bv, nv.Index(i))
 					err = info.SetField(k, newValue.Interface())
 					if err != nil {
-						return err
+						return nil, err
 					}
 				}
 			}
+			op.Time = time.Since(start)
 		case reflect.Ptr:
+			start := time.Now()
 			// if NativeToOVS was successful, then simply assign
 			if nv.Type() == reflect.ValueOf(current).Type() {
 				err = info.SetField(k, nv.Interface())
-				return err
+				op.Time = time.Since(start)
+				return nil, err
 			}
 			// With a pointer type, an update value could be a set with 2 elements [old, new]
 			if nv.Len() != 2 {
-				return fmt.Errorf("expected a slice with 2 elements for update: %+v", update)
+				return nil, fmt.Errorf("expected a slice with 2 elements for update: %+v", update)
 			}
 			// the new value is the value in the slice which isn't equal to the existing string
 			for i := 0; i < nv.Len(); i++ {
 				baseValue, err := info.FieldByColumn(k)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				bv := reflect.ValueOf(baseValue)
 				if nv.Index(i) != bv {
 					err = info.SetField(k, nv.Index(i).Addr().Interface())
 					if err != nil {
-						return err
+						return nil, err
 					}
 				}
 			}
+			op.Time = time.Since(start)
 		case reflect.Map:
 			// The difference between two maps are all key-value pairs whose keys appears in only one of the maps,
 			// plus the key-value pairs whose keys appear in both maps but with different values.
@@ -1091,7 +1119,7 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 
 			baseValue, err := info.FieldByColumn(k)
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			bv := reflect.ValueOf(baseValue)
@@ -1099,6 +1127,9 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 				bv = reflect.MakeMap(nv.Type())
 			}
 
+			op.NVLen = nv.Len()
+			op.BVLen = bv.Len()
+			start := time.Now()
 			for iter.Next() {
 				mk := iter.Key()
 				mv := iter.Value()
@@ -1121,18 +1152,22 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 			}
 			err = info.SetField(k, bv.Interface())
 			if err != nil {
-				return err
+				return nil, err
 			}
+			op.Time = time.Since(start)
 
 		default:
 			// For columns with single value, the difference is the value of the new column.
+			start := time.Now()
 			err = info.SetField(k, value)
 			if err != nil {
-				return err
+				return nil, err
 			}
+			op.Time = time.Since(start)
 		}
+		ops = append(ops, op)
 	}
-	return nil
+	return ops, nil
 }
 
 func valueFromIndex(info *mapper.Info, index index) (interface{}, error) {

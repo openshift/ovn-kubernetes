@@ -704,7 +704,14 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 			if op.Op == "INS" || op.Op == "INI" {
 				opStr = append(opStr, fmt.Sprintf("[%s %s: model: %v, create: %v, evt: %v]", op.Op, op.Table, op.ModelTime, op.CreateTime, op.EventTime))
 			} else if op.Op == "MOD" {
-				opStr = append(opStr, fmt.Sprintf("[%s %s: row: %v, clone: %v, apply: %v, eq: %v, update: %v, evt: %v]", op.Op, op.Table, op.RowTime, op.CloneTime, op.ApplyTime, op.EqualTime, op.UpdateTime, op.EventTime))
+				var aostr string
+				for _, op := range op.ApplyOps {
+					aostr = aostr + fmt.Sprintf("<%s(%s) %v/%s+%s>", op.Col, op.Kind, op.Time, op.BVLen, op.NVLen)
+				}
+				if len(aostr) > 0 {
+					aostr = aostr + " "
+				}
+				opStr = append(opStr, fmt.Sprintf("[%s %s: row: %v, clone: %v, apply: %v%s, eq: %v, update: %v, evt: %v]", op.Op, op.Table, op.RowTime, op.CloneTime, op.ApplyTime, aostr, op.EqualTime, op.UpdateTime, op.EventTime))
 			} else if op.Op == "DEL" {
 				opStr = append(opStr, fmt.Sprintf("[%s %s: row: %v, del: %v, evt: %v]", op.Op, op.Table, op.RowTime, op.DelTime, op.EventTime))
 			}
