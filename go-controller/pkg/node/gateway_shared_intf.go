@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/containernetworking/plugins/pkg/utils/sysctl"
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -1280,6 +1281,10 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 			return fmt.Errorf("could not add IPv6 rule: %v", err)
 		}
 	}
+
+	// lastly update the sysctl reverse path filtering options for ovn-k8s-mp0 interface to avoid dropping return packets
+	_, _ = sysctl.Sysctl(fmt.Sprintf("net/ipv6/conf/%s/rp_filter", types.K8sMgmtIntfName), "2")
+	_, _ = sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), "2")
 
 	return nil
 }
