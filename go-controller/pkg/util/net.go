@@ -5,11 +5,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"math/big"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -86,7 +87,7 @@ func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) 
 	defer cancel()
 	err := nbClient.Get(ctx, &lrp)
 	if err != nil {
-		return nil, fmt.Errorf("unable to find router port: %s, err: %v", portName, err)
+		return nil, fmt.Errorf("unable to find router port %s: %w", portName, err)
 	}
 	gwLRPIPs := []*net.IPNet{}
 	for _, network := range lrp.Networks {
