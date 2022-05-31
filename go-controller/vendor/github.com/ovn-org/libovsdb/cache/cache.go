@@ -724,8 +724,6 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 		tCache := t.cache[table]
 		for uuid, row := range updates {
 			op := &PopOp{Table: table}
-			logger := t.logger.WithValues("uuid", uuid, "table", table)
-			logger.V(5).Info("processing update")
 			start3 := time.Now()
 			switch {
 			case row.Initial != nil:
@@ -736,7 +734,6 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 				if err != nil {
 					return 0, 0, nil, err
 				}
-				logger.V(5).Info("creating row", "model", fmt.Sprintf("%+v", m))
 				start = time.Now()
 				if err := tCache.Create(uuid, m, false); err != nil {
 					return 0, 0, nil, err
@@ -753,7 +750,6 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 				if err != nil {
 					return 0, 0, nil, err
 				}
-				logger.V(5).Info("inserting row", "model", fmt.Sprintf("%+v", m))
 				start = time.Now()
 				if err := tCache.Create(uuid, m, false); err != nil {
 					return 0, 0, nil, err
@@ -785,7 +781,6 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 						return 0, 0, nil, err
 					}
 					op.UpdateTime = time.Since(start)
-					logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
 					start = time.Now()
 					t.eventProcessor.AddEvent(updateEvent, table, existing, modified)
 					op.EventTime = time.Since(start)
@@ -802,7 +797,6 @@ func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (time.Durat
 				if m == nil {
 					return 0, 0, nil, NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
 				}
-				logger.V(5).Info("deleting row", "model", fmt.Sprintf("%+v", m))
 				start = time.Now()
 				if err := tCache.Delete(uuid); err != nil {
 					return 0, 0, nil, err
