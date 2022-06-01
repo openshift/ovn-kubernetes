@@ -155,18 +155,21 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) error {
 		}
 	}
 
-	// update existing egress network policies to use the updated ACLs
+	// Update existing egress network policies to use the updated ACLs
+	// Note that the default multicast egress acls were created with the correct direction, but
+	// we'd still need to update its apply-after-lb=true option, so that the ACL priorities can apply properly;
+	// If acl's option["apply-after-lb"] is already set to true, then its direction should be also correct.
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[policyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) ||
-			item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress)
+		return (item.ExternalIDs[policyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) ||
+			item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress)) &&
+			item.Options["apply-after-lb"] != "true"
 	}
 	egressACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("cannot find NetworkPolicy Egress ACLs: %v", err)
 	}
 
-	// if the first egress ACL is correct they should all be correct and not need to update
-	if len(egressACLs) > 0 && egressACLs[0].Direction != nbdb.ACLDirectionFromLport {
+	if len(egressACLs) > 0 {
 		for _, acl := range egressACLs {
 			acl.Direction = nbdb.ACLDirectionFromLport
 			if acl.Options == nil {
@@ -339,7 +342,7 @@ func (oc *Controller) updateACLLoggingForPolicy(np *networkPolicy, logLevel stri
 	return err
 }
 
-func (oc *Controller) setACLLoggingForNamespace(ns string, nsInfo *namespaceInfo) error {
+func (oc *Controller) setNetworkPolicyACLLoggingForNamespace(ns string, nsInfo *namespaceInfo) error {
 	var ovsDBOps []ovsdb.Operation
 	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
 		denyACL, _ := buildDenyACLs(ns, "", targetPortGroupName(nsInfo.portGroupIngressDenyName, nsInfo.portGroupEgressDenyName, policyType), nsInfo.aclLogging.Deny, policyType)
@@ -1204,7 +1207,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	nsInfo.networkPolicies[policy.Name] = np
 	// there may have been a namespace update for ACL logging while we were creating the NP
 	// update it
-	if err := oc.setACLLoggingForNamespace(policy.Namespace, nsInfo); err != nil {
+	if err := oc.setNetworkPolicyACLLoggingForNamespace(policy.Namespace, nsInfo); err != nil {
 		klog.Warningf(err.Error())
 	} else {
 		klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",

@@ -899,6 +899,46 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("remove a LSP from a pod that has no OVN annotations", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*pod,
+						},
+					},
+				)
+				annotations := getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
+				gomega.Expect(annotations).To(gomega.Equal(""))
+
+				// Deleting port from a pod that has no annotations should be okay
+				err := fakeOvn.controller.deleteLogicalPort(pod, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("reconciles a deleted pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 
@@ -937,6 +977,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -944,7 +986,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(pod).To(gomega.BeNil())
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})))
 				return nil
 			}
 
