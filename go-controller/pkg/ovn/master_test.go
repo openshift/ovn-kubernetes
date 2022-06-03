@@ -68,6 +68,19 @@ type tNode struct {
 	DnatSnatIP           string
 }
 
+func (n tNode) k8sNode() v1.Node {
+	node := v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: n.Name,
+		},
+		Status: kapi.NodeStatus{
+			Addresses: []kapi.NodeAddress{{Type: kapi.NodeExternalIP, Address: n.NodeIP}},
+		},
+	}
+
+	return node
+}
+
 /*
 func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string, clusterCIDR string, nextHop string) {
 	const (
@@ -870,19 +883,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 
-			testNode := v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: node1.Name,
-				},
-				Status: kapi.NodeStatus{
-					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeExternalIP,
-							Address: node1.NodeIP,
-						},
-					},
-				},
-			}
+			testNode := node1.k8sNode()
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -1071,19 +1072,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 
-			testNode := v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: node1.Name,
-				},
-				Status: kapi.NodeStatus{
-					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeExternalIP,
-							Address: node1.NodeIP,
-						},
-					},
-				},
-			}
+			testNode := node1.k8sNode()
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -1457,19 +1446,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 
-			testNode := v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: node1.Name,
-				},
-				Status: kapi.NodeStatus{
-					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeExternalIP,
-							Address: node1.NodeIP,
-						},
-					},
-				},
-			}
+			testNode := node1.k8sNode()
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -1684,19 +1661,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 
-			testNode := v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: node1.Name,
-				},
-				Status: kapi.NodeStatus{
-					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeExternalIP,
-							Address: node1.NodeIP,
-						},
-					},
-				},
-			}
+			testNode := node1.k8sNode()
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
