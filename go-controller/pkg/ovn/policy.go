@@ -1143,11 +1143,13 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	nsInfo.networkPolicies[policy.Name] = np
 	// there may have been a namespace update for ACL logging while we were creating the NP
 	// update it
-	if err := oc.setACLLoggingForNamespace(policy.Namespace, nsInfo); err != nil {
-		klog.Warningf(err.Error())
-	} else {
-		klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
-			policy.Namespace, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+	if nsInfo.aclLogging.Allow != aclLogAllow {
+		if err := oc.updateACLLoggingForPolicy(np, nsInfo.aclLogging.Allow); err != nil {
+			klog.Warningf(err.Error())
+		} else {
+			klog.Infof("Policy %s: ACL logging setting updated to deny=%s allow=%s",
+				getPolicyNamespacedName(policy), nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+		}
 	}
 	return nil
 }
