@@ -34,7 +34,7 @@ convert_cni() {
   # FIXME: kubectl rollout restart deployment leaves the old pod hanging 
   # as workaround we delete the master directly
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-master
-  # restart ovnkube-node
+    # restart ovnkube-node
   kubectl -n ovn-kubernetes rollout restart daemonset ovnkube-node
   kubectl -n ovn-kubernetes rollout status daemonset ovnkube-node
   echo "Updated CNI"

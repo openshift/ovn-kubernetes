@@ -70,6 +70,7 @@ kube-system          kube-apiserver-ovn-control-plane            1/1     Running
 kube-system          kube-controller-manager-ovn-control-plane   1/1     Running   0          5h12m
 kube-system          kube-scheduler-ovn-control-plane            1/1     Running   0          5h11m
 local-path-storage   local-path-provisioner-7745554f7f-9r8dz     1/1     Running   0          5h13m
+ovn-kubernetes       ovnkube-cluster-manager-69b8985995-ccvzs    1/1     Running   0          5h13m
 ovn-kubernetes       ovnkube-db-5588bd699c-kb8h7                 2/2     Running   0          5h11m
 ovn-kubernetes       ovnkube-master-6f44d456df-bv2x8             3/3     Running   0          5h11m
 ovn-kubernetes       ovnkube-node-2t6m2                          3/3     Running   0          5h11m
@@ -460,6 +461,7 @@ kube-system        kube-apiserver-ovn-control-plane          1/1   Running  0   
 kube-system        kube-controller-manager-ovn-control-plane 1/1   Running  0        2m56s  172.17.0.2  ovn-control-plane
 kube-system        kube-scheduler-ovn-control-plane          1/1   Running  0        2m56s  172.17.0.2  ovn-control-plane
 local-path-storage local-path-provisioner-774f7f8fdb-msmd2   0/1   Pending  0        2m45s  <none>      <none>
+ovn-kubernetes     ovnkube-cluster-manager-69b8985995-ccvzs  1/1   Running  0        107s   172.17.0.2  ovn-control-plane
 ovn-kubernetes     ovnkube-db-cf4cc89b7-8d4xq                2/2   Running  0        107s   172.17.0.2  ovn-control-plane
 ovn-kubernetes     ovnkube-master-87fb56d6d-7qmnb            3/3   Running  0        107s   172.17.0.2  ovn-control-plane
 ovn-kubernetes     ovnkube-node-278l9                        2/3   Running  0        107s   172.17.0.3  ovn-worker2

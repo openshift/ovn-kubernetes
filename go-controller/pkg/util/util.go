@@ -20,7 +20,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -96,10 +96,10 @@ func GetGatewayRouterFromNode(node string) string {
 // the list of node IPs as an InternalIP address, we don't want to create the
 // default allow logical router policies for that IP. Node IPs are ordered,
 // meaning the egress IP will never be first in this list.
-func GetNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
+func GetNodeInternalAddrs(node *corev1.Node) (net.IP, net.IP) {
 	var v4Addr, v6Addr net.IP
 	for _, nodeAddr := range node.Status.Addresses {
-		if nodeAddr.Type == v1.NodeInternalIP {
+		if nodeAddr.Type == corev1.NodeInternalIP {
 			ip := utilnet.ParseIPSloppy(nodeAddr.Address)
 			if !utilnet.IsIPv6(ip) && v4Addr == nil {
 				v4Addr = ip
@@ -348,4 +348,22 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	}
 
 	return nil
+}
+
+// ShouldUpdateNode determines if the ovn-kubernetes plugin should update the state of the node.
+// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
+// whether or not ovn-kubernetes assigns a hostsubnet
+func ShouldUpdateNode(node, oldNode *corev1.Node) (bool, error) {
+	newNoHostSubnet := NoHostSubnet(node)
+	oldNoHostSubnet := NoHostSubnet(node)
+
+	if oldNoHostSubnet && newNoHostSubnet {
+		return false, nil
+	} else if oldNoHostSubnet && !newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate", node.Name)
+	} else if !oldNoHostSubnet && newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate", node.Name)
+	}
+
+	return true, nil
 }
