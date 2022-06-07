@@ -444,6 +444,20 @@ func (_m *Interface) UpdateNodeStatus(node *apicorev1.Node) error {
 	return r0
 }
 
+// UpdateNode provides a mock function with given fields: node
+func (_m *Interface) UpdateNode(node *apicorev1.Node) error {
+	ret := _m.Called(node)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*apicorev1.Node) error); ok {
+		r0 = rf(node)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UpdatePod provides a mock function with given fields: pod
 func (_m *Interface) UpdatePod(pod *apicorev1.Pod) error {
 	ret := _m.Called(pod)

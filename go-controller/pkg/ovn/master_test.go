@@ -23,7 +23,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -1008,10 +1007,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(oc).NotTo(gomega.BeNil())
 		oc.defaultCOPPUUID, err = EnsureDefaultCOPP(nbClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		err = oc.masterSubnetAllocator.InitRanges(subnets)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		// record events for testcases to check
 		wg.Add(1)
@@ -1431,9 +1426,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			// Override the default subnet allocator with a new one
-			// that has no ranges, to force a node add failure and retry
-			oc.masterSubnetAllocator = subnetallocator.NewHostSubnetAllocator()
+			// Don't create clusterManager so that the node has not subnets allocated.
 
 			config.Kubernetes.NoHostSubnetNodes = &metav1.LabelSelector{
 				MatchLabels: nodeNoHostSubnetAnnotation(),
@@ -1443,7 +1436,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				oc.retryNodes.ResourceHandler.AddResource(
 					&testNode, false)).To(
 				gomega.MatchError(
-					"nodeAdd: error adding node \"node1\": error allocating networks for node node1: 1 subnets expected only new 0 subnets allocated"))
+					"nodeAdd: error adding or updating the node node1: could not find \"k8s.ovn.org/node-subnets\" annotation"))
 
 			ginkgo.By("annotating the node with no host subnet")
 			testNode.Labels = nodeNoHostSubnetAnnotation()

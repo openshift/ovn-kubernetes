@@ -38,6 +38,8 @@ Usage:
      configuration file path (default: /etc/openvswitch/ovn_k8s.conf)
   -cluster-subnets string
      cluster wide IP subnet to use (default: 11.11.0.0/16)
+  -init-cluster-manager string
+     initialize cluster manager that watches nodes (allocates subnet for each node from the cluster-subnets), requires the hostname as argument and doesn't connect to the OVN dbs.
   -init-master string
      initialize master (that watches pods/nodes/services/policies), requires the hostname as argument
   -init-node string
@@ -147,6 +149,19 @@ server-cacert=path/to/server-ca.crt
 ```
 
 ## Example
+
+#### Initialize the master and run the main controller
+
+```
+ovnkube --init-cluster-manager <master-host-name> \
+	--k8s-cacert <path to the cacert file> \
+	--k8s-token <token string for authentication with kube apiserver> \
+	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
+	--cluster-subnets <cidr representing the global pod network e.g. 192.168.0.0/16>
+```
+
+With the above ovnkube cluster manager will establish the watcher loops for the following:
+ - nodes: as new nodes are born and init-node is called, the subnet IPAM is allocated for the respective nodes
 
 #### Initialize the master and run the main controller
 

@@ -766,6 +766,7 @@ install_ovn() {
   run_kubectl apply -f ovs-node.yaml
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
+  run_kubectl apply -f ovnkube-cluster-manager.yaml
   popd
 
   # Force pod reload just the ones with golang containers
@@ -853,7 +854,7 @@ kubectl_wait_pods() {
     echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
     kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
   done
-  for name in ovnkube-db ovnkube-master; do
+  for name in ovnkube-cluster-manager ovnkube-db ovnkube-master; do
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
     kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s

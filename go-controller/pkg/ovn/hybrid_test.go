@@ -21,10 +21,12 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	cm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -134,11 +136,7 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 }
 
 func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
-	err := clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	err = clusterController.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
+	var err error
 	clusterController.SCTPSupport = true
 	clusterController.loadBalancerGroupUUID = clusterLBUUID
 	clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
@@ -231,10 +229,11 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			err = clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// Let the real code run and ensure OVN database sync
+			clusterManager := cm.NewClusterManager(fakeClient, f, wg, record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			err = clusterManager.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			// Windows node should be allocated a subnet
@@ -260,6 +259,11 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			// nothing should be done in OVN dbs from HO running on windows node
 			gomega.Eventually(clusterController.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(dbSetup.NBData))
 			gomega.Eventually(clusterController.sbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(dbSetup.SBData))
+
+			clusterManager.Stop()
+			// Need to unregister the metrics, otherwise the subsequent tests would fail with the error
+			// that the metrics are already registered.
+			metrics.UnRegisterClusterManagerFunctional()
 			return nil
 		}
 
@@ -392,6 +396,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			clusterManager := cm.NewClusterManager(fakeClient, f, wg, record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
@@ -399,6 +405,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
+			err = clusterManager.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -538,6 +546,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedSBDatabaseState))
 
+			clusterManager.Stop()
+			// Need to unregister the metrics, otherwise the subsequent tests would fail with the error
+			// that the metrics are already registered.
+			metrics.UnRegisterClusterManagerFunctional()
 			return nil
 		}
 		err := app.Run([]string{
@@ -701,6 +713,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			clusterManager := cm.NewClusterManager(fakeClient, f, wg, record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
@@ -710,6 +724,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			err = clusterManager.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -724,6 +742,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			expectedSBDatabaseState = generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 
+			clusterManager.Stop()
+			// Need to unregister the metrics, otherwise the subsequent tests would fail with the error
+			// that the metrics are already registered.
+			metrics.UnRegisterClusterManagerFunctional()
 			return nil
 
 		}
@@ -872,6 +894,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			clusterManager := cm.NewClusterManager(fakeClient, f, wg, record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
@@ -879,6 +903,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			err = clusterManager.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -1010,6 +1037,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			gomega.Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedSBDatabaseState))
 
+			clusterManager.Stop()
+			// Need to unregister the metrics, otherwise the subsequent tests would fail with the error
+			// that the metrics are already registered.
+			metrics.UnRegisterClusterManagerFunctional()
 			return nil
 		}
 		err := app.Run([]string{

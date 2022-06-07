@@ -20,6 +20,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -348,4 +349,22 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	}
 
 	return nil
+}
+
+// ShouldUpdateNode() determines if the ovn-kubernetes plugin should update the state of the node.
+// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
+// whether or not ovn-kubernetes assigns a hostsubnet
+func ShouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
+	newNoHostSubnet := NoHostSubnet(node)
+	oldNoHostSubnet := NoHostSubnet(node)
+
+	if oldNoHostSubnet && newNoHostSubnet {
+		return false, nil
+	} else if oldNoHostSubnet && !newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate", node.Name)
+	} else if !oldNoHostSubnet && newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate", node.Name)
+	}
+
+	return true, nil
 }

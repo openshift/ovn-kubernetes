@@ -22,6 +22,12 @@ A CIDR notation IP range from which k8s assigns service cluster IPs.
 This should be the same as the one provided for kube-apiserver's
 \fB\--service-cluster-ip-range\fR option.
 .TP
+\fB\--init-cluster-manager\fR string
+Initialize cluster-manager that acts as a manager that allocates subnets for each node from the
+subnet allocation pool. Requires the hostname as argument.  Doesn't need to connect to the
+OVN databases.
+
+.TP
 \fB\--init-master\fR string
 Initialize master that acts as a controller that watches pods/services/policies. Requires the hostname as argument.
 .TP

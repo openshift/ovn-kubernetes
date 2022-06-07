@@ -70,6 +70,9 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s
 # create egressfirewalls.k8s.ovn.org CRD
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressfirewalls.yaml
 
+# Run cluster-manager deployment.
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-cluster-manager.yaml
+
 # Run ovnkube-db deployment.
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
 

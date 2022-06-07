@@ -9,7 +9,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -369,10 +368,10 @@ func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, ho
 	return oc.createNodeLogicalSwitch(node.Name, hostSubnets, oc.loadBalancerGroupUUID)
 }
 
-func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+func (oc *DefaultNetworkController) updateNodeAnnotationWithRetry(nodeName string) error {
+	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
+		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", nodeName, err)
 	}
 	var v4Addr, v6Addr *net.IPNet
 	for _, ip := range gwLRPIPs {
@@ -382,19 +381,57 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 			v6Addr = ip
 		}
 	}
-	updatedNodeAnnotation, err := util.CreateNodeGatewayRouterLRPAddrAnnotation(nil, v4Addr, v6Addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
-			node.Name, gwLRPIPs)
-	}
 
-	hostSubnets, err := oc.allocateNodeSubnets(node, oc.masterSubnetAllocator)
+	// Retry if it fails because of potential conflict which is transient. Return error in the
+	// case of other errors (say temporary API server down), and it will be taken care of by the
+	// retry mechanism.
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		node, err := oc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return err
+		}
+
+		cnode := node.DeepCopy()
+		cnode.Annotations, err = util.CreateNodeGatewayRouterLRPAddrAnnotation(cnode.Annotations, v4Addr, v6Addr)
+		if err != nil {
+			return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
+				node.Name, gwLRPIPs)
+		}
+		return oc.kube.PatchNode(node, cnode)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update node %s annotation", nodeName)
+	}
+	return nil
+}
+
+func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
+	// Node subnet for the default network is allocated by cluster manager.
+	// Make sure that the node is allocated with the subnet before proceeding
+	// to create OVN Northbound resources.
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {
+		// Log the error and return. Retry framework will keep retrying
+		// until the cluster manager has allocated the subnets.
+		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
 		return nil, err
 	}
 
-	hostSubnetsMap := map[string][]*net.IPNet{oc.GetNetworkName(): hostSubnets}
-	err = oc.UpdateNodeAnnotationWithRetry(node.Name, hostSubnetsMap, updatedNodeAnnotation)
+	// OVN can work in single-stack or dual-stack only.
+	currentHostSubnets := len(hostSubnets)
+	expectedHostSubnets := 1
+	// if dual-stack mode we expect one subnet per each IP family
+	if config.IPv4Mode && config.IPv6Mode {
+		expectedHostSubnets = 2
+	}
+
+	if expectedHostSubnets != currentHostSubnets {
+		klog.Errorf("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
+		return nil, fmt.Errorf("failed to get expected host subnets for node : %s, expected subnets : %d current subnets: %d", node.Name, expectedHostSubnets, currentHostSubnets)
+	}
+
+	err = oc.updateNodeAnnotationWithRetry(node.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -458,8 +495,6 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) erro
 }
 
 func (oc *DefaultNetworkController) deleteNode(nodeName string) error {
-	oc.masterSubnetAllocator.ReleaseAllNodeSubnets(nodeName)
-
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
@@ -583,21 +618,12 @@ func (oc *DefaultNetworkController) syncNodes(nodes []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		hostSubnets := oc.updateNodesManageHostSubnets(node, oc.masterSubnetAllocator, foundNodes)
-		if config.HybridOverlay.Enabled && len(hostSubnets) == 0 && houtil.IsHybridOverlayNode(node) {
-			// this is a hybrid overlay node so mark as allocated from the hybrid overlay subnet allocator
-			hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
-			if err != nil {
-				klog.Warning(err.Error())
-			} else if hostSubnet != nil {
-				klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
-				if err := oc.hybridOverlaySubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnet); err != nil {
-					utilruntime.HandleError(err)
-				}
-			}
-			// there is nothing left to be done if this is a hybrid overlay node
+
+		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
 			continue
 		}
+		foundNodes.Insert(node.Name)
+
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
 		if _, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name); err != nil {
 			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
@@ -677,19 +703,14 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	var errs []error
 	var err error
 
-	if noHostSubnet := noHostSubnet(node); noHostSubnet {
+	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(node.Name)
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for switch %s: %w", node.Name, err)
 		}
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
-			annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
-			if _, err := oc.hybridOverlayNodeEnsureSubnet(node, annotator); err != nil {
-				return fmt.Errorf("failed to update node %s hybrid overlay subnet annotation: %v", node.Name, err)
-			}
-			if err := annotator.Run(); err != nil {
-				oc.releaseHybridOverlayNodeSubnet(node.Name)
-				return fmt.Errorf(" failed to set hybrid overlay annotations for node %s: %v", node.Name, err)
+			if _, err := houtil.ParseHybridOverlayHostSubnet(node); err != nil {
+				return err
 			}
 		}
 		oc.clearInitialNodeNetworkUnavailableCondition(node)
@@ -703,10 +724,7 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
-			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
-			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
-			oc.recordNodeErrorEvent(node, err)
-			return err
+			return fmt.Errorf("nodeAdd: error adding or updating the node %s: %w", node.Name, err)
 		}
 		oc.addNodeFailed.Delete(node.Name)
 	}
@@ -789,12 +807,6 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 		"various caches", node.Name)
 
 	if config.HybridOverlay.Enabled {
-		if noHostSubnet := noHostSubnet(node); noHostSubnet {
-			// noHostSubnet nodes are different, only remove the switch and delete the hybrid overlay subnet
-			oc.lsManager.DeleteSwitch(node.Name)
-			oc.releaseHybridOverlayNodeSubnet(node.Name)
-			return nil
-		}
 		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 			oc.deleteHybridOverlayPort(node)
 		}

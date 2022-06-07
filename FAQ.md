@@ -37,7 +37,13 @@ that is part of the K8s cluster.
       port 4789 (when using Hybrid overlay mode)
     ```
 
- 3. The node on which ovnkube-db runs, open following ports:
+ 3. The node on which ovnkube-cluster-manager runs, open following ports:
+    ```text
+    TCP:
+      port 9411 (prometheus port to export ovnkube-cluster-manager metrics)
+    ```
+
+ 4. The node on which ovnkube-db runs, open following ports:
     ```text
     TCP:
       port 6641 (for OVN Northbound OVSDB Server)

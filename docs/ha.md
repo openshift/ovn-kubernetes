@@ -74,6 +74,23 @@ sudo ovs-appctl -t /var/run/openvswitch/ovnsb_db.ctl \
     cluster/status OVN_Southbound
 ```
 
+## Start 'ovn-kube -init-cluster-manager'
+
+On any one of the masters or on all the masters, we need to start
+'ovnkube -init-cluster-manager'.  If it is started on only one master,
+then this should ideally be a daemonset with replica count of 1.
+If it is started on all the masters (for HA of --init-cluster-manager),
+then this should ideally be a deployment.
+
+nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
+ -loglevel=4 \
+ -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
+ -logfile="/var/log/openvswitch/ovnkube.log" \
+ -init-cluster-manager="$NODENAME" -cluster-subnets="$CLUSTER_IP_SUBNET" \
+ -k8s-service-cidr="$SERVICE_IP_SUBNET" \
+ -k8s-token="$TOKEN" \
+ -nodeport 2>&1 &
+
 ## Start 'ovn-kube -init-master'
 
 On any one of the masters, we need to start 'ovnkube -init-master'.
