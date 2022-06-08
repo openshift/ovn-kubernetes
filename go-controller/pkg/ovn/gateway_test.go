@@ -619,8 +619,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
-						UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+						Name: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
+						UUID: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
 					},
 				},
 			})
@@ -740,8 +740,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
-						UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+						Name: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
+						UUID: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
 					},
 				},
 			})
