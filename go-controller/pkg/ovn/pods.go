@@ -33,7 +33,10 @@ func (oc *Controller) syncPods(pods []interface{}) {
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	var allOps []ovsdb.Operation
-	// get the list of logical switch ports (equivalent to pods)
+	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
+	// avoid subsequent new Pods getting the same duplicate Pod IP.
+	//
+	// TBD: Before this succeeds, add Pod handler should not continue to allocate IPs for the new Pods.
 	expectedLogicalPorts := make(map[string]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
