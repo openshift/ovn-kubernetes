@@ -25,8 +25,10 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 }
 
 func (o *ovsdbClient) transactSerial(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	start := time.Now()
 	select {
 	case o.transactionLockCh <- struct{}{}:
+		o.logger.V(3).Info("transactSerial waited", "time", fmt.Sprintf("%v", time.Since(start)))
 		res, err := o.transactReconnect(ctx, operation...)
 		<-o.transactionLockCh
 		return res, err
