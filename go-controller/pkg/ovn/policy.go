@@ -378,6 +378,29 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 	return nil
 }
 
+// must be called with a write lock on nsInfo
+func (oc *Controller) deleteDefaultDenyPG(namespace string, nsInfo *namespaceInfo) error {
+	ingressPGName := defaultDenyPortGroup(namespace, ingressDefaultDenySuffix)
+	egressPGName := defaultDenyPortGroup(namespace, egressDefaultDenySuffix)
+	err := deletePortGroup(oc.ovnNBClient, ingressPGName)
+	if err != nil {
+		return fmt.Errorf("failed to delete port_group for %s (%v)",
+			ingressPGName, err)
+	}
+	err = deletePortGroup(oc.ovnNBClient, egressPGName)
+	if err != nil {
+		return fmt.Errorf("failed to delete port_group for %s (%v)",
+			ingressPGName, err)
+	}
+	// NOTE: no need to explicitly remove ACLs; if PGs are gone, ACLs should be garbage collected
+	nsInfo.portGroupEgressDenyUUID = ""
+	nsInfo.portGroupEgressDenyName = ""
+	nsInfo.portGroupIngressDenyUUID = ""
+	nsInfo.portGroupIngressDenyName = ""
+
+	return nil
+}
+
 // modify ACL logging
 func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
 
@@ -1213,7 +1236,28 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	np := NewNetworkPolicy(policy)
 
 	if len(nsInfo.networkPolicies) == 0 {
-		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny, policy.Name)
+		defer func() {
+			if err != nil {
+				nsInfo, nsUnlock, errDelete := oc.ensureNamespaceLocked(policy.Namespace, false, nil)
+				// rollback failed, best effort cleanup; won't add to retry mechanism since item doesn't exist in cache yet.
+				if errDelete != nil {
+					klog.Warningf("Rollback of default port groups and acls for policy: %s/%s failed, Unable to ensure namespace for network policy: error %v", policy.Namespace, policy.Name, errDelete)
+					return
+				}
+				if len(nsInfo.networkPolicies) == 0 {
+					// try rolling-back since creation of default acls/pgs failed
+					errDelete = oc.deleteDefaultDenyPG(policy.Namespace, nsInfo)
+					nsUnlock()
+					if errDelete != nil {
+						// rollback failed, best effort cleanup; won't add to retry mechanism since item doesn't exist in cache yet.
+						klog.Warningf("Rollback of default port groups and acls for policy: %s/%s failed: error %v", policy.Namespace, policy.Name, errDelete)
+					}
+				} else {
+					nsUnlock()
+				}
+			}
+		}()
+		err = oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny, policy.Name)
 		if err != nil {
 			nsUnlock()
 			return fmt.Errorf("failed to create ingress default deny port group: %w", err)
@@ -1269,8 +1313,9 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 	if nsInfo == nil {
 		// if we didn't get nsInfo and np is nil, we cannot proceed
 		if np == nil {
-			return fmt.Errorf("failed to get namespace lock when deleting policy %s in namespace %s",
+			klog.Warningf("Failed to get namespace lock when deleting policy %s in namespace %s",
 				policy.Name, policy.Namespace)
+			return nil
 		}
 
 		if err := oc.destroyNetworkPolicy(np, false); err != nil {
@@ -1289,6 +1334,10 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 	if ok {
 		expectedLastPolicyNum = 1
 		np = foundNp
+	}
+	if np == nil {
+		klog.Warningf("Unable to delete network policy: %s/%s since its not found in cache", policy.Namespace, policy.Name)
+		return nil
 	}
 	isLastPolicyInNamespace := len(nsInfo.networkPolicies) == expectedLastPolicyNum
 	if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
