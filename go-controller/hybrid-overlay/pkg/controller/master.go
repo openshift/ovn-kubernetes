@@ -35,7 +35,7 @@ import (
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
 	kube                  kube.Interface
-	allocator             *subnetallocator.SubnetAllocator
+	allocator             subnetallocator.SubnetAllocator
 	nodeEventHandler      informer.EventHandler
 	namespaceEventHandler informer.EventHandler
 	podEventHandler       informer.EventHandler
@@ -131,7 +131,7 @@ func NewMaster(kube kube.Interface,
 			klog.Warningf(err.Error())
 		} else if hostsubnet != nil {
 			klog.V(5).Infof("Marking existing node %s hybrid overlay NodeSubnet %s as allocated", node.Name, hostsubnet)
-			if err := m.allocator.MarkAllocatedNetwork(hostsubnet); err != nil {
+			if err := m.allocator.MarkAllocatedNetworks(hostsubnet); err != nil {
 				utilruntime.HandleError(err)
 			}
 		}
@@ -192,7 +192,7 @@ func (m *MasterController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annota
 	}
 
 	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostsubnets[0].String()); err != nil {
-		_ = m.allocator.ReleaseNetwork(hostsubnets[0])
+		_ = m.allocator.ReleaseNetworks(hostsubnets[0])
 		return nil, err
 	}
 
@@ -201,7 +201,7 @@ func (m *MasterController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annota
 }
 
 func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet) error {
-	if err := m.allocator.ReleaseNetwork(subnet); err != nil {
+	if err := m.allocator.ReleaseNetworks(subnet); err != nil {
 		return fmt.Errorf("error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
 	}
 	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
