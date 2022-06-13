@@ -35,7 +35,7 @@ RUN yum install -y  \
 ARG ovsver=2.15.0-9.el8fdp
 ARG ovnver=20.12.0-196.el8fdp
 COPY ovn-2021-21.12.0-32.el8fdp.x86_64.rpm ovn-2021-central-21.12.0-32.el8fdp.x86_64.rpm ovn-2021-host-21.12.0-32.el8fdp.x86_64.rpm ovn-2021-vtep-21.12.0-32.el8fdp.x86_64.rpm  /root/
-
+COPY openvswitch2.16-2.16.0-15.el8fdp.x86_64.rpm openvswitch2.16-devel-2.16.0-15.el8fdp.x86_64.rpm openvswitch2.16-ipsec-2.16.0-15.el8fdp.x86_64.rpm python3-openvswitch2.16-2.16.0-15.el8fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
