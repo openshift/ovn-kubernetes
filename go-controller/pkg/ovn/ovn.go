@@ -65,7 +65,7 @@ type Controller struct {
 	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator *subnetallocator.SubnetAllocator
+	masterSubnetAllocator subnetallocator.SubnetAllocator
 
 	hoMaster *hocontroller.MasterController
 
