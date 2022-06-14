@@ -65,7 +65,7 @@ type Controller struct {
 	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator subnetallocator.SubnetAllocator
+	masterSubnetAllocator *subnetallocator.HostSubnetAllocator
 
 	hoMaster *hocontroller.MasterController
 
@@ -158,12 +158,6 @@ type Controller struct {
 	// libovsdb southbound client interface
 	sbClient libovsdbclient.Client
 
-	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
-	v4HostSubnetsUsed float64
-
-	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
-	v6HostSubnetsUsed float64
-
 	// Objects for pods that need to be retried
 	retryPods *retryObjs
 
@@ -231,7 +225,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		},
 		watchFactory:           wf,
 		stopChan:               stopChan,
-		masterSubnetAllocator:  subnetallocator.NewSubnetAllocator(),
+		masterSubnetAllocator:  subnetallocator.NewHostSubnetAllocator(),
 		lsManager:              lsm.NewLogicalSwitchManager(),
 		logicalPortCache:       newPortCache(stopChan),
 		namespaces:             make(map[string]*namespaceInfo),
