@@ -854,20 +854,22 @@ subnet=%s
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		app             *cli.App
-		f               *factory.WatchFactory
-		stopChan        chan struct{}
-		wg              *sync.WaitGroup
-		libovsdbCleanup *libovsdbtest.Cleanup
+		app      *cli.App
+		f        *factory.WatchFactory
+		stopChan chan struct{}
+		wg       *sync.WaitGroup
 
-		dbSetup                                  libovsdbtest.TestSetup
-		node1                                    tNode
-		testNode                                 v1.Node
-		fakeClient                               *util.OVNClientset
-		kubeFakeClient                           *fake.Clientset
-		clusterController                        *Controller
-		nodeAnnotator                            kube.Annotator
-		libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbOvnNBClient libovsdbclient.Client
+		libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbCleanup     *libovsdbtest.Cleanup
+
+		dbSetup           libovsdbtest.TestSetup
+		node1             tNode
+		testNode          v1.Node
+		fakeClient        *util.OVNClientset
+		kubeFakeClient    *fake.Clientset
+		clusterController *Controller
+		nodeAnnotator     kube.Annotator
 	)
 
 	const (

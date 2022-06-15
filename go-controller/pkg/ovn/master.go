@@ -821,7 +821,13 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 }
 
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node, config.IPv4Mode, config.IPv6Mode)
+	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+	if err != nil && !util.IsAnnotationNotSetError(err) {
+		// Log the error and try to allocate new subnets
+		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+	}
+
+	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -927,10 +933,8 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) error {
-	if err := oc.masterSubnetAllocator.ReleaseNodeSubnets(nodeName, hostSubnets...); err != nil {
-		return fmt.Errorf("error releasing node %s subnets: %v", nodeName, err)
-	}
+func (oc *Controller) deleteNode(nodeName string) error {
+	oc.masterSubnetAllocator.ReleaseAllNodeSubnets(nodeName)
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
@@ -1077,42 +1081,11 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
-	if len(nodeSwitches) == 0 {
-		klog.Warning("Did not find any logical switches with other-config")
-	}
-
 	for _, nodeSwitch := range nodeSwitches {
-		if foundNodes.Has(nodeSwitch.Name) {
-			// node still exists, no cleanup to do
-			continue
-		}
-
-		var subnets []*net.IPNet
-		for key, value := range nodeSwitch.OtherConfig {
-			var subnet *net.IPNet
-			if key == "subnet" {
-				_, subnet, err = net.ParseCIDR(value)
-				if err != nil {
-					klog.Warningf("Unable to parse subnet CIDR %v", value)
-					continue
-				}
-			} else if key == "ipv6_prefix" {
-				_, subnet, err = net.ParseCIDR(value + "/64")
-				if err != nil {
-					klog.Warningf("Unable to parse ipv6_prefix CIDR %v/64", value)
-					continue
-				}
+		if !foundNodes.Has(nodeSwitch.Name) {
+			if err := oc.deleteNode(nodeSwitch.Name); err != nil {
+				return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 			}
-			if subnet != nil {
-				subnets = append(subnets, subnet)
-			}
-		}
-		if len(subnets) == 0 {
-			continue
-		}
-
-		if err := oc.deleteNode(nodeSwitch.Name, subnets); err != nil {
-			return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 		}
 	}
 
@@ -1259,8 +1232,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
 
-	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
+	if err := oc.deleteNode(node.Name); err != nil {
 		return err
 	}
 	oc.lsManager.DeleteNode(node.Name)
