@@ -8,7 +8,6 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -35,7 +34,7 @@ import (
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
 	kube                  kube.Interface
-	allocator             subnetallocator.SubnetAllocator
+	allocator             *subnetallocator.HostSubnetAllocator
 	nodeEventHandler      informer.EventHandler
 	namespaceEventHandler informer.EventHandler
 	podEventHandler       informer.EventHandler
@@ -58,7 +57,7 @@ func NewMaster(kube kube.Interface,
 
 	m := &MasterController{
 		kube:        kube,
-		allocator:   subnetallocator.NewSubnetAllocator(),
+		allocator:   subnetallocator.NewHostSubnetAllocator(),
 		modelClient: modelClient,
 		nbClient:    libovsdbNBClient,
 		sbClient:    libovsdbSBClient,
@@ -113,28 +112,10 @@ func NewMaster(kube kube.Interface,
 	)
 
 	// Add our hybrid overlay CIDRs to the subnetallocator
-	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Mark existing hostsubnets as already allocated
-	existingNodes, err := m.kube.GetNodes()
-	if err != nil {
-		return nil, fmt.Errorf("error in initializing/fetching subnets: %v", err)
-	}
-	for _, node := range existingNodes.Items {
-		hostsubnet, err := houtil.ParseHybridOverlayHostSubnet(&node)
-		if err != nil {
-			klog.Warningf(err.Error())
-		} else if hostsubnet != nil {
-			klog.V(5).Infof("Marking existing node %s hybrid overlay NodeSubnet %s as allocated", node.Name, hostsubnet)
-			if err := m.allocator.MarkAllocatedNetworks(hostsubnet); err != nil {
-				utilruntime.HandleError(err)
-			}
-		}
+	klog.Infof("Allocating subnets")
+	if err := m.allocator.InitRanges(config.HybridOverlay.ClusterSubnets); err != nil {
+		klog.Errorf("Failed to initialize host subnet allocator ranges: %v", err)
+		return nil, err
 	}
 
 	return m, nil
@@ -180,31 +161,35 @@ func (m *MasterController) Run(stopCh <-chan struct{}) {
 // hybrid overlay subnet annotation. It returns any newly allocated subnet
 // or an error. If an error occurs, the newly allocated subnet will be released.
 func (m *MasterController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annotator kube.Annotator) (*net.IPNet, error) {
+	var existingSubnets []*net.IPNet
+
 	// Do not allocate a subnet if the node already has one
-	if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
-		return nil, nil
+	subnet, err := houtil.ParseHybridOverlayHostSubnet(node)
+	if err != nil {
+		// Log the error and try to allocate new subnets
+		klog.Infof("Failed to get node %s hybrid overlay subnet annotation: %v", node.Name, err)
+	} else if subnet != nil {
+		existingSubnets = []*net.IPNet{subnet}
 	}
 
 	// Allocate a new host subnet for this node
-	hostsubnets, err := m.allocator.AllocateNetworks()
+	// FIXME: hybrid overlay is only IPv4 for now due to limitations on the Windows side
+	hostSubnets, allocatedSubnets, err := m.allocator.AllocateNodeSubnets(node.Name, existingSubnets, true, false)
 	if err != nil {
 		return nil, fmt.Errorf("error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
 	}
 
-	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostsubnets[0].String()); err != nil {
-		_ = m.allocator.ReleaseNetworks(hostsubnets[0])
+	if err := annotator.Set(hotypes.HybridOverlayNodeSubnet, hostSubnets[0].String()); err != nil {
+		_ = m.allocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...)
 		return nil, err
 	}
 
-	klog.Infof("Allocated hybrid overlay HostSubnet %s for node %s", hostsubnets[0], node.Name)
-	return hostsubnets[0], nil
+	return hostSubnets[0], nil
 }
 
 func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet) error {
-	if err := m.allocator.ReleaseNetworks(subnet); err != nil {
-		return fmt.Errorf("error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
-	}
-	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
+	m.allocator.ReleaseAllNodeSubnets(nodeName)
+	klog.Infof("Deleted hybrid overlay HostSubnets for node %s", nodeName)
 	return nil
 }
 
@@ -221,7 +206,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	portName := util.GetHybridOverlayPortName(node.Name)
 
 	// retrieve mac annotation
-	am, annotationOK := node.Annotations[types.HybridOverlayDRMAC]
+	am, annotationOK := node.Annotations[hotypes.HybridOverlayDRMAC]
 	if annotationOK {
 		annotationMAC, err = net.ParseMAC(am)
 		if err != nil {
@@ -237,7 +222,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)
 		if annotationOK {
 			m.deleteOverlayPort(node)
-			annotator.Delete(types.HybridOverlayDRMAC)
+			annotator.Delete(hotypes.HybridOverlayDRMAC)
 		}
 		return nil
 	}
@@ -300,7 +285,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 	if !annotationOK {
 		klog.Infof("Setting node %s hybrid overlay mac annotation to %s", node.Name, annotationMAC.String())
-		if err := annotator.Set(types.HybridOverlayDRMAC, portMAC.String()); err != nil {
+		if err := annotator.Set(hotypes.HybridOverlayDRMAC, portMAC.String()); err != nil {
 			return fmt.Errorf("failed to set node %s hybrid overlay DRMAC annotation: %v", node.Name, err)
 		}
 	}
@@ -353,7 +338,7 @@ func (m *MasterController) DeleteNode(node *kapi.Node) error {
 		}
 	}
 
-	if _, ok := node.Annotations[types.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
+	if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 		m.deleteOverlayPort(node)
 	}
 

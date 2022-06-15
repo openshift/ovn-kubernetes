@@ -974,7 +974,14 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 }
 
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node, config.IPv4Mode, config.IPv6Mode)
+	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+	if err != nil && !util.IsAnnotationNotSetError(err) {
+		// Log the error and try to allocate new subnets
+		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+	}
+
+	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
+	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -1095,30 +1102,28 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
-	// Clean up as much as we can but don't hard error
-	if err := oc.masterSubnetAllocator.ReleaseNodeSubnets(nodeName, hostSubnets...); err != nil {
-		klog.Errorf("Error deleting node %s subnet: %v", nodeName, err)
-	}
+func (oc *Controller) deleteNode(nodeName string) error {
+	oc.masterSubnetAllocator.ReleaseAllNodeSubnets(nodeName)
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
-		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
 
 	if err := oc.gatewayCleanup(nodeName); err != nil {
-		klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
 	if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
-		klog.Errorf("Failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
+		return fmt.Errorf("failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
 	}
 
 	p := func(item *sbdb.Chassis) bool {
 		return item.Hostname == nodeName
 	}
 	if err := libovsdbops.DeleteChassisWithPredicate(oc.sbClient, p); err != nil {
-		klog.Errorf("Failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
+		return fmt.Errorf("failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
 	}
+	return nil
 }
 
 // OVN uses an overlay and doesn't need GCE Routes, we need to
@@ -1270,38 +1275,12 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		}
 		klog.Warning("Did not find any logical switches with other-config")
 	}
-
 	for _, nodeSwitch := range nodeSwitches {
-		if foundNodes.Has(nodeSwitch.Name) {
-			// node still exists, no cleanup to do
-			continue
-		}
-
-		var subnets []*net.IPNet
-		for key, value := range nodeSwitch.OtherConfig {
-			var subnet *net.IPNet
-			if key == "subnet" {
-				_, subnet, err = net.ParseCIDR(value)
-				if err != nil {
-					klog.Warningf("Unable to parse subnet CIDR %v", value)
-					continue
-				}
-			} else if key == "ipv6_prefix" {
-				_, subnet, err = net.ParseCIDR(value + "/64")
-				if err != nil {
-					klog.Warningf("Unable to parse ipv6_prefix CIDR %v/64", value)
-					continue
-				}
-			}
-			if subnet != nil {
-				subnets = append(subnets, subnet)
+		if !foundNodes.Has(nodeSwitch.Name) {
+			if err := oc.deleteNode(nodeSwitch.Name); err != nil {
+				return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 			}
 		}
-		if len(subnets) == 0 {
-			continue
-		}
-
-		oc.deleteNode(nodeSwitch.Name, subnets)
 	}
 
 	// cleanup stale chassis with no corresponding nodes

@@ -1357,8 +1357,9 @@ func (oc *Controller) WatchNodes() {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			oc.deleteNode(node.Name, nodeSubnets)
+			if err := oc.deleteNode(node.Name); err != nil {
+				klog.Errorf("Error deleting node %s: %v", node.Name, err)
+			}
 			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
