@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/rpc2"
@@ -26,9 +27,12 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 
 func (o *ovsdbClient) transactSerial(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
 	start := time.Now()
+    pending := atomic.AddUint64(&o.pendingTransactions, 1)
+	o.logger.V(3).Info("transactSerial transactions", "pending", pending, "ops", operation)
 	select {
 	case o.transactionLockCh <- struct{}{}:
-		o.logger.V(3).Info("transactSerial waited", "time", fmt.Sprintf("%v", time.Since(start)))
+		atomic.AddUint64(&o.pendingTransactions, ^uint64(0))
+		o.logger.V(3).Info("transactSerial waited", "time", fmt.Sprintf("%v", time.Since(start)), "ops", operation)
 		res, err := o.transactReconnect(ctx, operation...)
 		<-o.transactionLockCh
 		return res, err
@@ -77,6 +81,10 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...
 		return nil, ErrNotConnected
 	}
 	o.logger.V(4).Info("transacting operations", "database", dbName, "operations", operation)
+	start := time.Now()
+	defer func() {
+		o.logger.V(3).Info("CallWithContext took", "time", fmt.Sprintf("%v", time.Since(start)), "ops", operation)
+	}()
 	var reply []ovsdb.OperationResult
 	err := o.rpcClient.CallWithContext(ctx, "transact", args, &reply)
 	if err != nil {
@@ -106,6 +114,11 @@ func (o *ovsdbClient) ValidateOperations(dbName string, operations ...ovsdb.Oper
 	if !o.options.validateTransactions {
 		return nil
 	}
+
+	start := time.Now()
+	defer func() {
+		o.logger.V(3).Info("Transact took", "time", fmt.Sprintf("%v", time.Since(start)), "ops", operations)
+	}()
 
 	// validate operations against a temporary database built from the cache
 	database.cacheMutex.RLock()

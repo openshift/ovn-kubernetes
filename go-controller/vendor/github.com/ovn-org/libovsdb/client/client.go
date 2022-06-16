@@ -108,6 +108,7 @@ type ovsdbClient struct {
 
 	// used to serialize transactions when validation is enabled
 	transactionLockCh chan struct{}
+	pendingTransactions uint64
 }
 
 // database is everything needed to map between go types and an ovsdb Database
