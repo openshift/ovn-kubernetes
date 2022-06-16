@@ -9,6 +9,7 @@ import (
 
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
+	"k8s.io/klog/v2"
 )
 
 // ConntrackTableType Conntrack table for the netlink operation
@@ -96,7 +97,9 @@ func (h *Handle) ConntrackDeleteFilter(table ConntrackTableType, family InetFami
 
 	var matched uint
 	for _, dataRaw := range res {
+		klog.Infof("SURYA %v", dataRaw)
 		flow := parseRawData(dataRaw)
+		klog.Infof("SURYA %v", flow.String())
 		if match := filter.MatchConntrackFlow(flow); match {
 			req2 := h.newConntrackRequest(table, family, nl.IPCTNL_MSG_CT_DELETE, unix.NLM_F_ACK)
 			// skip the first 4 byte that are the netfilter header, the newConntrackRequest is adding it already
@@ -105,6 +108,7 @@ func (h *Handle) ConntrackDeleteFilter(table ConntrackTableType, family InetFami
 			matched++
 		}
 	}
+	klog.Infof("SURYA %v", matched)
 
 	return matched, nil
 }
@@ -145,6 +149,7 @@ type ConntrackFlow struct {
 	Forward    ipTuple
 	Reverse    ipTuple
 	Mark       uint32
+	Labels     []byte
 }
 
 func (s *ConntrackFlow) String() string {
@@ -246,11 +251,21 @@ func parseConnectionMark(r *bytes.Reader) (mark uint32) {
 	return
 }
 
+func parseConnectionLabels(r *bytes.Reader) (label []byte) {
+	label = make([]byte, 16) // netfilter defines 128 bit labels value
+	binary.Read(r, nl.NativeEndian(), &label)
+	return
+}
+
 func parseRawData(data []byte) *ConntrackFlow {
 	s := &ConntrackFlow{}
 	// First there is the Nfgenmsg header
 	// consume only the family field
 	reader := bytes.NewReader(data)
+	klog.Infof("SURYA %v:%x:", data, data)
+	/*for _, bye := range data {
+		klog.Infof("SURYA %v:%v:%08b", bye, string(bye), bye)
+	}*/
 	binary.Read(reader, nl.NativeEndian(), &s.FamilyType)
 
 	// skip rest of the Netfilter header
@@ -285,6 +300,10 @@ func parseRawData(data []byte) *ConntrackFlow {
 			switch t {
 			case nl.CTA_MARK:
 				s.Mark = parseConnectionMark(reader)
+			case nl.CTA_LABELS:
+				klog.Infof("case labels")
+				s.Labels = parseConnectionLabels(reader)
+				klog.Infof("SURYA %v", s.Labels)
 			}
 		}
 	}
@@ -327,16 +346,18 @@ func parseRawData(data []byte) *ConntrackFlow {
 type ConntrackFilterType uint8
 
 const (
-	ConntrackOrigSrcIP   = iota                // -orig-src ip    Source address from original direction
-	ConntrackOrigDstIP                         // -orig-dst ip    Destination address from original direction
-	ConntrackReplySrcIP                        // --reply-src ip  Reply Source IP
-	ConntrackReplyDstIP                        // --reply-dst ip  Reply Destination IP
-	ConntrackReplyAnyIP                        // Match source or destination reply IP
-	ConntrackOrigSrcPort                       // --orig-port-src port    Source port in original direction
-	ConntrackOrigDstPort                       // --orig-port-dst port    Destination port in original direction
-	ConntrackNatSrcIP    = ConntrackReplySrcIP // deprecated use instead ConntrackReplySrcIP
-	ConntrackNatDstIP    = ConntrackReplyDstIP // deprecated use instead ConntrackReplyDstIP
-	ConntrackNatAnyIP    = ConntrackReplyAnyIP // deprecated use instead ConntrackReplyAnyIP
+	ConntrackOrigSrcIP     = iota                // -orig-src ip    Source address from original direction
+	ConntrackOrigDstIP                           // -orig-dst ip    Destination address from original direction
+	ConntrackReplySrcIP                          // --reply-src ip  Reply Source IP
+	ConntrackReplyDstIP                          // --reply-dst ip  Reply Destination IP
+	ConntrackReplyAnyIP                          // Match source or destination reply IP
+	ConntrackOrigSrcPort                         // --orig-port-src port    Source port in original direction
+	ConntrackOrigDstPort                         // --orig-port-dst port    Destination port in original direction
+	ConntrackMatchLabels                         // --label label1,label2   Labels used in entry
+	ConntrackUnmatchLabels                       // --label label1,label2   Labels not used in entry
+	ConntrackNatSrcIP      = ConntrackReplySrcIP // deprecated use instead ConntrackReplySrcIP
+	ConntrackNatDstIP      = ConntrackReplyDstIP // deprecated use instead ConntrackReplyDstIP
+	ConntrackNatAnyIP      = ConntrackReplyAnyIP // deprecated use instead ConntrackReplyAnyIP
 )
 
 type CustomConntrackFilter interface {
@@ -349,6 +370,7 @@ type ConntrackFilter struct {
 	ipFilter    map[ConntrackFilterType]net.IP
 	portFilter  map[ConntrackFilterType]uint16
 	protoFilter uint8
+	labelFilter map[ConntrackFilterType][][]byte
 }
 
 // AddIP adds an IP to the conntrack filter
@@ -382,6 +404,19 @@ func (f *ConntrackFilter) AddPort(tp ConntrackFilterType, port uint16) error {
 	return nil
 }
 
+// AddLabel adds the label value to the conntrack filter
+func (f *ConntrackFilter) AddLabel(tp ConntrackFilterType, labels [][]byte) error {
+	if len(labels) == 0 {
+		return errors.New("Invalid length for provided labels")
+	}
+	if f.labelFilter == nil {
+		f.labelFilter = make(map[ConntrackFilterType][][]byte)
+	}
+	f.labelFilter[tp] = labels
+	klog.Infof("SURYA key=%v value=%v", tp, labels)
+	return nil
+}
+
 // AddProtocol adds the Layer 4 protocol to the conntrack filter
 func (f *ConntrackFilter) AddProtocol(proto uint8) error {
 	if f.protoFilter != 0 {
@@ -394,7 +429,7 @@ func (f *ConntrackFilter) AddProtocol(proto uint8) error {
 // MatchConntrackFlow applies the filter to the flow and returns true if the flow matches the filter
 // false otherwise
 func (f *ConntrackFilter) MatchConntrackFlow(flow *ConntrackFlow) bool {
-	if len(f.ipFilter) == 0 && len(f.portFilter) == 0 && f.protoFilter == 0 {
+	if len(f.ipFilter) == 0 && len(f.portFilter) == 0 && f.protoFilter == 0 && len(f.labelFilter) == 0 {
 		// empty filter always not match
 		return false
 	}
@@ -417,6 +452,7 @@ func (f *ConntrackFilter) MatchConntrackFlow(flow *ConntrackFlow) bool {
 		// -orig-dst ip   Destination address from original direction
 		if elem, found := f.ipFilter[ConntrackOrigDstIP]; match && found {
 			match = match && elem.Equal(flow.Forward.DstIP)
+			klog.Infof("SURYA %v", match)
 		}
 
 		// -src-nat ip    Source NAT ip
@@ -441,10 +477,25 @@ func (f *ConntrackFilter) MatchConntrackFlow(flow *ConntrackFlow) bool {
 		if elem, found := f.portFilter[ConntrackOrigSrcPort]; match && found {
 			match = match && elem == flow.Forward.SrcPort
 		}
+	}
 
-		// -orig-port-dst port	Destination port from original direction
-		if elem, found := f.portFilter[ConntrackOrigDstPort]; match && found {
-			match = match && elem == flow.Forward.DstPort
+	// Label filter
+	if len(f.labelFilter) > 0 && len(flow.Labels) > 0 {
+		// --label label1,label2 in conn entry;
+		// every label passed should be contained in flow.Labels for a match to be true
+		if elem, found := f.labelFilter[ConntrackMatchLabels]; match && found {
+			for _, label := range elem {
+				match = match && (bytes.Contains(flow.Labels, label))
+			}
+		}
+		// --label label1,label2 in conn entry;
+		// every label passed should be not contained in flow.Labels for a match to be true
+		if elem, found := f.labelFilter[ConntrackUnmatchLabels]; match && found {
+			for _, label := range elem {
+				match = match && !(bytes.Contains(flow.Labels, label))
+				klog.Infof("SURYA %v: %v", match, flow.String())
+				klog.Infof("SURYA deleted: %v: %v:", flow.Labels, label)
+			}
 		}
 	}
 

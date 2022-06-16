@@ -828,7 +828,7 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol)
+			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackReplyAnyIP, nil)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {

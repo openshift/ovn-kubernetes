@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -26,6 +27,11 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
+)
+
+const (
+	// Annotations used by multiple external gateways feature
+	externalGatewayPodsAnnotations = "k8s.ovn.org/external-gw-pods"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -270,7 +276,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			return err
 		}
 	}
-
+	util.SetARPTimeout()
+	n.WatchNamespaces()
 	n.WatchEndpoints()
 
 	cniServer := cni.NewCNIServer("", n.watchFactory)
@@ -290,7 +297,7 @@ func (n *OvnNode) WatchEndpoints() {
 			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
 			for item := range buildEndpointAddressMap(epOld.Subsets) {
 				if _, ok := newEpAddressMap[item]; !ok {
-					err := deleteConntrack(item.ip, item.port, item.protocol)
+					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP, nil)
 					if err != nil {
 						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 					}
@@ -300,11 +307,63 @@ func (n *OvnNode) WatchEndpoints() {
 		DeleteFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			for item := range buildEndpointAddressMap(ep.Subsets) {
-				err := deleteConntrack(item.ip, item.port, item.protocol)
+				err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP, nil)
 				if err != nil {
 					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 				}
 
+			}
+		},
+	}, nil)
+}
+
+func exGatewayPodsAnnotationsChanged(oldNs, newNs *kapi.Namespace) bool {
+	// We only care about exgw pod deletions, i.e if the IPs on a namespace reduced than before, we return true
+	// NOTE: we don't care about the whole namespace getting deleted since pods will go away and so will the conntrack entries
+	klog.Infof("SURYA old:%v, new:%v", oldNs.Annotations[externalGatewayPodsAnnotations], newNs.Annotations[externalGatewayPodsAnnotations])
+	return len(oldNs.Annotations[externalGatewayPodsAnnotations]) > len(newNs.Annotations[externalGatewayPodsAnnotations])
+}
+
+func (n *OvnNode) WatchNamespaces() {
+	n.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			oldNs, newNs := old.(*kapi.Namespace), new.(*kapi.Namespace)
+			if exGatewayPodsAnnotationsChanged(oldNs, newNs) {
+				validNextHopMAC := [][]byte{}
+				for _, gwIP := range strings.Split(newNs.Annotations[externalGatewayPodsAnnotations], ",") {
+					klog.Infof("SURYA %v", gwIP)
+					if len(gwIP) > 0 {
+						if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
+							klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
+						} else if len(hwAddr) > 0 {
+							klog.Infof("SURYA %v:%v", newNs.Name, hwAddr)
+							for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
+								hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
+							}
+							klog.Infof("SURYA %v:%v", newNs.Name, hwAddr)
+							validNextHopMAC = append(validNextHopMAC, []byte(hwAddr))
+							klog.Infof("SURYA %v:%v", newNs.Name, validNextHopMAC)
+						}
+					}
+				}
+				pods, err := n.watchFactory.GetPods(newNs.Name)
+				if err != nil {
+					klog.Errorf("Unable to get pods from informer: %v", err)
+				}
+				for _, pod := range pods {
+					pod := pod
+					podIPs, err := util.GetAllPodIPs(pod)
+					if err != nil {
+						klog.Errorf("Unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+					}
+					for _, podIP := range podIPs { // flush conntrack only for UDP
+						klog.Infof("SURYA %v", podIP)
+						err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMAC)
+						if err != nil {
+							klog.Errorf("Failed to delete conntrack entry for pod %s: %v", podIP.String(), err)
+						}
+					}
+				}
 			}
 		},
 	}, nil)

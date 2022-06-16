@@ -281,7 +281,7 @@ type ovndb struct {
 	client       *libovsdb.OvsdbClient
 	cache        map[string]map[string]libovsdb.Row
 	cachemutex   sync.RWMutex
-	tranmutex    sync.RWMutex
+	tranmutex    sync.Mutex
 	signalCB     OVNSignal
 	disconnectCB OVNDisconnectedCallback
 	db           string
@@ -360,8 +360,6 @@ func (c *ovndb) reconnect() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	go func() {
 		log.Printf("%s disconnected. Reconnecting ... \n", c.addr)
-		c.tranmutex.Lock()
-		defer c.tranmutex.Unlock()
 		retry := 0
 		for range ticker.C {
 			if err := connect(c); err != nil {
@@ -394,7 +392,7 @@ func (c *ovndb) filterTablesFromSchema() []string {
 		tables = SBTablesOrder
 	}
 
-	dbSchema := c.getSchema(c.db)
+	dbSchema := c.GetSchema()
 	schemaTables := make([]string, 0)
 	for _, table := range tables {
 		if _, ok := dbSchema.Tables[table]; ok {
@@ -445,26 +443,14 @@ func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, 
 	return c.client.Monitor(c.db, jsonContext, requests)
 }
 
-func (c *ovndb) close() error {
+// TODO return proper error
+func (c *ovndb) Close() error {
 	c.client.Disconnect()
 	return nil
 }
 
-// TODO return proper error
-func (c *ovndb) Close() error {
-	c.tranmutex.Lock()
-	defer c.tranmutex.Unlock()
-	return c.close()
-}
-
-func (c *ovndb) getSchema(db string) libovsdb.DatabaseSchema {
-	return c.client.Schema[db]
-}
-
 func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
-	c.tranmutex.RLock()
-	defer c.tranmutex.RUnlock()
-	return c.getSchema(c.db)
+	return c.client.Schema[c.db]
 }
 
 func (c *ovndb) EncapList(chname string) ([]*Encap, error) {

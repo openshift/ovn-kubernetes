@@ -18,11 +18,13 @@ import (
 
 const (
 	// Annotation used to enable/disable multicast in the namespace
-	nsMulticastAnnotation        = "k8s.ovn.org/multicast-enabled"
-	routingExternalGWsAnnotation = "k8s.ovn.org/routing-external-gws"
-	routingNamespaceAnnotation   = "k8s.ovn.org/routing-namespaces"
-	routingNetworkAnnotation     = "k8s.ovn.org/routing-network"
-	bfdAnnotation                = "k8s.ovn.org/bfd-enabled"
+	nsMulticastAnnotation = "k8s.ovn.org/multicast-enabled"
+	// Annotations used by multiple external gateways feature
+	routingExternalGWsAnnotation   = "k8s.ovn.org/routing-external-gws"
+	routingNamespaceAnnotation     = "k8s.ovn.org/routing-namespaces"
+	routingNetworkAnnotation       = "k8s.ovn.org/routing-network"
+	bfdAnnotation                  = "k8s.ovn.org/bfd-enabled"
+	externalGatewayPodsAnnotations = "k8s.ovn.org/external-gw-pods"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {

@@ -146,8 +146,9 @@ func (odbi *ovndb) getRowsMatchingUUID(table, field, uuid string) ([]string, err
 }
 
 func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.OperationResult, error) {
-	odbi.tranmutex.RLock()
-	defer odbi.tranmutex.RUnlock()
+	// Only support one trans at same time now.
+	odbi.tranmutex.Lock()
+	defer odbi.tranmutex.Unlock()
 	reply, err := odbi.client.Transact(db, ops...)
 
 	if err != nil {
@@ -166,8 +167,7 @@ func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.Op
 			if i < len(ops) {
 				opsInfo = fmt.Sprintf("%v", ops[i])
 			}
-			odbi.close()
-			return nil, fmt.Errorf("Reconnecting...Transaction Failed due to an error: %v details: %v in %s",
+			return nil, fmt.Errorf("Transaction Failed due to an error: %v details: %v in %s",
 				o.Error, o.Details, opsInfo)
 		}
 	}

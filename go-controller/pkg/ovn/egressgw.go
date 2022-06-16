@@ -156,6 +156,26 @@ func (oc *Controller) deleteRouteInfoLocked(name ktypes.NamespacedName) *externa
 	return routeInfo
 }
 
+func (oc *Controller) updateExternalGatewayPodsAnnotations(namespace string, exgwIPs []net.IP) error {
+	klog.Infof("SURYA %v", exgwIPs)
+	ns, err := oc.watchFactory.GetNamespace(namespace)
+    if err != nil {
+        return fmt.Errorf("unable to get the namespace %s: %v", namespace, err)
+    }
+	exgwPodAnnotation := ""
+	for _, ip := range exgwIPs {
+		exgwPodAnnotation += ip.String()
+		exgwPodAnnotation += ","
+	}
+	klog.Infof("SURYA %v", exgwPodAnnotation)
+
+	err = oc.kube.SetAnnotationsOnNamespace(ns, map[string]string{externalGatewayPodsAnnotations: exgwPodAnnotation})
+	if err != nil {
+		return fmt.Errorf("failed to add annotation %s/%v for namespace %s: %v", externalGatewayPodsAnnotations, exgwPodAnnotation, namespace, err)
+	}
+	return nil
+}
+
 // addPodExternalGW handles detecting if a pod is serving as an external gateway for namespace(s) and adding routes
 // to all pods in that namespace
 func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
@@ -185,6 +205,10 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 		err := oc.addPodExternalGWForNamespace(namespace, pod, gatewayInfo{gws: foundGws, bfdEnabled: enableBFD})
 		if err != nil {
 			return err
+		}
+		// add the exgw podIP to the namespace's k8s.ovn.org/external-gw-pods IP list
+		if err := oc.updateExternalGatewayPodsAnnotations(namespace, foundGws); err != nil {
+			klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", externalGatewayPodsAnnotations, foundGws, namespace, err)
 		}
 	}
 	return nil
@@ -218,6 +242,10 @@ func (oc *Controller) addExternalGWsForNamespace(egress gatewayInfo, nsInfo *nam
 		return fmt.Errorf("unable to add gateways routes for namespace: %s, gateways are nil", namespace)
 	}
 	nsInfo.routingExternalGWs = egress
+	// add the exgw podIP to the namespace's k8s.ovn.org/external-gw-pods IP list
+	if err := oc.updateExternalGatewayPodsAnnotations(namespace, egress.gws); err != nil {
+		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", externalGatewayPodsAnnotations, egress.gws, namespace, err)
+	}
 	return oc.addGWRoutesForNamespace(namespace, egress)
 }
 
@@ -327,6 +355,11 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 			routeInfo.Unlock()
 		}
 	}
+	// remove the exgw podIP to the namespace's k8s.ovn.org/external-gw-pods IP list
+	if err := oc.updateExternalGatewayPodsAnnotations(namespace, foundGws.gws); err != nil {
+		klog.Errorf("Unable to update %s/%v annotation for namespace %s: %v", externalGatewayPodsAnnotations, foundGws, namespace, err)
+	}
+	return
 }
 
 // deleteGwRoutesForNamespace handles deleting all routes to gateways for a pod on a specific GR
