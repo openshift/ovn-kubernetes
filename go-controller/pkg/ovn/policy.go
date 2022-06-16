@@ -1291,8 +1291,7 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 		return fmt.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
 	}
 	allEgressACLs = append(allEgressACLs, egressACLs...)
-	// if the first egress ACL is correct they should all be correct and not need to update
-	if allEgressACLs != nil && allEgressACLs[0].Direction != nbdb.ACLDirectionFromLport {
+	if len(allEgressACLs) != 0 {
 		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
 		var egressACLsPTR []*nbdb.ACL
 		for _, acl := range allEgressACLs {
