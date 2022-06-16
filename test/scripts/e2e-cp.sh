@@ -61,6 +61,11 @@ if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == true ]; then
   	SKIPPED_TESTS+="|"
   fi
   SKIPPED_TESTS+="Should validate the egress IP functionality against remote hosts"
+else
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="e2e multiple external gateway stale conntrack entry deletion validation"
 fi
 
 # setting these is required to make RuntimeClass tests work ... :/
