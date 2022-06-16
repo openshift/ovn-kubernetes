@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
@@ -387,6 +388,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (*namespac
 			networkPolicies:       make(map[string]*namespacePolicy),
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
+			routingExternalGWs:    gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
 		}
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it

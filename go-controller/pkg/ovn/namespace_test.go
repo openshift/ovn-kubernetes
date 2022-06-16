@@ -20,11 +20,19 @@ import (
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 	. "github.com/onsi/gomega"
 )
+
+func getNamespaceAnnotations(fakeClient kubernetes.Interface, name string) map[string]string {
+	ns, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), name, metav1.GetOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	return ns.Annotations
+}
 
 func newNamespaceMeta(namespace string, additionalLabels map[string]string) metav1.ObjectMeta {
 	labels := map[string]string{
