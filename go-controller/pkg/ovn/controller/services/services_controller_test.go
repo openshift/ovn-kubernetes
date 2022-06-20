@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/onsi/gomega"
@@ -84,28 +85,32 @@ func TestSyncServices(t *testing.T) {
 	outport := int32(3456)
 	tcp := v1.ProtocolTCP
 
+	const (
+		nodeA           = "node-a"
+		nodeB           = "node-b"
+		nodeAEndpointIP = "10.128.0.2"
+		nodeBEndpointIP = "10.128.1.2"
+		nodeAHostIP     = "10.0.0.1"
+		nodeBHostIP     = "10.0.0.2"
+	)
+	firstNode := nodeConfig(nodeA, nodeAHostIP)
+	secondNode := nodeConfig(nodeB, nodeBHostIP)
 	defaultNodes := map[string]nodeInfo{
-		"node-a": {
-			name:              "node-a",
-			nodeIPs:           []string{"10.0.0.1"},
-			gatewayRouterName: "gr-node-a",
-			switchName:        "switch-node-a",
-		},
-		"node-b": {
-			name:              "node-b",
-			nodeIPs:           []string{"10.0.0.2"},
-			gatewayRouterName: "gr-node-b",
-			switchName:        "switch-node-b",
-		},
+		nodeA: *firstNode,
+		nodeB: *secondNode,
 	}
 
+	const nodePort = 8989
+
 	tests := []struct {
-		name        string
-		slice       *discovery.EndpointSlice
-		service     *v1.Service
-		initialDb   []libovsdbtest.TestData
-		expectedDb  []libovsdbtest.TestData
-		gatewayMode string
+		name                 string
+		slice                *discovery.EndpointSlice
+		service              *v1.Service
+		initialDb            []libovsdbtest.TestData
+		expectedDb           []libovsdbtest.TestData
+		gatewayMode          string
+		nodeToDelete         *nodeInfo
+		dbStateAfterDeleting []libovsdbtest.TestData
 	}{
 
 		{
@@ -135,61 +140,26 @@ func TestSyncServices(t *testing.T) {
 				},
 			},
 			initialDb: []libovsdbtest.TestData{
-				&nbdb.LogicalSwitch{
-					UUID: "switch-node-a",
-					Name: "switch-node-a",
-				},
-				&nbdb.LogicalSwitch{
-					UUID: "switch-node-b",
-					Name: "switch-node-b",
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-a",
-					Name: "gr-node-a",
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-b",
-					Name: "gr-node-b",
-				},
+				nodeLogicalSwitch(nodeA),
+				nodeLogicalSwitch(nodeB),
+				nodeLogicalRouter(nodeA),
+				nodeLogicalRouter(nodeB),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-a",
-					Name:         "switch-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-b",
-					Name:         "switch-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 		},
 		{
@@ -220,96 +190,39 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				&nbdb.LogicalSwitch{
-					UUID: "switch-node-a",
-					Name: "switch-node-a",
-				},
-				&nbdb.LogicalSwitch{
-					UUID: "switch-node-b",
-					Name: "switch-node-b",
-				},
-				&nbdb.LogicalSwitch{
-					UUID:         "wrong-switch",
-					Name:         "wrong-switch",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-b",
-					Name: "gr-node-b",
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-c",
-					Name:         "gr-node-c",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalSwitch(nodeA),
+				nodeLogicalSwitch(nodeB),
+				nodeLogicalSwitch("wrong-switch", loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter("node-c", loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-a",
-					Name:         "switch-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-b",
-					Name:         "switch-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID: "wrong-switch",
-					Name: "wrong-switch",
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-c",
-					Name: "gr-node-c",
-				},
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch("wrong-switch"),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter("node-c"),
 			},
 		},
 		{
@@ -340,21 +253,14 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				&nbdb.LoadBalancer{
 					UUID:     "TCP_lb_gateway_router",
@@ -362,76 +268,33 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"TCP_lb_gateway_router": "",
-					},
+					ExternalIDs: tcpGatewayRouterExternalIDs(),
 				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-a",
-					Name:         "switch-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-b",
-					Name:         "switch-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				&nbdb.LoadBalancer{
-					UUID:     "TCP_lb_gateway_router",
-					Protocol: &nbdb.LoadBalancerProtocolTCP,
-					ExternalIDs: map[string]string{
-						"TCP_lb_gateway_router": "",
-					},
+					UUID:        "TCP_lb_gateway_router",
+					Protocol:    &nbdb.LoadBalancerProtocolTCP,
+					ExternalIDs: tcpGatewayRouterExternalIDs(),
 				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-a",
-					Name:         "switch-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-b",
-					Name:         "switch-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 		},
 		{
@@ -469,133 +332,160 @@ func TestSyncServices(t *testing.T) {
 						Port:       80,
 						Protocol:   v1.ProtocolTCP,
 						TargetPort: intstr.FromInt(3456),
-						NodePort:   8989,
+						NodePort:   nodePort,
 					}},
 				},
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-a",
-					Name:         "switch-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalSwitch{
-					UUID:         "switch-node-b",
-					Name:         "switch-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
+				},
+				nodeRouterLoadBalancer(firstNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				nodeRouterLoadBalancer(secondNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				nodeLogicalSwitch(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName)),
+				nodeLogicalSwitch(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
+				nodeLogicalRouter(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName)),
+				nodeLogicalRouter(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
+			},
+		},
+		{
+			name: "deleting a node should not leave stale load balancers",
+			slice: &discovery.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      serviceName + "ab1",
+					Namespace: ns,
+					Labels:    map[string]string{discovery.LabelServiceName: serviceName},
+				},
+				Ports: []discovery.EndpointPort{
+					{
+						Protocol: &tcp,
+						Port:     &outport,
 					},
 				},
-				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_node_router+switch_node-a",
-					Name: "Service_testns/foo_TCP_node_router+switch_node-a",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
+				AddressType: discovery.AddressTypeIPv4,
+				Endpoints: []discovery.Endpoint{
+					{
+						Conditions: discovery.EndpointConditions{
+							Ready: utilpointer.BoolPtr(true),
+						},
+						Addresses: []string{"10.128.0.2", "10.128.1.2"},
 					},
+				},
+			},
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
+				Spec: v1.ServiceSpec{
+					Type:       v1.ServiceTypeClusterIP,
+					ClusterIP:  "192.168.1.1",
+					ClusterIPs: []string{"192.168.1.1"},
+					Selector:   map[string]string{"foo": "bar"},
+					Ports: []v1.ServicePort{{
+						Port:       80,
+						Protocol:   v1.ProtocolTCP,
+						TargetPort: intstr.FromInt(3456),
+						NodePort:   nodePort,
+					}},
+				},
+			},
+			initialDb: []libovsdbtest.TestData{
+				&nbdb.LoadBalancer{
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
-						"10.0.0.1:8989": "10.128.0.2:3456,10.128.1.2:3456",
+						"192.168.0.1:6443": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
+				nodeLogicalSwitch(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+			},
+			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_node_router+switch_node-b",
-					Name: "Service_testns/foo_TCP_node_router+switch_node-b",
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
-						"10.0.0.2:8989": "10.128.0.2:3456,10.128.1.2:3456",
+						"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				&nbdb.LogicalSwitch{
-					UUID: "switch-node-a",
-					Name: "switch-node-a",
-					LoadBalancer: []string{
-						"Service_testns/foo_TCP_cluster",
-						"Service_testns/foo_TCP_node_router+switch_node-a",
-					},
+				nodeRouterLoadBalancer(firstNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				nodeRouterLoadBalancer(secondNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				nodeLogicalSwitch(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName)),
+				nodeLogicalSwitch(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
+				nodeLogicalRouter(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName)),
+				nodeLogicalRouter(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
+			},
+			nodeToDelete: nodeConfig(nodeA, nodeAHostIP),
+			dbStateAfterDeleting: []libovsdbtest.TestData{&nbdb.LoadBalancer{
+				UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+				Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+				Options:  servicesOptions(),
+				Protocol: &nbdb.LoadBalancerProtocolTCP,
+				Vips: map[string]string{
+					"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
 				},
-				&nbdb.LogicalSwitch{
-					UUID: "switch-node-b",
-					Name: "switch-node-b",
-					LoadBalancer: []string{
-						"Service_testns/foo_TCP_cluster",
-						"Service_testns/foo_TCP_node_router+switch_node-b",
-					},
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-a",
-					Name: "gr-node-a",
-					LoadBalancer: []string{
-						"Service_testns/foo_TCP_cluster",
-						"Service_testns/foo_TCP_node_router+switch_node-a",
-					},
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-b",
-					Name: "gr-node-b",
-					LoadBalancer: []string{
-						"Service_testns/foo_TCP_cluster",
-						"Service_testns/foo_TCP_node_router+switch_node-b",
-					},
-				},
+				ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
+			},
+				nodeRouterLoadBalancer(secondNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
+				nodeLogicalSwitch(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
+				nodeLogicalRouter(nodeA,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB,
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
 			},
 		},
 	}
@@ -628,6 +518,118 @@ func TestSyncServices(t *testing.T) {
 			}
 
 			g.Eventually(controller.nbClient).Should(libovsdbtest.HaveData(tt.expectedDb))
+
+			if tt.nodeToDelete != nil {
+				deleteNode(controller, tt.nodeToDelete.name)
+				g.Expect(controller.syncService(namespacedServiceName(ns, serviceName))).To(gomega.Succeed())
+				g.Eventually(controller.nbClient).ShouldNot(libovsdbtest.ContainData(nodeRouterLoadBalancer(firstNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP)))
+				g.Eventually(controller.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(tt.dbStateAfterDeleting))
+			}
 		})
+	}
+}
+
+func deleteNode(controller *serviceController, nodeName string) {
+	controller.nodeTracker.removeNodeWithServiceReSync(nodeName)
+}
+
+func nodeLogicalSwitch(nodeName string, namespacedServiceNames ...string) *nbdb.LogicalSwitch {
+	ls := &nbdb.LogicalSwitch{
+		UUID: nodeSwitchName(nodeName),
+		Name: nodeSwitchName(nodeName),
+	}
+	if len(namespacedServiceNames) > 0 {
+		ls.LoadBalancer = namespacedServiceNames
+	}
+	return ls
+}
+
+func nodeLogicalRouter(nodeName string, namespacedServiceNames ...string) *nbdb.LogicalRouter {
+	ls := &nbdb.LogicalRouter{
+		UUID: nodeGWRouterName(nodeName),
+		Name: nodeGWRouterName(nodeName),
+	}
+	if len(namespacedServiceNames) > 0 {
+		ls.LoadBalancer = namespacedServiceNames
+	}
+	return ls
+}
+
+func nodeSwitchName(nodeName string) string {
+	return fmt.Sprintf("switch-%s", nodeName)
+}
+
+func nodeGWRouterName(nodeName string) string {
+	return fmt.Sprintf("gr-%s", nodeName)
+}
+
+func loadBalancerClusterWideTCPServiceName(ns string, serviceName string) string {
+	return fmt.Sprintf("Service_%s_TCP_cluster", namespacedServiceName(ns, serviceName))
+}
+
+func namespacedServiceName(ns string, name string) string {
+	return fmt.Sprintf("%s/%s", ns, name)
+}
+
+func nodeSwitchRouterLoadBalancerName(nodeName string, serviceNamespace string, serviceName string) string {
+	return fmt.Sprintf(
+		"Service_%s/%s_TCP_node_router+switch_%s",
+		serviceNamespace,
+		serviceName,
+		nodeName)
+}
+
+func servicesOptions() map[string]string {
+	return map[string]string{
+		"event":     "false",
+		"reject":    "true",
+		"skip_snat": "false",
+	}
+}
+
+func tcpGatewayRouterExternalIDs() map[string]string {
+	return map[string]string{
+		"TCP_lb_gateway_router": "",
+	}
+}
+
+func serviceExternalIDs(namespacedServiceName string) map[string]string {
+	return map[string]string{
+		"k8s.ovn.org/kind":  "Service",
+		"k8s.ovn.org/owner": namespacedServiceName,
+	}
+}
+
+func nodeRouterLoadBalancer(node *nodeInfo, nodePort int32, serviceName string, serviceNamespace string, outputPort int32, endpointIPs ...string) *nbdb.LoadBalancer {
+	return &nbdb.LoadBalancer{
+		UUID:     nodeSwitchRouterLoadBalancerName(node.name, serviceNamespace, serviceName),
+		Name:     nodeSwitchRouterLoadBalancerName(node.name, serviceNamespace, serviceName),
+		Options:  servicesOptions(),
+		Protocol: &nbdb.LoadBalancerProtocolTCP,
+		Vips: map[string]string{
+			endpoint(node.nodeIPs[0], nodePort): computeEndpoints(outputPort, endpointIPs...),
+		},
+		ExternalIDs: serviceExternalIDs(namespacedServiceName(serviceNamespace, serviceName)),
+	}
+}
+
+func computeEndpoints(outputPort int32, ips ...string) string {
+	var endpoints []string
+	for _, ip := range ips {
+		endpoints = append(endpoints, endpoint(ip, outputPort))
+	}
+	return strings.Join(endpoints, ",")
+}
+
+func endpoint(ip string, port int32) string {
+	return fmt.Sprintf("%s:%d", ip, port)
+}
+
+func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
+	return &nodeInfo{
+		name:              nodeName,
+		nodeIPs:           []string{nodeIP},
+		gatewayRouterName: nodeGWRouterName(nodeName),
+		switchName:        nodeSwitchName(nodeName),
 	}
 }

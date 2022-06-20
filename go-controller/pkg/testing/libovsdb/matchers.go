@@ -203,49 +203,68 @@ func testDataEqual(x, y TestData, ignoreUUIDs bool) bool {
 
 // HaveData matches expected libovsdb models with named UUIDs
 func HaveData(expected ...TestData) gomegatypes.GomegaMatcher {
-	return haveData(false, true, expected)
+	return haveData(false, true, expected, gomega.ConsistOf)
 }
 
 // HaveDataIgnoringUUIDs matches expected libovsdb models ignoring UUIDs
 func HaveDataIgnoringUUIDs(expected ...TestData) gomegatypes.GomegaMatcher {
-	return haveData(true, false, expected)
+	return haveData(true, false, expected, gomega.ConsistOf)
 }
 
 // HaveDataExact matches expected libovsdb models exactly
 func HaveDataExact(expected ...TestData) gomegatypes.GomegaMatcher {
-	return haveData(false, false, expected)
+	return haveData(false, false, expected, gomega.ConsistOf)
 }
 
 func HaveEmptyData() gomegatypes.GomegaMatcher {
-	transform := func(client libovsdbclient.Client) []TestData {
-		return getTestDataFromClientCache(client)
-	}
-	return gomega.WithTransform(transform, gomega.BeEmpty())
+	return gomega.WithTransform(getTestDataFromClientCache, gomega.BeEmpty())
 }
 
-func haveData(ignoreUUIDs, nameUUIDs bool, expected []TestData) gomegatypes.GomegaMatcher {
-	if e, ok := expected[0].([]TestData); len(expected) == 1 && ok {
-		// flatten
-		expected = e
+func haveData(ignoreUUIDs, nameUUIDs bool, expected []TestData, matcherFunction func(elements ...interface{}) gomegatypes.GomegaMatcher) gomegatypes.GomegaMatcher {
+	expected = flatten(expected)
+	matchers := testDataMatchers(ignoreUUIDs, expected)
+
+	if nameUUIDs {
+		namedUUIDTransformWrapper := func(client libovsdbclient.Client) []TestData {
+			return transformTestDataWithUUIDs(client, expected, matchers)
+		}
+		return gomega.WithTransform(namedUUIDTransformWrapper, matcherFunction(matchers))
 	}
+
+	return gomega.WithTransform(getTestDataFromClientCache, matcherFunction(matchers))
+}
+
+// ContainData succeeds if actual contains the passed in elements.
+// The ordering of the elements does not matter.
+func ContainData(expected ...TestData) gomegatypes.GomegaMatcher {
+	return haveData(false, true, expected, gomega.ContainElements)
+}
+
+// ContainDataIgnoringUUIDs succeeds if actual contains the passed in elements,
+// ignoring the elements UUIDs.
+// The ordering of the elements does not matter.
+func ContainDataIgnoringUUIDs(expected ...TestData) gomegatypes.GomegaMatcher {
+	return haveData(true, false, expected, gomega.ContainElements)
+}
+
+func transformTestDataWithUUIDs(client libovsdbclient.Client, expected []TestData, matchers []*testDataMatcher) []TestData {
+	expectedCopy := copystructure.Must(copystructure.Copy(expected)).([]TestData)
+	actualCopy := copystructure.Must(
+		copystructure.Copy(
+			getTestDataFromClientCache(client))).([]TestData)
+	matchAndReplaceNamedUUIDs(actualCopy, expectedCopy)
+	for i, m := range matchers {
+		m.expected = expectedCopy[i]
+	}
+	return actualCopy
+}
+
+func testDataMatchers(ignoreUUIDs bool, expected []TestData) []*testDataMatcher {
 	matchers := []*testDataMatcher{}
 	for _, e := range expected {
 		matchers = append(matchers, matchTestData(ignoreUUIDs, e))
 	}
-	transform := func(client libovsdbclient.Client) []TestData {
-		actual := getTestDataFromClientCache(client)
-		if nameUUIDs {
-			expectedCopy := copystructure.Must(copystructure.Copy(expected)).([]TestData)
-			actualCopy := copystructure.Must(copystructure.Copy(actual)).([]TestData)
-			matchAndReplaceNamedUUIDs(actualCopy, expectedCopy)
-			for i, m := range matchers {
-				m.expected = expectedCopy[i]
-			}
-			return actualCopy
-		}
-		return actual
-	}
-	return gomega.WithTransform(transform, gomega.ConsistOf(matchers))
+	return matchers
 }
 
 func matchTestData(ignoreUUID bool, expected TestData) *testDataMatcher {
@@ -259,15 +278,14 @@ func ConsistOfIgnoringUUIDs(expected ...TestData) gomegatypes.GomegaMatcher {
 	if len(expected) == 0 {
 		return gomega.BeEmpty()
 	}
+	return gomega.ConsistOf(testDataMatchers(true, flatten(expected)))
+}
+
+func flatten(expected []TestData) []TestData {
 	if e, ok := expected[0].([]TestData); len(expected) == 1 && ok {
-		// flatten
 		expected = e
 	}
-	matchers := []*testDataMatcher{}
-	for _, e := range expected {
-		matchers = append(matchers, matchTestData(true, e))
-	}
-	return gomega.ConsistOf(matchers)
+	return expected
 }
 
 type testDataMatcher struct {
