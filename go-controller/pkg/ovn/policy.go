@@ -177,6 +177,7 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
 		var egressACLsPTR []*nbdb.ACL
 		for _, acl := range allEgressACLs {
+			acl := acl
 			acl.Direction = nbdb.ACLDirectionFromLport
 			acl.Options = map[string]string{"apply-after-lb": "true"}
 			egressACLsPTR = append(egressACLsPTR, &acl)
@@ -1296,6 +1297,7 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
 		var egressACLsPTR []*nbdb.ACL
 		for _, acl := range allEgressACLs {
+			acl := acl
 			acl.Direction = nbdb.ACLDirectionFromLport
 			acl.Options = map[string]string{"apply-after-lb": "true"}
 			egressACLsPTR = append(egressACLsPTR, &acl)
