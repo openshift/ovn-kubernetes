@@ -1869,22 +1869,40 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
 			},
 		},
-		{
-			Model: &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				if len(logicalRouterPolicyRes) == 1 && len(logicalRouterPolicyRes[0].Nexthops) == 1 && logicalRouterPolicyRes[0].Nexthops[0] == gatewayRouterIP {
-					return lr.Name == types.OVNClusterRouter
-				}
-				return false
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
 	}
-	if err := e.modelClient.Delete(opsModel...); err != nil {
+	ops, err := e.modelClient.DeleteOps(opsModel...)
+	if err != nil {
+		return fmt.Errorf("unable to prepare ops for remove nexthops of logical router policy, err: %v", err)
+	}
+
+	// If this would be the removal of the last nexthop of the logicalRouterPolicy, simply remove it instead of mutating the row
+	if len(logicalRouterPolicyRes) == 1 && len(logicalRouterPolicyRes[0].Nexthops) == 1 && logicalRouterPolicyRes[0].Nexthops[0] == gatewayRouterIP {
+		logicalRouterPolicy = nbdb.LogicalRouterPolicy{
+			UUID: logicalRouterPolicyRes[0].UUID,
+		}
+		opsModel = []libovsdbops.OperationModel{
+			{
+				Model: &logicalRouterPolicy,
+			},
+			{
+				Model: &logicalRouter,
+				ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+					return lr.Name == types.OVNClusterRouter
+				},
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
+				},
+			},
+		}
+		ops, err = e.modelClient.DeleteOps(opsModel...)
+		if err != nil {
+			return fmt.Errorf("unable to prepare ops for removal of logical router policy, err: %v", err)
+		}
+	}
+	if _, err = libovsdbops.TransactAndCheck(e.nbClient, ops); err != nil {
 		return fmt.Errorf("unable to remove logical router policy, err: %v", err)
 	}
+
 	return nil
 }
 
