@@ -179,4 +179,6 @@ const (
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology = "layer3"
 	Layer2Topology = "layer2"
+
+	OvnDefaultZone = "global"
 )

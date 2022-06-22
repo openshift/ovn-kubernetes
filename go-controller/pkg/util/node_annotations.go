@@ -14,6 +14,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // This handles the annotations used by the node to pass information about its local
@@ -78,6 +79,10 @@ const (
 
 	// ovnNodeId is the id (of type integer) of a node. It is set by cluster-manager.
 	ovnNodeId = "k8s.ovn.org/ovn-node-id"
+
+	// ovnNodeZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
+	// ovnkube-node gets the node's zone from the OVN Southbound database.
+	ovnNodeZoneName = "k8s.ovn.org/ovn-zone"
 )
 
 type L3GatewayConfig struct {
@@ -590,4 +595,20 @@ func GetNodeId(node *kapi.Node) int {
 		return -1
 	}
 	return id
+}
+
+// SetNodeZone() sets the node's zone in the 'ovnNodeZoneName' node annotation.
+func SetNodeZone(nodeAnnotator kube.Annotator, zoneName string) error {
+	return nodeAnnotator.Set(ovnNodeZoneName, zoneName)
+}
+
+// SetNodeZone() returns the zone of the node set in the 'ovnNodeZoneName' node annotation.
+// If the annotation is not set, it returns the 'default' zone name.
+func GetNodeZone(node *kapi.Node) string {
+	zoneName, ok := node.Annotations[ovnNodeZoneName]
+	if !ok {
+		return types.OvnDefaultZone
+	}
+
+	return zoneName
 }
