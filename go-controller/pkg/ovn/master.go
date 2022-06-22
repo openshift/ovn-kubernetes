@@ -1363,7 +1363,8 @@ func (oc *Controller) syncNodesPeriodic() {
 	}
 
 	staleChassis := []*sbdb.Chassis{}
-	for _, v := range chassisHostNameMap {
+	for i, _ := range chassisHostNameMap {
+		v := chassisHostNameMap[i]
 		staleChassis = append(staleChassis, &v)
 	}
 
@@ -1474,7 +1475,8 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 
 	knownChassisNames := sets.NewString()
 	chassisDeleteList := []*sbdb.Chassis{}
-	for _, chassis := range chassisList {
+	for i, _ := range chassisList {
+		chassis := chassisList[i]
 		knownChassisNames.Insert(chassis.Name)
 		// skip chassis that have a corresponding node
 		if foundNodes.Has(chassis.Hostname) {
