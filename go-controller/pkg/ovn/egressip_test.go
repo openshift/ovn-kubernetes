@@ -4616,6 +4616,29 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Action:   nbdb.LogicalRouterPolicyActionAllow,
 						UUID:     "no-reroute-service-UUID",
 					},
+					// FIXME(kyrtapz): This will never happen during real operations because OVS
+					//   DB server will GC unreferenced non-root items. However
+					//   until https://github.com/ovn-org/libovsdb/issues/219 is
+					//   done, libovsdb test server won't
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.EgressIPReroutePriority,
+						Match:    fmt.Sprintf("ip4.src == %s", egressPod2.Status.PodIP),
+						Action:   nbdb.LogicalRouterPolicyActionReroute,
+						ExternalIDs: map[string]string{
+							"name": eIP.Name,
+						},
+						UUID: "reroute-UUID1",
+					},
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.EgressIPReroutePriority,
+						Match:    fmt.Sprintf("ip4.src == %s", egressPod1.Status.PodIP),
+						Action:   nbdb.LogicalRouterPolicyActionReroute,
+						ExternalIDs: map[string]string{
+							"name": eIP.Name,
+						},
+						UUID: "reroute-UUID2",
+					},
+
 					&nbdb.NAT{
 						UUID:       "egressip-nat-UUID1",
 						LogicalIP:  podV4IP,
