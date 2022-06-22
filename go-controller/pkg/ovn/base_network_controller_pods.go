@@ -80,7 +80,7 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 	topoType := bnc.TopologyType()
 	if !bnc.IsSecondary() || topoType == ovntypes.Layer3Topology {
 		// for default network and layer3 topology type networks, get all node switches.
-		nodes, err := bnc.watchFactory.GetNodes()
+		nodes, err := bnc.GetLocalZoneNodes()
 		if err != nil {
 			return fmt.Errorf("failed to get nodes: %v", err)
 		}

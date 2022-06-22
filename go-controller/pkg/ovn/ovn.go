@@ -121,11 +121,20 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
 
+func (oc *DefaultNetworkController) isPodScheduledinLocalZone(pod *kapi.Pod) bool {
+	if !util.PodScheduled(pod) {
+		return false
+	}
+
+	_, isLocalZoneNode := oc.localZoneNodes.Load(pod.Spec.NodeName)
+	return isLocalZoneNode
+}
+
 // ensurePod tries to set up a pod. It returns nil on success and error on failure; failure
 // indicates the pod set up should be retried later.
 func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	// Try unscheduled pods later
-	if !util.PodScheduled(pod) {
+	if !oc.isPodScheduledinLocalZone(pod) {
 		return nil
 	}
 

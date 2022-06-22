@@ -602,12 +602,17 @@ func (oc *DefaultNetworkController) syncNodes(nodes []interface{}) error {
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
 			continue
 		}
-		foundNodes.Insert(node.Name)
 
-		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		if _, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name); err != nil {
-			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
-			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+		// Add the node to the foundNodes only if it belongs to the local zone.
+		if oc.isLocalZoneNode(node) {
+			foundNodes.Insert(node.Name)
+			oc.localZoneNodes.Store(node.Name, true)
+
+			// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
+			if _, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name); err != nil {
+				// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
+				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+			}
 		}
 	}
 
@@ -678,10 +683,15 @@ type nodeSyncs struct {
 	syncHo                bool
 }
 
-func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
+
+	_, present := oc.localZoneNodes.Load(node.Name)
+	if !present {
+		oc.localZoneNodes.Store(node.Name, true)
+	}
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(node.Name)
@@ -782,6 +792,15 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	return err
 }
 
+func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node) error {
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		_ = oc.deleteNodeEvent(node)
+	}
+	return nil
+}
+
 func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
@@ -794,6 +813,8 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 			return err
 		}
 	}
+	oc.localZoneNodes.Delete(node.Name)
+
 	if err := oc.deleteNode(node.Name); err != nil {
 		return err
 	}
@@ -833,4 +854,9 @@ func (oc *DefaultNetworkController) createACLLoggingMeter() error {
 	}
 
 	return nil
+}
+
+// isLocalZoneNode returns true if the node is part of the local zone.
+func (oc *DefaultNetworkController) isLocalZoneNode(node *kapi.Node) bool {
+	return util.GetNodeZone(node) == oc.zone
 }

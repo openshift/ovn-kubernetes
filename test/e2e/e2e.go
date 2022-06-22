@@ -486,8 +486,8 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 }
 
 func findOvnKubeMasterNode() (string, error) {
-
-	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master",
+	masterDefaultZoneLeaseName := "ovn-kubernetes-master-global"
+	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", masterDefaultZoneLeaseName,
 		"-o", "jsonpath='{.spec.holderIdentity}'")
 
 	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master)"+

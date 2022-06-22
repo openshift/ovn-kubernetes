@@ -179,6 +179,9 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 
 // Start waits until this process is the leader before starting master functions
 func (cm *networkControllerManager) Start(ctx context.Context, cancel context.CancelFunc) error {
+	// Get the zone name first.
+	zone := libovsdbops.GetNBZone(cm.nbClient)
+
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		// TODO (rravaiol) (bpickard)
@@ -190,7 +193,7 @@ func (cm *networkControllerManager) Start(ctx context.Context, cancel context.Ca
 		// This will have to be updated for the next k8s bump: to 1.26.
 		resourcelock.LeasesResourceLock,
 		config.Kubernetes.OVNConfigNamespace,
-		"ovn-kubernetes-master",
+		"ovn-kubernetes-master-"+zone,
 		cm.client.CoreV1(),
 		cm.client.CoordinationV1(),
 		resourcelock.ResourceLockConfig{

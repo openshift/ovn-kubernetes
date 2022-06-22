@@ -243,6 +243,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 								namespace1,
 							},
 						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+							},
+						},
 						&v1.PodList{
 							Items: pods,
 						},
@@ -323,6 +328,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespace1,
+							},
+						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
 							},
 						},
 					)

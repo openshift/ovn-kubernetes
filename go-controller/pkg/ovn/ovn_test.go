@@ -124,6 +124,13 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
+
+	existingNodes, err := o.controller.kube.GetNodes()
+	if err == nil {
+		for _, node := range existingNodes.Items {
+			o.controller.localZoneNodes.Store(node.Name, true)
+		}
+	}
 }
 
 func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {

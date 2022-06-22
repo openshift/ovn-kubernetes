@@ -9,6 +9,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -92,6 +93,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -225,6 +231,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
 							},
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -366,6 +377,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -528,6 +544,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								namespaceT,
 							},
 						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+							},
+						},
 						&v1.PodList{
 							Items: []v1.Pod{
 								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -684,6 +705,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								namespaceT,
 							},
 						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+							},
+						},
 						&v1.PodList{
 							Items: []v1.Pod{
 								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -794,6 +820,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespaceT,
+							},
+						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
 							},
 						},
 						&v1.PodList{
@@ -982,6 +1013,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								UUID: "node1",
 								Name: "node1",
 							},
+							&nbdb.LogicalSwitch{
+								UUID: "node2",
+								Name: "node2",
+							},
 							&nbdb.LogicalRouter{
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
@@ -993,6 +1028,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT, namespaceX,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node2", "192.168.126.51/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							gwPod,
@@ -1000,6 +1040,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1038,6 +1079,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Name:  "node1",
 				Ports: []string{"lsp1"},
 			},
+			&nbdb.LogicalSwitch{
+				UUID: "node2",
+				Name: "node2",
+			},
 			&nbdb.LogicalRouterStaticRoute{
 				UUID:       "static-route-1-UUID",
 				IPPrefix:   "10.128.1.3/32",
@@ -1073,6 +1118,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					UUID:  "node1",
 					Name:  "node1",
 					Ports: []string{"lsp1"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: "node2",
+					Name: "node2",
 				},
 				&nbdb.BFD{
 					UUID:        bfd1NamedUUID,
@@ -1125,6 +1174,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								UUID: "node1",
 								Name: "node1",
 							},
+							&nbdb.LogicalSwitch{
+								UUID: "node2",
+								Name: "node2",
+							},
 							&nbdb.LogicalRouter{
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
@@ -1136,6 +1189,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT, namespaceX,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node2", "192.168.126.51/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -1143,6 +1201,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1180,6 +1239,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Name:  "node1",
 				Ports: []string{"lsp1"},
 			},
+			&nbdb.LogicalSwitch{
+				UUID: "node2",
+				Name: "node2",
+			},
 			&nbdb.LogicalRouterStaticRoute{
 				UUID:       "static-route-1-UUID",
 				IPPrefix:   "10.128.1.3/32",
@@ -1215,6 +1278,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					UUID:  "node1",
 					Name:  "node1",
 					Ports: []string{"lsp1"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: "node2",
+					Name: "node2",
 				},
 				&nbdb.BFD{
 					UUID:        bfd1NamedUUID,
@@ -1275,6 +1342,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								UUID: "node1",
 								Name: "node1",
 							},
+							&nbdb.LogicalSwitch{
+								UUID: "node2",
+								Name: "node2",
+							},
 							&nbdb.LogicalRouter{
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
@@ -1286,6 +1357,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT, namespaceX,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node2", "192.168.126.51/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							gwPod,
@@ -1293,6 +1369,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1331,6 +1408,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Name:  "node1",
 				Ports: []string{"lsp1"},
 			},
+			&nbdb.LogicalSwitch{
+				UUID: "node2",
+				Name: "node2",
+			},
 			&nbdb.LogicalRouterStaticRoute{
 				UUID:       "static-route-1-UUID",
 				IPPrefix:   "10.128.1.3/32",
@@ -1366,6 +1447,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					UUID:  "node1",
 					Name:  "node1",
 					Ports: []string{"lsp1"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: "node2",
+					Name: "node2",
 				},
 				&nbdb.BFD{
 					UUID:        bfd1NamedUUID,
@@ -1421,6 +1506,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 									UUID: "node1",
 									Name: "node1",
 								},
+								&nbdb.LogicalSwitch{
+									UUID: "node2",
+									Name: "node2",
+								},
 								&nbdb.LogicalRouter{
 									UUID: "GR_node1-UUID",
 									Name: "GR_node1",
@@ -1432,6 +1521,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								namespaceT, namespaceX,
 							},
 						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+								*newNode("node2", "192.168.126.50/24"),
+							},
+						},
 						&v1.PodList{
 							Items: []v1.Pod{
 								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -1439,6 +1534,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					)
 					t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+					fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1485,6 +1581,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Name:  "node1",
 						Ports: []string{"lsp1"},
 					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
 					&nbdb.LogicalRouterStaticRoute{
 						UUID:       "static-route-1-UUID",
 						IPPrefix:   "10.128.1.3/32",
@@ -1521,6 +1621,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Name:  "node1",
 						Ports: []string{"lsp1"},
 					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
 					&nbdb.LogicalRouter{
 						UUID:         "GR_node1-UUID",
 						Name:         "GR_node1",
@@ -1547,6 +1651,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					UUID:  "node1",
 					Name:  "node1",
 					Ports: []string{"lsp1"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: "node2",
+					Name: "node2",
 				},
 				&nbdb.BFD{
 					UUID:        bfd1NamedUUID,
@@ -1590,6 +1698,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Name:  "node1",
 						Ports: []string{"lsp1"},
 					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
 					&nbdb.LogicalRouter{
 						UUID:         "GR_node1-UUID",
 						Name:         "GR_node1",
@@ -1628,6 +1740,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								UUID: "node1",
 								Name: "node1",
 							},
+							&nbdb.LogicalSwitch{
+								UUID: "node2",
+								Name: "node2",
+							},
 							&nbdb.LogicalRouter{
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
@@ -1639,6 +1755,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+							*newNode("node2", "192.168.126.50/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -1646,7 +1768,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-
+				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1675,6 +1797,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						UUID:  "node1",
 						Name:  "node1",
 						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
 					},
 					&nbdb.BFD{
 						UUID:        bfd1NamedUUID,
@@ -1747,6 +1873,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								UUID: "node1",
 								Name: "node1",
 							},
+							&nbdb.LogicalSwitch{
+								UUID: "node2",
+								Name: "node2",
+							},
 							&nbdb.LogicalRouter{
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
@@ -1758,6 +1888,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+							*newNode("node2", "192.168.126.50/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -1765,7 +1901,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-
+				fakeOvn.controller.lsManager.AddSwitch("node2", getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"), []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1794,6 +1930,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						UUID:  "node1",
 						Name:  "node1",
 						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
 					},
 					&nbdb.BFD{
 						UUID:        bfd1NamedUUID,
@@ -1887,6 +2027,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -2044,6 +2189,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -2459,6 +2609,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: pod,
 					},
@@ -2541,4 +2696,5 @@ func injectNode(fakeOvn *FakeOVN) {
 		},
 	}
 	gomega.ExpectWithOffset(1, fakeOvn.controller.watchFactory.NodeInformer().GetStore().Add(node)).To(gomega.Succeed())
+	fakeOvn.controller.localZoneNodes.Store(node.Name, true)
 }

@@ -56,6 +56,9 @@ type CommonNetworkControllerInfo struct {
 
 	// Supports multicast?
 	multicastSupport bool
+
+	// Northbounb database zone name to which this Controller is connected to - aka local zone
+	zone string
 }
 
 // BaseNetworkController structure holds per-network fields and network specific configuration
@@ -121,6 +124,7 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 		podRecorder:      podRecorder,
 		SCTPSupport:      SCTPSupport,
 		multicastSupport: multicastSupport,
+		zone:             libovsdbops.GetNBZone(nbClient),
 	}
 }
 
@@ -645,4 +649,20 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 
 	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
 	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
+}
+
+func (bnc *BaseNetworkController) GetLocalZoneNodes() ([]*kapi.Node, error) {
+	nodes, err := bnc.watchFactory.GetNodes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes: %v", err)
+	}
+
+	var zoneNodes []*kapi.Node
+	for _, n := range nodes {
+		if util.GetNodeZone(n) == bnc.zone {
+			zoneNodes = append(zoneNodes, n)
+		}
+	}
+
+	return zoneNodes, nil
 }
