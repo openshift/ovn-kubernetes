@@ -218,6 +218,7 @@ func removeACLsFromSwitches(nbClient libovsdbclient.Client, switches []nbdb.Logi
 	}
 
 	for i, sw := range switches {
+		sw := sw
 		sw.ACLs = aclUUIDs
 		swName := switches[i].Name
 		opModels = append(opModels, OperationModel{
