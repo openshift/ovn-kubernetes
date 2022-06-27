@@ -68,7 +68,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 			if podEntry.needsAdd {
 				klog.Infof("%s retry pod setup", podDesc)
 				if err := oc.ensurePod(nil, pod, true); err != nil {
-					klog.Infof("%s setup retry failed; will try again later", podDesc)
+					klog.Infof("%s setup retry failed; will try again later: %v", podDesc, err)
 					podEntry.timeStamp = time.Now()
 				} else {
 					klog.Infof("%s pod setup successful", podDesc)
@@ -159,6 +159,15 @@ func (oc *Controller) initRetryDelPod(pod *kapi.Pod) {
 	}
 }
 
+func (oc *Controller) removeAddRetry(pod *kapi.Pod) {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	key := getPodNamespacedName(pod)
+	if entry, ok := oc.retryPods[key]; ok {
+		entry.needsAdd = false
+	}
+}
+
 func (oc *Controller) removeDeleteRetry(pod *kapi.Pod) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
@@ -202,6 +211,14 @@ func (oc *Controller) requestRetryPods() {
 	default:
 		klog.V(5).Infof("Iterate retry pods already requested")
 	}
+}
+
+// unit testing only
+func (oc *Controller) hasPodRetryEntry(pod *kapi.Pod) bool {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	_, ok := oc.retryPods[getPodNamespacedName(pod)]
+	return ok
 }
 
 // getPodNamespacedName returns <namespace>_<podname> for the provided pod

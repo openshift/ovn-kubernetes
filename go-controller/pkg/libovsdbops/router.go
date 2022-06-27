@@ -384,8 +384,11 @@ func DeleteNATsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Oper
 	}
 
 	routerNats, err := getRouterNATs(nbClient, router)
+	if err == libovsdbclient.ErrNotFound {
+		return ops, nil
+	}
 	if err != nil {
-		return ops, err
+		return ops, fmt.Errorf("unable to get NAT entries for router %+v: %w", router, err)
 	}
 
 	natUUIDs := make([]string, 0, len(nats))
