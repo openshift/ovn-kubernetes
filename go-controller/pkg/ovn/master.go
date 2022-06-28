@@ -325,7 +325,13 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		}
 	}
 
-	return err
+	// Store node's Gateway router port IPs as annotations (to be used by the interconnect).
+	updatedNodeAnnotation, err := util.UpdateNodeGatewayRouterPortIPsAnnotation(nil, gwLRPIPs)
+	if err != nil {
+		return err
+	}
+
+	return oc.UpdateNodeAnnotationWithRetry(node.Name, updatedNodeAnnotation)
 }
 
 func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
