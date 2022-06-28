@@ -49,6 +49,10 @@ const (
 	// types.OVNLayer2Switch is the name of layer2 topology switch
 	OVNLayer2Switch = "ovn_layer2_switch"
 
+	TransitSwitch               = "transit_switch"
+	TransitSwitchToRouterPrefix = "tstor-"
+	RouterToTransitSwitchPrefix = "rtots-"
+
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority

@@ -791,6 +791,14 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err = oc.interconnectAddUpdateLocalNode(node); err != nil {
+			klog.Errorf("Interconnect Local Node update failed for %s, will try again later: %v",
+				node.Name, err)
+			errs = append(errs, err)
+		}
+	}
+
 	err = kerrors.NewAggregate(errs)
 	if err != nil {
 		oc.recordNodeErrorEvent(node, err)
@@ -804,6 +812,11 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node) er
 	if present {
 		_ = oc.deleteNodeEvent(node)
 	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		return oc.interconnectAddUpdateRemoteNode(node)
+	}
+
 	return nil
 }
 
@@ -819,6 +832,11 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 			return err
 		}
 	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		_ = oc.interconnectRemoveNode(node)
+	}
+
 	oc.localZoneNodes.Delete(node.Name)
 
 	if err := oc.deleteNode(node.Name); err != nil {
@@ -829,6 +847,7 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
+
 	return nil
 }
 
