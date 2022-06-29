@@ -12,7 +12,7 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	//hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -105,9 +105,11 @@ type Controller struct {
 	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator *subnetallocator.SubnetAllocator
+	masterSubnetAllocator        *subnetallocator.SubnetAllocator
+	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
 
-	hoMaster *hocontroller.MasterController
+	//KEYWORD jtanenba remove
+	//hoMaster *hocontroller.MasterController
 
 	SCTPSupport bool
 
@@ -447,13 +449,16 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		}()
 	}
 
-	if oc.hoMaster != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			oc.hoMaster.Run(oc.stopChan)
-		}()
-	}
+	/*
+		//KEYWORD: remove
+		if oc.hoMaster != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				oc.hoMaster.Run(oc.stopChan)
+			}()
+		}
+	*/
 
 	// Final step to cleanup after resource handlers have synced
 	err := oc.ovnTopologyCleanup()

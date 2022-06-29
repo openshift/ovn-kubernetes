@@ -22,9 +22,11 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	//hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
+	//"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	//	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -310,18 +312,21 @@ func (oc *Controller) StartClusterMaster() error {
 	}
 
 	if config.HybridOverlay.Enabled {
-		oc.hoMaster, err = hocontroller.NewMaster(
-			oc.kube,
-			oc.watchFactory.NodeInformer(),
-			oc.watchFactory.NamespaceInformer(),
-			oc.watchFactory.PodInformer(),
-			oc.nbClient,
-			oc.sbClient,
-			informer.NewDefaultEventHandler,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
-		}
+		/*
+			//KEYWORD: jtanenba remove
+				oc.hoMaster, err = hocontroller.NewMaster(
+					oc.kube,
+					oc.watchFactory.NodeInformer(),
+					oc.watchFactory.NamespaceInformer(),
+					oc.watchFactory.PodInformer(),
+					oc.nbClient,
+					oc.sbClient,
+					informer.NewDefaultEventHandler,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
+				}
+		*/
 	}
 
 	return nil
@@ -1325,8 +1330,14 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
 		}
-		oc.clearInitialNodeNetworkUnavailableCondition(node)
-		return nil
+		if houtil.IsHybridOverlayNode(node) {
+			// jtanenba allocate the subnet
+			err = oc.allocateHybridOverlaySubnet(node)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
 	}
 
 	klog.Infof("Adding or Updating Node %q", node.Name)
