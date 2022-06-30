@@ -13,6 +13,8 @@ import (
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	//hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -544,6 +546,25 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 				return fmt.Errorf("addPodExternalGW failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
 		}
+	}
+
+	//KEYWORD: THIS IS THE ANNOTATIONS FOR HYBRID OVERLAY STUFF MAYBE MAKE FUNCTION
+	if config.HybridOverlay.Enabled {
+		namespace, err := oc.watchFactory.GetNamespace(pod.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed to get the namespace %s to check hybrid annotations for adding pod %s: %v", pod.Namespace, pod.Name, err)
+		}
+		namespaceExternalGw := namespace.Annotations[hotypes.HybridOverlayExternalGw]
+		namespaceVTEP := namespace.Annotations[hotypes.HybridOverlayVTEP]
+
+		podExternalGw := pod.Annotations[hotypes.HybridOverlayExternalGw]
+		podVTEP := pod.Annotations[hotypes.HybridOverlayVTEP]
+
+		if namespaceExternalGw != podExternalGw || namespaceVTEP != podVTEP {
+			// copy namespace annotations to the pod and return
+			return houtil.CopyNamespaceAnnotationsToPod(oc.kube, namespace, pod)
+		}
+
 	}
 
 	return nil

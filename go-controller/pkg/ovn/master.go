@@ -1098,6 +1098,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) erro
 	if err := libovsdbops.DeleteChassisWithPredicate(oc.sbClient, p); err != nil {
 		return fmt.Errorf("failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
 	}
+
 	return nil
 }
 
@@ -1371,6 +1372,13 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		}
 	}
 
+	if config.HybridOverlay.Enabled {
+		err = oc.handleOverlayPort(node)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	// delete stale chassis in SBDB if any
 	if err := oc.deleteStaleNodeChassis(node); err != nil {
 		errs = append(errs, err)
@@ -1416,6 +1424,12 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
 
+	// KEYWORD: TODO:  RENAME FUNCTION
+	if config.HybridOverlay.Enabled {
+		if err := oc.DeleteNode(node); err != nil {
+			return fmt.Errorf("Failed to delete hybrid overlay components of node %s: %v", node.Name, err)
+		}
+	}
 	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
 		return err
