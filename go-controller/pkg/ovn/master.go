@@ -1427,7 +1427,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	// KEYWORD: TODO:  RENAME FUNCTION
 	if config.HybridOverlay.Enabled {
 		if err := oc.DeleteNode(node); err != nil {
-			return fmt.Errorf("Failed to delete hybrid overlay components of node %s: %v", node.Name, err)
+			return fmt.Errorf("failed to delete hybrid overlay components of node %s: %v", node.Name, err)
 		}
 	}
 	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
