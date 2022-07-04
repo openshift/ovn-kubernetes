@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -322,7 +324,18 @@ func (oc *DefaultNetworkController) Init() error {
 	for _, node := range existingNodes.Items {
 		nodeNames = append(nodeNames, node.Name)
 	}
-	if err := oc.SetupMaster(nodeNames); err != nil {
+
+	var zoneSubnets []*net.IPNet
+	for _, node := range existingNodes.Items {
+		if util.GetNodeZone(&node) == oc.zone {
+			zoneSubnets, err = util.ParseZoneJoinSubnetsAnnotation(&node, types.DefaultNetworkName)
+			if err == nil {
+				break
+			}
+		}
+	}
+
+	if err := oc.SetupMaster(nodeNames, zoneSubnets); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}

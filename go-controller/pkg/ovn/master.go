@@ -110,7 +110,7 @@ func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes *kapi.NodeL
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
+func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string, joinSubnets []*net.IPNet) error {
 	// Create default Control Plane Protection (COPP) entry for routers
 	logicalRouter, err := oc.createOvnClusterRouter()
 	if err != nil {
@@ -166,7 +166,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames)
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames, joinSubnets)
 	if err != nil {
 		return err
 	}
