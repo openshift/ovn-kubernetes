@@ -594,6 +594,7 @@ func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
 		nodeIPs:           []string{nodeIP},
 		gatewayRouterName: nodeGWRouterName(nodeName),
 		switchName:        nodeSwitchName(nodeName),
+		zone:              types.OvnDefaultZone,
 	}
 }
 

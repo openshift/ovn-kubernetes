@@ -8,6 +8,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -351,7 +352,8 @@ func (c *Controller) syncService(key string) error {
 	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
 
 	// Convert the LB configs in to load-balancer objects
-	nodeInfos := c.nodeTracker.allNodes()
+	zone := libovsdbops.GetNBZone(c.nbClient)
+	nodeInfos := c.nodeTracker.allZoneNodes(zone)
 	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos, c.useLBGroups)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
 	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
