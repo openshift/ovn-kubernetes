@@ -213,13 +213,27 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			}
 		}
 	} else {
-		// Delete all assignments that are to be removed from the allocator
-		// cache. If we don't do this we will occupy assignment positions for
-		// the ipsToAdd, even though statusToRemove will be removed afterwards
-		oc.deleteAllocatorEgressIPAssignments(statusToRemove)
-		// If running on a public cloud we should not program OVN just yet, we
-		// need confirmation from the cloud-network-config-controller that it
-		// can assign the IPs. reconcileCloudPrivateIPConfig will take care of
+		// Even when running on a public cloud, we must make sure that we unwire EgressIP
+		// configuration from OVN *before* we instruct the CloudNetworkConfigController
+		// to remove the CloudPrivateIPConfig object from the cloud.
+		// CloudPrivateIPConfig objects can be in the "Deleting" state for a long time,
+		// waiting for the underlying cloud to finish its action and to report success of the
+		// unattach operation. This can take anywhere from seconds to minutes and during this
+		// time, flows can already break.
+		// If we unwire OVNK's EgressIP setup only after the CloudPrivateIPConfig was completely
+		// removed from the K8s API, then we drop traffic potentially for a long time.
+		if len(statusToRemove) > 0 {
+			// Delete all assignments that are to be removed from the allocator
+			// cache. If we don't do this we will occupy assignment positions for
+			// the ipsToAdd, even though statusToRemove will be removed afterwards
+			oc.deleteAllocatorEgressIPAssignments(statusToRemove)
+			if err := oc.deleteEgressIPAssignments(name, statusToRemove); err != nil {
+				return err
+			}
+		}
+		// If running on a public cloud we should not program OVN just yet for assignment
+		// operations. We need confirmation from the cloud-network-config-controller that
+		// it can assign the IPs. reconcileCloudPrivateIPConfig will take care of
 		// processing the answer from the requests we make here, and update OVN
 		// accordingly when we know what the outcome is.
 		if len(ipsToAssign) > 0 {
