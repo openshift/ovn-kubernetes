@@ -1629,9 +1629,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					}},
 				)
 
-				egressOptions := map[string]string{
-					"apply-after-lb": "true",
-				}
 				pgHash := hashedPortGroup(networkPolicy.Namespace)
 				leftOverACLFromUpgrade1 := libovsdbops.BuildACL(
 					networkPolicy.Namespace+"_ARPallowPolicy",
@@ -1645,7 +1642,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					map[string]string{
 						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
 					},
-					egressOptions,
 				)
 				leftOverACLFromUpgrade1.UUID = *leftOverACLFromUpgrade1.Name + "-ingressAllowACL-UUID1"
 
@@ -1661,7 +1657,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					map[string]string{
 						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
 					},
-					egressOptions,
 				)
 				leftOverACLFromUpgrade2.UUID = *leftOverACLFromUpgrade2.Name + "-ingressAllowACL-UUID2"
 
@@ -1684,16 +1679,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				err := fakeOvn.controller.WatchNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				ginkgo.By("Creating a network policy that applies to a pod and ensuring creation fails")
 
-				err = fakeOvn.controller.addNetworkPolicy(networkPolicy)
+				err := fakeOvn.controller.addNetworkPolicy(networkPolicy)
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create default port groups and acls for policy: namespace1/networkpolicy1, error: unexpectedly found multiple results for provided predicate"))
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create default port groups and acls for policy: namespace1/networkpolicy1, error: unexpectedly found multiple equivalent ACLs"))
 
 				ginkgo.By("Deleting the network policy that failed to create and ensuring we panic")
 				gomega.Expect(func () {
