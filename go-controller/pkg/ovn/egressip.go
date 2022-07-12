@@ -772,8 +772,18 @@ func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toA
 			}
 		}
 	}
+	// Merge ops into the existing pendingCloudPrivateIPConfigsOps.
+	// This allows us to:
+	// a) execute only the new ops
+	// b) keep track of any pending changes
 	if len(ops) > 0 {
-		oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName] = ops
+		if _, ok := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]; !ok {
+			oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName] = ops
+		} else {
+			for cloudPrivateIP, op := range ops {
+				oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP] = op
+			}
+		}
 	}
 	return oc.executeCloudPrivateIPConfigOps(egressIPName, ops)
 }
