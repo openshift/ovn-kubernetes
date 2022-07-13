@@ -369,6 +369,29 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 	return nil
 }
 
+// must be called with a write lock on nsInfo
+func (oc *Controller) deleteDefaultDenyPG(namespace string, nsInfo *namespaceInfo) error {
+	ingressPGName := defaultDenyPortGroup(namespace, ingressDefaultDenySuffix)
+	egressPGName := defaultDenyPortGroup(namespace, egressDefaultDenySuffix)
+	err := deletePortGroup(oc.ovnNBClient, ingressPGName)
+	if err != nil {
+		return fmt.Errorf("failed to delete port_group for %s (%v)",
+			ingressPGName, err)
+	}
+	err = deletePortGroup(oc.ovnNBClient, egressPGName)
+	if err != nil {
+		return fmt.Errorf("failed to delete port_group for %s (%v)",
+			ingressPGName, err)
+	}
+	// NOTE: no need to explicitly remove ACLs; if PGs are gone, ACLs should be garbage collected
+	nsInfo.portGroupEgressDenyUUID = ""
+	nsInfo.portGroupEgressDenyName = ""
+	nsInfo.portGroupIngressDenyUUID = ""
+	nsInfo.portGroupIngressDenyName = ""
+
+	return nil
+}
+
 // modify ACL logging
 func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
 
@@ -1199,7 +1222,28 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	np := NewNetworkPolicy(policy)
 
 	if len(nsInfo.networkPolicies) == 0 {
-		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny, policy.Name)
+		defer func() {
+			if err != nil {
+				nsInfo, nsUnlock, errDelete := oc.ensureNamespaceLocked(policy.Namespace, false, nil)
+				// rollback failed, best effort cleanup; won't add to retry mechanism since item doesn't exist in cache yet.
+				if errDelete != nil {
+					klog.Warningf("Rollback of default port groups and acls for policy: %s/%s failed, Unable to ensure namespace for network policy: error %v", policy.Namespace, policy.Name, errDelete)
+					return
+				}
+				if len(nsInfo.networkPolicies) == 0 {
+					// try rolling-back since creation of default acls/pgs failed
+					errDelete = oc.deleteDefaultDenyPG(policy.Namespace, nsInfo)
+					nsUnlock()
+					if errDelete != nil {
+						// rollback failed, best effort cleanup; won't add to retry mechanism since item doesn't exist in cache yet.
+						klog.Warningf("Rollback of default port groups and acls for policy: %s/%s failed: error %v", policy.Namespace, policy.Name, errDelete)
+					}
+				} else {
+					nsUnlock()
+				}
+			}
+		}()
+		err = oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny, policy.Name)
 		if err != nil {
 			nsUnlock()
 			return fmt.Errorf("failed to create ingress default deny port group: %w", err)
@@ -1255,8 +1299,9 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 	if nsInfo == nil {
 		// if we didn't get nsInfo and np is nil, we cannot proceed
 		if np == nil {
-			return fmt.Errorf("failed to get namespace lock when deleting policy %s in namespace %s",
+			klog.Warningf("Failed to get namespace lock when deleting policy %s in namespace %s",
 				policy.Name, policy.Namespace)
+			return nil
 		}
 
 		if err := oc.destroyNetworkPolicy(np, false); err != nil {
@@ -1268,10 +1313,19 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 	defer nsUnlock()
 
 	// try to use the more official np found in nsInfo
-	if foundNp := nsInfo.networkPolicies[policy.Name]; foundNp != nil {
+	// also, if this is called during the process of the policy creation, the current network policy
+	// may not be added to nsInfo.networkPolicies yet.
+	expectedLastPolicyNum := 0
+	foundNp, ok := nsInfo.networkPolicies[policy.Name]
+	if ok {
+		expectedLastPolicyNum = 1
 		np = foundNp
 	}
-	isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
+	if np == nil {
+		klog.Warningf("Unable to delete network policy: %s/%s since its not found in cache", policy.Namespace, policy.Name)
+		return nil
+	}
+	isLastPolicyInNamespace := len(nsInfo.networkPolicies) == expectedLastPolicyNum
 	if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
 		return fmt.Errorf("failed to destroy network policy: %s/%s", policy.Namespace, policy.Name)
 	}
@@ -1296,12 +1350,20 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 		return true
 	})
 
+	var err error
 	ingressPGName := defaultDenyPortGroup(np.namespace, ingressDefaultDenySuffix)
 	egressPGName := defaultDenyPortGroup(np.namespace, egressDefaultDenySuffix)
 
-	if err := oc.localPodDelDefaultDeny(np, ingressPGName, egressPGName, ports...); err != nil {
+	if err = oc.localPodDelDefaultDeny(np, ingressPGName, egressPGName, ports...); err != nil {
 		return err
 	}
+	defer func() {
+		// In case of error, undo localPodDelDefaultDeny() and restore lspIngressDenyCache/lspEgressDenyCache refcnt.
+		// Deletion will be retried.
+		if err != nil {
+			oc.localPodAddDefaultDeny(np.policy, ingressPGName, egressPGName, ports...)
+		}
+	}()
 
 	// we haven't deleted our np from the namespace yet so there should be 1 policy
 	// if there are no more policies left on the namespace
@@ -1319,7 +1381,7 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 	}
 
 	// Delete the port group
-	err := deletePortGroup(oc.ovnNBClient, np.portGroupName)
+	err = deletePortGroup(oc.ovnNBClient, np.portGroupName)
 	if err != nil {
 		return fmt.Errorf("failed to make delete network policy port group ops, policy: %s/%s, group name: %s,"+
 			" error: %v", np.namespace, np.name, np.portGroupName, err)
@@ -1327,13 +1389,15 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 
 	// Delete ingress/egress address sets
 	for _, policy := range np.ingressPolicies {
-		if err := policy.destroy(); err != nil {
+		err = policy.destroy()
+		if err != nil {
 			return fmt.Errorf("failed to delete network policy ingress address sets, policy: %s/%s, error: %v",
 				np.namespace, np.name, err)
 		}
 	}
 	for _, policy := range np.egressPolicies {
-		if err := policy.destroy(); err != nil {
+		err = policy.destroy()
+		if err != nil {
 			return fmt.Errorf("failed to delete network policy egress address sets, policy: %s/%s, error: %v",
 				np.namespace, np.name, err)
 		}
