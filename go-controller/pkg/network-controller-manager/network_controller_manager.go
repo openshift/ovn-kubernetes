@@ -182,6 +182,10 @@ func (cm *networkControllerManager) Start(ctx context.Context, cancel context.Ca
 	// Get the zone name first.
 	zone := libovsdbops.GetNBZone(cm.nbClient)
 
+	if config.Default.Zone != zone {
+		return fmt.Errorf("OVN Nortboubd db zone [%s] mismatch with the config zone [%s]", zone, config.Default.Zone)
+	}
+
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		// TODO (rravaiol) (bpickard)

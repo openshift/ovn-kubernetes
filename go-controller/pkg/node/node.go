@@ -430,6 +430,11 @@ func (n *OvnNode) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
 	}
 
+	nodeZone := getOVNSBZone()
+	if config.Default.Zone != nodeZone {
+		return fmt.Errorf("node %s zone [%s] mismatch with the Southbound zone [%s]", n.name, config.Default.Zone, nodeZone)
+	}
+
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
@@ -509,17 +514,13 @@ func (n *OvnNode) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		nodeZone := getOVNSBZone()
-		_ = util.SetNodeZone(nodeAnnotator, nodeZone)
-	}
+	_ = util.SetNodeZone(nodeAnnotator, nodeZone)
 
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
 	}
 
 	// Wait for management port and gateway resources to be created by the master
-	klog.Infof("Waiting for gateway and management port readiness...")
 	start := time.Now()
 	if err := waiter.Wait(); err != nil {
 		return err
