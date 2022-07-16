@@ -104,6 +104,8 @@ github.com/googleapis/gnostic/openapiv2
 github.com/gorilla/mux
 # github.com/imdario/mergo v0.3.12
 github.com/imdario/mergo
+# github.com/j-keck/arping v1.0.2
+github.com/j-keck/arping
 # github.com/json-iterator/go v1.1.11
 github.com/json-iterator/go
 # github.com/juju/errors v0.0.0-20200330140219-3fe23663418f
