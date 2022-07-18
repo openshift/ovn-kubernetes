@@ -172,7 +172,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	})
 
 	var err error
-
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues)
@@ -344,11 +343,15 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newInformer(
+		ServiceType,
+		wf.iFactory.Core().V1().Services().Informer())
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[EndpointsType], err = newInformer(EndpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
+	wf.informers[EndpointSliceType], err = newInformer(
+		EndpointSliceType,
+		wf.iFactory.Discovery().V1().EndpointSlices().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -884,6 +887,28 @@ func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 		options.LabelSelector = labelSelector.String()
 	}
 }
+
+// noHeadlessServiceSelector is a LabelSelector added to the watch for
+// Endpoints (and, eventually, EndpointSlices) that excludes endpoints
+// for headless services.
+// This matches the behavior of kube-proxy
+func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// if the service is headless, skip it
+	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	selector := labels.NewSelector()
+	selector.Add(*svcNameLabel)
+	selector.Add(*notEmptySvcName)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = selector.String()
+	}
+}
+
 
 // noServiceNameSelector is a LabelSelector added to the watch for
 // endpointslices that excludes endpointslices which doesn't
