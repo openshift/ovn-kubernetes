@@ -315,6 +315,35 @@ func getNodeAddresses(node *v1.Node) (string, string) {
 	return ipv4Res, ipv6Res
 }
 
+// Returns the container's ipv4 and ipv6 addresses IN ORDER
+// related to the given network.
+func getContainerAddressesForNetwork(container, network string) (string, string) {
+	ipv4Format := fmt.Sprintf("{{.NetworkSettings.Networks.%s.IPAddress}}", network)
+	ipv6Format := fmt.Sprintf("{{.NetworkSettings.Networks.%s.GlobalIPv6Address}}", network)
+
+	ipv4, err := runCommand("docker", "inspect", "-f", ipv4Format, container)
+	if err != nil {
+		framework.Failf("failed to inspect external test container for its IPv4: %v", err)
+	}
+	ipv6, err := runCommand("docker", "inspect", "-f", ipv6Format, container)
+	if err != nil {
+		framework.Failf("failed to inspect external test container for its IPv4: %v", err)
+	}
+	return strings.TrimSuffix(ipv4, "\n"), strings.TrimSuffix(ipv6, "\n")
+}
+
+// Returns the container's MAC addresses
+// related to the given network.
+func getMACAddressesForNetwork(container, network string) string {
+	mac := fmt.Sprintf("{{.NetworkSettings.Networks.%s.MacAddress}}", network)
+
+	macAddr, err := runCommand("docker", "inspect", "-f", mac, container)
+	if err != nil {
+		framework.Failf("failed to inspect external test container for its MAC: %v", err)
+	}
+	return strings.TrimSuffix(macAddr, "\n")
+}
+
 // deletePodSyncNS deletes a pod and wait for its deletion.
 // accept the namespace as a parameter.
 func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {
