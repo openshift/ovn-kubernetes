@@ -139,8 +139,22 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 		aclList := aclList
 		newName := namespacePortGroupACLName(namespace, "", gressSuffix)
 		if len(aclList) > 1 {
+			var aclListPtr []*nbdb.ACL
+			for i := 1; i < len(aclList); i++ {
+				aclListPtr = append(aclListPtr, &aclList[i])
+			}
 			// this should never be the case but delete everything except 1st ACL
-			err := libovsdbops.DeleteACLs(oc.nbClient, aclList[1:])
+			gressPGName := defaultDenyPortGroup(namespace, gressSuffix)
+			ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, nil, gressPGName, aclListPtr...)
+			if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+				return fmt.Errorf("cannot construct ops to delete ACL %+v from portgroup %s: %v",
+					aclList[1:], gressPGName, err)
+			}
+			_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+			if err != nil {
+				return fmt.Errorf("cannot delete ACL %+v from portgroup %s: %v", aclList[1:], gressPGName, err)
+			}
+			err = libovsdbops.DeleteACLs(oc.nbClient, aclList[1:])
 			if err != nil {
 				return err
 			}
@@ -252,6 +266,28 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 	gressACLs, err := libovsdbops.FindACLsByPredicate(oc.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("cannot find stale arp allow ACLs: %v", err)
+	}
+	// Remove these stale ACLs from port groups and then delete them
+	for _, gressACL := range gressACLs {
+		gressACL := gressACL
+		pgName := ""
+		if strings.Contains(gressACL.Match, "inport") {
+			// egress default ARP allow policy ("inport == @a16323395479447859119_egressDefaultDeny && arp")
+			pgName = strings.TrimPrefix(gressACL.Match, "inport == @")
+		} else if strings.Contains(gressACL.Match, "outport") {
+			// ingress default ARP allow policy ("outport == @a16323395479447859119_egressDefaultDeny && arp")
+			pgName = strings.TrimPrefix(gressACL.Match, "outport == @")
+		}
+		pgName = strings.TrimSuffix(pgName, " && arp")
+		ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, nil, pgName, &gressACL)
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return fmt.Errorf("cannot construct ops to delete ACL %+v from portgroup %s: %v",
+				gressACL, pgName, err)
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			return fmt.Errorf("cannot delete ACL %+v from portgroup %s: %v", gressACL, pgName, err)
+		}
 	}
 	err = libovsdbops.DeleteACLs(oc.nbClient, gressACLs)
 	if err != nil {
