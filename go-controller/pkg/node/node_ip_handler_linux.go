@@ -67,6 +67,22 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 	return false
 }
 
+// ListAddresses returns all the addresses we know about
+func (c *addressManager) ListAddresses() []net.IP {
+	c.Lock()
+	defer c.Unlock()
+	addrs := c.addresses.List()
+	out := make([]net.IP, 0, len(addrs))
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		out = append(out, ip)
+	}
+	return out
+}
+
 func (c *addressManager) Run(stopChan <-chan struct{}) {
 	var addrChan chan netlink.AddrUpdate
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{

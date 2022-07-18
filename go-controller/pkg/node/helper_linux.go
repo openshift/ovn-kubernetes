@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package node
@@ -10,7 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -109,8 +109,4 @@ func getIntfName(gatewayIntf string) (string, error) {
 			intfName, stderr, err)
 	}
 	return intfName, nil
-}
-
-func deleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
-	return util.DeleteConntrack(ip, port, protocol)
 }
