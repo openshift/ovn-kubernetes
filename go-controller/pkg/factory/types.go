@@ -40,8 +40,14 @@ type NodeWatchFactory interface {
 	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemovePodHandler(handler *Handler)
 
+	AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler)
+	RemoveNamespaceHandler(handler *Handler)
+
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
+
+	GetPods(namespace string) ([]*kapi.Pod, error)
+	GetNamespaces() ([]*kapi.Namespace, error)
 }
 
 type Shutdownable interface {

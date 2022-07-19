@@ -3,7 +3,6 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -12,17 +11,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-)
-
-const (
-	// Annotation used to enable/disable multicast in the namespace
-	nsMulticastAnnotation        = "k8s.ovn.org/multicast-enabled"
-	routingExternalGWsAnnotation = "k8s.ovn.org/routing-external-gws"
-	routingNamespaceAnnotation   = "k8s.ovn.org/routing-namespaces"
-	routingNetworkAnnotation     = "k8s.ovn.org/routing-network"
-	bfdAnnotation                = "k8s.ovn.org/bfd-enabled"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
@@ -110,7 +101,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 		return
 	}
 
-	enabled := (ns.Annotations[nsMulticastAnnotation] == "true")
+	enabled := (ns.Annotations[util.NsMulticastAnnotation] == "true")
 	enabledOld := nsInfo.multicastEnabled
 
 	if enabledOld == enabled {
@@ -165,18 +156,6 @@ func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
 	return nil
 }
 
-func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
-	var routingExternalGWs []net.IP
-	for _, v := range strings.Split(annotation, ",") {
-		parsedAnnotation := net.ParseIP(v)
-		if parsedAnnotation == nil {
-			return nil, fmt.Errorf("could not parse routing external gw annotation value %s", v)
-		}
-		routingExternalGWs = append(routingExternalGWs, parsedAnnotation)
-	}
-	return routingExternalGWs, nil
-}
-
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	klog.Infof("[%s] adding namespace", ns.Name)
@@ -213,18 +192,18 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		}
 	}
 
-	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
-		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
+	if annotation, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok {
+		exGateways, err := util.ParseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
 			klog.Errorf(err.Error())
 		} else {
-			_, bfdEnabled := ns.Annotations[bfdAnnotation]
+			_, bfdEnabled := ns.Annotations[util.BfdAnnotation]
 			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
 			if err != nil {
 				klog.Error(err.Error())
 			}
 		}
-		if _, ok := ns.Annotations[bfdAnnotation]; ok {
+		if _, ok := ns.Annotations[util.BfdAnnotation]; ok {
 			nsInfo.routingExternalGWs.bfdEnabled = true
 		}
 	}
@@ -248,10 +227,10 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	}
 	defer nsUnlock()
 
-	gwAnnotation := newer.Annotations[routingExternalGWsAnnotation]
-	oldGWAnnotation := old.Annotations[routingExternalGWsAnnotation]
-	_, newBFDEnabled := newer.Annotations[bfdAnnotation]
-	_, oldBFDEnabled := old.Annotations[bfdAnnotation]
+	gwAnnotation := newer.Annotations[util.RoutingExternalGWsAnnotation]
+	oldGWAnnotation := old.Annotations[util.RoutingExternalGWsAnnotation]
+	_, newBFDEnabled := newer.Annotations[util.BfdAnnotation]
+	_, oldBFDEnabled := old.Annotations[util.BfdAnnotation]
 
 	if gwAnnotation != oldGWAnnotation || newBFDEnabled != oldBFDEnabled {
 		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
@@ -275,7 +254,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 			oc.deleteGWRoutesForNamespace(old.Name)
 			nsInfo.routingExternalGWs = gatewayInfo{}
 		}
-		exGateways, err := parseRoutingExternalGWAnnotation(gwAnnotation)
+		exGateways, err := util.ParseRoutingExternalGWAnnotation(gwAnnotation)
 		if err != nil {
 			klog.Error(err.Error())
 		} else {
@@ -409,6 +388,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (*namespac
 			networkPolicies:       make(map[string]*namespacePolicy),
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
+			routingExternalGWs:    gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
 		}
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it

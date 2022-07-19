@@ -11,6 +11,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -394,20 +396,20 @@ var _ = Describe("OVN NetworkPolicy Operations with IP Address Family", func() {
 					Expect(ns).NotTo(BeNil())
 
 					// Multicast is denied by default.
-					_, ok := ns.Annotations[nsMulticastAnnotation]
+					_, ok := ns.Annotations[util.NsMulticastAnnotation]
 					Expect(ok).To(BeFalse())
 
 					// Enable multicast in the namespace.
 					mcastPolicy := multicastPolicy{}
 					mcastPolicy.enableCmds(fExec, namespace1.Name)
-					ns.Annotations[nsMulticastAnnotation] = "true"
+					ns.Annotations[util.NsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 					// Disable multicast in the namespace.
 					mcastPolicy.disableCmds(fExec, namespace1.Name)
-					ns.Annotations[nsMulticastAnnotation] = "false"
+					ns.Annotations[util.NsMulticastAnnotation] = "false"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -486,7 +488,7 @@ var _ = Describe("OVN NetworkPolicy Operations with IP Address Family", func() {
 					mcastPolicy.enableCmds(fExec, namespace1.Name)
 					// The pod should be added to the multicast allow port group.
 					mcastPolicy.addPodCmds(fExec, namespace1.Name)
-					ns.Annotations[nsMulticastAnnotation] = "true"
+					ns.Annotations[util.NsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -554,7 +556,7 @@ var _ = Describe("OVN NetworkPolicy Operations with IP Address Family", func() {
 					// Enable multicast in the namespace.
 					mcastPolicy := multicastPolicy{}
 					mcastPolicy.enableCmds(fExec, namespace1.Name)
-					ns.Annotations[nsMulticastAnnotation] = "true"
+					ns.Annotations[util.NsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)

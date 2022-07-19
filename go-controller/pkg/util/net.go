@@ -2,6 +2,7 @@ package util
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -11,6 +12,8 @@ import (
 	goovn "github.com/ebay/go-ovn"
 	utilnet "k8s.io/utils/net"
 )
+
+var NoIPError = errors.New("no IP available")
 
 // NextIP returns IP incremented by 1
 func NextIP(ip net.IP) net.IP {
@@ -259,4 +262,19 @@ func MatchIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
 		}
 	}
 	return nil, fmt.Errorf("no %s value available", IPFamilyName(isIPv6))
+}
+
+// MatchAllIPStringFamily loops through the array of string and returns a
+// of addresses in the same IP Family, based on input flag isIPv6.
+func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
+	var ipAddrs []string
+	for _, ipString := range ipStrings {
+		if utilnet.IsIPv6String(ipString) == isIPv6 {
+			ipAddrs = append(ipAddrs, ipString)
+		}
+	}
+	if len(ipAddrs) > 0 {
+		return ipAddrs, nil
+	}
+	return nil, NoIPError
 }

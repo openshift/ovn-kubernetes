@@ -19,6 +19,7 @@ require (
 	github.com/imdario/mergo v0.3.8 // indirect
 	github.com/juju/errors v0.0.0-20200330140219-3fe23663418f // indirect
 	github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd // indirect
+	github.com/j-keck/arping v1.0.2
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20200626054723-37f83d1996bc
 	github.com/miekg/dns v1.1.31
 	github.com/onsi/ginkgo v1.15.0

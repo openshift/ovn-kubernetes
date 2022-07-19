@@ -14,6 +14,7 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -263,8 +264,7 @@ func (oc *Controller) getRoutingExternalGWs(ns string) *gatewayInfo {
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
-	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
-	copy(res.gws, nsInfo.routingExternalGWs.gws)
+	res.gws = sets.NewString(nsInfo.routingExternalGWs.gws.UnsortedList()...)
 	return &res
 }
 
@@ -280,9 +280,8 @@ func (oc *Controller) getRoutingPodGWs(ns string) map[string]*gatewayInfo {
 	for k, v := range nsInfo.routingExternalPodGWs {
 		item := &gatewayInfo{
 			bfdEnabled: v.bfdEnabled,
-			gws:        make([]net.IP, len(v.gws)),
+			gws:        sets.NewString(v.gws.UnsortedList()...),
 		}
-		copy(item.gws, v.gws)
 		res[k] = item
 	}
 	return res
