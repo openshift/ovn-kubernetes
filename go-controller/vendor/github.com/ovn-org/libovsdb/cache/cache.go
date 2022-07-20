@@ -2,6 +2,7 @@ package cache
 
 import (
 	"bytes"
+	"container/list"
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
@@ -1136,7 +1137,10 @@ type event struct {
 
 // eventProcessor handles the queueing and processing of cache events
 type eventProcessor struct {
-	events chan event
+	events        *list.List
+	eventCapacity int
+	eventChan     chan struct{}
+	eventLock     sync.Mutex
 	// handlersMutex locks the handlers array when we add a handler or dispatch events
 	// we don't need a RWMutex in this case as we only have one thread reading and the write
 	// volume is very low (i.e only when AddEventHandler is called)
@@ -1147,9 +1151,11 @@ type eventProcessor struct {
 
 func newEventProcessor(capacity int, logger *logr.Logger) *eventProcessor {
 	return &eventProcessor{
-		events:   make(chan event, capacity),
-		handlers: []EventHandler{},
-		logger:   logger,
+		events:        list.New(),
+		eventCapacity: capacity,
+		eventChan:     make(chan struct{}),
+		handlers:      []EventHandler{},
+		logger:        logger,
 	}
 }
 
@@ -1173,12 +1179,18 @@ func (e *eventProcessor) AddEvent(eventType string, table string, old model.Mode
 		old:       old,
 		new:       new,
 	}
+	e.eventLock.Lock()
+	if e.events.Len() >= e.eventCapacity {
+		e.logger.V(0).Info("dropping event because event linked list is full")
+		return
+	}
+	e.events.PushBack(event)
+	e.eventLock.Unlock()
 	select {
-	case e.events <- event:
-		// noop
+	case e.eventChan <- struct{}{}:
 		return
 	default:
-		e.logger.V(0).Info("dropping event because event buffer is full")
+		e.logger.V(0).Info("dropping event because event channel is already set")
 	}
 }
 
@@ -1191,19 +1203,31 @@ func (e *eventProcessor) Run(stopCh <-chan struct{}) {
 		select {
 		case <-stopCh:
 			return
-		case event := <-e.events:
-			e.handlersMutex.Lock()
-			for _, handler := range e.handlers {
-				switch event.eventType {
-				case addEvent:
-					handler.OnAdd(event.table, event.new)
-				case updateEvent:
-					handler.OnUpdate(event.table, event.old, event.new)
-				case deleteEvent:
-					handler.OnDelete(event.table, event.old)
+		case <-e.eventChan:
+			e.eventLock.Lock()
+			len := e.events.Len()
+			e.eventLock.Unlock()
+
+			for i := 0; i < len; i++ {
+				e.eventLock.Lock()
+				element := e.events.Front()
+				event := element.Value.(event)
+				e.events.Remove(element)
+				e.eventLock.Unlock()
+
+				e.handlersMutex.Lock()
+				for _, handler := range e.handlers {
+					switch event.eventType {
+					case addEvent:
+						handler.OnAdd(event.table, event.new)
+					case updateEvent:
+						handler.OnUpdate(event.table, event.old, event.new)
+					case deleteEvent:
+						handler.OnDelete(event.table, event.old)
+					}
 				}
+				e.handlersMutex.Unlock()
 			}
-			e.handlersMutex.Unlock()
 		}
 	}
 }
