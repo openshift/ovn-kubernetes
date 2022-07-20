@@ -707,6 +707,7 @@ func (r *Request) Watch(ctx context.Context) (watch.Interface, error) {
 			retryAfter = nil
 		}
 
+		klog.Infof("#### [REQ] %s => %s\n****   %q\n****   %q", r.verb, r.URL().String(), r.headers, r.body)
 		resp, err := client.Do(req)
 		updateURLMetrics(ctx, r, resp, err)
 		if r.c.base != nil {
@@ -838,6 +839,7 @@ func (r *Request) Stream(ctx context.Context) (io.ReadCloser, error) {
 			retryAfter = nil
 		}
 
+		klog.Infof("#### [REQ] %s => %s\n****   %q\n****   %q", r.verb, r.URL().String(), r.headers, r.body)
 		resp, err := client.Do(req)
 		updateURLMetrics(ctx, r, resp, err)
 		if r.c.base != nil {
@@ -977,6 +979,7 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 			}
 			retryAfter = nil
 		}
+		klog.Infof("#### [REQ] %s => %s\n****   %q\n****   %q", r.verb, r.URL().String(), r.headers, r.body)
 		resp, err := client.Do(req)
 		updateURLMetrics(ctx, r, resp, err)
 		if err != nil {
