@@ -290,10 +290,9 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 }
 
 func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
-	aclUUID, hasEndpoints := ovn.getServiceLBInfo(lb, vip)
-	if aclUUID == "" && !hasEndpoints {
-		// If no ACL and does not have endpoints, we can assume there is no valid entry in the cache here as
-		// this is an illegal state.
+	aclUUID, _ := ovn.getServiceLBInfo(lb, vip)
+	if aclUUID == "" {
+		// If no ACL in local map, make sure there's no ACL also in OVN.
 		// Determine and remove ACL by name.
 		ip, port, err := util.SplitHostPortInt32(vip)
 		if err != nil {
@@ -310,10 +309,6 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 			klog.Infof("No reject ACL found in cache or in OVN to remove for load-balancer: %s, vip: %s", lb, vip)
 			return
 		}
-	} else if aclUUID == "" {
-		// Must have endpoints and no reject ACL to remove
-		klog.V(5).Infof("No reject ACL found to remove for load balancer: %s, vip: %s", lb, vip)
-		return
 	}
 	// check if the load balancer is on a GR, if so we need to get the join/external switches
 	gwRouterSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
