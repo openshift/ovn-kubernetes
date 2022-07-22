@@ -262,6 +262,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 		// This step is required to ensure the clean-up when ovn upgrades from logical_switch acls
 		// to port_group based acls.
 		ovn.removeACLFromNodeSwitches(switches, aclUUID)
+		ovn.removeRejectACLFromStartupList(aclName)
 		return aclUUID, nil
 	}
 
@@ -285,22 +286,26 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 	// Associate ACL UUID with load balancer and ip+port so we can remove this ACL if
 	// backends are re-added.
 	ovn.setServiceACLToLB(lb, vip, aclUUID)
-
+	// Remove it from the start up list, since it's now being tracked by oc.serviceLBMap
+	ovn.removeRejectACLFromStartupList(aclName)
 	return aclUUID, nil
 }
 
 func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 	aclUUID, hasEndpoints := ovn.getServiceLBInfo(lb, vip)
+
+	sourceIP, sourcePort, err := util.SplitHostPortInt32(vip)
+	if err != nil {
+		klog.Errorf("Unable to parse vip for Reject ACL deletion: %v", err)
+		return
+	}
+	aclName := generateACLNameForOVNCommand(lb, sourceIP, sourcePort) // expected name
+
 	if aclUUID == "" && !hasEndpoints {
 		// If no ACL and does not have endpoints, we can assume there is no valid entry in the cache here as
 		// this is an illegal state.
 		// Determine and remove ACL by name.
-		ip, port, err := util.SplitHostPortInt32(vip)
-		if err != nil {
-			klog.Errorf("Unable to parse vip for Reject ACL deletion: %v", err)
-			return
-		}
-		aclUUID, err = ovn.findStaleRejectACL(lb, ip, port)
+		aclUUID, err = ovn.findStaleRejectACL(aclName)
 		if err != nil {
 			klog.Infof("Unable to delete Reject ACL for load-balancer: %s, vip: %s. No entry in cache and "+
 				"error occurred while trying to find the ACL by name in OVN, error: %v", lb, vip, err)
@@ -311,9 +316,17 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 			return
 		}
 	} else if aclUUID == "" {
-		// Must have endpoints and no reject ACL to remove
-		klog.V(5).Infof("No reject ACL found to remove for load balancer: %s, vip: %s", lb, vip)
-		return
+		// lookup name of possible reject ACL in the valid reject ACLs found
+		// at startup; remove matching ACL or return.
+		aclUUID = ovn.rejectACLsAtStartup[aclName]
+		if aclUUID == "" {
+			// Must have endpoints and no reject ACL to remove
+			klog.V(5).Infof("No reject ACL found to remove for load balancer: %s, vip: %s", lb, vip)
+			return
+		} else {
+			klog.V(5).Infof("Found reject ACL %s from startup list for load balancer: %s, vip: %s",
+				aclUUID, lb, vip)
+		}
 	}
 	// check if the load balancer is on a GR, if so we need to get the join/external switches
 	gwRouterSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
@@ -323,11 +336,12 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 		ovn.removeACLFromNodeSwitches([]string{gwRouterSwitch}, aclUUID)
 	}
 	ovn.removeACLFromPortGroup(lb, aclUUID)
-	ovn.removeServiceACL(lb, vip)
+	ovn.removeServiceACL(lb, vip) // from internal cache
+	// Remove it from the start up list, since it has been removed from OVN
+	ovn.removeRejectACLFromStartupList(aclName)
 }
 
-func (ovn *Controller) findStaleRejectACL(lb, ip string, port int32) (string, error) {
-	aclName := generateACLNameForOVNCommand(lb, ip, port)
+func (ovn *Controller) findStaleRejectACL(aclName string) (string, error) {
 	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
 		fmt.Sprintf("name=%s", aclName))
 	if err != nil {

@@ -36,8 +36,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -194,6 +194,11 @@ type Controller struct {
 
 	serviceLBLock sync.Mutex
 
+	// Map of valid reject ACLs found in OVN at startup
+	rejectACLsAtStartup map[string]string
+
+	rejectACLsAtStartupLock sync.Mutex
+
 	joinSwIPManager *lsm.JoinSwitchIPManager
 
 	// event recorder used to post events to k8s
@@ -289,6 +294,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
+		rejectACLsAtStartup:      make(map[string]string),
+		rejectACLsAtStartupLock:  sync.Mutex{},
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]retryEntry),
 		recorder:                 recorder,
@@ -1300,6 +1307,14 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 	defer oc.serviceLBLock.Unlock()
 	if _, ok := oc.serviceLBMap[lb][vip]; ok {
 		oc.serviceLBMap[lb][vip].endpoints = []string{}
+	}
+}
+
+func (oc *Controller) removeRejectACLFromStartupList(aclName string) {
+	oc.rejectACLsAtStartupLock.Lock()
+	defer oc.rejectACLsAtStartupLock.Unlock()
+	if _, ok := oc.rejectACLsAtStartup[aclName]; ok {
+		delete(oc.rejectACLsAtStartup, aclName)
 	}
 }
 

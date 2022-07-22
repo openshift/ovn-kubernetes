@@ -3,10 +3,11 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"reflect"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
@@ -143,6 +144,9 @@ func (ovn *Controller) syncServices(services []interface{}) {
 	type ovnACLData struct {
 		Data [][]interface{}
 	}
+
+	OVNRejectACLsAtStartup := make(map[string]string)
+
 	data, stderr, err := util.RunOVNNbctl("--columns=name,_uuid", "--format=json", "find", "acl", "action=reject")
 	if err != nil {
 		klog.Errorf("Error while querying ACLs with reject action: %s, %v", stderr, err)
@@ -204,12 +208,16 @@ func (ovn *Controller) syncServices(services []interface{}) {
 									foundSwitches)
 								ovn.removeACLFromNodeSwitches(foundSwitches, uuid)
 							}
+						} else {
+							OVNRejectACLsAtStartup[name] = uuid
 						}
 					}
 				}
 			}
 		}
 	}
+
+	ovn.rejectACLsAtStartup = OVNRejectACLsAtStartup
 
 	// Get OVN's current cluster load balancer VIPs and delete them if they
 	// are stale.
@@ -287,7 +295,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 
 	// We can end up in a situation where the endpoint creation is triggered before the service creation,
 	// we should not be creating the reject ACLs if this endpoint exists, because that would result in an unreachable service
-	// eventough the endpoint exists.
+	// even though the endpoint exists.
 	// NOTE: we can also end up in a situation where a service matching no pods is created. Such a service still has an endpoint, but with no subsets.
 	// make sure to treat that service as an ACL reject.
 	ep, err := ovn.watchFactory.GetEndpoint(service.Namespace, service.Name)
