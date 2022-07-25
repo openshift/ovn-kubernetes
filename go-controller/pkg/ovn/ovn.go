@@ -770,7 +770,7 @@ func (oc *Controller) WatchEgressNodes() {
 				oc.setNodeEgressReachable(node.Name, true)
 			}
 			if hasEgressLabel && isReachable && isReady {
-				if err := oc.addEgressNode(node); err != nil {
+				if err := oc.addEgressNode(node.Name); err != nil {
 					klog.Error(err)
 				}
 			}
@@ -791,7 +791,7 @@ func (oc *Controller) WatchEgressNodes() {
 			if oldHadEgressLabel && !newHasEgressLabel {
 				klog.Infof("Node: %s has been un-labelled, deleting it from egress assignment", newNode.Name)
 				oc.setNodeEgressAssignable(oldNode.Name, false)
-				if err := oc.deleteEgressNode(oldNode); err != nil {
+				if err := oc.deleteEgressNode(oldNode.Name); err != nil {
 					klog.Error(err)
 				}
 				return
@@ -805,7 +805,7 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
 				oc.setNodeEgressAssignable(newNode.Name, true)
 				if isNewReady && isNewReachable {
-					if err := oc.addEgressNode(newNode); err != nil {
+					if err := oc.addEgressNode(newNode.Name); err != nil {
 						klog.Error(err)
 					}
 				} else {
@@ -818,12 +818,12 @@ func (oc *Controller) WatchEgressNodes() {
 			}
 			if !isNewReady {
 				klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
-				if err := oc.deleteEgressNode(newNode); err != nil {
+				if err := oc.deleteEgressNode(newNode.Name); err != nil {
 					klog.Error(err)
 				}
 			} else if isNewReady && isNewReachable {
 				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
-				if err := oc.addEgressNode(newNode); err != nil {
+				if err := oc.addEgressNode(newNode.Name); err != nil {
 					klog.Error(err)
 				}
 			}
@@ -835,7 +835,7 @@ func (oc *Controller) WatchEgressNodes() {
 			}
 			nodeLabels := node.GetLabels()
 			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
-				if err := oc.deleteEgressNode(node); err != nil {
+				if err := oc.deleteEgressNode(node.Name); err != nil {
 					klog.Error(err)
 				}
 			}
