@@ -27,6 +27,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
@@ -571,7 +572,41 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}
 
+	// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
+	if err := n.startEgressIPHealthCheckingServer(wg, mgmtPortConfig); err != nil {
+		return err
+	}
+
 	klog.Infof("OVN Kube Node initialized and ready.")
+	return nil
+}
+
+func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPortConfig *managementPortConfig) error {
+	healthCheckPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
+	if healthCheckPort == 0 {
+		klog.Infof("Egress IP health check server skipped: no port specified")
+		return nil
+	}
+
+	var nodeMgmtIP net.IP
+	if mgmtPortConfig.ipv4 != nil {
+		nodeMgmtIP = mgmtPortConfig.ipv4.ifAddr.IP
+	} else if mgmtPortConfig.ipv6 != nil {
+		nodeMgmtIP = mgmtPortConfig.ipv6.ifAddr.IP
+	} else {
+		return fmt.Errorf("unable to start health checking server: no mgmt ip")
+	}
+
+	healthServer, err := healthcheck.NewEgressIPHealthServer(nodeMgmtIP, healthCheckPort)
+	if err != nil {
+		return fmt.Errorf("unable to allocate health checking server: %v", err)
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		healthServer.Run(n.stopChan)
+	}()
 	return nil
 }
 
