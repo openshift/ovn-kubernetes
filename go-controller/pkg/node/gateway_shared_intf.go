@@ -277,6 +277,9 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return
 	}
+	npw.updateServiceFlowCache(service, false)
+	npw.ofm.requestFlowSync()
+	delSharedGatewayIptRules(service)
 	// Remove all conntrack entries for the serviceVIPs of this service irrespective of protocol stack
 	// since service deletion is considered as unplugging the network cable and hence graceful termination
 	// is not guaranteed. See https://github.com/kubernetes/kubernetes/issues/108523#issuecomment-1074044415.
@@ -284,9 +287,6 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	if err != nil {
 		klog.Errorf("Failed to delete conntrack entry for service %v/%v: %v", service.Namespace, service.Name, err)
 	}
-	npw.updateServiceFlowCache(service, false)
-	npw.ofm.requestFlowSync()
-	delSharedGatewayIptRules(service)
 }
 
 func (npw *nodePortWatcher) SyncServices(services []interface{}) {
