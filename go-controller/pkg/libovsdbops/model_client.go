@@ -113,12 +113,6 @@ type OperationModel struct {
 	// DoAfter is invoked at the end of the operation and allows to setup a
 	// subsequent operation with values obtained from this one.
 	DoAfter func()
-	// Name is used to signify if this model has a name being used. Typically
-	// corresponds to Name field used on ovsdb objects. Using a non-empty
-	// Name indicates that during a Create the model will have a predicate
-	// operation to ensure a duplicate txn will not occur. See:
-	// https://bugzilla.redhat.com/show_bug.cgi?id=2042001
-	Name string
 }
 
 // WithClient is useful for ad-hoc override of the targetted OVS DB. Can be used,
@@ -126,6 +120,10 @@ type OperationModel struct {
 func (m *ModelClient) WithClient(client client.Client) *ModelClient {
 	cl := NewModelClient(client)
 	return &cl
+}
+
+func onModelUpdatesNone() []interface{} {
+	return nil
 }
 
 /*
@@ -150,14 +148,21 @@ func (m *ModelClient) WithClient(client client.Client) *ModelClient {
  If BulkOp is set, update or mutate can happen accross multiple models found.
 */
 func (m *ModelClient) CreateOrUpdate(opModels ...OperationModel) ([]ovsdb.OperationResult, error) {
-	created, ops, err := m.CreateOrUpdateOps(opModels...)
+	created, ops, err := m.createOrUpdateOps(nil, opModels...)
 	if err != nil {
 		return nil, err
 	}
 	return TransactAndCheckAndSetUUIDs(m.client, created, ops)
 }
 
-func (m *ModelClient) CreateOrUpdateOps(opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
+func (m *ModelClient) CreateOrUpdateOps(ops []ovsdb.Operation, opModels ...OperationModel) ([]ovsdb.Operation, error) {
+	_, ops, err := m.createOrUpdateOps(ops, opModels...)
+	return ops, err
+}
+
+func (m *ModelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
+	hasGuardOp := len(ops) > 0 && isGuardOp(&ops[0])
+	guardOp := []ovsdb.Operation{}
 	doWhenFound := func(model interface{}, opModel *OperationModel) ([]ovsdb.Operation, error) {
 		if opModel.OnModelUpdates != nil {
 			return m.update(model, opModel)
@@ -167,9 +172,25 @@ func (m *ModelClient) CreateOrUpdateOps(opModels ...OperationModel) (interface{}
 		return nil, nil
 	}
 	doWhenNotFound := func(model interface{}, opModel *OperationModel) ([]ovsdb.Operation, error) {
+		if !hasGuardOp {
+			// for the first insert of certain models, build a wait operation
+			// that checks for duplicates as a guard op to prevent against
+			// duplicate transactions
+			var err error
+			guardOp, err = buildFailOnDuplicateOps(m.client, opModel.Model)
+			if err != nil {
+				return nil, err
+			}
+			hasGuardOp = len(guardOp) > 0
+		}
 		return m.create(opModel)
 	}
-	return m.buildOps(doWhenFound, doWhenNotFound, opModels...)
+	created, ops, err := m.buildOps(ops, doWhenFound, doWhenNotFound, opModels...)
+	if len(guardOp) > 0 {
+		// set the guard op as the first of the list
+		ops = append(guardOp, ops...)
+	}
+	return created, ops, err
 }
 
 /*
@@ -188,7 +209,7 @@ func (m *ModelClient) CreateOrUpdateOps(opModels ...OperationModel) (interface{}
  If BulkOp is set, delete or mutate can happen accross multiple models found.
 */
 func (m *ModelClient) Delete(opModels ...OperationModel) error {
-	ops, err := m.DeleteOps(opModels...)
+	ops, err := m.DeleteOps(nil, opModels...)
 	if err != nil {
 		return err
 	}
@@ -196,7 +217,7 @@ func (m *ModelClient) Delete(opModels ...OperationModel) error {
 	return err
 }
 
-func (m *ModelClient) DeleteOps(opModels ...OperationModel) ([]ovsdb.Operation, error) {
+func (m *ModelClient) DeleteOps(ops []ovsdb.Operation, opModels ...OperationModel) ([]ovsdb.Operation, error) {
 	doWhenFound := func(model interface{}, opModel *OperationModel) (o []ovsdb.Operation, err error) {
 		if opModel.OnModelMutations != nil {
 			return m.mutate(model, opModel, ovsdb.MutateOperationDelete)
@@ -204,14 +225,16 @@ func (m *ModelClient) DeleteOps(opModels ...OperationModel) ([]ovsdb.Operation, 
 			return m.delete(model, opModel)
 		}
 	}
-	_, ops, err := m.buildOps(doWhenFound, nil, opModels...)
+	_, ops, err := m.buildOps(ops, doWhenFound, nil, opModels...)
 	return ops, err
 }
 
 type opModelToOpMapper func(model interface{}, opModel *OperationModel) (o []ovsdb.Operation, err error)
 
-func (m *ModelClient) buildOps(doWhenFound opModelToOpMapper, doWhenNotFound opModelToOpMapper, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
-	ops := []ovsdb.Operation{}
+func (m *ModelClient) buildOps(ops []ovsdb.Operation, doWhenFound opModelToOpMapper, doWhenNotFound opModelToOpMapper, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
+	if ops == nil {
+		ops = []ovsdb.Operation{}
+	}
 	notfound := []interface{}{}
 	for _, opModel := range opModels {
 		if opModel.ExistingResult == nil && opModel.Model != nil {
@@ -279,37 +302,12 @@ func (m *ModelClient) create(opModel *OperationModel) ([]ovsdb.Operation, error)
 	if uuid == "" {
 		setUUID(opModel.Model, BuildNamedUUID())
 	}
-	ops := make([]ovsdb.Operation, 0, 1)
-	o, err := m.client.Create(opModel.Model)
+
+	ops, err := m.client.Create(opModel.Model)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create model, err: %v", err)
 	}
 
-	// Add wait methods accordingly
-	// ACL we would have to use external_ids + name for unique match
-	// However external_ids would be a performance hit, and in one case we use
-	// an empty name and external_ids for addAllowACLFromNode
-	if len(opModel.Name) > 0 && o[0].Table != "ACL" {
-		timeout := types.OVSDBWaitTimeout
-		ops = append(ops, ovsdb.Operation{
-			Op:      ovsdb.OperationWait,
-			Timeout: &timeout,
-			Table:   o[0].Table,
-			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: opModel.Name}},
-			Columns: []string{"name"},
-			Until:   "!=",
-			Rows:    []ovsdb.Row{{"name": opModel.Name}},
-		})
-	} else if info, err := m.client.Cache().DatabaseModel().NewModelInfo(opModel.Model); err == nil {
-		if name, err := info.FieldByColumn("name"); err == nil {
-			if len(fmt.Sprint(name)) > 0 {
-				klog.Warningf("OVSDB Create operation detected without setting opModel Name. Name: %s, %#v",
-					name, info)
-			}
-		}
-	}
-
-	ops = append(ops, o...)
 	klog.V(5).Infof("Create operations generated as: %+v", ops)
 	return ops, nil
 }
@@ -395,4 +393,8 @@ func addToExistingResult(model interface{}, existingResult interface{}) {
 	resultPtr := reflect.ValueOf(existingResult)
 	resultVal := reflect.Indirect(resultPtr)
 	resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(model))))
+}
+
+func isGuardOp(op *ovsdb.Operation) bool {
+	return op != nil && op.Op == ovsdb.OperationWait && op.Timeout != nil && *op.Timeout == types.OVSDBWaitTimeout
 }

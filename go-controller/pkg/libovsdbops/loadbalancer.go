@@ -105,17 +105,6 @@ func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsd
 
 	// If LoadBalancer does not exist, create it
 	if err == libovsdbclient.ErrNotFound {
-		timeout := types.OVSDBWaitTimeout
-		ops = append(ops, libovsdb.Operation{
-			Op:      libovsdb.OperationWait,
-			Timeout: &timeout,
-			Table:   "Load_Balancer",
-			Where:   []libovsdb.Condition{{Column: "name", Function: libovsdb.ConditionEqual, Value: lb.Name}},
-			Columns: []string{"name"},
-			Until:   "!=",
-			Rows:    []libovsdb.Row{{"name": lb.Name}},
-		})
-
 		ensureLoadBalancerUUID(lb)
 		op, err := nbClient.Create(lb)
 		if err != nil {
@@ -135,6 +124,27 @@ func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsd
 	return ops, nil
 }
 
+// CreateLoadBalancersOps creates the provided load balancers returning the
+// corresponding ops
+func CreateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	opModels := make([]OperationModel, 0, len(lbs))
+	for i := range lbs {
+		lb := lbs[i]
+		opModel := OperationModel{
+			Model:          lb,
+			OnModelUpdates: onModelUpdatesNone(),
+			ErrNotFound:    false,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := NewModelClient(nbClient)
+	return modelClient.CreateOrUpdateOps(ops, opModels...)
+}
+
+// CreateOrUpdateLoadBalancersOps creates or updates the provided load balancers
+// returning the corresponding ops
 func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
