@@ -35,7 +35,8 @@ RUN yum install -y  \
 ARG ovsver=2.17.0-22.el8fdp
 ARG ovnver=22.06.0-27.el8fdp
 
-COPY openvswitch2.17-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm openvswitch2.17-devel-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm openvswitch2.17-ipsec-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm python3-openvswitch2.17-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm /root/
+#COPY openvswitch2.17-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm openvswitch2.17-devel-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm openvswitch2.17-ipsec-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm python3-openvswitch2.17-2.17.0-weak_ref_hist.43.el8fdp.x86_64.rpm /root/
+COPY ovn22.06-22.06.0-sb_lb_dpg.30.el8fdp.x86_64.rpm ovn22.06-central-22.06.0-sb_lb_dpg.30.el8fdp.x86_64.rpm ovn22.06-host-22.06.0-sb_lb_dpg.30.el8fdp.x86_64.rpm ovn22.06-vtep-22.06.0-sb_lb_dpg.30.el8fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
