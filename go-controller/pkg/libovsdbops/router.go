@@ -470,3 +470,123 @@ func FindLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, p lo
 	err := nbClient.WhereCache(p).List(ctx, &found)
 	return found, err
 }
+
+// GetLogicalRouterPolicy looks up a logical router policy from the cache
+func GetLogicalRouterPolicy(nbClient libovsdbclient.Client, policy *nbdb.LogicalRouterPolicy) (*nbdb.LogicalRouterPolicy, error) {
+	found := []*nbdb.LogicalRouterPolicy{}
+	opModel := OperationModel{
+		Model:          policy,
+		ExistingResult: &found,
+		OnModelUpdates: nil, // no update
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := NewModelClient(nbClient)
+	_, err := m.CreateOrUpdate(opModel)
+	if err != nil {
+		return nil, err
+	}
+
+	return found[0], nil
+}
+
+func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, lrps []*nbdb.LogicalRouterPolicy, nextHops ...string) ([]libovsdb.Operation, error) {
+	nextHopSet := sets.NewString(nextHops...)
+	opModels := []OperationModel{}
+	router := &nbdb.LogicalRouter{
+		Name:     routerName,
+		Policies: []string{},
+	}
+
+	for i := range lrps {
+		lrp := lrps[i]
+		if nextHopSet.HasAll(lrp.Nexthops...) {
+			// if no next-hops remain in the policy, remove it alltogether
+			router.Policies = append(router.Policies, lrp.UUID)
+			opModel := OperationModel{
+				Model:       lrp,
+				BulkOp:      false,
+				ErrNotFound: false,
+			}
+			opModels = append(opModels, opModel)
+		} else {
+			// otherwise just remove the next-hops
+			lrp.Nexthops = nextHops
+			opModel := OperationModel{
+				Model:            lrp,
+				OnModelMutations: []interface{}{&lrp.Nexthops},
+				BulkOp:           false,
+				ErrNotFound:      false,
+			}
+			opModels = append(opModels, opModel)
+		}
+	}
+
+	if len(router.Policies) > 0 {
+		opModel := OperationModel{
+			Model:            router,
+			ModelPredicate:   func(lr *nbdb.LogicalRouter) bool { return lr.Name == router.Name },
+			OnModelMutations: []interface{}{&router.Policies},
+			BulkOp:           false,
+			ErrNotFound:      false,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	m := NewModelClient(nbClient)
+	return m.DeleteOps(ops, opModels...)
+}
+
+// DeleteNextHopsFromLogicalRouterPolicies removes the Nexthops from the
+// provided logical router policies. If a logical router policy ends up with no
+// Nexthops, it is deleted and removed from the provided logical router.
+func DeleteNextHopsFromLogicalRouterPolicies(nbClient libovsdbclient.Client, routerName string, lrps ...*nbdb.LogicalRouterPolicy) error {
+	ops := []libovsdb.Operation{}
+	for _, lrp := range lrps {
+		nextHops := lrp.Nexthops
+		lrp, err := GetLogicalRouterPolicy(nbClient, lrp)
+		if err == libovsdbclient.ErrNotFound {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+
+		ops, err = deleteNextHopsFromLogicalRouterPolicyOps(nbClient, ops, routerName, []*nbdb.LogicalRouterPolicy{lrp}, nextHops...)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err := TransactAndCheck(nbClient, ops)
+	return err
+}
+
+// DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps looks up a logical
+// router policy from the cache based on a given predicate and removes the
+// provided Nexthop from it. If the logical router policy ends up with no
+// Nexthops, it is deleted and removed from the provided logical router. Returns
+// the corresponding ops
+func DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, p logicalRouterPolicyPredicate, nextHop string) ([]libovsdb.Operation, error) {
+	lrps, err := FindLogicalRouterPoliciesWithPredicate(nbClient, p)
+	if err != nil {
+		return nil, err
+	}
+
+	return deleteNextHopsFromLogicalRouterPolicyOps(nbClient, nil, routerName, lrps, nextHop)
+}
+
+// DeleteNextHopFromLogicalRouterPoliciesWithPredicate looks up a logical router
+// policy from the cache based on a given predicate and removes the provided
+// Nexthop from it. If the logical router policy ends up with no Nexthops, it is
+// deleted and removed from the provided logical router.
+func DeleteNextHopFromLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, routerName string, p logicalRouterPolicyPredicate, nextHop string) error {
+	ops, err := DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(nbClient, nil, routerName, p, nextHop)
+	if err != nil {
+		return err
+	}
+
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}
