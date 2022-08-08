@@ -395,11 +395,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	var libovsdbExecuteTime time.Duration
 	var podAnnoTime time.Duration
+	var grSnatTime time.Duration
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort took %v, libovsdb time %v, annotation time: %v",
-			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime, podAnnoTime)
+		klog.Infof("[%s/%s] addLogicalPort took %v, grSNAT time %v, libovsdb time %v, annotation time: %v",
+			pod.Namespace, pod.Name, time.Since(start), grSnatTime, libovsdbExecuteTime, podAnnoTime)
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
@@ -623,11 +624,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
-		if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
-			return err
-		} else if ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
+		extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName)
+		if err != nil {
 			return err
 		}
+		start := time.Now()
+		ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops)
+		if err != nil {
+			return err
+		}
+		grSnatTime = time.Since(start)
 	}
 
 	// set addresses on the port
