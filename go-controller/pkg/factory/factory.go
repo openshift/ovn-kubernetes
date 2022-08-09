@@ -888,34 +888,12 @@ func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 	}
 }
 
-// noHeadlessServiceSelector is a LabelSelector added to the watch for
-// Endpoints (and, eventually, EndpointSlices) that excludes endpoints
-// for headless services.
-// This matches the behavior of kube-proxy
-func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
-	// if the service is headless, skip it
-	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
-	if err != nil {
-		// cannot occur
-		panic(err)
-	}
-
-	selector := labels.NewSelector()
-	selector.Add(*svcNameLabel)
-	selector.Add(*notEmptySvcName)
-
-	return func(options *metav1.ListOptions) {
-		options.LabelSelector = selector.String()
-	}
-}
-
-
 // noServiceNameSelector is a LabelSelector added to the watch for
 // endpointslices that excludes endpointslices which doesn't
 // have "kubernetes.io/service-name" label and also the one's
 // that have "kubernetes.io/service-name" label value set to "".
 func noServiceNameSelector() func(options *metav1.ListOptions) {
-	// if the LabelServiceName label doesn't exists, skip it.
+	// if the LabelServiceName label doesn't exist, skip it.
 	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
 	if err != nil {
 		// cannot occur
