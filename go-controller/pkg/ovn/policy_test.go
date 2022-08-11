@@ -1432,19 +1432,24 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
 				key := getPolicyNamespacedName(networkPolicy2)
-				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
-
+				fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key)
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key)
+				}).ShouldNot(gomega.BeNil())
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
-				setRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
-				fakeOvn.controller.retryNetworkPolicies.RequestRetryObjs()
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
+				fakeOvn.controller.retryNetworkPolicies.requestRetryObjs()
 
 				gressPolicy2ExpectedData := npTest.getPolicyData(networkPolicy2, []string{nPodTest.portUUID}, nil, []int32{portNum + 1}, nbdb.ACLSeverityInfo, false)
 				expectedDataWithPolicy2 := append(expectedData, gressPolicy2ExpectedData...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithPolicy2...))
 				// check the cache no longer has the entry
-				checkRetryObjectEventually(key, false, fakeOvn.controller.retryNetworkPolicies)
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key)
+				}).Should(gomega.BeNil())
+
 				return nil
 			}
 
@@ -1563,8 +1568,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
 				key := getPolicyNamespacedName(networkPolicy2)
-				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
-				if retryEntry, found := getRetryObj(key, fakeOvn.controller.retryNetworkPolicies); found {
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key)
+				}).ShouldNot(gomega.BeNil())
+				if retryEntry := fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key); retryEntry != nil {
 					ginkgo.By("retry entry new policy should be nil")
 					gomega.Expect(retryEntry.newObj).To(gomega.BeNil())
 					ginkgo.By("retry entry old policy should not be nil")
@@ -1593,7 +1600,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 				// check the cache no longer has the entry
 				key = getPolicyNamespacedName(networkPolicy)
-				checkRetryObjectEventually(key, false, fakeOvn.controller.retryNetworkPolicies)
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key)
+				}).Should(gomega.BeNil())
+
 				return nil
 			}
 
@@ -2647,12 +2657,14 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
 				key := getPolicyNamespacedName(networkPolicy)
-				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key)
+				}).ShouldNot(gomega.BeNil())
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
-				setRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
-				fakeOvn.controller.retryNetworkPolicies.RequestRetryObjs()
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
+				fakeOvn.controller.retryNetworkPolicies.requestRetryObjs()
 
 				eventuallyExpectNoAddressSets(fakeOvn, networkPolicy)
 
@@ -2662,7 +2674,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				// check the cache no longer has the entry
-				checkRetryObjectEventually(key, false, fakeOvn.controller.retryNetworkPolicies)
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryNetworkPolicies.getObjRetryEntry(key)
+				}).Should(gomega.BeNil())
 				return nil
 			}
 

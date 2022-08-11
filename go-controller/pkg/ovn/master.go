@@ -1403,14 +1403,10 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 						continue
 					}
 					klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
-					err = oc.retryPods.AddRetryObjWithAddNoBackoff(&pod)
-					if err != nil {
-						errs = append(errs, err)
-						klog.Errorf("Failed to add pod %s/%s to retryPods: %v", pod.Namespace, pod.Name, err)
-					}
+					oc.retryPods.addRetryObjWithAddNoBackoff(&pod)
 				}
 			}
-			oc.retryPods.RequestRetryObjs()
+			oc.retryPods.requestRetryObjs()
 		}
 	}
 
