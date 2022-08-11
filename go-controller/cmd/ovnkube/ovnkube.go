@@ -123,7 +123,7 @@ func main() {
 	go func() {
 		select {
 		case s := <-exitCh:
-			klog.Infof("Received signal %s. Shutting down", s)
+			klog.Infof("Received signal %s. Shutting down bye", s)
 			cancel()
 		case <-ctx.Done():
 		}
