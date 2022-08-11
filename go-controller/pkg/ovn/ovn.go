@@ -692,8 +692,7 @@ func (oc *Controller) WatchPods() {
 			pod, err := oc.watchFactory.GetPod(podNs, podName)
 			if err != nil {
 				// When processing an object in terminal state there is a chance that it was already removed from
-				//  the API server. Since delete events for objects in terminal state are skipped delete it here.
-				// This only applies to pod watchers (pods + dynamic network policy handlers watching pods).
+				// the API server. Since delete events for objects in terminal state are skipped delete it here.
 				if kerrors.IsNotFound(err) && util.PodCompleted(newerPod) {
 					klog.Warningf("Pod %s/%s is in terminal state but no longer exists in informer cache, removing",
 						podNs, podName)
