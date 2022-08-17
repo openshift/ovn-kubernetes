@@ -13,18 +13,30 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
+// LOGICAL_SWITCH OPs
+
+type switchPredicate func(*nbdb.LogicalSwitch) bool
+
+// FindLogicalSwitchesWithPredicate looks up logical switches from the cache
+// based on a given predicate
+func FindLogicalSwitchesWithPredicate(nbClient libovsdbclient.Client, p switchPredicate) ([]*nbdb.LogicalSwitch, error) {
+	found := []*nbdb.LogicalSwitch{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
+
 // findSwitchUUID looks up the switch in the cache and sets the UUID
 func findSwitchUUID(nbClient libovsdbclient.Client, lswitch *nbdb.LogicalSwitch) error {
 	if lswitch.UUID != "" && !IsNamedUUID(lswitch.UUID) {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	switches := []nbdb.LogicalSwitch{}
-	err := nbClient.WhereCache(func(item *nbdb.LogicalSwitch) bool {
+	p := func(item *nbdb.LogicalSwitch) bool {
 		return item.Name == lswitch.Name
-	}).List(ctx, &switches)
+	}
+	switches, err := FindLogicalSwitchesWithPredicate(nbClient, p)
 	if err != nil {
 		return fmt.Errorf("can't find switch %+v: %v", *lswitch, err)
 	}
