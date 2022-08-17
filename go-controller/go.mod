@@ -1,6 +1,6 @@
 module github.com/ovn-org/ovn-kubernetes/go-controller
 
-go 1.18
+go 1.17
 
 require (
 	github.com/Mellanox/sriovnet v1.0.3

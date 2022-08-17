@@ -202,28 +202,28 @@ type Controller struct {
 	v6HostSubnetsUsed float64
 
 	// Objects for pods that need to be retried
-	retryPods *RetryObjs
+	retryPods *retryObjs
 
 	// Objects for network policies that need to be retried
-	retryNetworkPolicies *RetryObjs
+	retryNetworkPolicies *retryObjs
 
 	// Objects for egress firewall that need to be retried
-	retryEgressFirewalls *RetryObjs
+	retryEgressFirewalls *retryObjs
 
 	// Objects for egress IP that need to be retried
-	retryEgressIPs *RetryObjs
+	retryEgressIPs *retryObjs
 	// Objects for egress IP Namespaces that need to be retried
-	retryEgressIPNamespaces *RetryObjs
+	retryEgressIPNamespaces *retryObjs
 	// Objects for egress IP Pods that need to be retried
-	retryEgressIPPods *RetryObjs
+	retryEgressIPPods *retryObjs
 	// Objects for Egress nodes that need to be retried
-	retryEgressNodes *RetryObjs
+	retryEgressNodes *retryObjs
 	// EgressIP Node-specific syncMap used by egressip node event handler
 	addEgressNodeFailed sync.Map
 	// Objects for nodes that need to be retried
-	retryNodes *RetryObjs
+	retryNodes *retryObjs
 	// Objects for Cloud private IP config that need to be retried
-	retryCloudPrivateIPConfig *RetryObjs
+	retryCloudPrivateIPConfig *retryObjs
 	// Node-specific syncMap used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
