@@ -54,7 +54,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 			if podEntry.needsDel != nil {
 				klog.Infof("%s retry pod teardown", podDesc)
 				if err := oc.removePod(pod, podEntry.needsDel); err != nil {
-					klog.Infof("%s teardown retry failed; will try again later", podDesc)
+					klog.Infof("%s teardown retry failed; will try again later: %v", podDesc, err)
 					podEntry.timeStamp = time.Now()
 					continue // if deletion failed we will not retry add
 				}
