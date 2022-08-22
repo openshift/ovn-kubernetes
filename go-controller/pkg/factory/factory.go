@@ -330,7 +330,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			noServiceNameSelector())
+			withServiceNameAndNoHeadlessServiceSelector())
 	})
 
 	var err error
@@ -885,33 +885,6 @@ func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 
 	return func(options *metav1.ListOptions) {
 		options.LabelSelector = labelSelector.String()
-	}
-}
-
-// noServiceNameSelector is a LabelSelector added to the watch for
-// endpointslices that excludes endpointslices which doesn't
-// have "kubernetes.io/service-name" label and also the one's
-// that have "kubernetes.io/service-name" label value set to "".
-func noServiceNameSelector() func(options *metav1.ListOptions) {
-	// if the LabelServiceName label doesn't exist, skip it.
-	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
-	if err != nil {
-		// cannot occur
-		panic(err)
-	}
-
-	notEmptySvcName, err := labels.NewRequirement(discovery.LabelServiceName, selection.NotEquals, []string{""})
-	if err != nil {
-		// cannot occur
-		panic(err)
-	}
-
-	selector := labels.NewSelector()
-	selector.Add(*svcNameLabel)
-	selector.Add(*notEmptySvcName)
-
-	return func(options *metav1.ListOptions) {
-		options.LabelSelector = selector.String()
 	}
 }
 
