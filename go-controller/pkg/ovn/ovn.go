@@ -38,6 +38,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -594,6 +595,32 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 	return nil
 }
 
+// processPodInTerminalState is executed when a pod has been added or updated and is actually in a terminal state
+// already. The add or update event is not valid for such object, which we now remove from the cluster in order to
+// free its resources. (for now, this applies to completed pods)
+func (oc *Controller) processPodInTerminalState(pod *kapi.Pod) {
+	// pod is in completed state, remove it
+	klog.Infof("Detected completed pod: %s. Will remove.", getPodNamespacedName(pod))
+	oc.initRetryDelPod(pod)
+	oc.removeAddRetry(pod)
+	oc.logicalPortCache.remove(util.GetLogicalPortName(pod.Namespace, pod.Name))
+	retryEntry := oc.getPodRetryEntry(pod)
+	var portInfo *lpInfo
+	if retryEntry != nil {
+		// retryEntry shouldn't be nil since we usually add the pod to retryCache above
+		portInfo = retryEntry.needsDel
+	}
+
+	if err := oc.removePod(pod, portInfo); err != nil {
+		oc.recordPodEvent(err, pod)
+		klog.Errorf("Failed to delete completed pod %s, error: %v",
+			getPodNamespacedName(pod), err)
+		oc.unSkipRetryPod(pod)
+		return
+	}
+	oc.checkAndDeleteRetryPod(pod)
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
 	start := time.Now()
@@ -652,7 +679,7 @@ func (oc *Controller) WatchPods() {
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
-			pod := newer.(*kapi.Pod)
+			newerPod := newer.(*kapi.Pod)
 			// there may be a situation where this update event is not the latest
 			// and we rely on annotations to determine the pod mac/ifaddr
 			// this would create a situation where
@@ -660,12 +687,20 @@ func (oc *Controller) WatchPods() {
 			// 2. creates OVN logical port with old pod annotation value
 			// 3. CNI flows check fails and pod annotation does not match what is in OVN
 			// Therefore we need to get the latest version of this pod to attempt to addLogicalPort with
-			podName := pod.Name
-			podNs := pod.Namespace
+			podName := newerPod.Name
+			podNs := newerPod.Namespace
 			pod, err := oc.watchFactory.GetPod(podNs, podName)
 			if err != nil {
-				klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
-					podNs, podName)
+				// When processing an object in terminal state there is a chance that it was already removed from
+				// the API server. Since delete events for objects in terminal state are skipped delete it here.
+				if kerrors.IsNotFound(err) && util.PodCompleted(newerPod) {
+					klog.Warningf("Pod %s/%s is in terminal state but no longer exists in informer cache, removing",
+						podNs, podName)
+					oc.processPodInTerminalState(newerPod)
+				} else {
+					klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
+						podNs, podName)
+				}
 				return
 			}
 			oc.checkAndSkipRetryPod(pod)
@@ -683,24 +718,7 @@ func (oc *Controller) WatchPods() {
 				oc.removeDeleteRetry(pod)
 			} else if util.PodCompleted(pod) {
 				// pod is in completed state, remove it
-				klog.Infof("Detected completed pod: %s. Will remove.", getPodNamespacedName(pod))
-				oc.initRetryDelPod(pod)
-				oc.removeAddRetry(pod)
-				oc.logicalPortCache.remove(util.GetLogicalPortName(pod.Namespace, pod.Name))
-				retryEntry := oc.getPodRetryEntry(pod)
-				var portInfo *lpInfo
-				if retryEntry != nil {
-					// retryEntry shouldn't be nil since we usually add the pod to retryCache above
-					portInfo = retryEntry.needsDel
-				}
-				if err := oc.removePod(pod, portInfo); err != nil {
-					oc.recordPodEvent(err, pod)
-					klog.Errorf("Failed to delete completed pod %s, error: %v",
-						getPodNamespacedName(pod), err)
-					oc.unSkipRetryPod(pod)
-					return
-				}
-				oc.checkAndDeleteRetryPod(pod)
+				oc.processPodInTerminalState(pod)
 				return
 			}
 
