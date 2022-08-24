@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package node
@@ -340,11 +341,17 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
 				}
 			}
 		}
-		externalIPs := make([]string, 0, len(service.Spec.ExternalIPs)+len(service.Status.LoadBalancer.Ingress))
+		externalIPsCount := len(service.Spec.ExternalIPs)
+		if config.Gateway.Mode == config.GatewayModeShared {
+			externalIPsCount += len(service.Status.LoadBalancer.Ingress)
+		}
+		externalIPs := make([]string, 0, externalIPsCount)
 		externalIPs = append(externalIPs, service.Spec.ExternalIPs...)
-		for _, ingress := range service.Status.LoadBalancer.Ingress {
-			if len(ingress.IP) > 0 {
-				externalIPs = append(externalIPs, ingress.IP)
+		if config.Gateway.Mode == config.GatewayModeShared {
+			for _, ingress := range service.Status.LoadBalancer.Ingress {
+				if len(ingress.IP) > 0 {
+					externalIPs = append(externalIPs, ingress.IP)
+				}
 			}
 		}
 
