@@ -239,6 +239,10 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 			}
 			podIPs = append(podIPs, ipNet)
 		}
+		if len(podIPs) == 0 {
+			klog.Warningf("Will not add gateway routes for pod %s/%s. IPs not found!", pod.Namespace, pod.Name)
+			continue
+		}
 		if err := oc.addGWRoutesForPod([]*gatewayInfo{&egress}, podIPs, podNsName, pod.Spec.NodeName); err != nil {
 			return err
 		}
