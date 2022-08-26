@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"testing"
 
 	"github.com/Mellanox/sriovnet"
@@ -310,7 +311,9 @@ func TestSetupNetwork(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.linkMockHelper)
 			ovntest.ProcessMockFnList(&mockCNIPlugin.Mock, tc.cniPluginMockHelper)
 
-			err := setupNetwork(tc.inpLink, tc.inpPodIfaceInfo)
+			f, _ := os.Open("/dev/null")
+			defer f.Close()
+			err := setupNetwork(tc.inpLink, tc.inpPodIfaceInfo, f)
 			t.Log(err)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
@@ -389,7 +392,8 @@ func TestSetupInterface(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockCNIPlugin.Mock, tc.cniPluginMockHelper)
 			ovntest.ProcessMockFnList(&mockNS.Mock, tc.nsMockHelper)
 
-			hostIface, contIface, err := setupInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo)
+			f, _ := os.Open("/dev/null")
+			hostIface, contIface, err := setupInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, f)
 			t.Log(hostIface, contIface, err)
 			if tc.errExp {
 				assert.NotNil(t, err)
@@ -687,7 +691,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovOpsMockHelper)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.linkMockHelper)
 
-			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs)
+			f, _ := os.Open("/dev/null")
+			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs, f)
 			t.Log(hostIface, contIface, err)
 			if tc.errExp {
 				assert.NotNil(t, err)

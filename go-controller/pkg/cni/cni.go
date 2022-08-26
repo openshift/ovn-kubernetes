@@ -3,6 +3,8 @@ package cni
 import (
 	"fmt"
 	"net"
+	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
@@ -111,6 +113,14 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
 
+	now := time.Now()
+	pr.logf, _ = os.Create(fmt.Sprintf("/tmp/%s-%s-%s", pr.PodNamespace, pr.PodName, now.Format(time.RFC3339Nano)))
+	pr.logf.WriteString(fmt.Sprintf("Start: %v\n", now.Format(time.RFC3339Nano)))
+	defer func() {
+		pr.logf.Sync()
+		pr.logf.Close()
+	}()
+
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		var err error
@@ -132,13 +142,17 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
+	start := time.Now()
 	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
+	pr.logf.WriteString(fmt.Sprintf("Annotations: %v\n", time.Since(start)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
+	start = time.Now()
 	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
 		return nil, err
 	}
+	pr.logf.WriteString(fmt.Sprintf("CheckUID: %v\n", time.Since(start)))
 
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName)
 	if err != nil {
@@ -154,6 +168,8 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	} else {
 		response.PodIFInfo = podInterfaceInfo
 	}
+
+	pr.logf.WriteString(fmt.Sprintf("Done: %v\n", time.Since(now)))
 
 	return response, nil
 }
@@ -257,7 +273,9 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 
 // getCNIResult get result from pod interface info.
 func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient kubernetes.Interface, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+	start := time.Now()
 	interfacesArray, err := pr.ConfigureInterface(podLister, kclient, podInterfaceInfo)
+	pr.logf.WriteString(fmt.Sprintf("Conf: %v\n", time.Since(start)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -271,11 +272,12 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	ifaceName, ifaceID string, checkExternalIDs bool,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, initialPodUID string) error {
+	namespace, name, initialPodUID string, logf *os.File) error {
 	var detail string
 	var ofPort int
 	var err error
 
+	realStart := time.Now()
 	if checkExternalIDs {
 		detail = " (ovn-installed)"
 	} else {
@@ -284,6 +286,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 			return err
 		}
 	}
+	i := -1
 	for {
 		select {
 		case <-ctx.Done():
@@ -298,7 +301,11 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 				// get ovn-installed flag in the same request
 				columns = append(columns, "external-ids:ovn-installed")
 			}
+			i += 1
+			start := time.Now()
 			output, err := ovsGetMultiOutput("Interface", ifaceName, columns)
+			logf.WriteString(fmt.Sprintf("         Wait(%d): %v\n", i, time.Since(start)))
+			start = time.Now()
 			// check to see if the interface has its external id set, which indicates if it is active
 			// It may have been cleared by a subsequent CNI ADD and if so, there's no need to keep checking for flows
 			if err == nil && len(output) > 0 && output[0] != ifaceID {
@@ -308,19 +315,24 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 			if checkExternalIDs {
 				if err == nil && len(output) == 2 && output[1] == "true" {
 					klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+					logf.WriteString(fmt.Sprintf("         Success(%d,ext): %v\n", i, time.Since(realStart)))
 					return nil
 				}
 				klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
 			} else {
 				if doPodFlowsExist(mac, ifAddrs, ofPort) {
 					// success
+					logf.WriteString(fmt.Sprintf("         Success(%d,flow): %v\n", i, time.Since(realStart)))
 					return nil
 				}
 			}
+			logf.WriteString(fmt.Sprintf("         Check(%d): %v\n", i, time.Since(start)))
+			start = time.Now()
 
 			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, initialPodUID); err != nil {
 				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
 			}
+			logf.WriteString(fmt.Sprintf("         Cancel(%d): %v\n", i, time.Since(start)))
 
 			// try again later
 			time.Sleep(200 * time.Millisecond)

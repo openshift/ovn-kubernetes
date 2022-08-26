@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -134,7 +135,9 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 		return fmt.Errorf("failed to get dpu annotation. %v", err)
 	}
 
-	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient)
+	f, err := os.Open("/dev/null")
+	defer f.Close()
+	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient, f)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)
