@@ -166,11 +166,17 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 
 // addPodExternalGWForNamespace handles adding routes to all pods in that namespace for a pod GW
 func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.Pod, egress gatewayInfo) error {
+	tmpPodGWs := oc.getRoutingPodGWs(namespace)
+	tmpPodGWs[makePodGWKey(pod)] = egress
+	if err := validateRoutingPodGWs(tmpPodGWs); err != nil {
+		return fmt.Errorf("unable to add pod: %s/%s as external gateway for namespace: %s, error: %v",
+			pod.Namespace, pod.Name, namespace, err)
+	}
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(namespace, false)
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	nsInfo.routingExternalPodGWs[pod.Name] = egress
+	nsInfo.routingExternalPodGWs[makePodGWKey(pod)] = egress
 	existingGWs := sets.NewString()
 	for _, gwInfo := range nsInfo.routingExternalPodGWs {
 		existingGWs.Insert(gwInfo.gws.UnsortedList()...)
@@ -244,19 +250,20 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pod.Name,
 		podRoutingNamespaceAnno)
 	for _, namespace := range strings.Split(podRoutingNamespaceAnno, ",") {
-		oc.deletePodGWRoutesForNamespace(pod.Name, namespace)
+		oc.deletePodGWRoutesForNamespace(pod, namespace)
 	}
 }
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
-func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
+func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace string) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
+	podGWKey := makePodGWKey(pod)
 	// check if any gateways were stored for this pod
-	foundGws, ok := nsInfo.routingExternalPodGWs[pod]
-	delete(nsInfo.routingExternalPodGWs, pod)
+	foundGws, ok := nsInfo.routingExternalPodGWs[podGWKey]
+	delete(nsInfo.routingExternalPodGWs, podGWKey)
 	existingGWs := sets.NewString()
 	for _, gwInfo := range nsInfo.routingExternalPodGWs {
 		existingGWs.Insert(gwInfo.gws.UnsortedList()...)
@@ -870,4 +877,8 @@ func buildOVNECMPCache() map[string][]*ovnRoute {
 		}
 	}
 	return ovnRouteCache
+}
+
+func makePodGWKey(pod *kapi.Pod) string {
+	return fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 }
