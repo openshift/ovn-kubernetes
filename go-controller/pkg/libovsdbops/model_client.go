@@ -130,11 +130,6 @@ type operationModel struct {
 	// Model are used for mutations and updates as well. If this Model is
 	// looked up or created, it will have its UUID set after the operation.
 	Model interface{}
-	// LookupModels specifies a list of models to be looked up in the cache
-	// if ModelPredicate is not specified. The found models will be placed
-	// into ExistingResult. Ignored if Model is specified. All given models
-	// must be the same type.
-	LookupModels []interface{}
 	// ModelPredicate specifies a predicate to look up models in the cache.
 	ModelPredicate interface{}
 	// ExistingResult is where the results of the look up are added to.
@@ -393,12 +388,8 @@ func (m *modelClient) Lookup(opModels ...operationModel) error {
 // lookup the model in the cache prioritizing provided indexes over a
 // predicate unless bulkop is set
 func (m *modelClient) lookup(opModel *operationModel) error {
-	if opModel.ExistingResult == nil {
-		if opModel.Model != nil {
-			opModel.ExistingResult = getListFromModel(opModel.Model)
-		} else if len(opModel.LookupModels) > 0 {
-			opModel.ExistingResult = getListFromModel(opModel.LookupModels[0])
-		}
+	if opModel.ExistingResult == nil && opModel.Model != nil {
+		opModel.ExistingResult = getListFromModel(opModel.Model)
 	}
 
 	var err error
@@ -411,11 +402,6 @@ func (m *modelClient) lookup(opModel *operationModel) error {
 
 	if opModel.ModelPredicate != nil {
 		err = m.whereCache(opModel)
-	} else if opModel.LookupModels != nil {
-		if !opModel.BulkOp {
-			return fmt.Errorf("must use bulk operations with LookupModels")
-		}
-		err = m.where(opModel)
 	} else if opModel.BulkOp {
 		panic("Expected a ModelPredicate with BulkOp==true")
 	}
@@ -446,20 +432,6 @@ func (m *modelClient) get(opModel *operationModel) error {
 		setUUID(opModel.Model, getUUID(copy))
 	}
 	return addToExistingResult(copy, opModel.ExistingResult)
-}
-
-func (m *modelClient) where(opModel *operationModel) error {
-	// Where() takes a list of models, but we get passed a list of interfaces
-	// and Go is dumb enough that it doesn't know that model.Model is
-	// actually an interface{} anyway
-	models := make([]model.Model, len(opModel.LookupModels))
-	for i := range opModel.LookupModels {
-		models[i] = opModel.LookupModels[i].(model.Model)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	return m.client.Where(models...).List(ctx, opModel.ExistingResult)
 }
 
 func (m *modelClient) whereCache(opModel *operationModel) error {
