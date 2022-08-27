@@ -471,39 +471,6 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	}
 	// END OCP HACK
 
-	start = time.Now()
-	err = netns.Do(func(hostNS ns.NetNS) error {
-		// deny IPv6 neighbor solicitations
-		foo := time.Now()
-		dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
-		if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(dadSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to disable IPv6 DAD: %q", err)
-			}
-		}
-		pr.logf.WriteString(fmt.Sprintf("      DAD: %v\n", time.Since(foo)))
-		foo = time.Now()
-		// generate address based on EUI64
-		genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIface.Name)
-		if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(genSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
-			}
-		}
-
-		pr.logf.WriteString(fmt.Sprintf("      AddrGen: %v\n", time.Since(foo)))
-		foo = time.Now()
-		err := ip.SettleAddresses(contIface.Name, 10)
-		pr.logf.WriteString(fmt.Sprintf("      Settle: %v\n", time.Since(foo)))
-		return err
-	})
-	pr.logf.WriteString(fmt.Sprintf("   V6: %v\n", time.Since(start)))
-	if err != nil {
-		klog.Warningf("Failed to settle addresses: %q", err)
-	}
-
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
