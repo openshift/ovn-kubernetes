@@ -34,6 +34,8 @@ require (
 	golang.org/x/net v0.0.0-20220526153639-5463443f8c37
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8
+	google.golang.org/grpc v1.49.0
+	google.golang.org/protobuf v1.27.1
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
@@ -67,7 +69,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
-	github.com/google/go-cmp v0.5.5 // indirect
+	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
@@ -97,7 +99,7 @@ require (
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/protobuf v1.27.1 // indirect
+	google.golang.org/genproto v0.0.0-20210402141018-6c239bbf2bb1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
