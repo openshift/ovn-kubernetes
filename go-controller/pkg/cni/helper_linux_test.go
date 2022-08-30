@@ -192,23 +192,6 @@ func TestSetupNetwork(t *testing.T) {
 		cniPluginMockHelper  []ovntest.TestifyMockHelper
 	}{
 		{
-			desc:    "test code path when LinkSetHardwareAddr returns error",
-			inpLink: mockLink,
-			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{
-					MAC: ovntest.MustParseMAC("11:22:33:44:55:66"),
-				},
-			},
-			errMatch: fmt.Errorf("failed to add mac address"),
-			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "LinkSetDown", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetHardwareAddr", OnCallMethodArgType: []string{"*mocks.Link", "net.HardwareAddr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
-			},
-			linkMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
-			},
-		},
-		{
 			desc:    "test code path when AddrAdd returns error",
 			inpLink: mockLink,
 			inpPodIfaceInfo: &PodInterfaceInfo{
@@ -219,9 +202,6 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			errMatch: fmt.Errorf("failed to add IP addr"),
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "LinkSetDown", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetHardwareAddr", OnCallMethodArgType: []string{"*mocks.Link", "net.HardwareAddr"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 			linkMockHelper: []ovntest.TestifyMockHelper{
@@ -240,9 +220,6 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			errMatch: fmt.Errorf("failed to add gateway route"),
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "LinkSetDown", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetHardwareAddr", OnCallMethodArgType: []string{"*mocks.Link", "net.HardwareAddr"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
 			},
 			cniPluginMockHelper: []ovntest.TestifyMockHelper{
@@ -267,9 +244,6 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			errMatch: fmt.Errorf("failed to add pod route"),
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "LinkSetDown", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetHardwareAddr", OnCallMethodArgType: []string{"*mocks.Link", "net.HardwareAddr"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
 			},
 			cniPluginMockHelper: []ovntest.TestifyMockHelper{
@@ -294,9 +268,6 @@ func TestSetupNetwork(t *testing.T) {
 				},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "LinkSetDown", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetHardwareAddr", OnCallMethodArgType: []string{"*mocks.Link", "net.HardwareAddr"}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
 			},
 			cniPluginMockHelper: []ovntest.TestifyMockHelper{
