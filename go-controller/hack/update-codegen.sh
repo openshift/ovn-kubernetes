@@ -19,6 +19,7 @@ fi
 
 go generate ./pkg/nbdb
 go generate ./pkg/sbdb
+go generate ./pkg/vswitchdb
 
 crds=$(ls pkg/crd 2> /dev/null)
 if [ -z "${crds}" ]; then
