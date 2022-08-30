@@ -363,12 +363,6 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	logf.WriteString(fmt.Sprintf("      ConfOVSAddPort: %v\n", time.Since(start)))
 	start = time.Now()
 
-	if err := clearPodBandwidth(sandboxID); err != nil {
-		return err
-	}
-	logf.WriteString(fmt.Sprintf("      ConfOVSClearBW: %v\n", time.Since(start)))
-	start = time.Now()
-
 	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
 		l, err := netlink.LinkByName(hostIfaceName)
 		if err != nil {
