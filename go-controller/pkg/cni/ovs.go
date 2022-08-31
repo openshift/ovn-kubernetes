@@ -12,6 +12,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"github.com/ovn-org/libovsdb/client"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -272,7 +274,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	ifaceName, ifaceID string, checkExternalIDs bool,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, initialPodUID string, logf *os.File) error {
+	namespace, name, initialPodUID string, vsClient client.Client, logf *os.File) error {
 	var detail string
 	var ofPort int
 	var err error

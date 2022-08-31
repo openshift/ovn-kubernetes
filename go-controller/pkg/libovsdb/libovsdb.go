@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchdb"
 	"gopkg.in/fsnotify/fsnotify.v1"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
@@ -69,6 +70,42 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 	}
 
 	return client, nil
+}
+
+// NewVSwitchClient creates a new client to the local ovs-vswitchd database
+func NewVSwitchClient(stopCh <-chan struct{}) (client.Client, error) {
+	dbModel, err := vswitchdb.FullDatabaseModel()
+	if err != nil {
+		return nil, err
+	}
+	c, err := newClient(config.OvnAuthConfig{
+		Address: "unix:///var/run/openvswitch/db.sock",
+		Scheme:  config.OvnDBSchemeUnix,
+	}, dbModel, stopCh)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	go func() {
+		<-stopCh
+		cancel()
+	}()
+
+	_, err = c.Monitor(ctx,
+		c.NewMonitor(
+			client.WithTable(&vswitchdb.Bridge{}),
+			client.WithTable(&vswitchdb.Interface{}),
+			client.WithTable(&vswitchdb.Port{}),
+			client.WithTable(&vswitchdb.QoS{}),
+		),
+	)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	return c, nil
 }
 
 // NewSBClient creates a new OVN Southbound Database client

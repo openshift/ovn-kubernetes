@@ -18,7 +18,12 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchdb"
+
+	"github.com/ovn-org/libovsdb/client"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -316,6 +321,28 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	return hostIface, contIface, nil
 }
 
+// clearExistingIfaceIDs find and remove any existing OVS port with this iface-id.
+// Pods can have multiple sandboxes if some are waiting for garbage collection,
+// but only the latest one should have the iface-id set.
+func clearExistingIfaceIDs(vsClient client.Client, ifaceID string, logf *os.File) error {
+	start := time.Now()
+	p := func(iface *vswitchdb.Interface) bool {
+		foundID, ok := iface.ExternalIDs["iface-id"]
+		return ok && foundID == ifaceID
+	}
+	interfaces, err := libovsdbops.FindInterfacesWithPredicate(vsClient, p)
+	if err != nil {
+		return fmt.Errorf("failed to find interfaces with iface-id %q: %v", ifaceID, err)
+	}
+	logf.WriteString(fmt.Sprintf("      ConfOVSFind: %v\n", time.Since(start)))
+	start = time.Now()
+	if err := libovsdbops.DeleteInterfacesIfaceID(vsClient, interfaces...); err != nil {
+		return fmt.Errorf("failed to clear stale OVS interfaces iface-id %q: %v", ifaceID, err)
+	}
+	logf.WriteString(fmt.Sprintf("      ConfOVSRemove: %v\n", time.Since(start)))
+	return err
+}
+
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
@@ -324,41 +351,53 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifaceID := util.GetIfaceId(namespace, podName)
 	initialPodUID := ifInfo.PodUID
 
-	// Find and remove any existing OVS port with this iface-id. Pods can
-	// have multiple sandboxes if some are waiting for garbage collection,
-	// but only the latest one should have the iface-id set.
 	start := time.Now()
-	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
-	logf.WriteString(fmt.Sprintf("      ConfOVSFind: %v\n", time.Since(start)))
-	start = time.Now()
-	for _, uuid := range uuids {
-		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
-		}
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	vsClient, err := libovsdb.NewVSwitchClient(stopCh)
+	if err != nil {
+		return fmt.Errorf("failed to create vswitchd database client: %v", err)
 	}
-	logf.WriteString(fmt.Sprintf("      ConfOVSRemove: %v\n", time.Since(start)))
+	logf.WriteString(fmt.Sprintf("      ConfOVSConnect: %v\n", time.Since(start)))
+
+	if err := clearExistingIfaceIDs(vsClient, ifaceID, logf); err != nil {
+		return err
+	}
 	start = time.Now()
+
+	bridge, err := libovsdbops.FindBridgeByName(vsClient, "br-int")
+	if err != nil {
+		return err
+	}
+	logf.WriteString(fmt.Sprintf("      ConfOVSFindBridge: %v\n", time.Since(start)))
+	start = time.Now()
+
 	ipStrs := make([]string, len(ifInfo.IPs))
 	for i, ip := range ifInfo.IPs {
 		ipStrs[i] = ip.String()
 	}
-	// Add the new sandbox's OVS port, tag the port as transient so stale
-	// pod ports are scrubbed on hard reboot
-	ovsArgs := []string{
-		"add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
-		"interface", hostIfaceName,
-		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
-		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
-		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
-		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
+	iface := &vswitchdb.Interface{
+		ExternalIDs: map[string]string{
+			"attached_mac": ifInfo.MAC.String(),
+			"iface-id":     ifaceID,
+			"iface-id-ver": initialPodUID,
+			"ip_addresses": strings.Join(ipStrs, ","),
+			"sandbox":      sandboxID,
+		},
+	}
+	if len(ifInfo.VfNetdevName) != 0 {
+		iface.ExternalIDs["vf-netdev-name"] = ifInfo.VfNetdevName
 	}
 
-	if len(ifInfo.VfNetdevName) != 0 {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName))
+	port := &vswitchdb.Port{
+		Name: hostIfaceName,
+		OtherConfig: map[string]string{
+			"transient": "true",
+		},
 	}
-	if out, err := ovsExec(ovsArgs...); err != nil {
-		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
+
+	if err := libovsdbops.CreateOrUpdatePortAndAddToBridge(vsClient, bridge.UUID, port, iface); err != nil {
+		return fmt.Errorf("failed to create interface and port and add to bridge: %v", err)
 	}
 	logf.WriteString(fmt.Sprintf("      ConfOVSAddPort: %v\n", time.Since(start)))
 	start = time.Now()
@@ -381,7 +420,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	start = time.Now()
 	if err := waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName,
 		ifaceID, ifInfo.CheckExtIDs, podLister, kclient, namespace, podName,
-		initialPodUID, logf); err != nil {
+		initialPodUID, vsClient, logf); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
 		klog.Warningf("[%s/%s %s] pod uid %s: %v", namespace, podName, sandboxID, initialPodUID, err)

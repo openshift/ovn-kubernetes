@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchdb"
 )
 
 func getUUID(model model.Model) string {
@@ -59,6 +60,14 @@ func getUUID(model model.Model) string {
 	case *sbdb.SBGlobal:
 		return t.UUID
 	case *nbdb.QoS:
+		return t.UUID
+	case *vswitchdb.Bridge:
+		return t.UUID
+	case *vswitchdb.Interface:
+		return t.UUID
+	case *vswitchdb.Port:
+		return t.UUID
+	case *vswitchdb.QoS:
 		return t.UUID
 	default:
 		panic(fmt.Sprintf("getUUID: unknown model %T", t))
@@ -112,6 +121,14 @@ func setUUID(model model.Model, uuid string) {
 	case *sbdb.SBGlobal:
 		t.UUID = uuid
 	case *nbdb.QoS:
+		t.UUID = uuid
+	case *vswitchdb.Bridge:
+		t.UUID = uuid
+	case *vswitchdb.Interface:
+		t.UUID = uuid
+	case *vswitchdb.Port:
+		t.UUID = uuid
+	case *vswitchdb.QoS:
 		t.UUID = uuid
 	default:
 		panic(fmt.Sprintf("setUUID: unknown model %T", t))
@@ -226,6 +243,25 @@ func copyIndexes(model model.Model) model.Model {
 		return &nbdb.QoS{
 			UUID: t.UUID,
 		}
+	case *vswitchdb.Bridge:
+		return &vswitchdb.Bridge{
+			UUID: t.UUID,
+			Name: t.Name,
+		}
+	case *vswitchdb.Interface:
+		return &vswitchdb.Interface{
+			UUID: t.UUID,
+			Name: t.Name,
+		}
+	case *vswitchdb.Port:
+		return &vswitchdb.Port{
+			UUID: t.UUID,
+			Name: t.Name,
+		}
+	case *vswitchdb.QoS:
+		return &vswitchdb.QoS{
+			UUID: t.UUID,
+		}
 	default:
 		panic(fmt.Sprintf("copyIndexes: unknown model %T", t))
 	}
@@ -277,6 +313,14 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*sbdb.MACBinding{}
 	case *nbdb.QoS:
 		return &[]nbdb.QoS{}
+	case *vswitchdb.Bridge:
+		return &[]vswitchdb.Bridge{}
+	case *vswitchdb.Interface:
+		return &[]vswitchdb.Interface{}
+	case *vswitchdb.Port:
+		return &[]vswitchdb.Port{}
+	case *vswitchdb.QoS:
+		return &[]vswitchdb.QoS{}
 	default:
 		panic(fmt.Sprintf("getModelList: unknown model %T", t))
 	}
