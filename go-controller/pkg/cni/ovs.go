@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/ovn-org/libovsdb/client"
@@ -280,9 +281,11 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	var err error
 
 	realStart := time.Now()
+	waitTime := 20 * time.Millisecond // default for checkExternalIDs
 	if checkExternalIDs {
 		detail = " (ovn-installed)"
 	} else {
+		waitTime = 200 * time.Millisecond
 		ofPort, err = getIfaceOFPort(ifaceName)
 		if err != nil {
 			return err
@@ -298,27 +301,28 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 			}
 			return fmt.Errorf("%s waiting for OVS port binding%s for %s %v", errDetail, detail, mac, ifAddrs)
 		default:
-			columns := []string{"external-ids:iface-id"}
-			if checkExternalIDs {
-				// get ovn-installed flag in the same request
-				columns = append(columns, "external-ids:ovn-installed")
-			}
 			i += 1
 			start := time.Now()
-			output, err := ovsGetMultiOutput("Interface", ifaceName, columns)
+			ovsIface, err := libovsdbops.FindInterfaceByName(vsClient, ifaceName)
 			logf.WriteString(fmt.Sprintf("         Wait(%d): %v\n", i, time.Since(start)))
 			start = time.Now()
 			// check to see if the interface has its external id set, which indicates if it is active
 			// It may have been cleared by a subsequent CNI ADD and if so, there's no need to keep checking for flows
-			if err == nil && len(output) > 0 && output[0] != ifaceID {
-				return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
-					"CNI ADD)", ifaceName)
+			if err == nil {
+				foundIfaceID, ok := ovsIface.ExternalIDs["iface-id"]
+				if ok && foundIfaceID != ifaceID {
+					return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
+						"CNI ADD)", ifaceName)
+				}
 			}
 			if checkExternalIDs {
-				if err == nil && len(output) == 2 && output[1] == "true" {
-					klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
-					logf.WriteString(fmt.Sprintf("         Success(%d,ext): %v\n", i, time.Since(realStart)))
-					return nil
+				if err == nil {
+					foundInstalled, ok := ovsIface.ExternalIDs["ovn-installed"]
+					if ok && foundInstalled == "true" {
+						klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+						logf.WriteString(fmt.Sprintf("         Success(%d,ext): %v\n", i, time.Since(realStart)))
+						return nil
+					}
 				}
 				klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
 			} else {
@@ -337,7 +341,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 			logf.WriteString(fmt.Sprintf("         Cancel(%d): %v\n", i, time.Since(start)))
 
 			// try again later
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(waitTime)
 		}
 	}
 }
