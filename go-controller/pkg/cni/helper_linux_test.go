@@ -1,10 +1,12 @@
 package cni
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/Mellanox/sriovnet"
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -12,15 +14,21 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	cni_type_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/containernetworking/cni/pkg/types"
 	cni_ns_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/containernetworking/plugins/pkg/ns"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	pkgtypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
+
+	kapi "k8s.io/api/core/v1"
 )
 
 func TestRenameLink(t *testing.T) {
@@ -448,6 +456,8 @@ func TestSetupSriovInterface(t *testing.T) {
 		netNsDoError = do(nil)
 	}).Return(nil)
 
+	const vfRepPortName string = "VFRepresentor"
+
 	tests := []struct {
 		desc                 string
 		inpNetNS             ns.NetNS
@@ -462,6 +472,8 @@ func TestSetupSriovInterface(t *testing.T) {
 		netLinkOpsMockHelper []ovntest.TestifyMockHelper
 		sriovOpsMockHelper   []ovntest.TestifyMockHelper
 		linkMockHelper       []ovntest.TestifyMockHelper
+		initialVSData        []libovsdbtest.TestData
+		finalVSData          []libovsdbtest.TestData
 	}{
 		{
 			desc:         "test code path when moveIfToNetns() returns error",
@@ -600,7 +612,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
-				{OnCallMethodName: "GetVfRepresentor", OnCallMethodArgType: []string{"string", "int"}, RetArgList: []interface{}{"VFRepresentor", nil}},
+				{OnCallMethodName: "GetVfRepresentor", OnCallMethodArgType: []string{"string", "int"}, RetArgList: []interface{}{vfRepPortName, nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
@@ -614,6 +626,12 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "Fd", OnCallMethodArgType: []string{}, RetArgList: []interface{}{uintptr(123456)}},
 				// The below mock call is for the netns.Do() invocation
 				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{nil}},
+			},
+			initialVSData: []libovsdbtest.TestData{
+				&vswitchdb.Port{
+					UUID: "port-uuid",
+					Name: vfRepPortName,
+				},
 			},
 		},
 		{
@@ -631,7 +649,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
-				{OnCallMethodName: "GetVfRepresentor", OnCallMethodArgType: []string{"string", "int"}, RetArgList: []interface{}{"VFRepresentor", nil}},
+				{OnCallMethodName: "GetVfRepresentor", OnCallMethodArgType: []string{"string", "int"}, RetArgList: []interface{}{vfRepPortName, nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
@@ -651,6 +669,12 @@ func TestSetupSriovInterface(t *testing.T) {
 				// The below mock call is for the netns.Do() invocation
 				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{nil}},
 			},
+			initialVSData: []libovsdbtest.TestData{
+				&vswitchdb.Port{
+					UUID: "port-uuid",
+					Name: vfRepPortName,
+				},
+			},
 		},
 		{
 			desc:         "test code path when LinkSetMTU() fails",
@@ -667,7 +691,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
-				{OnCallMethodName: "GetVfRepresentor", OnCallMethodArgType: []string{"string", "int"}, RetArgList: []interface{}{"VFRepresentor", nil}},
+				{OnCallMethodName: "GetVfRepresentor", OnCallMethodArgType: []string{"string", "int"}, RetArgList: []interface{}{vfRepPortName, nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
@@ -693,6 +717,12 @@ func TestSetupSriovInterface(t *testing.T) {
 				// The below mock call is to retrieve the MAC address of host interface right before LinkSetMTU() method
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
+			initialVSData: []libovsdbtest.TestData{
+				&vswitchdb.Port{
+					UUID: "port-uuid",
+					Name: vfRepPortName,
+				},
+			},
 		},
 		{
 			desc:         "test code path when working in DPUHost mode",
@@ -713,7 +743,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetNsFd", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
 			nsMockHelper: []ovntest.TestifyMockHelper{
 				// The below mock call is needed when moveIfToNetns() is called
 				{OnCallMethodName: "Fd", OnCallMethodArgType: []string{}, RetArgList: []interface{}{uintptr(123456)}},
@@ -732,17 +761,14 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetNsFd", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container LinkSetDown() returns error",
@@ -755,9 +781,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -765,8 +790,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetDown", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container LinkSetName() returns error",
@@ -779,9 +802,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -790,8 +812,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkSetDown", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "LinkSetName", OnCallMethodArgType: []string{"*mocks.Link", "string"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container LinkSetUp() returns error",
@@ -804,9 +824,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -816,8 +835,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkSetName", OnCallMethodArgType: []string{"*mocks.Link", "string"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container second LinkByName() returns error",
@@ -830,9 +847,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -843,8 +859,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container LinkSetHardwareAddr() returns error",
@@ -857,9 +871,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -871,8 +884,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetHardwareAddr", OnCallMethodArgType: []string{"*mocks.Link", "net.HardwareAddr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container LinkSetMTU() returns error",
@@ -885,9 +896,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -900,8 +910,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkSetHardwareAddr", OnCallMethodArgType: []string{"*mocks.Link", "net.HardwareAddr"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "LinkSetMTU", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container second LinkSetUp() returns error",
@@ -914,9 +922,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -930,8 +937,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "LinkSetMTU", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			linkMockHelper: []ovntest.TestifyMockHelper{},
-			nsMockHelper:   []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container setupNetwork AddrAdd() returns error",
@@ -946,9 +951,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -967,7 +971,6 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Flags: net.FlagUp}}},
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Flags: net.FlagUp}}},
 			},
-			nsMockHelper: []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container setupNetwork Gateways AddRoute() returns error",
@@ -983,9 +986,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -1006,7 +1008,6 @@ func TestSetupSriovInterface(t *testing.T) {
 			linkMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Flags: net.FlagUp}}},
 			},
-			nsMockHelper: []ovntest.TestifyMockHelper{},
 		},
 		{
 			desc:         "test code path when container setupNetwork Routes AddRoute() returns error",
@@ -1028,9 +1029,8 @@ func TestSetupSriovInterface(t *testing.T) {
 				IsDPUHostMode: true,
 				VfNetdevName:  "en01",
 			},
-			inpPCIAddrs:        "0000:03:00.1",
-			errExp:             true,
-			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      true,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -1052,7 +1052,6 @@ func TestSetupSriovInterface(t *testing.T) {
 			linkMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Flags: net.FlagUp}}},
 			},
-			nsMockHelper: []ovntest.TestifyMockHelper{},
 		},
 	}
 	for i, tc := range tests {
@@ -1062,9 +1061,22 @@ func TestSetupSriovInterface(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNS.Mock, tc.nsMockHelper)
 			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovOpsMockHelper)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.linkMockHelper)
-			netNsDoError = nil
 
-			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs)
+			brData := []libovsdbtest.TestData{
+				&vswitchdb.Bridge{
+					UUID: "bridge-uuid",
+					Name: "br-int",
+				},
+			}
+			initialVSDB := libovsdbtest.TestSetup{VSData: append(brData, tc.initialVSData...)}
+			vsClient, cleanup, err := libovsdbtest.NewVSTestHarness(initialVSDB, nil)
+			if err != nil {
+				t.Fatal(fmt.Errorf("test: %q failed to create test harness: %v", tc.desc, err))
+			}
+			t.Cleanup(cleanup.Cleanup)
+
+			netNsDoError = nil
+			hostIface, contIface, err := setupSriovInterface(vsClient, tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs)
 			t.Log(hostIface, contIface, err)
 			if err == nil {
 				err = netNsDoError
@@ -1081,6 +1093,15 @@ func TestSetupSriovInterface(t *testing.T) {
 			mockNS.AssertExpectations(t)
 			mockSriovnetOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)
+
+			// Ensure ovsdb contents are as expected
+			matcher := libovsdbtest.HaveData(append(brData, tc.finalVSData...))
+			ok, err := matcher.Match(vsClient)
+			if !ok {
+				t.Fatal(fmt.Errorf("test ovsdb: \"%s\" didn't match expected with actual, err: %v", tc.desc, matcher.FailureMessage(vsClient)))
+			} else if err != nil {
+				t.Fatal(fmt.Errorf("test ovsdb: \"%s\" encountered error: %v", tc.desc, err))
+			}
 		})
 	}
 }
@@ -1173,6 +1194,190 @@ func TestPodRequest_deletePodConntrack(t *testing.T) {
 			}
 			tc.inpPodRequest.deletePodConntrack()
 			mockTypeResult.AssertExpectations(t)
+		})
+	}
+}
+
+func createPod(t *testing.T, namespace, name, podIP, podMAC string) *kapi.Pod {
+	pa := &util.PodAnnotation{}
+	if podIP != "" || podMAC != "" {
+		if podIP != "" {
+			pa.IPs = []*net.IPNet{ovntest.MustParseIPNet(podIP)}
+		}
+		if podMAC != "" {
+			pa.MAC = ovntest.MustParseMAC(podMAC)
+		}
+	}
+	annotations, err := util.MarshalPodAnnotation(nil, pa, pkgtypes.DefaultNetworkName)
+	assert.Nil(t, err)
+	return newPod(namespace, name, annotations)
+}
+
+func createPodIfInfo(podName, podIP, podMAC string) *PodInterfaceInfo {
+	ips := []*net.IPNet{ovntest.MustParseIPNet(podIP)}
+	return &PodInterfaceInfo{
+		PodAnnotation: util.PodAnnotation{
+			IPs: ips,
+			MAC: ovntest.MustParseMAC(podMAC),
+		},
+		PodUID:  podName, // newPod() sets UID to pod name
+		NADName: pkgtypes.DefaultNetworkName,
+	}
+}
+
+type podGetter struct {
+	pod *kapi.Pod
+	err error
+}
+
+func newPodGetter(pod *kapi.Pod, err error) *podGetter {
+	return &podGetter{pod, err}
+}
+
+func (p *podGetter) getPod(namespace, name string) (*kapi.Pod, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.pod, nil
+}
+
+func TestConfigureOVS(t *testing.T) {
+	const (
+		hostIfaceName string = "hostiface"
+		sandboxID     string = "1234567890"
+		podNS         string = "ns1"
+		podName       string = "apod"
+		podIP         string = "1.1.1.1/24"
+		podMAC        string = "00:11:22:33:44:55"
+		portUUID      string = "port-uuid"
+		intfUUID      string = "intf-uuid"
+	)
+
+	tests := []struct {
+		desc          string
+		podIfInfo     *PodInterfaceInfo
+		pod           *kapi.Pod
+		ovnDelay      time.Duration
+		podErr        error
+		errExp        bool
+		errMatch      error
+		initialVSData []libovsdbtest.TestData
+		finalVSData   []libovsdbtest.TestData
+	}{
+		{
+			desc:      "pod port-binding timeout",
+			podIfInfo: createPodIfInfo(podName, podIP, podMAC),
+			pod:       createPod(t, podNS, podName, podIP, podMAC),
+			errMatch:  fmt.Errorf("timed out waiting for OVS port binding (ovn-installed) for %s [%s]", podMAC, podIP),
+			finalVSData: []libovsdbtest.TestData{
+				&vswitchdb.Bridge{
+					UUID:  "bridge-uuid",
+					Name:  "br-int",
+					Ports: []string{portUUID},
+				},
+				&vswitchdb.Port{
+					UUID:       portUUID,
+					Name:       hostIfaceName,
+					Interfaces: []string{intfUUID},
+					OtherConfig: map[string]string{
+						"transient": "true",
+					},
+				},
+				&vswitchdb.Interface{
+					UUID: intfUUID,
+					Name: hostIfaceName,
+					ExternalIDs: map[string]string{
+						"ip_addresses":        podIP,
+						"k8s.ovn.org/nad":     pkgtypes.DefaultNetworkName,
+						"k8s.ovn.org/network": "",
+						"sandbox":             sandboxID,
+						"attached_mac":        podMAC,
+						"iface-id":            fmt.Sprintf("%s_%s_%s", pkgtypes.DefaultNetworkName, podNS, podName),
+						"iface-id-ver":        podName,
+					},
+				},
+			},
+		},
+		{
+			desc:      "pod setup success",
+			podIfInfo: createPodIfInfo(podName, podIP, podMAC),
+			pod:       createPod(t, podNS, podName, podIP, podMAC),
+			ovnDelay:  time.Second * 2,
+			finalVSData: []libovsdbtest.TestData{
+				&vswitchdb.Bridge{
+					UUID:  "bridge-uuid",
+					Name:  "br-int",
+					Ports: []string{portUUID},
+				},
+				&vswitchdb.Port{
+					UUID:       portUUID,
+					Name:       hostIfaceName,
+					Interfaces: []string{intfUUID},
+					OtherConfig: map[string]string{
+						"transient": "true",
+					},
+				},
+				&vswitchdb.Interface{
+					UUID: intfUUID,
+					Name: hostIfaceName,
+					ExternalIDs: map[string]string{
+						"ip_addresses":        podIP,
+						"k8s.ovn.org/nad":     pkgtypes.DefaultNetworkName,
+						"k8s.ovn.org/network": "",
+						"sandbox":             sandboxID,
+						"attached_mac":        podMAC,
+						"iface-id":            fmt.Sprintf("%s_%s_%s", pkgtypes.DefaultNetworkName, podNS, podName),
+						"iface-id-ver":        podName,
+						"ovn-installed":       "true",
+					},
+				},
+			},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			brData := []libovsdbtest.TestData{
+				&vswitchdb.Bridge{
+					UUID: "bridge-uuid",
+					Name: "br-int",
+				},
+			}
+			initialVSDB := libovsdbtest.TestSetup{VSData: append(brData, tc.initialVSData...)}
+			vsClient, cleanup, err := libovsdbtest.NewVSTestHarness(initialVSDB, nil)
+			if err != nil {
+				t.Fatal(fmt.Errorf("test: %q failed to create test harness: %v", tc.desc, err))
+			}
+			t.Cleanup(cleanup.Cleanup)
+
+			if tc.ovnDelay > 0 {
+				go func() {
+					// After the specified delay, mark the port as installed
+					<-time.After(tc.ovnDelay)
+					err := libovsdbops.SetInterfaceOVNInstalled(vsClient, hostIfaceName, true)
+					assert.Nil(t, err)
+				}()
+			}
+
+			ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
+			t.Cleanup(cancel)
+			err = ConfigureOVS(vsClient, ctx, podNS, podName, hostIfaceName, tc.podIfInfo, sandboxID, newPodGetter(tc.pod, tc.podErr))
+			if tc.errExp {
+				assert.NotNil(t, err)
+			} else if tc.errMatch != nil {
+				assert.NotNil(t, err)
+				assert.Contains(t, err.Error(), tc.errMatch.Error())
+			} else {
+				assert.Nil(t, err)
+			}
+
+			// Ensure ovsdb contents are as expected
+			matcher := libovsdbtest.HaveData(tc.finalVSData...)
+			ok, err := matcher.Match(vsClient)
+			if !ok {
+				t.Fatal(fmt.Errorf("test ovsdb: \"%s\" didn't match expected with actual, err: %v", tc.desc, matcher.FailureMessage(vsClient)))
+			} else if err != nil {
+				t.Fatal(fmt.Errorf("test ovsdb: \"%s\" encountered error: %v", tc.desc, err))
+			}
 		})
 	}
 }
