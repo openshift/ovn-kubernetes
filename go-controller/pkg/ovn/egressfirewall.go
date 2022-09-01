@@ -468,7 +468,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	}
 	uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "--format=table", "find", "ACL", match, "action="+action,
-		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
+		fmt.Sprintf("external-ids:egressFirewall=%s", externalID), fmt.Sprintf("priority=%d", priority))
 	if err != nil {
 		return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
 	}
