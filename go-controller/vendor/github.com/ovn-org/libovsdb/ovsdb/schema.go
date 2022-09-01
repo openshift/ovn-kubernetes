@@ -321,9 +321,7 @@ func (b *BaseType) UnmarshalJSON(data []byte) error {
 			oSet := bt.Enum.([]interface{})
 			innerSet := oSet[1].([]interface{})
 			b.Enum = make([]interface{}, len(innerSet))
-			for k, val := range innerSet {
-				b.Enum[k] = val
-			}
+			copy(b.Enum, innerSet)
 		default:
 			b.Enum = []interface{}{bt.Enum}
 		}
@@ -365,7 +363,7 @@ func (b BaseType) MarshalJSON() ([]byte, error) {
 		RefType:    b.refType,
 	}
 	if len(b.Enum) > 0 {
-		set, err := NewOvsSet(b.Enum)
+		set, err := newOvsSetRaw(b.Type, &Unlimited, b.Enum)
 		if err != nil {
 			return nil, err
 		}
@@ -439,6 +437,7 @@ func (c *ColumnType) UnmarshalJSON(data []byte) error {
 	default:
 		c.max = nil
 	}
+
 	return nil
 }
 

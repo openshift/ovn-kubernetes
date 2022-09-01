@@ -673,7 +673,7 @@ func diff(column *ovsdb.ColumnSchema, a interface{}, b interface{}) interface{} 
 			}
 		}
 		if len(c) > 0 {
-			cSet, _ := ovsdb.NewOvsSet(c)
+			cSet, _ := ovsdb.NewOvsSet(column, c)
 			return cSet
 		}
 		return nil

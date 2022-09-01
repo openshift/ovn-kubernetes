@@ -116,6 +116,10 @@ func ovsSliceToGoNotation(val interface{}) (interface{}, error) {
 		case "set":
 			var oSet OvsSet
 			err = json.Unmarshal(bsliced, &oSet)
+			if err != nil {
+				return oSet, err
+			}
+			oSet.maxSize = len(oSet.GoSet)
 			return oSet, err
 		case "map":
 			var oMap OvsMap

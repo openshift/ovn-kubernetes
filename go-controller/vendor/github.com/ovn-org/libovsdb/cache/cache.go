@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -166,12 +167,12 @@ func (r *RowCache) Row(uuid string) model.Model {
 	return r.rowByUUID(uuid)
 }
 
+// rowsByModels searches the cache to find all rows matching any of the provided
+// models, either by UUID or indexes. An error is returned if the model schema
+// has no UUID field, or if the provided models are not all the same type.
 func (r *RowCache) rowsByModels(models []model.Model, useClientIndexes bool) (map[string]model.Model, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	if len(models) == 0 {
-		return nil, nil
-	}
 
 	results := make(map[string]model.Model, len(models))
 	for _, m := range models {
@@ -1284,7 +1285,12 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 		}
 
 		current, err := info.FieldByColumn(k)
-		if err != nil {
+		var colNotFoundErr *mapper.ErrColumnNotFound
+		if errors.As(err, &colNotFoundErr) {
+			// Ignore missing columns
+			t.logger.V(2).Info("OVSDB row modification received with missing column", "name", k)
+			continue
+		} else if err != nil {
 			return modified, err
 		}
 

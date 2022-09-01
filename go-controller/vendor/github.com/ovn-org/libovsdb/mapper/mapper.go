@@ -247,7 +247,7 @@ func (m Mapper) NewMutation(data *Info, column string, mutator ovsdb.Mutator, va
 	// keys (rfc7047 5.1). Handle this special case here.
 	if mutator == "delete" && columnSchema.Type == ovsdb.TypeMap && reflect.TypeOf(value).Kind() != reflect.Map {
 		// It's OK to cast the value to a list of elements because validation has passed
-		ovsSet, err := ovsdb.NewOvsSet(value)
+		ovsSet, err := ovsdb.NewOvsSet(columnSchema, value)
 		if err != nil {
 			return nil, err
 		}

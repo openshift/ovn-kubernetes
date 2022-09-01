@@ -12,20 +12,48 @@ import (
 // a 2-element JSON array that represents a database set value.  The
 // first element of the array must be the string "set", and the
 // second element must be an array of zero or more <atom>s giving the
-// values in the set.  All of the <atom>s must have the same type.
+// values in the set.  All of the <atom>s must have the same type, and all
+// values must be unique within the set.
 type OvsSet struct {
-	GoSet []interface{}
+	GoSet   []interface{}
+	maxSize int // <0 means unlimited
 }
 
-// NewOvsSet creates a new OVSDB style set from a Go interface (object)
-func NewOvsSet(obj interface{}) (OvsSet, error) {
+// NewOvsSetRaw creates a new OVSDB style set from a Go interface (object)
+// using the column schema to determine the element type and max set length
+func NewOvsSet(column *ColumnSchema, obj interface{}) (OvsSet, error) {
+	return newOvsSetRaw(column.TypeObj.Key.Type, column.TypeObj.max, obj)
+}
+
+func getUUID(val interface{}) (UUID, error) {
+	uuid, ok := val.(UUID)
+	if ok {
+		return uuid, nil
+	}
+	str, ok := val.(string)
+	if ok {
+		return UUID{GoUUID: str}, nil
+	}
+	return UUID{}, fmt.Errorf("expected UUID or string but got %T", val)
+}
+
+// newOvsSetRaw creates a new OVSDB style set from a Go interface (object)
+func newOvsSetRaw(keyType string, maxSizePtr *int, obj interface{}) (OvsSet, error) {
+	maxSize := -1
+	if maxSizePtr != nil {
+		maxSize = *maxSizePtr
+	}
+
 	ovsSet := make([]interface{}, 0)
 	var v reflect.Value
 	if reflect.TypeOf(obj).Kind() == reflect.Ptr {
 		v = reflect.ValueOf(obj).Elem()
 		if v.Kind() == reflect.Invalid {
 			// must be a nil pointer, so just return an empty set
-			return OvsSet{ovsSet}, nil
+			return OvsSet{
+				GoSet:   ovsSet,
+				maxSize: maxSize,
+			}, nil
 		}
 	} else {
 		v = reflect.ValueOf(obj)
@@ -34,10 +62,27 @@ func NewOvsSet(obj interface{}) (OvsSet, error) {
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
-			ovsSet = append(ovsSet, v.Index(i).Interface())
+			if keyType == TypeUUID {
+				uuid, err := getUUID(v.Index(i).Interface())
+				if err != nil {
+					return OvsSet{}, err
+				}
+				ovsSet = append(ovsSet, uuid)
+			} else {
+				ovsSet = append(ovsSet, v.Index(i).Interface())
+			}
 		}
-	case reflect.String,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+	case reflect.String:
+		if keyType == TypeUUID {
+			uuid, err := getUUID(v.Interface())
+			if err != nil {
+				return OvsSet{}, err
+			}
+			ovsSet = append(ovsSet, uuid)
+		} else {
+			ovsSet = append(ovsSet, v.Interface())
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64, reflect.Bool:
 		ovsSet = append(ovsSet, v.Interface())
@@ -50,11 +95,17 @@ func NewOvsSet(obj interface{}) (OvsSet, error) {
 	default:
 		return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid or pointers to those types")
 	}
-	return OvsSet{ovsSet}, nil
+	return OvsSet{
+		GoSet:   ovsSet,
+		maxSize: maxSize,
+	}, nil
 }
 
 // MarshalJSON wil marshal an OVSDB style Set in to a JSON byte array
 func (o OvsSet) MarshalJSON() ([]byte, error) {
+	if o.maxSize >= 0 && len(o.GoSet) > o.maxSize {
+		return nil, fmt.Errorf("OvsSet max size is %d but has %d elements", o.maxSize, len(o.GoSet))
+	}
 	switch l := len(o.GoSet); {
 	case l == 1:
 		return json.Marshal(o.GoSet[0])

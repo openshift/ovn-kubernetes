@@ -86,7 +86,7 @@ func (c *equalityConditional) Matches() (map[string]model.Model, error) {
 // on the index.
 func (c *equalityConditional) Generate() ([][]ovsdb.Condition, error) {
 	models, err := c.Matches()
-	if err != nil {
+	if err != nil && err != ErrNotFound {
 		return nil, err
 	}
 	if len(models) == 0 {
@@ -144,7 +144,7 @@ func (c *explicitConditional) Matches() (map[string]model.Model, error) {
 // Generate returns conditions based on the provided Condition list
 func (c *explicitConditional) Generate() ([][]ovsdb.Condition, error) {
 	models, err := c.Matches()
-	if err != nil {
+	if err != nil && err != ErrNotFound {
 		return nil, err
 	}
 	if len(models) == 0 {

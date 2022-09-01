@@ -78,10 +78,6 @@ func NativeType(column *ColumnSchema) reflect.Type {
 		if column.TypeObj.Min() == 1 && column.TypeObj.Max() == 1 {
 			return keyType
 		}
-		// max is > 1, use an array
-		if column.TypeObj.Max() > 1 {
-			return reflect.ArrayOf(column.TypeObj.Max(), keyType)
-		}
 		return reflect.SliceOf(keyType)
 	default:
 		panic(fmt.Errorf("unknown extended type %s", column.Type))
@@ -179,24 +175,24 @@ func OvsToNative(column *ColumnSchema, ovsElem interface{}) (interface{}, error)
 				return pv.Interface(), nil
 			}
 		case reflect.Array:
-			array := reflect.New(reflect.ArrayOf(column.TypeObj.Max(), naType.Elem())).Elem()
+			slice := reflect.New(reflect.SliceOf(naType.Elem())).Elem()
 			switch ovsSet := ovsElem.(type) {
 			case OvsSet:
-				for i, v := range ovsSet.GoSet {
+				for _, v := range ovsSet.GoSet {
 					nv, err := OvsToNativeAtomic(column.TypeObj.Key.Type, v)
 					if err != nil {
 						return nil, err
 					}
-					array.Index(i).Set(reflect.ValueOf(nv))
+					reflect.Append(slice, reflect.ValueOf(nv))
 				}
 			default:
 				nv, err := OvsToNativeAtomic(column.TypeObj.Key.Type, ovsElem)
 				if err != nil {
 					return nil, err
 				}
-				array.Index(0).Set(reflect.ValueOf(nv))
+				reflect.Append(slice, reflect.ValueOf(nv))
 			}
-			return array.Interface(), nil
+			return slice.Interface(), nil
 		case reflect.Slice:
 			return OvsToNativeSlice(column.TypeObj.Key.Type, ovsElem)
 		default:
@@ -255,33 +251,7 @@ func NativeToOvs(column *ColumnSchema, rawElem interface{}) (interface{}, error)
 	case TypeUUID:
 		return UUID{GoUUID: rawElem.(string)}, nil
 	case TypeSet:
-		var ovsSet OvsSet
-		if column.TypeObj.Key.Type == TypeUUID {
-			ovsSlice := []interface{}{}
-			if _, ok := rawElem.([]string); ok {
-				for _, v := range rawElem.([]string) {
-					uuid := UUID{GoUUID: v}
-					ovsSlice = append(ovsSlice, uuid)
-				}
-			} else if _, ok := rawElem.(*string); ok {
-				v := rawElem.(*string)
-				if v != nil {
-					uuid := UUID{GoUUID: *v}
-					ovsSlice = append(ovsSlice, uuid)
-				}
-			} else {
-				return nil, fmt.Errorf("uuid slice was neither []string or *string")
-			}
-			ovsSet = OvsSet{GoSet: ovsSlice}
-
-		} else {
-			var err error
-			ovsSet, err = NewOvsSet(rawElem)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return ovsSet, nil
+		return NewOvsSet(column, rawElem)
 	case TypeMap:
 		nativeMapVal := reflect.ValueOf(rawElem)
 		ovsMap := make(map[interface{}]interface{}, nativeMapVal.Len())
