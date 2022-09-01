@@ -337,6 +337,13 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		isOvnUpEnabled, err = getOVNIfUpCheckMode()
+		if err != nil {
+			return err
+		}
+	}
+
 	// Start and sync the watch factory to begin listening for events
 	if err := n.watchFactory.Start(); err != nil {
 		return err
@@ -390,13 +397,6 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
 	}
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
-
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		isOvnUpEnabled, err = getOVNIfUpCheckMode()
-		if err != nil {
-			return err
-		}
-	}
 
 	// Create CNI Server
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
