@@ -26,6 +26,7 @@ import (
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -199,8 +200,17 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		// Return the full CNI result from ovnkube-node if it configured the pod interface
 		result = response.Result
 	} else {
+		stopCh := make(chan struct{})
+		defer close(stopCh)
+		vsClient, err := libovsdb.NewVSwitchClient(stopCh)
+		if err != nil {
+			err := fmt.Errorf("failed to create vswitchd database client: %v", err)
+			klog.Error(err.Error())
+			return err
+		}
+
 		// Use the IPAM details from ovnkube-node to configure the pod interface
-		pr, err := cniRequestToPodRequest(req, nil, kclient)
+		pr, err := cniRequestToPodRequest(req, nil, kclient, vsClient)
 		if err != nil {
 			err = fmt.Errorf("failed to create pod request: %v", err)
 			klog.Error(err.Error())
@@ -256,7 +266,16 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 
 	// if Result is nil, then ovnkube-node is running in unprivileged mode so unconfigure the Interface from here.
 	if response.Result == nil {
-		pr, err = cniRequestToPodRequest(req, nil, nil)
+		stopCh := make(chan struct{})
+		defer close(stopCh)
+		vsClient, err := libovsdb.NewVSwitchClient(stopCh)
+		if err != nil {
+			err := fmt.Errorf("failed to create vswitchd database client: %v", err)
+			klog.Error(err.Error())
+			return err
+		}
+
+		pr, err = cniRequestToPodRequest(req, nil, nil, vsClient)
 		if err != nil {
 			err = fmt.Errorf("failed to create pod request: %v", err)
 			return err

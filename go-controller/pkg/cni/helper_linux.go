@@ -18,7 +18,6 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchdb"
@@ -346,24 +345,15 @@ func clearExistingIfaceIDs(vsClient client.Client, ifaceID string, logf *os.File
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
-	kclient kubernetes.Interface, logf *os.File) error {
+	kclient kubernetes.Interface, vsClient client.Client, logf *os.File) error {
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
 	ifaceID := util.GetIfaceId(namespace, podName)
 	initialPodUID := ifInfo.PodUID
 
-	start := time.Now()
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	vsClient, err := libovsdb.NewVSwitchClient(stopCh)
-	if err != nil {
-		return fmt.Errorf("failed to create vswitchd database client: %v", err)
-	}
-	logf.WriteString(fmt.Sprintf("      ConfOVSConnect: %v\n", time.Since(start)))
-
 	if err := clearExistingIfaceIDs(vsClient, ifaceID, logf); err != nil {
 		return err
 	}
-	start = time.Now()
+	start := time.Now()
 
 	bridge, err := libovsdbops.FindBridgeByName(vsClient, "br-int")
 	if err != nil {
@@ -463,7 +453,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	if !ifInfo.IsDPUHostMode {
 		start = time.Now()
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
-			podLister, kclient, pr.logf)
+			podLister, kclient, pr.vsClient, pr.logf)
 		pr.logf.WriteString(fmt.Sprintf("   ConfOVS: %v\n", time.Since(start)))
 		if err != nil {
 			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)

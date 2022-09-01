@@ -21,12 +21,15 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -42,6 +45,7 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+	vsClient     libovsdbclient.Client
 }
 
 // NewNode creates a new controller for node management
@@ -338,6 +342,11 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		return err
 	}
 
+	n.vsClient, err = libovsdb.NewVSwitchClient(n.stopChan)
+	if err != nil {
+		return fmt.Errorf("failed to create vswitchd database client: %v", err)
+	}
+
 	if node, err = n.Kube.GetNode(n.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
 	}
@@ -395,7 +404,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient, n.vsClient)
 		if err != nil {
 			return err
 		}

@@ -16,6 +16,8 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -48,7 +50,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface, vsClient libovsdbclient.Client) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
@@ -78,6 +80,7 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 			KubeAPIToken:     config.Kubernetes.Token,
 			KubeAPITokenFile: config.Kubernetes.TokenFile,
 		},
+		vsClient: vsClient,
 	}
 
 	if len(config.Kubernetes.CAData) > 0 {
@@ -124,14 +127,15 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 	return mapArgs, nil
 }
 
-func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kclient kubernetes.Interface) (*PodRequest, error) {
+func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kclient kubernetes.Interface, vsClient libovsdbclient.Client) (*PodRequest, error) {
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
 	}
 
 	req := &PodRequest{
-		Command: command(cmd),
+		Command:  command(cmd),
+		vsClient: vsClient,
 	}
 
 	req.SandboxID, ok = cr.Env["CNI_CONTAINERID"]
@@ -192,7 +196,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
-	req, err := cniRequestToPodRequest(&cr, s.podLister, s.kclient)
+	req, err := cniRequestToPodRequest(&cr, s.podLister, s.kclient, s.vsClient)
 	if err != nil {
 		return nil, err
 	}

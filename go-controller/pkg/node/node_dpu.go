@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -52,7 +54,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient, n.vsClient)
 				if err != nil {
 					klog.Infof("Failed to add rep port, %s. retrying", err)
 					retryPods.Store(pod.UID, true)
@@ -87,7 +89,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 				if err != nil {
 					return
 				}
-				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient, n.vsClient)
 				if err != nil {
 					klog.Infof("Failed to add rep port, %s. retrying", err)
 				} else {
@@ -128,7 +130,7 @@ func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
-func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
+func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface, vsClient libovsdbclient.Client) error {
 	klog.Infof("Adding VF representor %s", vfRepName)
 	dpuConnDetails := util.DPUConnectionDetails{}
 	if err := dpuConnDetails.FromPodAnnotation(pod.Annotations); err != nil {
@@ -137,7 +139,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 
 	f, err := os.Open("/dev/null")
 	defer f.Close()
-	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient, f)
+	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient, vsClient, f)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)

@@ -12,6 +12,8 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -144,7 +146,8 @@ type PodRequest struct {
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
 
-	logf *os.File
+	logf     *os.File
+	vsClient libovsdbclient.Client
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)
@@ -159,4 +162,5 @@ type Server struct {
 	kclient           kubernetes.Interface
 	podLister         corev1listers.PodLister
 	kubeAuth          *KubeAPIAuth
+	vsClient          libovsdbclient.Client
 }
