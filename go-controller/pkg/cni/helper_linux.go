@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
@@ -450,6 +451,19 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		return nil, err
 	}
 
+	var wg sync.WaitGroup
+	var iptErr error
+	var iptTime time.Duration
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
+		iptStart := time.Now()
+		iptErr = setupIPTablesBlocks(netns, ifInfo)
+		iptTime = time.Since(iptStart)
+		// END OCP HACK
+	}()
+
 	if !ifInfo.IsDPUHostMode {
 		start = time.Now()
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
@@ -461,14 +475,11 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		}
 	}
 
-	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
-	start = time.Now()
-	err = setupIPTablesBlocks(netns, ifInfo)
-	pr.logf.WriteString(fmt.Sprintf("   IPTables: %v\n", time.Since(start)))
-	if err != nil {
-		return nil, err
+	wg.Wait()
+	pr.logf.WriteString(fmt.Sprintf("   IPTables: %v\n", iptTime))
+	if iptErr != nil {
+		return nil, iptErr
 	}
-	// END OCP HACK
 
 	return []*current.Interface{hostIface, contIface}, nil
 }
