@@ -34,7 +34,7 @@ import (
 
 type CNIPluginLibOps interface {
 	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link, mtu int) error
-	SetupVeth(contVethName string, hostVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS) (netlink.Link, netlink.Link, error)
+	SetupVeth(contVethName string, hostVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS, logf *os.File) (netlink.Link, netlink.Link, error)
 }
 
 type defaultCNIPluginLibOps struct{}
@@ -53,8 +53,8 @@ func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Li
 	return util.GetNetLinkOps().RouteAdd(route)
 }
 
-func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS) (netlink.Link, netlink.Link, error) {
-	return ip.SetupVethWithName(contVethName, hostVethName, mtu, hardwareAddr, hostNS)
+func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS, logf *os.File) (netlink.Link, netlink.Link, error) {
+	return ip.SetupVethWithName(contVethName, hostVethName, mtu, hardwareAddr, hostNS, logf)
 }
 
 // This is a good value that allows fast streams of small packets to be aggregated,
@@ -194,7 +194,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		// create the veth pair in the container and move host end into host netns
 		hostIface.Name = containerID[:15]
 		start = time.Now()
-		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, hostIface.Name, ifInfo.MTU, ifInfo.MAC, hostNS)
+		hostVeth, containerVeth, err := ip.SetupVethWithName(ifName, hostIface.Name, ifInfo.MTU, ifInfo.MAC, hostNS, logf)
 		logf.WriteString(fmt.Sprintf("      SetupVeth: %v\n", time.Since(start)))
 		if err != nil {
 			return err

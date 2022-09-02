@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
@@ -32,7 +33,7 @@ var (
 	ErrLinkNotFound = errors.New("link not found")
 )
 
-func makeVethPair(name, peer string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS) (netlink.Link, error) {
+func makeVethPair(name, peer string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS, logf *os.File) (netlink.Link, error) {
 	veth := &netlink.Veth{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:         name,
@@ -43,15 +44,20 @@ func makeVethPair(name, peer string, mtu int, hardwareAddr net.HardwareAddr, hos
 		PeerName:      peer,
 		PeerNamespace: netlink.NsFd(int(hostNS.Fd())),
 	}
+	start := time.Now()
 	if err := netlink.LinkAdd(veth); err != nil {
 		return nil, err
 	}
+	logf.WriteString(fmt.Sprintf("          makeVethAdd: %v\n", time.Since(start)))
+	start = time.Now()
+
 	// Re-fetch container-side link to get its creation-time parameters, e.g. index and mac
 	veth2, err := netlink.LinkByName(name)
 	if err != nil {
 		netlink.LinkDel(veth) // try and clean up the link if possible.
 		return nil, err
 	}
+	logf.WriteString(fmt.Sprintf("          makeVethLink: %v\n", time.Since(start)))
 
 	return veth2, nil
 }
@@ -63,8 +69,9 @@ func peerExists(name string) bool {
 	return true
 }
 
-func makeVeth(name, vethPeerName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS) (peerName string, veth netlink.Link, err error) {
+func makeVeth(name, vethPeerName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS, logf *os.File) (peerName string, veth netlink.Link, err error) {
 	for i := 0; i < 10; i++ {
+		start := time.Now()
 		if vethPeerName != "" {
 			peerName = vethPeerName
 		} else {
@@ -74,7 +81,7 @@ func makeVeth(name, vethPeerName string, mtu int, hardwareAddr net.HardwareAddr,
 			}
 		}
 
-		veth, err = makeVethPair(name, peerName, mtu, hardwareAddr, hostNS)
+		veth, err = makeVethPair(name, peerName, mtu, hardwareAddr, hostNS, logf)
 		switch {
 		case err == nil:
 			return
@@ -90,6 +97,7 @@ func makeVeth(name, vethPeerName string, mtu int, hardwareAddr net.HardwareAddr,
 			err = fmt.Errorf("failed to make veth pair: %v", err)
 			return
 		}
+		logf.WriteString(fmt.Sprintf("          makeVeth(%d): %v\n", i, time.Since(start)))
 	}
 
 	// should really never be hit
@@ -133,28 +141,37 @@ func ifaceFromNetlinkLink(l netlink.Link) net.Interface {
 // devices and move the host-side veth into the provided hostNS namespace.
 // hostVethName: If hostVethName is not specified, the host-side veth name will use a random string.
 // On success, SetupVethWithName returns (hostVeth, containerVeth, nil)
-func SetupVethWithName(contVethName, hostVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS) (netlink.Link, netlink.Link, error) {
-	hostVethName, contVeth, err := makeVeth(contVethName, hostVethName, mtu, hardwareAddr, hostNS)
+func SetupVethWithName(contVethName, hostVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS, logf *os.File) (netlink.Link, netlink.Link, error) {
+	hostVethName, contVeth, err := makeVeth(contVethName, hostVethName, mtu, hardwareAddr, hostNS, logf)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	start := time.Now()
 	if contVeth.Attrs().Flags & net.FlagUp == 0 {
 		if err = netlink.LinkSetUp(contVeth); err != nil {
 			return nil, nil, fmt.Errorf("failed to set %q up: %v", contVethName, err)
 		}
 	}
+	logf.WriteString(fmt.Sprintf("          LinkUp: %v\n", time.Since(start)))
+	start = time.Now()
 
 	var hostVeth netlink.Link
 	err = hostNS.Do(func(_ ns.NetNS) error {
+		logf.WriteString(fmt.Sprintf("          HostNSDo: %v\n", time.Since(start)))
+		start := time.Now()
 		hostVeth, err = netlink.LinkByName(hostVethName)
 		if err != nil {
 			return fmt.Errorf("failed to lookup %q in %q: %v", hostVethName, hostNS.Path(), err)
 		}
+		logf.WriteString(fmt.Sprintf("          HostLinkByName: %v\n", time.Since(start)))
+		start = time.Now()
 
 		if err = netlink.LinkSetUp(hostVeth); err != nil {
 			return fmt.Errorf("failed to set %q up: %v", hostVethName, err)
 		}
+		logf.WriteString(fmt.Sprintf("          HostLinkUp: %v\n", time.Since(start)))
+		start = time.Now()
 
 		// we want to own the routes for this interface
 		//_, _ = sysctl.Sysctl(fmt.Sprintf("net/ipv6/conf/%s/accept_ra", hostVethName), "0")
@@ -170,8 +187,8 @@ func SetupVethWithName(contVethName, hostVethName string, mtu int, hardwareAddr 
 // Call SetupVeth from inside the container netns.  It will create both veth
 // devices and move the host-side veth into the provided hostNS namespace.
 // On success, SetupVeth returns (hostVeth, containerVeth, nil)
-func SetupVeth(contVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS) (netlink.Link, netlink.Link, error) {
-	return SetupVethWithName(contVethName, "", mtu, hardwareAddr, hostNS)
+func SetupVeth(contVethName string, mtu int, hardwareAddr net.HardwareAddr, hostNS ns.NetNS, logf *os.File) (netlink.Link, netlink.Link, error) {
+	return SetupVethWithName(contVethName, "", mtu, hardwareAddr, hostNS, logf)
 }
 
 // DelLinkByName removes an interface link.
