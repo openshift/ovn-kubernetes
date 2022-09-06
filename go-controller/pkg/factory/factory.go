@@ -428,6 +428,12 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority uint3
 func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandlerFuncType, error) {
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
+	case NamespaceType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddNamespaceHandler(funcs, processExisting)
+		}, nil
+
 	case PolicyType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
