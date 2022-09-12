@@ -2,6 +2,7 @@ package cni
 
 import (
 	"fmt"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"net"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -10,7 +11,6 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -122,7 +122,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 			// Add DPU connection-details annotation so ovnkube-node running on DPU
 			// performs the needed network plumbing.
-			if err = pr.addDPUConnectionDetailsAnnot(kubecli, vfNetdevName); err != nil {
+			if err = pr.addDPUConnectionDetailsAnnot(kubecli, podLister, vfNetdevName); err != nil {
 				return nil, err
 			}
 			annotCondFn = isDPUReady
@@ -171,9 +171,9 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				klog.Warningf("Failed to get pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
 				return response, nil
 			}
-			dpuCD := util.DPUConnectionDetails{}
-			if err := dpuCD.FromPodAnnotation(pod.Annotations); err != nil {
-				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s: %v", pr.PodNamespace,
+			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, types.DefaultNetworkName)
+			if err != nil {
+				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s", pr.PodNamespace,
 					pr.PodName, err)
 				return response, nil
 			}
