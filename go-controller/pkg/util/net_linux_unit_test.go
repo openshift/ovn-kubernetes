@@ -590,6 +590,7 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
 					{
 						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
 						MTU: 1400,
 					},
 				}, nil}},
@@ -607,9 +608,33 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			errExp:       false,
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
-					{Gw: ovntest.MustParseIP("192.168.0.1")},
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
+					},
 				}, nil}},
 				{OnCallMethodName: "RouteReplace", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route exists, has the same mtu and is not updated",
+			inputLink:    mockLink,
+			inputGwIP:    nil,
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
+						MTU: 1400,
+						Src: ovntest.MustParseIP("192.168.0.10"),
+					},
+				}, nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
