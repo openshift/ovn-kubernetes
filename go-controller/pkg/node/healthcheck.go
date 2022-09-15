@@ -22,18 +22,20 @@ import (
 
 type loadBalancerHealthChecker struct {
 	sync.Mutex
-	nodeName  string
-	server    healthcheck.Server
-	services  map[ktypes.NamespacedName]uint16
-	endpoints map[ktypes.NamespacedName]int
+	nodeName     string
+	server       healthcheck.Server
+	services     map[ktypes.NamespacedName]uint16
+	endpoints    map[ktypes.NamespacedName]int
+	watchFactory factory.NodeWatchFactory
 }
 
-func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
+func newLoadBalancerHealthChecker(nodeName string, watchFactory factory.NodeWatchFactory) *loadBalancerHealthChecker {
 	return &loadBalancerHealthChecker{
-		nodeName:  nodeName,
-		server:    healthcheck.NewServer(nodeName, nil, nil, nil),
-		services:  make(map[ktypes.NamespacedName]uint16),
-		endpoints: make(map[ktypes.NamespacedName]int),
+		nodeName:     nodeName,
+		server:       healthcheck.NewServer(nodeName, nil, nil, nil),
+		services:     make(map[ktypes.NamespacedName]uint16),
+		endpoints:    make(map[ktypes.NamespacedName]int),
+		watchFactory: watchFactory,
 	}
 }
 
@@ -48,7 +50,26 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
 }
 
 func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
-	// HealthCheckNodePort can't be changed on update
+	// if the ETP values have changed between local and cluster,
+	// we need to update health checks accordingly
+	// HealthCheckNodePort is used only in ETP=local mode
+	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster &&
+		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal {
+		l.AddService(new)
+		ep, err := l.watchFactory.GetEndpoint(new.Namespace, new.Name)
+		if err != nil {
+			klog.V(4).Infof("Could not fetch endpoint for service %s/%s during health check update service", new.Namespace, new.Name)
+		}
+		namespacedName := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
+		l.Lock()
+		l.endpoints[namespacedName] = countLocalEndpoints(ep, l.nodeName)
+		_ = l.server.SyncEndpoints(l.endpoints)
+		l.Unlock()
+	}
+	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal &&
+		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster {
+		l.DeleteService(old)
+	}
 }
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
