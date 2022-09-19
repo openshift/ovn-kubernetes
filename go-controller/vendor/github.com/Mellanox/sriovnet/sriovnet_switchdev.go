@@ -230,6 +230,12 @@ func GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
 // Note: this method does not support old representor names used by old kernels
 // e.g <vf_num> and will return PORT_FLAVOUR_UNKNOWN for such cases.
 func GetRepresentorPortFlavour(netdev string) (PortFlavour, error) {
+
+	// this is POC hack
+	if netdev == "eth0" {
+		return PORT_FLAVOUR_PCI_PF, nil
+	}
+
 	if !isSwitchdev(netdev) {
 		return PORT_FLAVOUR_UNKNOWN, fmt.Errorf("net device %s is does not represent an eswitch port", netdev)
 	}
