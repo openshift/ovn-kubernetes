@@ -11,4 +11,4 @@ docker run --pid host --network host --user=0 --name ovn-node -dit --cap-add=NET
   -e OVN_ENCAP_IP=$DPU_IP -e K8S_TOKEN=$K8S_TOKEN -e K8S_CACERT=$K8S_CACERT \
   -e OVN_GATEWAY_OPTS="$OVN_GATEWAY_OPTS" -e OVNKUBE_NODE_MGMT_PORT_NETDEV="$OVNKUBE_NODE_MGMT_PORT_NETDEV" \
   -e OVN_DISABLE_PKT_MTU_CHECK=true \
-   --entrypoint=/root/ovnkube.sh ovn-daemonset:latest "ovn-node"
+   --entrypoint=/root/ovnkube.sh navadiaev/ovn-daemonset-f-aarch64:latest "ovn-node"
