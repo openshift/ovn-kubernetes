@@ -42,8 +42,8 @@ func IsEquivalentACL(existing *nbdb.ACL, searched *nbdb.ACL) bool {
 		existing.Action == searched.Action
 }
 
-// findACLsByPredicate looks up ACLs from the cache based on a given predicate
-func findACLsByPredicate(nbClient libovsdbclient.Client, lookupFunction func(item *nbdb.ACL) bool) ([]nbdb.ACL, error) {
+// FindACLsByPredicate looks up ACLs from the cache based on a given predicate
+func FindACLsByPredicate(nbClient libovsdbclient.Client, lookupFunction func(item *nbdb.ACL) bool) ([]nbdb.ACL, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
 	acls := []nbdb.ACL{}
@@ -61,7 +61,7 @@ func findACL(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
 		return nil
 	}
 
-	acls, err := findACLsByPredicate(nbClient, func(item *nbdb.ACL) bool {
+	acls, err := FindACLsByPredicate(nbClient, func(item *nbdb.ACL) bool {
 		return IsEquivalentACL(item, acl)
 	})
 
@@ -87,7 +87,7 @@ func FindRejectACLs(nbClient libovsdbclient.Client) ([]nbdb.ACL, error) {
 		return acl.Action == nbdb.ACLActionReject
 	}
 
-	return findACLsByPredicate(nbClient, rejectACLLookupFcn)
+	return FindACLsByPredicate(nbClient, rejectACLLookupFcn)
 }
 
 // FindACLsByPriorityRange looks up the acls with priorities within a given inclusive range
@@ -97,7 +97,7 @@ func FindACLsByPriorityRange(nbClient libovsdbclient.Client, minPriority, maxPri
 		return (item.Priority >= minPriority) && (item.Priority <= maxPriority)
 	}
 
-	return findACLsByPredicate(nbClient, priorityRangeLookupFcn)
+	return FindACLsByPredicate(nbClient, priorityRangeLookupFcn)
 }
 
 // FindACLsByExternalID looks up the acls with the given externalID/s
@@ -115,7 +115,7 @@ func FindACLsByExternalID(nbClient libovsdbclient.Client, externalIDs map[string
 		return aclMatch
 	}
 
-	return findACLsByPredicate(nbClient, ACLLookupFcn)
+	return FindACLsByPredicate(nbClient, ACLLookupFcn)
 }
 
 func ensureACLUUID(acl *nbdb.ACL) {
