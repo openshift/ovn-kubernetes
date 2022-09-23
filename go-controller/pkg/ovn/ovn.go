@@ -34,8 +34,6 @@ import (
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 
-	utilnet "k8s.io/utils/net"
-
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -246,20 +244,6 @@ const (
 	// SCTP is the constant string for the string "SCTP"
 	SCTP = "SCTP"
 )
-
-func GetIPFullMask(ip string) string {
-	const (
-		// IPv4FullMask is the maximum prefix mask for an IPv4 address
-		IPv4FullMask = "/32"
-		// IPv6FullMask is the maxiumum prefix mask for an IPv6 address
-		IPv6FullMask = "/128"
-	)
-
-	if utilnet.IsIPv6(net.ParseIP(ip)) {
-		return IPv6FullMask
-	}
-	return IPv4FullMask
-}
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
