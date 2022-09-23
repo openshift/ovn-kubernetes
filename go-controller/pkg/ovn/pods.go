@@ -62,7 +62,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 						util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName)
 				} else {
-					return fmt.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
+					return fmt.Errorf("couldn't allocate IPs: %s for pod: %s on node: %s"+
 						" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName, err)
 				}

@@ -3,8 +3,9 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -272,7 +273,7 @@ func FindRoutersUsingNAT(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]nb
 	return routers, nil
 }
 
-func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
+func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
 	nats := []*nbdb.NAT{}
 
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
@@ -356,7 +357,7 @@ func AddOrUpdateNATsToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 		return ops, err
 	}
 
-	routerNats, err := getRouterNATs(nbClient, router)
+	routerNats, err := GetRouterNATs(nbClient, router)
 	if err != nil {
 		return ops, err
 	}
@@ -383,7 +384,7 @@ func DeleteNATsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Oper
 		return ops, err
 	}
 
-	routerNats, err := getRouterNATs(nbClient, router)
+	routerNats, err := GetRouterNATs(nbClient, router)
 	if err == libovsdbclient.ErrNotFound {
 		return ops, nil
 	}
