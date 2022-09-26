@@ -124,7 +124,7 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(npType) && // default-deny-policy-type:Egress or default-deny-policy-type:Ingress
 			strings.Contains(item.Match, gressSuffix) && // Match:inport ==	@ablah80448_egressDefaultDeny or Match:inport == @ablah80448_ingressDefaultDeny
 			!strings.Contains(*item.Name, arpAllowPolicySuffix) && // != name: namespace_ARPallowPolicy
-			!strings.Contains(*item.Name, gressSuffix) // filter out already converted ACLs
+			!strings.Contains(*item.Name, gressSuffix) // filter out already converted ACLs (we still continue to pick the cases where names were >45 chars)
 	}
 	gressACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 	if err != nil {
@@ -145,8 +145,27 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 				return err
 			}
 		}
-		aclList[0].Name = &newName
-		err := libovsdbops.CreateOrUpdateACLs(oc.nbClient, aclList[0])
+		meter := ""
+		if aclList[0].Meter != nil {
+			meter = *aclList[0].Meter
+		}
+		severity := ""
+		if aclList[0].Severity != nil {
+			severity = *aclList[0].Severity
+		}
+		newACL := libovsdbops.BuildACL(
+			newName, // this is the only thing we need to change, keep the rest same
+			aclList[0].Direction,
+			aclList[0].Priority,
+			aclList[0].Match,
+			aclList[0].Action,
+			meter,
+			severity,
+			aclList[0].Log,
+			aclList[0].ExternalIDs,
+			aclList[0].Options,
+		)
+		err := libovsdbops.CreateOrUpdateACLs(oc.nbClient, newACL)
 		if err != nil {
 			return fmt.Errorf("cannot update old NetworkPolicy ACLs for namespace %s: %v", namespace, err)
 		}
