@@ -53,10 +53,6 @@ type namespaceInfo struct {
 
 	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
 	aclLogging ACLLoggingLevels
-
-	// Per-namespace port group default deny UUIDs
-	portGroupIngressDenyName string // Port group Name for ingress deny rule
-	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
 // This function implements the main body of work of syncNamespaces.
@@ -199,7 +195,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo)
+		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name)
 	}
 	if err != nil {
 		return err
@@ -212,7 +208,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name); err != nil {
 			return err
 		}
 	}
@@ -234,6 +230,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 	}
 	defer nsUnlock()
 
+	// OCP HACK -- hybrid overlay
 	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
@@ -252,6 +249,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
 	}
+	// END OCP HACK
 	return nil
 }
 
@@ -392,6 +390,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 		}
 	}
 
+	// OCP HACK -- hybrid overlay
 	annotation := newer.Annotations[hotypes.HybridOverlayExternalGw]
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
@@ -414,7 +413,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	} else {
 		nsInfo.hybridOverlayVTEP = nil
 	}
-
+	// END OCP HACK
 	if err := oc.multicastUpdateNamespace(newer, nsInfo); err != nil {
 		errors = append(errors, err)
 	}
@@ -432,14 +431,13 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) error {
 
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
-		key := getPolicyNamespacedName(np.policy)
+		key := getPolicyKey(np.policy)
 		oc.retryNetworkPolicies.skipRetryObj(key)
 		// add the full np object to the retry entry, since the namespace is going to be removed
 		// along with any mappings of nsInfo -> network policies
 		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np)
-		isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
-		if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
-			klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
+		if err := oc.destroyNetworkPolicy(np); err != nil {
+			return fmt.Errorf("failed to delete network policy: %s, error: %v", key, err)
 			oc.retryNetworkPolicies.unSkipRetryObj(key)
 		} else {
 			oc.retryNetworkPolicies.deleteRetryObj(key, true)
@@ -554,6 +552,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 	if namespace != nil {
 		// if we have the namespace, attempt to configure nsInfo with it
 		if err := oc.configureNamespace(nsInfo, namespace); err != nil {
+			unlockFunc()
 			return nil, nil, fmt.Errorf("failed to configure namespace %s: %v", ns, err)
 		}
 	}

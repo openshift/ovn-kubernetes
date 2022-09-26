@@ -360,7 +360,7 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		return getPolicyNamespacedName(np), nil
+		return getPolicyKey(np), nil
 
 	case factory.NodeType,
 		factory.EgressNodeType:
@@ -713,10 +713,8 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
+			false,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -835,10 +833,8 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
+			false,
 			newObj)
 
 	case factory.EgressIPType:
@@ -1006,22 +1002,10 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 			return extraParameters.gp.delNamespaceAddressSet(namespace.Name)
 		})
 
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
-			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
-			obj)
-
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			obj)
 
 	case factory.EgressFirewallType:

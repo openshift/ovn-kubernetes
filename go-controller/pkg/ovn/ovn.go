@@ -24,6 +24,7 @@ import (
 
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -110,16 +111,12 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
-	// For each logical port, the number of network policies that want
-	// to add an ingress deny rule.
-	lspIngressDenyCache map[string]int
-
-	// For each logical port, the number of network policies that want
-	// to add an egress deny rule.
-	lspEgressDenyCache map[string]int
-
-	// A mutex for lspIngressDenyCache and lspEgressDenyCache
-	lspMutex *sync.Mutex
+	// map of existing shared port groups for network policies
+	// port group exists in the db if and only if port group key is present in this map
+	// key is namespace
+	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
+	// make sure to keep this order to avoid deadlocks
+	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
 	// Supports multicast?
 	multicastSupport bool
@@ -225,19 +222,17 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory:          wf,
-		stopChan:              stopChan,
-		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
-		lsManager:             lsm.NewLogicalSwitchManager(),
-		logicalPortCache:      newPortCache(stopChan),
-		namespaces:            make(map[string]*namespaceInfo),
-		namespacesMutex:       sync.Mutex{},
-		externalGWCache:       make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:        sync.RWMutex{},
-		addressSetFactory:     addressSetFactory,
-		lspIngressDenyCache:   make(map[string]int),
-		lspEgressDenyCache:    make(map[string]int),
-		lspMutex:              &sync.Mutex{},
+		watchFactory:           wf,
+		stopChan:               stopChan,
+		masterSubnetAllocator:  subnetallocator.NewSubnetAllocator(),
+		lsManager:              lsm.NewLogicalSwitchManager(),
+		logicalPortCache:       newPortCache(stopChan),
+		namespaces:             make(map[string]*namespaceInfo),
+		namespacesMutex:        sync.Mutex{},
+		externalGWCache:        make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:         sync.RWMutex{},
+		addressSetFactory:      addressSetFactory,
+		sharedNetpolPortGroups: syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
