@@ -664,7 +664,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	var v4Gateway, v6Gateway net.IP
 	var hostNetworkPolicyIPs []net.IP
 	logicalRouterPortNetwork := []string{}
-	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
@@ -674,8 +673,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
 
-			logicalSwitch.OtherConfig["ipv6_prefix"] =
-				hostSubnet.IP.String()
+			logicalSwitch.OtherConfig = map[string]string{
+				"ipv6_prefix": hostSubnet.IP.String(),
+			}
 		} else {
 			v4Gateway = gwIfAddr.IP
 			excludeIPs := mgmtIfAddr.IP.String()
@@ -683,8 +683,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
 				excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
 			}
-			logicalSwitch.OtherConfig["subnet"] = hostSubnet.String()
-			logicalSwitch.OtherConfig["exclude_ips"] = excludeIPs
+			logicalSwitch.OtherConfig = map[string]string{
+				"subnet":      hostSubnet.String(),
+				"exclude_ips": excludeIPs,
+			}
 		}
 	}
 
