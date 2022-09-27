@@ -517,8 +517,13 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 	}
 	// if no routes are added return an error
 	if routesAdded < 1 {
-		return fmt.Errorf("gateway specified for namespace %s with gateway addresses %v but no valid routes exist for pod: %s",
-			podNsName.Namespace, podIfAddrs, podNsName.Name)
+		gws := sets.NewString()
+		for _, gateway := range gateways {
+			gws.Insert(gateway.gws.List()...)
+		}
+		return fmt.Errorf("gateway specified for namespace %s with gateways %v "+
+			"but no valid routes could be added for pod %s with IP addresses %v",
+			podNsName.Namespace, gws, podIfAddrs, podNsName.Name)
 	}
 	return nil
 }

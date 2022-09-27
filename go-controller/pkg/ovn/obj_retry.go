@@ -780,6 +780,7 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 // to its version in newObj according to its type and returns the error, if any, yielded during the object update.
 // The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
 func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj interface{}, inRetryCache bool) error {
+	klog.Infof("Akaris --- running updateResource %s %v %v %t", objectsToRetry.oType, oldObj, newObj)
 	switch objectsToRetry.oType {
 	case factory.PodType:
 		oldPod := oldObj.(*kapi.Pod)
@@ -911,9 +912,12 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
+		klog.Infof("Akaris ---- inside updateResource and updating namespace %s", newNs.Name)
 		// OCP HACK -- required for hybrid overlay
 		if config.HybridOverlay.Enabled && nsHybridAnnotationChanged(oldNs, newNs) {
+			klog.Infof("Akaris ---- updating namespace, oc.addNamespaceICNIv1: %s", newNs.Name)
 			if err := oc.addNamespaceICNIv1(newNs); err != nil {
+				klog.Infof("Akaris ---- unable to handle legacy ICNIv1 check for namespace %q during update, error: %v", newNs.Name, err)
 				return fmt.Errorf("unable to handle legacy ICNIv1 check for namespace %q during update, error: %v",
 					newNs.Name, err)
 			}
@@ -1483,8 +1487,10 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 					objectsToRetry.oType, newKey)
 
 				hasUpdateFunc := hasResourceAnUpdateFunc(objectsToRetry.oType)
+				klog.Infof("Akaris --- resourceHasUpdateFunc %s %s %t", objectsToRetry.oType, newKey, hasUpdateFunc)
 
 				objectsToRetry.DoWithLock(newKey, func(key string) {
+					klog.Infof("Akaris --- inside objectsToRetry.DoWithLock %s %s %s %t", key, objectsToRetry.oType, newKey, hasUpdateFunc)
 					// STEP 1:
 					// Delete existing (old) object if:
 					// a) it has a retry entry marked for deletion and doesn't use update or
@@ -1495,6 +1501,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 					// retryEntryOrNil may be nil if found=false
 
 					if found && retryEntryOrNil.oldObj != nil {
+						klog.Infof("Akaris --- found && retryEntryOrNil.oldObj != nil %s %s %s", key, objectsToRetry.oType, oldKey)
 						// [step 1a] there is a retry entry marked for deletion
 						klog.Infof("Found retry entry for %s %s marked for deletion: will delete the object",
 							objectsToRetry.oType, oldKey)
@@ -1511,6 +1518,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 							objectsToRetry.removeDeleteFromRetryObj(retryEntryOrNil)
 						}
 					} else if oc.isObjectInTerminalState(objectsToRetry.oType, latest) { // check the latest status on newer
+						klog.Infof("Akaris --- oc.isObjectInTerminalState %s %s %s", key, objectsToRetry.oType, oldKey)
 						// [step 1b] The object is in a terminal state: delete it from the cluster,
 						// delete its retry entry and return. This only applies to pod watchers
 						// (pods + dynamic network policy handlers watching pods).
@@ -1518,6 +1526,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 						return
 
 					} else if !hasUpdateFunc {
+						klog.Infof("Akaris --- !hasUpdateFunc %s %s %s", key, objectsToRetry.oType, oldKey)
 						// [step 1c] if this resource type has no update function,
 						// delete old obj and in step 2 add the new one
 						var existingCacheEntry interface{}
@@ -1539,10 +1548,12 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 							objectsToRetry.removeDeleteFromRetryObj(retryEntryOrNil)
 						}
 					}
+					klog.Infof("Akaris --- beforeStep2 %s %s %s", newKey, objectsToRetry.oType, oldKey)
 					// STEP 2:
 					// Execute the update function for this resource type; resort to add if no update
 					// function is available.
 					if hasUpdateFunc {
+						klog.Infof("Akaris --- running updateResource %s %s %v %v %t", objectsToRetry.oType, newKey, old, latest, found)
 						// if this resource type has an update func, just call the update function
 						if err := oc.updateResource(objectsToRetry, old, latest, found); err != nil {
 							klog.Errorf("Failed to update %s, old=%s, new=%s, error: %v",
@@ -1558,6 +1569,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 							return
 						}
 					} else { // we previously deleted old object, now let's add the new one
+						klog.Infof("Akaris --- running addResource %s %s %v %t", objectsToRetry.oType, newKey, latest, false)
 						if err := oc.addResource(objectsToRetry, latest, false); err != nil {
 							oc.recordErrorEvent(objectsToRetry.oType, latest, err)
 							retryEntry := objectsToRetry.initRetryObjWithAdd(latest, key)

@@ -188,6 +188,8 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()
 
+	klog.Infof("Akaris -------- inside AddNamespec for %s", ns.Name)
+
 	// OCP HACK - needed for hybrid overlay
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	// END OCP HACK
@@ -198,11 +200,13 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 
 	// OCP HACK - needed for hybrid overlay
 	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
+	klog.Infof("Akaris -------- annotation is %s)", annotation)
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
 			return fmt.Errorf("could not parse hybrid overlay external gw annotation")
 		} else {
+			klog.Infof("Akaris -------- parsedAnnotation is %s)", parsedAnnotation)
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
 	}
@@ -224,13 +228,16 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) error {
 	var errors []error
 	if annotation, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok {
+		klog.Infof("Akaris -------- RoutingExternalGWsAnnotation annotation is %s)", annotation)
 		exGateways, err := util.ParseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
+			klog.Infof("Akaris -------- failed to parse external gateway annotation (%v)", err)
 			errors = append(errors, fmt.Errorf("failed to parse external gateway annotation (%v)", err))
 		} else {
 			_, bfdEnabled := ns.Annotations[util.BfdAnnotation]
 			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
 			if err != nil {
+				klog.Infof("Akaris -------- failed to add external gateway for namespace %s (%v)", ns.Name, err)
 				errors = append(errors, fmt.Errorf("failed to add external gateway for namespace %s (%v)", ns.Name, err))
 			}
 		}
@@ -264,13 +271,20 @@ func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespa
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	var errors []error
 	klog.Infof("[%s] updating namespace", old.Name)
+	klog.Infof("Akaris ---- inside updateNamespace and updating namespace %s", newer.Name)
 
 	nsInfo, nsUnlock := oc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {
+		klog.Infof("Akaris -------- Update event for unknown namespace %q", old.Name)
 		klog.Warningf("Update event for unknown namespace %q", old.Name)
 		return nil
 	}
-	defer nsUnlock()
+	defer func() {
+		klog.Infof("Akaris -------- inside updateNamespace for %s; unlock", newer.Name)
+		nsUnlock()
+	}()
+
+	klog.Infof("Akaris -------- inside updateNamespace for %s; got the lock", newer.Name)
 
 	gwAnnotation := newer.Annotations[util.RoutingExternalGWsAnnotation]
 	oldGWAnnotation := old.Annotations[util.RoutingExternalGWsAnnotation]
@@ -283,6 +297,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 			if config.Gateway.DisableSNATMultipleGWs {
 				existingPods, err := oc.watchFactory.GetPods(old.Name)
 				if err != nil {
+					klog.Infof("Akaris -------- failed to get all the pods (%v)", err)
 					errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 				}
 				for _, pod := range existingPods {
@@ -292,6 +307,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 					}
 					podIPs, err := util.GetAllPodIPs(pod)
 					if err != nil {
+						klog.Infof("Akaris -------- unable to get pod %q IPs for SNAT rule removal err (%v)", logicalPort, err)
 						errors = append(errors, fmt.Errorf("unable to get pod %q IPs for SNAT rule removal err (%v)", logicalPort, err))
 					}
 					ips := make([]*net.IPNet, 0, len(podIPs))
@@ -300,8 +316,10 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 					}
 					if len(ips) > 0 {
 						if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
+							klog.Infof("Akaris -------- (%v)", err)
 							errors = append(errors, err)
 						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, ips); err != nil {
+							klog.Infof("Akaris -------- (%v)", err)
 							errors = append(errors, err)
 						}
 					}
@@ -309,16 +327,19 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 			}
 		} else {
 			if err := oc.deleteGWRoutesForNamespace(old.Name, nil); err != nil {
+				klog.Infof("Akaris -------- (%v)", err)
 				errors = append(errors, err)
 			}
 			nsInfo.routingExternalGWs = gatewayInfo{}
 		}
 		exGateways, err := util.ParseRoutingExternalGWAnnotation(gwAnnotation)
 		if err != nil {
+			klog.Infof("Akaris -------- (%v)", err)
 			errors = append(errors, err)
 		} else {
 			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: newBFDEnabled}, nsInfo, old.Name)
 			if err != nil {
+				klog.Infof("Akaris -------- (%v)", err)
 				errors = append(errors, err)
 			}
 		}
@@ -327,16 +348,20 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
 			existingPods, err := oc.watchFactory.GetPods(old.Name)
 			if err != nil {
+				klog.Infof("Akaris -------- failed to get all the pods (%v)", err)
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
 				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 				if err != nil {
+					klog.Infof("Akaris -------- (%v)", err)
 					errors = append(errors, err)
 				} else {
 					if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
+						klog.Infof("Akaris -------- (%v)", err)
 						errors = append(errors, err)
 					} else if err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs); err != nil {
+						klog.Infof("Akaris -------- (%v)", err)
 						errors = append(errors, err)
 					}
 				}
@@ -357,6 +382,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 		if len(nsInfo.networkPolicies) > 0 {
 			// deny rules are all one per namespace
 			if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
+				klog.Infof("Akaris -------- (%v)", err)
 				errors = append(errors, err)
 			} else {
 				klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
@@ -367,6 +393,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 		// this will not do anything.
 		updated, err := oc.updateACLLoggingForEgressFirewall(old.Name, nsInfo)
 		if err != nil {
+			klog.Infof("Akaris -------- (%v)", err)
 			errors = append(errors, err)
 		} else if updated {
 			klog.Infof("Namespace %s: EgressFirewall ACL logging setting updated to deny=%s allow=%s",
@@ -376,11 +403,14 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 
 	// OSP HACK -- neede for hybrid overlay
 	annotation := newer.Annotations[hotypes.HybridOverlayExternalGw]
+	klog.Infof("Akaris -------- found annotation on update: %s", annotation)
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
+			klog.Infof("Akaris -------- could not parse hybrid overlay external gw annotation")
 			errors = append(errors, fmt.Errorf("could not parse hybrid overlay external gw annotation"))
 		} else {
+			klog.Infof("Akaris -------- updating nsInfo with parsedAnnotation: %s", parsedAnnotation)
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
 	} else {
@@ -390,6 +420,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
+			klog.Infof("Akaris -------- could not parse hybrid overlay VTEP annotation")
 			errors = append(errors, fmt.Errorf("could not parse hybrid overlay VTEP annotation"))
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
@@ -398,8 +429,10 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 		nsInfo.hybridOverlayVTEP = nil
 	}
 	if err := oc.multicastUpdateNamespace(newer, nsInfo); err != nil {
+		klog.Infof("Akaris -------- (%v)", err)
 		errors = append(errors, err)
 	}
+	klog.Infof("Akaris -------- kerrors.NewAggregate(errors) (%v)", errors)
 	return kerrors.NewAggregate(errors)
 }
 
@@ -453,10 +486,18 @@ func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) (*namespaceIn
 	}
 	var unlockFunc func()
 	if readOnly {
-		unlockFunc = func() { nsInfo.RUnlock() }
+		klog.Info("Akaris --- getNamespaceLocked - nsInfo.RLock() for %s", ns)
+		unlockFunc = func() {
+			klog.Info("Akaris --- nsInfo.RUnlock() for %s", ns)
+			nsInfo.RUnlock()
+		}
 		nsInfo.RLock()
 	} else {
-		unlockFunc = func() { nsInfo.Unlock() }
+		klog.Info("Akaris --- getNamespaceLocked - nsInfo.Lock() for %s", ns)
+		unlockFunc = func() {
+			klog.Info("Akaris --- nsInfo.Unlock() for %s", ns)
+			nsInfo.Unlock()
+		}
 		nsInfo.Lock()
 	}
 	// Check that the namespace wasn't deleted while we were waiting for the lock
@@ -474,7 +515,9 @@ func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) (*namespaceIn
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 // if no k8s namespace object is provided, this function will attempt to find it via informer cache
 func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace *kapi.Namespace) (*namespaceInfo, func(), error) {
+	klog.Info("Akaris --- inside ensureNamespaceLocked for ns %s", ns)
 	oc.namespacesMutex.Lock()
+	klog.Info("Akaris --- acquired lock in ensureNamespaceLocked for ns %s", ns)
 	nsInfo := oc.namespaces[ns]
 	nsInfoExisted := false
 	if nsInfo == nil {
@@ -503,10 +546,18 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 
 	var unlockFunc func()
 	if readOnly {
-		unlockFunc = func() { nsInfo.RUnlock() }
+		unlockFunc = func() {
+			klog.Info("Akaris --- nsInfo.RUnlock for ns %s", ns)
+			nsInfo.RUnlock()
+		}
+		klog.Info("Akaris --- nsInfo.RLock for ns %s", ns)
 		nsInfo.RLock()
 	} else {
-		unlockFunc = func() { nsInfo.Unlock() }
+		unlockFunc = func() {
+			klog.Info("Akaris --- nsInfo.Unlock for ns %s", ns)
+			nsInfo.Unlock()
+		}
+		klog.Info("Akaris --- nsInfo.Lock for ns %s", ns)
 		nsInfo.Lock()
 	}
 
@@ -536,6 +587,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 	if namespace != nil {
 		// if we have the namespace, attempt to configure nsInfo with it
 		if err := oc.configureNamespace(nsInfo, namespace); err != nil {
+			klog.Infof("Akaris -------- configureNamespace failed %s (%v)", ns, err)
 			return nil, nil, fmt.Errorf("failed to configure namespace %s: %v", ns, err)
 		}
 	}
