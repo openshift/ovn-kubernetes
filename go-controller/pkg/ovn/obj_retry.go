@@ -762,7 +762,7 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 		// OCP HACK -- required for hybrid overlay
 		if config.HybridOverlay.Enabled && hasHybridAnnotation(ns.ObjectMeta) {
 			if err := oc.addNamespaceICNIv1(ns); err != nil {
-				klog.Errorf("Unable to handle legacy ICNIv1 check for namespace %q add, error: %v",
+				return fmt.Errorf("unable to handle legacy ICNIv1 check for namespace %q add, error: %v",
 					ns.Name, err)
 			}
 		}
@@ -914,7 +914,7 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 		// OCP HACK -- required for hybrid overlay
 		if config.HybridOverlay.Enabled && nsHybridAnnotationChanged(oldNs, newNs) {
 			if err := oc.addNamespaceICNIv1(newNs); err != nil {
-				klog.Errorf("Unable to handle legacy ICNIv1 check for namespace %q during update, error: %v",
+				return fmt.Errorf("unable to handle legacy ICNIv1 check for namespace %q during update, error: %v",
 					newNs.Name, err)
 			}
 		}
