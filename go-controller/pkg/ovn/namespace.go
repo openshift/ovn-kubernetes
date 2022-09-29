@@ -31,11 +31,14 @@ type namespaceInfo struct {
 	// of all pods in the namespace.
 	addressSet addressset.AddressSet
 
-	// map from NetworkPolicy name to networkPolicy. You must hold the
-	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
-	// networkPolicy's mutex (and not necessarily the namespaceInfo's) to work with
-	// the policy itself.
-	networkPolicies map[string]*networkPolicy
+	// Map of related network policies. Policy will add itself to this list when it's ready to subscribe
+	// to namespace Update events. Retry logic to update network policy based on namespace event is handled by namespace.
+	// Policy should only be added after successful create, and deleted before any network policy resources are deleted.
+	// This is the map of keys that can be used to get networkPolicy from oc.networkPolicies.
+	//
+	// You must hold the namespaceInfo's mutex to add/delete dependent policies.
+	// Namespace can take oc.networkPolicies key Lock while holding nsInfo lock, the opposite should never happen.
+	relatedNetworkPolicies map[string]bool
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
@@ -379,13 +382,11 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	aclAnnotation := newer.Annotations[util.AclLoggingAnnotation]
 	oldACLAnnotation := old.Annotations[util.AclLoggingAnnotation]
 	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
-	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") &&
-		len(nsInfo.networkPolicies) > 0 {
-		// deny rules are all one per namespace
-		if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
+	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") {
+		if err := oc.handleNetPolNamespaceUpdate(old.Name, nsInfo); err != nil {
 			errors = append(errors, err)
 		} else {
-			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
+			klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
 				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 		}
 	}
@@ -429,21 +430,6 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) error {
 	}
 	defer nsInfo.Unlock()
 
-	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
-	for _, np := range nsInfo.networkPolicies {
-		key := getPolicyKey(np.policy)
-		oc.retryNetworkPolicies.skipRetryObj(key)
-		// add the full np object to the retry entry, since the namespace is going to be removed
-		// along with any mappings of nsInfo -> network policies
-		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np)
-		if err := oc.destroyNetworkPolicy(np); err != nil {
-			return fmt.Errorf("failed to delete network policy: %s, error: %v", key, err)
-			oc.retryNetworkPolicies.unSkipRetryObj(key)
-		} else {
-			oc.retryNetworkPolicies.deleteRetryObj(key, true)
-			delete(nsInfo.networkPolicies, np.name)
-		}
-	}
 	if err := oc.deleteGWRoutesForNamespace(ns.Name, nil); err != nil {
 		return fmt.Errorf("failed to delete GW routes for namespace: %s, error: %v", ns.Name, err)
 	}
@@ -495,10 +481,10 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 	nsInfoExisted := false
 	if nsInfo == nil {
 		nsInfo = &namespaceInfo{
-			networkPolicies:       make(map[string]*networkPolicy),
-			multicastEnabled:      false,
-			routingExternalPodGWs: make(map[string]gatewayInfo),
-			routingExternalGWs:    gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
+			relatedNetworkPolicies: map[string]bool{},
+			multicastEnabled:       false,
+			routingExternalPodGWs:  make(map[string]gatewayInfo),
+			routingExternalGWs:     gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
 		}
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it

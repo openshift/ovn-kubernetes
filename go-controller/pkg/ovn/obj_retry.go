@@ -927,7 +927,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 
 // Given a *retryObjs instance, an object and optionally a cachedObj, deleteResource deletes the object from the cluster
 // according to the delete logic of its resource type. cachedObj is the internal cache entry for this object,
-// used for now for pods and network policies.
+// used for now only for pods.
 func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj interface{}) error {
 	switch objectsToRetry.oType {
 	case factory.PodType:
@@ -941,18 +941,11 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 		return oc.removePod(pod, portInfo)
 
 	case factory.PolicyType:
-		var cachedNP *networkPolicy
 		knp, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
-
-		if cachedObj != nil {
-			if cachedNP, ok = cachedObj.(*networkPolicy); !ok {
-				cachedNP = nil
-			}
-		}
-		return oc.deleteNetworkPolicy(knp, cachedNP)
+		return oc.deleteNetworkPolicy(knp)
 
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
