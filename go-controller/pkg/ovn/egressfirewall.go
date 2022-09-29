@@ -466,17 +466,34 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	} else {
 		logicalSwitches = append(logicalSwitches, types.OVNJoinSwitch)
 	}
+	uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "--format=table", "find", "ACL", match, "action="+action,
+		fmt.Sprintf("external-ids:egressFirewall=%s", externalID), fmt.Sprintf("priority=%d", priority))
+	if err != nil {
+		return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
+	}
 	sort.Strings(logicalSwitches)
 	for _, logicalSwitch := range logicalSwitches {
-		id := fmt.Sprintf("%s-%d", logicalSwitch, priority)
-		_, stderr, err := txn.AddOrCommit([]string{"--id=@" + id, "create", "acl",
-			fmt.Sprintf("priority=%d", priority),
-			fmt.Sprintf("direction=%s", types.DirectionToLPort), match, "action=" + action,
-			fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
-			"--", "add", "logical_switch", logicalSwitch,
-			"acls", "@" + id})
-		if err != nil {
-			return fmt.Errorf("failed to commit db changes for egressFirewall  stderr: %q, err: %+v", stderr, err)
+		if uuids == "" {
+			id := fmt.Sprintf("%s-%d", logicalSwitch, priority)
+			_, stderr, err := txn.AddOrCommit([]string{"--id=@" + id, "create", "acl",
+				fmt.Sprintf("priority=%d", priority),
+				fmt.Sprintf("direction=%s", types.DirectionToLPort), match, "action=" + action,
+				fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
+				"--", "add", "logical_switch", logicalSwitch,
+				"acls", "@" + id})
+			if err != nil {
+				return fmt.Errorf("failed to commit db changes for egressFirewall  stderr: %q, err: %+v", stderr, err)
+
+			}
+
+		} else {
+			for _, uuid := range strings.Fields(uuids) {
+				_, stderr, err := txn.AddOrCommit([]string{"add", "logical_switch", logicalSwitch, "acls", uuid})
+				if err != nil {
+					return fmt.Errorf("failed to commit db changes for egressFirewall stderr: %q, err: %+v", stderr, err)
+				}
+			}
 		}
 	}
 	return nil
