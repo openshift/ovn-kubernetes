@@ -50,7 +50,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		// add masquerade subnet route to avoid zeroconf routes
-		err = addMasqueradeRoute(gwBridge.bridgeName, gwNextHops)
+		err = addMasqueradeRoute(gwBridge.bridgeName, nodeName, watchFactory)
 		if err != nil {
 			return nil, err
 		}
@@ -102,6 +102,14 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
 
+		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
+			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+		}
+
+		if err := addMasqueradeRoute(gwBridge.bridgeName, nodeName, watchFactory); err != nil {
+			return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+		}
+
 		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, gw.nodeIPManager.ListAddresses())
 		if err != nil {
 			return err
@@ -131,6 +139,11 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			// no service OpenFlows, request to sync flows now.
 			gw.openflowManager.requestFlowSync()
 		}
+
+		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+			return fmt.Errorf("failed to add MAC bindings for service routing")
+		}
+
 		return nil
 	}
 

@@ -15,6 +15,8 @@ const (
 	HybridOverlayExternalGw = HybridOverlayAnnotationBase + "external-gw"
 	// HybridOverlayVTEP is a pod and namespace annotation that holds the IP address of the VTEP
 	HybridOverlayVTEP = HybridOverlayAnnotationBase + "vtep"
+	// HybridOverlayDRIP holds the port address to redirect traffic to get to the hybrid overlay
+	HybridOverlayDRIP = HybridOverlayAnnotationBase + "distributed-router-gateway-ip"
 	// HybridOverlayVNI is the VNI for VXLAN tunnels between nodes/endpoints
 	HybridOverlayVNI = 4097
 )

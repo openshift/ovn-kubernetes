@@ -96,7 +96,7 @@ func (r *RetryObjs) DoWithLock(key string, f func(key string)) {
 
 func (r *RetryObjs) initRetryObjWithAddBackoff(obj interface{}, lockedKey string, backoff time.Duration) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoffSec: backoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoffSec: backoff})
 	entry.timeStamp = time.Now()
 	entry.newObj = obj
 	entry.failedAttempts = 0
@@ -112,7 +112,7 @@ func (r *RetryObjs) initRetryObjWithAdd(obj interface{}, lockedKey string) *retr
 
 // initRetryObjWithUpdate tracks objects that failed to be updated to potentially retry later
 func (r *RetryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey string) *retryObjEntry {
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoffSec: initialBackoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoffSec: initialBackoff})
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
 	entry.timeStamp = time.Now()
 	entry.newObj = newObj
@@ -132,7 +132,7 @@ func (r *RetryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey
 // The noRetryAdd boolean argument is to indicate whether to retry for addition
 func (r *RetryObjs) initRetryObjWithDelete(obj interface{}, lockedKey string, config interface{}, noRetryAdd bool) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoffSec: initialBackoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoffSec: initialBackoff})
 	entry.timeStamp = time.Now()
 	entry.oldObj = obj
 	if entry.config == nil {
@@ -227,7 +227,8 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressIPPodType,
 		factory.EgressNodeType,
 		factory.CloudPrivateIPConfigType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.NamespaceType:
 		return true
 	}
 	return false
@@ -317,6 +318,9 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 		// force update path for EgressIP resource.
 		return false, nil
 
+	case factory.NamespaceType:
+		// force update path for Namespace resource.
+		return false, nil
 	}
 
 	return false, fmt.Errorf("no object comparison for type %s", objType)
@@ -332,7 +336,7 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		return getPolicyNamespacedName(np), nil
+		return getPolicyKey(np), nil
 
 	case factory.NodeType,
 		factory.EgressNodeType:
@@ -362,7 +366,8 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 
 	case factory.PeerNamespaceAndPodSelectorType,
 		factory.PeerNamespaceSelectorType,
-		factory.EgressIPNamespaceType:
+		factory.EgressIPNamespaceType,
+		factory.NamespaceType:
 		namespace, ok := obj.(*kapi.Namespace)
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
@@ -453,7 +458,8 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 
 	case factory.PeerNamespaceAndPodSelectorType,
 		factory.PeerNamespaceSelectorType,
-		factory.EgressIPNamespaceType:
+		factory.EgressIPNamespaceType,
+		factory.NamespaceType:
 		obj, err = oc.watchFactory.GetNamespace(key)
 
 	case factory.EgressFirewallType:
@@ -559,7 +565,8 @@ func resourceNeedsUpdate(objType reflect.Type) bool {
 		factory.EgressIPType,
 		factory.EgressIPPodType,
 		factory.EgressIPNamespaceType,
-		factory.CloudPrivateIPConfigType:
+		factory.CloudPrivateIPConfigType,
+		factory.NamespaceType:
 		return true
 	}
 	return false
@@ -645,11 +652,14 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 		}
 
 		// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
+		syncFunc := func(objs []interface{}) error {
+			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
+		}
 		retryPeerPods := NewRetryObjs(
 			factory.PeerPodForNamespaceAndPodSelectorType,
 			namespace.Name,
 			extraParameters.podSelector,
-			nil,
+			syncFunc,
 			&NetworkPolicyExtraParameters{gp: extraParameters.gp},
 		)
 		// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
@@ -684,10 +694,8 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
+			false,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -746,6 +754,13 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
 
+	case factory.NamespaceType:
+		ns, ok := obj.(*kapi.Namespace)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
+		}
+		return oc.AddNamespace(ns)
+
 	default:
 		return fmt.Errorf("no add function for object type %s", objectsToRetry.oType)
 	}
@@ -800,10 +815,8 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
+			false,
 			newObj)
 
 	case factory.EgressIPType:
@@ -885,6 +898,10 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
+
+	case factory.NamespaceType:
+		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
+		return oc.updateNamespace(oldNs, newNs)
 	}
 
 	return fmt.Errorf("no update function for object type %s", objectsToRetry.oType)
@@ -967,22 +984,10 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 			return extraParameters.gp.delNamespaceAddressSet(namespace.Name)
 		})
 
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
-			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
-			obj)
-
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -1023,6 +1028,10 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
+
+	case factory.NamespaceType:
+		ns := obj.(*kapi.Namespace)
+		return oc.deleteNamespace(ns)
 
 	default:
 		return fmt.Errorf("object type %s not supported", objectsToRetry.oType)
@@ -1210,39 +1219,12 @@ func (oc *Controller) getSyncResourcesFunc(r *RetryObjs) (func([]interface{}) er
 	case factory.NodeType:
 		syncFunc = oc.syncNodesRetriable
 
-	case factory.PeerServiceType,
-		factory.PeerNamespaceAndPodSelectorType:
-		syncFunc = nil
-
-	case factory.PeerPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerNamespaceSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		// the function below will never fail, so there's no point in making it retriable...
-		syncFunc = func(i []interface{}) error {
-			// This needs to be a write lock because there's no locking around 'gress policies
-			extraParameters.np.Lock()
-			defer extraParameters.np.Unlock()
-			// We load the existing address set into the 'gress policy.
-			// Notice that this will make the AddFunc for this initial
-			// address set a noop.
-			// The ACL must be set explicitly after setting up this handler
-			// for the address set to be considered.
-			extraParameters.gp.addNamespaceAddressSets(i)
-			return nil
-		}
-
-	case factory.LocalPodSelectorType:
+	case factory.LocalPodSelectorType,
+		factory.PeerServiceType,
+		factory.PeerNamespaceAndPodSelectorType,
+		factory.PeerPodSelectorType,
+		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.PeerNamespaceSelectorType:
 		syncFunc = r.syncFunc
 
 	case factory.EgressFirewallType:
@@ -1258,6 +1240,9 @@ func (oc *Controller) getSyncResourcesFunc(r *RetryObjs) (func([]interface{}) er
 		factory.EgressIPNamespaceType,
 		factory.CloudPrivateIPConfigType:
 		syncFunc = nil
+
+	case factory.NamespaceType:
+		syncFunc = oc.syncNamespaces
 
 	default:
 		return nil, fmt.Errorf("no sync function for object type %s", r.oType)

@@ -10,10 +10,12 @@ import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
@@ -142,15 +144,15 @@ func isNamespaceMulticastEnabled(annotations map[string]string) bool {
 // Creates an explicit "allow" policy for multicast traffic within the
 // namespace if multicast is enabled. Otherwise, removes the "allow" policy.
 // Traffic will be dropped by the default multicast deny ACL.
-func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
+func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
 	if !oc.multicastSupport {
-		return
+		return nil
 	}
 
 	enabled := isNamespaceMulticastEnabled(ns.Annotations)
 	enabledOld := nsInfo.multicastEnabled
 	if enabledOld == enabled {
-		return
+		return nil
 	}
 
 	var err error
@@ -161,24 +163,25 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name)
 	}
 	if err != nil {
-		klog.Errorf(err.Error())
-		return
+		return err
 	}
+	return nil
 }
 
 // Cleans up the multicast policy for this namespace if multicast was
 // previously allowed.
-func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
+func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
 		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name); err != nil {
-			klog.Errorf(err.Error())
+			return err
 		}
 	}
+	return nil
 }
 
 // AddNamespace creates corresponding addressset in ovn db
-func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
+func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -188,10 +191,8 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	if err != nil {
-		klog.Errorf("Failed to ensure namespace locked: %v", err)
-		return
+		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-
 	defer nsUnlock()
 
 	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
@@ -212,20 +213,22 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
 	}
+	return nil
 }
 
 // configureNamespace ensures internal structures are updated based on namespace
 // must be called with nsInfo lock
-func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) {
+func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) error {
+	var errors []error
 	if annotation, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok {
 		exGateways, err := util.ParseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
-			klog.Errorf(err.Error())
+			errors = append(errors, fmt.Errorf("failed to parse external gateway annotation (%v)", err))
 		} else {
 			_, bfdEnabled := ns.Annotations[util.BfdAnnotation]
 			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
 			if err != nil {
-				klog.Error(err.Error())
+				errors = append(errors, fmt.Errorf("failed to add external gateway for namespace %s (%v)", ns.Name, err))
 			}
 		}
 		if _, ok := ns.Annotations[util.BfdAnnotation]; ok {
@@ -249,16 +252,20 @@ func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespa
 	// created
 
 	// If multicast enabled, adds all current pods in the namespace to the allow policy
-	oc.multicastUpdateNamespace(ns, nsInfo)
+	if err := oc.multicastUpdateNamespace(ns, nsInfo); err != nil {
+		errors = append(errors, fmt.Errorf("failed to update multicast (%v)", err))
+	}
+	return kerrors.NewAggregate(errors)
 }
 
-func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
+func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
+	var errors []error
 	klog.Infof("[%s] updating namespace", old.Name)
 
 	nsInfo, nsUnlock := oc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {
 		klog.Warningf("Update event for unknown namespace %q", old.Name)
-		return
+		return nil
 	}
 	defer nsUnlock()
 
@@ -273,7 +280,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 			if config.Gateway.DisableSNATMultipleGWs {
 				existingPods, err := oc.watchFactory.GetPods(old.Name)
 				if err != nil {
-					klog.Errorf("Failed to get all the pods (%v)", err)
+					errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 				}
 				for _, pod := range existingPods {
 					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
@@ -282,7 +289,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					}
 					podIPs, err := util.GetAllPodIPs(pod)
 					if err != nil {
-						klog.Warningf("Unable to get pod %q IPs for SNAT rule removal", logicalPort)
+						errors = append(errors, fmt.Errorf("unable to get pod %q IPs for SNAT rule removal err (%v)", logicalPort, err))
 					}
 					ips := make([]*net.IPNet, 0, len(podIPs))
 					for _, podIP := range podIPs {
@@ -290,26 +297,26 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					}
 					if len(ips) > 0 {
 						if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
-							klog.Error(err.Error())
+							errors = append(errors, err)
 						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, ips); err != nil {
-							klog.Error(err.Error())
+							errors = append(errors, err)
 						}
 					}
 				}
 			}
 		} else {
 			if err := oc.deleteGWRoutesForNamespace(old.Name, nil); err != nil {
-				klog.Error(err.Error())
+				errors = append(errors, err)
 			}
 			nsInfo.routingExternalGWs = gatewayInfo{}
 		}
 		exGateways, err := util.ParseRoutingExternalGWAnnotation(gwAnnotation)
 		if err != nil {
-			klog.Error(err.Error())
+			errors = append(errors, err)
 		} else {
 			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: newBFDEnabled}, nsInfo, old.Name)
 			if err != nil {
-				klog.Error(err.Error())
+				errors = append(errors, err)
 			}
 		}
 		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
@@ -317,17 +324,17 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
 			existingPods, err := oc.watchFactory.GetPods(old.Name)
 			if err != nil {
-				klog.Errorf("Failed to get all the pods (%v)", err)
+				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 				if err != nil {
-					klog.Error(err.Error())
+					errors = append(errors, err)
 				} else {
 					if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
-						klog.Error(err.Error())
+						errors = append(errors, err)
 					} else if err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs); err != nil {
-						klog.Error(err.Error())
+						errors = append(errors, err)
 					}
 				}
 			}
@@ -347,7 +354,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		if len(nsInfo.networkPolicies) > 0 {
 			// deny rules are all one per namespace
 			if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
-				klog.Warningf(err.Error())
+				errors = append(errors, err)
 			} else {
 				klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
 					old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
@@ -357,7 +364,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		// this will not do anything.
 		updated, err := oc.updateACLLoggingForEgressFirewall(old.Name, nsInfo)
 		if err != nil {
-			klog.Warningf(err.Error())
+			errors = append(errors, err)
 		} else if updated {
 			klog.Infof("Namespace %s: EgressFirewall ACL logging setting updated to deny=%s allow=%s",
 				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
@@ -386,27 +393,29 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	} else {
 		nsInfo.hybridOverlayVTEP = nil
 	}
-	oc.multicastUpdateNamespace(newer, nsInfo)
+	if err := oc.multicastUpdateNamespace(newer, nsInfo); err != nil {
+		errors = append(errors, err)
+	}
+	return kerrors.NewAggregate(errors)
 }
 
-func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
+func (oc *Controller) deleteNamespace(ns *kapi.Namespace) error {
 	klog.Infof("[%s] deleting namespace", ns.Name)
 
 	nsInfo := oc.deleteNamespaceLocked(ns.Name)
 	if nsInfo == nil {
-		return
+		return nil
 	}
 	defer nsInfo.Unlock()
 
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
-		key := getPolicyNamespacedName(np.policy)
+		key := getPolicyKey(np.policy)
 		oc.retryNetworkPolicies.DoWithLock(key, func(key string) {
 			// add the full np object to the retry entry, since the namespace is going to be removed
 			// along with any mappings of nsInfo -> network policies
 			oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np, false)
-			isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
-			if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
+			if err := oc.destroyNetworkPolicy(np); err != nil {
 				klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
 			} else {
 				oc.retryNetworkPolicies.deleteRetryObj(key)
@@ -415,9 +424,12 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		})
 	}
 	if err := oc.deleteGWRoutesForNamespace(ns.Name, nil); err != nil {
-		klog.Errorf("Failed to delete GW routes for namespace: %s, error: %v", ns.Name, err)
+		return fmt.Errorf("failed to delete GW routes for namespace: %s, error: %v", ns.Name, err)
 	}
-	oc.multicastDeleteNamespace(ns, nsInfo)
+	if err := oc.multicastDeleteNamespace(ns, nsInfo); err != nil {
+		return fmt.Errorf("failed to delete multicast nameosace error %v", err)
+	}
+	return nil
 }
 
 // getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
@@ -518,7 +530,10 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 
 	if namespace != nil {
 		// if we have the namespace, attempt to configure nsInfo with it
-		oc.configureNamespace(nsInfo, namespace)
+		if err := oc.configureNamespace(nsInfo, namespace); err != nil {
+			unlockFunc()
+			return nil, nil, fmt.Errorf("failed to configure namespace %s: %v", ns, err)
+		}
 	}
 
 	return nsInfo, unlockFunc, nil
@@ -593,7 +608,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		} else {
 			ips = make([]net.IP, 0, len(existingNodes))
 			for _, node := range existingNodes {
-				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 				if err != nil {
 					klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
 						node.Name, err)

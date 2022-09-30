@@ -278,7 +278,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			updatedNode, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
+			nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Eventually(nodeHostSubnetAnnotations[0].String()).Should(gomega.Equal(node1.NodeSubnet))
 
@@ -323,7 +323,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			skipSnat := false
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.nbClient, 2).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			// check the namespace again and ensure the address set
 			// being created with the right set of IPs in it.

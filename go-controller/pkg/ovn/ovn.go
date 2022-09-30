@@ -12,26 +12,24 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
-	corev1listers "k8s.io/client-go/listers/core/v1"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	utilnet "k8s.io/utils/net"
-
-	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -42,12 +40,13 @@ import (
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
-
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -153,16 +152,12 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
-	// For each logical port, the number of network policies that want
-	// to add an ingress deny rule.
-	lspIngressDenyCache map[string]int
-
-	// For each logical port, the number of network policies that want
-	// to add an egress deny rule.
-	lspEgressDenyCache map[string]int
-
-	// A mutex for lspIngressDenyCache and lspEgressDenyCache
-	lspMutex *sync.Mutex
+	// map of existing shared port groups for network policies
+	// port group exists in the db if and only if port group key is present in this map
+	// key is namespace
+	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
+	// make sure to keep this order to avoid deadlocks
+	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
 	// Supports multicast?
 	multicastSupport bool
@@ -228,6 +223,8 @@ type Controller struct {
 	retryNodes *RetryObjs
 	// Objects for Cloud private IP config that need to be retried
 	retryCloudPrivateIPConfig *RetryObjs
+	// Objects for namespaces that need to be retried
+	retryNamespaces *RetryObjs
 	// Node-specific syncMap used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
@@ -300,9 +297,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:               sync.RWMutex{},
 		addressSetFactory:            addressSetFactory,
-		lspIngressDenyCache:          make(map[string]int),
-		lspEgressDenyCache:           make(map[string]int),
-		lspMutex:                     &sync.Mutex{},
+		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -329,6 +324,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryEgressIPPods:         NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
 		retryEgressNodes:          NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
 		retryCloudPrivateIPConfig: NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
+		retryNamespaces:           NewRetryObjs(factory.NamespaceType, "", nil, nil, nil),
 		recorder:                  recorder,
 		nbClient:                  libovsdbOvnNBClient,
 		sbClient:                  libovsdbOvnSBClient,
@@ -631,39 +627,8 @@ func (oc *Controller) WatchEgressIPPods() error {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() error {
-	start := time.Now()
-	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			if config.HybridOverlay.Enabled && hasHybridAnnotation(ns.ObjectMeta) {
-				if err := oc.addNamespaceICNIv1(ns); err != nil {
-					klog.Errorf("Unable to handle legacy ICNIv1 check for namespace %q add, error: %v",
-						ns.Name, err)
-				}
-			}
-			oc.AddNamespace(ns)
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
-			if config.HybridOverlay.Enabled && nsHybridAnnotationChanged(oldNs, newNs) {
-				if err := oc.addNamespaceICNIv1(newNs); err != nil {
-					klog.Errorf("Unable to handle legacy ICNIv1 check for namespace %q during update, error: %v",
-						newNs.Name, err)
-				}
-			}
-			oc.updateNamespace(oldNs, newNs)
-		},
-		DeleteFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			oc.deleteNamespace(ns)
-		},
-	}, oc.syncNamespaces)
-	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
-	if err != nil {
-		klog.Errorf("Failed to watch namespaces err: %v", err)
-		return err
-	}
-	return nil
+	_, err := oc.WatchResource(oc.retryNamespaces)
+	return err
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
@@ -674,7 +639,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 		if err != nil {
 			return err
 		}
@@ -786,8 +751,8 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 }
 
 func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
