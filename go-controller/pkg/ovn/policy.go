@@ -48,6 +48,12 @@ const (
 	egressDefaultDenySuffix = "egressDefaultDeny"
 	// arpAllowPolicySuffix is the suffix used when creating default ACLs for a namespace
 	arpAllowPolicySuffix = "ARPallowPolicy"
+	// arpAllowPolicyMatch is the match used when creating default allow ARP ACLs for a namespace
+	arpAllowPolicyMatch = "(arp || nd)"
+	// staleArpAllowPolicyMatch "was" the old match used when creating default allow ARP ACLs for a namespace
+	// NOTE: This is succeed by arpAllowPolicyMatch to allow support for IPV6. This is currently only
+	// used when removing stale ACLs from the syncNetworkPolicy function and should NOT be used in any main logic.
+	staleArpAllowPolicyMatch = "arp"
 )
 
 var NetworkPolicyNotCreated error
@@ -120,10 +126,18 @@ func hashedPortGroup(s string) string {
 func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gressSuffix string) error {
 	cleanUpDefaultDeny := make(map[string][]nbdb.ACL)
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(npType) && // default-deny-policy-type:Egress or default-deny-policy-type:Ingress
-			strings.Contains(item.Match, gressSuffix) && // Match:inport ==	@ablah80448_egressDefaultDeny or Match:inport == @ablah80448_ingressDefaultDeny
-			!strings.Contains(*item.Name, arpAllowPolicySuffix) && // != name: namespace_ARPallowPolicy
-			!strings.Contains(*item.Name, gressSuffix) // filter out already converted ACLs (we still continue to pick the cases where names were >45 chars)
+		if item.Name != nil { // we don't care about node ACLs
+			aclNameSuffix := strings.Split(*item.Name, "_")
+			if len(aclNameSuffix) == 1 {
+				// doesn't have suffix; no update required; append the actual suffix since this ACL can be skipped
+				aclNameSuffix = append(aclNameSuffix, gressSuffix)
+			}
+			return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(npType) && // default-deny-policy-type:Egress or default-deny-policy-type:Ingress
+				strings.Contains(item.Match, gressSuffix) && // Match:inport ==	@ablah80448_egressDefaultDeny or Match:inport == @ablah80448_ingressDefaultDeny
+				!strings.Contains(item.Match, arpAllowPolicyMatch) && // != match: (arp || nd)
+				!strings.HasPrefix(gressSuffix, aclNameSuffix[1]) // filter out already converted ACLs or ones that are a no-op
+		}
+		return false
 	}
 	gressACLs, err := libovsdbops.FindACLsByPredicate(oc.nbClient, p)
 	if err != nil {
@@ -131,7 +145,8 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 	}
 	for _, acl := range gressACLs {
 		acl := acl
-		namespace := strings.Split(*acl.Name, "_")[0] // parse the namespace from the ACL name
+		// parse the namespace.Name from the ACL name (if ACL name is 63 chars, then it will fully be namespace.Name)
+		namespace := strings.Split(*acl.Name, "_")[0]
 		cleanUpDefaultDeny[namespace] = append(cleanUpDefaultDeny[namespace], acl)
 	}
 	// loop through the cleanUp map and per namespace update the first ACL's name and delete the rest
@@ -178,6 +193,7 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 			aclList[0].Log,
 			aclList[0].ExternalIDs,
 		)
+		newACL.UUID = aclList[0].UUID // for performance
 		err := libovsdbops.CreateOrUpdateACLs(oc.nbClient, newACL)
 		if err != nil {
 			return fmt.Errorf("cannot update old NetworkPolicy ACLs for namespace %s: %v", namespace, err)
@@ -268,18 +284,13 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 
 	}
 
-	if err := oc.updateStaleDefaultDenyACLNames(knet.PolicyTypeEgress, egressDefaultDenySuffix); err != nil {
-		return fmt.Errorf("cannot clean up egress default deny ACL name: %v", err)
-	}
-	if err := oc.updateStaleDefaultDenyACLNames(knet.PolicyTypeIngress, ingressDefaultDenySuffix); err != nil {
-		return fmt.Errorf("cannot clean up ingress default deny ACL name: %v", err)
-	}
-
 	// remove stale egress and ingress allow arp ACLs that were leftover as a result
 	// of ACL migration for "ARPallowPolicy" when the match changed from "arp" to "(arp || nd)"
 	p := func(item *nbdb.ACL) bool {
-		return strings.Contains(item.Match, " && arp") &&
-			strings.Contains(*item.Name, arpAllowPolicySuffix)
+		return strings.Contains(item.Match, " && "+staleArpAllowPolicyMatch) &&
+			// default-deny-policy-type:Egress or default-deny-policy-type:Ingress
+			(item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) ||
+				item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeIngress))
 	}
 	gressACLs, err := libovsdbops.FindACLsByPredicate(oc.nbClient, p)
 	if err != nil {
@@ -293,10 +304,10 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 			// egress default ARP allow policy ("inport == @a16323395479447859119_egressDefaultDeny && arp")
 			pgName = strings.TrimPrefix(gressACL.Match, "inport == @")
 		} else if strings.Contains(gressACL.Match, "outport") {
-			// ingress default ARP allow policy ("outport == @a16323395479447859119_egressDefaultDeny && arp")
+			// ingress default ARP allow policy ("outport == @a16323395479447859119_ingressDefaultDeny && arp")
 			pgName = strings.TrimPrefix(gressACL.Match, "outport == @")
 		}
-		pgName = strings.TrimSuffix(pgName, " && arp")
+		pgName = strings.TrimSuffix(pgName, " && "+staleArpAllowPolicyMatch)
 		ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, nil, pgName, &gressACL)
 		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 			return fmt.Errorf("cannot construct ops to delete ACL %+v from portgroup %s: %v",
@@ -310,6 +321,13 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 	err = libovsdbops.DeleteACLs(oc.nbClient, gressACLs)
 	if err != nil {
 		return fmt.Errorf("cannot delete stale arp allow ACLs: %v", err)
+	}
+
+	if err := oc.updateStaleDefaultDenyACLNames(knet.PolicyTypeEgress, egressDefaultDenySuffix); err != nil {
+		return fmt.Errorf("cannot clean up egress default deny ACL name: %v", err)
+	}
+	if err := oc.updateStaleDefaultDenyACLNames(knet.PolicyTypeIngress, ingressDefaultDenySuffix); err != nil {
+		return fmt.Errorf("cannot clean up ingress default deny ACL name: %v", err)
 	}
 
 	return nil
@@ -379,7 +397,7 @@ func defaultDenyPortGroup(namespace, gressSuffix string) string {
 
 func buildDenyACLs(namespace, policy, pg, aclLogging string, policyType knet.PolicyType) (denyACL, allowACL *nbdb.ACL) {
 	denyMatch := getACLMatch(pg, "", policyType)
-	allowMatch := getACLMatch(pg, "(arp || nd)", policyType)
+	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, policyType)
 	if policyType == knet.PolicyTypeIngress {
 		denyACL = buildACL(namespace, pg, ingressDefaultDenySuffix, nbdb.ACLDirectionToLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
 		allowACL = buildACL(namespace, pg, arpAllowPolicySuffix, nbdb.ACLDirectionToLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
