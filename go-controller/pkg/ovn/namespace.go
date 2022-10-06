@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -18,6 +20,46 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
+
+// namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
+// or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
+// nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
+// manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
+type namespaceInfo struct {
+	sync.RWMutex
+
+	// addressSet is an address set object that holds the IP addresses
+	// of all pods in the namespace.
+	addressSet addressset.AddressSet
+
+	// Map of related network policies. Policy will add itself to this list when it's ready to subscribe
+	// to namespace Update events. Retry logic to update network policy based on namespace event is handled by namespace.
+	// Policy should only be added after successful create, and deleted before any network policy resources are deleted.
+	// This is the map of keys that can be used to get networkPolicy from oc.networkPolicies.
+	//
+	// You must hold the namespaceInfo's mutex to add/delete dependent policies.
+	// Namespace can take oc.networkPolicies key Lock while holding nsInfo lock, the opposite should never happen.
+	relatedNetworkPolicies map[string]bool
+
+	// OCP hack only begin
+	hybridOverlayExternalGW net.IP
+	hybridOverlayVTEP       net.IP
+	// OCP hack only end
+
+	// routingExternalGWs is a slice of net.IP containing the values parsed from
+	// annotation k8s.ovn.org/routing-external-gws
+	routingExternalGWs gatewayInfo
+
+	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
+	// exgw IPs
+	// key is <namespace>_<pod name>
+	routingExternalPodGWs map[string]gatewayInfo
+
+	multicastEnabled bool
+
+	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
+	aclLogging ACLLoggingLevels
+}
 
 // This function implements the main body of work of syncNamespaces.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
@@ -328,7 +370,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 				if err != nil {
 					errors = append(errors, err)
 				} else {
@@ -352,14 +394,11 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 				"ACL logging is set to deny=%s allow=%s, err: %q",
 				newer.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow, err)
 		}
-		if len(nsInfo.networkPolicies) > 0 {
-			// deny rules are all one per namespace
-			if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
-				errors = append(errors, err)
-			} else {
-				klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
-					old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
-			}
+		if err := oc.handleNetPolNamespaceUpdate(old.Name, nsInfo); err != nil {
+			errors = append(errors, err)
+		} else {
+			klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
+				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 		}
 		// Trigger an egress fw logging update - this will only happen if an egress firewall exists for the NS, otherwise
 		// this will not do anything.
@@ -411,22 +450,6 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) error {
 	}
 	defer nsInfo.Unlock()
 
-	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
-	for _, np := range nsInfo.networkPolicies {
-		key := getPolicyNamespacedName(np.policy)
-		oc.retryNetworkPolicies.DoWithLock(key, func(key string) {
-			// add the full np object to the retry entry, since the namespace is going to be removed
-			// along with any mappings of nsInfo -> network policies
-			oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np, false)
-			isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
-			if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
-				klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
-			} else {
-				oc.retryNetworkPolicies.deleteRetryObj(key)
-				delete(nsInfo.networkPolicies, np.name)
-			}
-		})
-	}
 	if err := oc.deleteGWRoutesForNamespace(ns.Name, nil); err != nil {
 		return fmt.Errorf("failed to delete GW routes for namespace: %s, error: %v", ns.Name, err)
 	}
@@ -478,10 +501,10 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 	nsInfoExisted := false
 	if nsInfo == nil {
 		nsInfo = &namespaceInfo{
-			networkPolicies:       make(map[string]*networkPolicy),
-			multicastEnabled:      false,
-			routingExternalPodGWs: make(map[string]gatewayInfo),
-			routingExternalGWs:    gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
+			relatedNetworkPolicies: map[string]bool{},
+			multicastEnabled:       false,
+			routingExternalPodGWs:  make(map[string]gatewayInfo),
+			routingExternalGWs:     gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
 		}
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it
@@ -612,7 +635,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		} else {
 			ips = make([]net.IP, 0, len(existingNodes))
 			for _, node := range existingNodes {
-				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 				if err != nil {
 					klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
 						node.Name, err)
