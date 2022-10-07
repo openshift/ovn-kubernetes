@@ -1344,7 +1344,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 						" add of type %v with the same key: %s",
 						objectsToRetry.oType, key)
 					internalCacheEntry := oc.getInternalCacheEntry(objectsToRetry.oType, obj)
-					if err := oc.deleteResource(objectsToRetry, obj, internalCacheEntry); err != nil {
+					if err := oc.deleteResource(objectsToRetry, retryEntry.oldObj, internalCacheEntry); err != nil {
 						klog.Errorf("Failed to delete old object %s of type %v,"+
 							" during add event: %v", key, objectsToRetry.oType, err)
 						oc.recordErrorEvent(objectsToRetry.oType, obj, err)
