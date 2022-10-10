@@ -970,6 +970,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
 		clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		err = clusterController.masterSubnetAllocator.InitRanges(subnets)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		clusterController.SCTPSupport = true
 		clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -1081,6 +1085,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = clusterController.masterSubnetAllocator.InitRanges(subnets)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
@@ -1223,6 +1231,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = clusterController.masterSubnetAllocator.InitRanges(subnets)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
@@ -1481,6 +1493,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = clusterController.masterSubnetAllocator.InitRanges(subnets)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -1628,6 +1644,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = clusterController.masterSubnetAllocator.InitRanges(subnets)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
@@ -1793,6 +1813,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = clusterController.masterSubnetAllocator.InitRanges(subnets)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
