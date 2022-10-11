@@ -100,8 +100,9 @@ func countLocalEndpoints(epSlice *discovery.EndpointSlice, nodeName string) int 
 	var num int
 	for _, endpoint := range epSlice.Endpoints {
 		if endpoint.NodeName != nil && *endpoint.NodeName == nodeName {
-			num++
+			continue
 		}
+		num++
 	}
 	return num
 }
