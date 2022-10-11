@@ -720,7 +720,7 @@ func (n *OvnNode) WatchNamespaces() {
 				n.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
 			}
 		},
-	}, nil)
+	}, nil, n.watchFactory.GetHandlerPriority(""))
 }
 
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big

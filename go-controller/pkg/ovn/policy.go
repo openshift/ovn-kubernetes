@@ -947,7 +947,7 @@ func (oc *Controller) handleLocalPodSelector(
 			},
 		}, func(objs []interface{}) {
 			handleInitialItems(objs)
-		})
+		}, oc.watchFactory.GetHandlerPriority("LocalPodSelectorType"))
 
 	np.Lock()
 	defer np.Unlock()
@@ -1518,7 +1518,7 @@ func (oc *Controller) handlePeerPodSelector(
 			},
 		}, func(objs []interface{}) {
 			oc.handlePeerPodSelectorAddUpdate(gp, objs...)
-		})
+		}, oc.watchFactory.GetHandlerPriority("PeerPodSelectorType"))
 	np.podHandlerList = append(np.podHandlerList, h)
 }
 
@@ -1563,7 +1563,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 						},
 					}, func(objs []interface{}) {
 						oc.handlePeerPodSelectorAddUpdate(gp, objs...)
-					})
+					}, oc.watchFactory.GetHandlerPriority("PeerPodForNamespaceAndPodSelectorType"))
 				np.Lock()
 				defer np.Unlock()
 				if np.deleted {
@@ -1585,7 +1585,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},
-		}, nil)
+		}, nil, oc.watchFactory.GetHandlerPriority("PeerNamespaceAndPodSelectorType"))
 	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
 }
 
@@ -1648,7 +1648,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			// The ACL must be set explicitly after setting up this handler
 			// for the address set to be considered.
 			gress.addNamespaceAddressSets(i)
-		})
+		}, oc.watchFactory.GetHandlerPriority("PeerNamespaceSelectorType"))
 	np.nsHandlerList = append(np.nsHandlerList, h)
 }
 

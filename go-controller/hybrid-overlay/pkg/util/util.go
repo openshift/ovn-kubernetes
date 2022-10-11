@@ -78,7 +78,7 @@ func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) {
 			node := obj.(*kapi.Node)
 			h.Delete(node)
 		},
-	}, nil)
+	}, nil, wf.GetHandlerPriority(""))
 }
 
 // CopyNamespaceAnnotationsToPod copies annotations from a namespace to a pod

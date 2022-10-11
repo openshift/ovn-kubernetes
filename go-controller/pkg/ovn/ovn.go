@@ -747,7 +747,7 @@ func (oc *Controller) WatchPods() {
 			}
 			oc.checkAndDeleteRetryPod(pod)
 		},
-	}, oc.syncPods)
+	}, oc.syncPods, oc.watchFactory.GetHandlerPriority(""))
 
 	go func() {
 		// track the retryPods map and every 30 seconds check if any pods need to be retried
@@ -1019,7 +1019,7 @@ func (oc *Controller) WatchEgressNodes() {
 				}
 			}
 		},
-	}, oc.initClusterEgressPolicies)
+	}, oc.initClusterEgressPolicies, oc.watchFactory.GetHandlerPriority("EgressNodeType"))
 }
 
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
@@ -1096,7 +1096,7 @@ func (oc *Controller) WatchEgressIPNamespaces() {
 				klog.Errorf("Unable to delete egress IP matching namespace: %s, err: %v", namespace.Name, err)
 			}
 		},
-	}, oc.syncEgressIPs)
+	}, oc.syncEgressIPs, oc.watchFactory.GetHandlerPriority("EgressIPNamespaceType"))
 }
 
 func (oc *Controller) WatchEgressIPPods() {
@@ -1127,7 +1127,7 @@ func (oc *Controller) WatchEgressIPPods() {
 				klog.Errorf("Unable to delete egress IP matching pod: %s/%s, err: %v", pod.Name, pod.Namespace, err)
 			}
 		},
-	}, nil)
+	}, nil, oc.watchFactory.GetHandlerPriority("EgressIPPodType"))
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
@@ -1147,7 +1147,7 @@ func (oc *Controller) WatchNamespaces() {
 			ns := obj.(*kapi.Namespace)
 			oc.deleteNamespace(ns)
 		},
-	}, oc.syncNamespaces)
+	}, oc.syncNamespaces, oc.watchFactory.GetHandlerPriority(""))
 	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
 }
 
@@ -1344,7 +1344,7 @@ func (oc *Controller) WatchNodes() {
 			gatewaysFailed.Delete(node.Name)
 			nodeClusterRouterPortFailed.Delete(node.Name)
 		},
-	}, oc.syncNodes)
+	}, oc.syncNodes, oc.watchFactory.GetHandlerPriority(""))
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
 }
 
