@@ -550,11 +550,6 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
-	go func() {
-		// track the retryPods map and every 30 seconds check if any pods need to be retried
-		utilwait.Until(oc.iterateRetryPods, 30*time.Second, oc.stopChan)
-	}()
-
 	start := time.Now()
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -599,6 +594,12 @@ func (oc *Controller) WatchPods() {
 			oc.deleteLogicalPort(pod)
 		},
 	}, oc.syncPods)
+
+	go func() {
+		// track the retryPods map and every 30 seconds check if any pods need to be retried
+		utilwait.Until(oc.iterateRetryPods, 30*time.Second, oc.stopChan)
+	}()
+
 	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
 }
 
