@@ -489,11 +489,18 @@ func configsByProto(configs []lbConfig) map[v1.Protocol][]lbConfig {
 
 // lbOpts generates the OVN load balancer options from the kubernetes Service.
 func lbOpts(service *v1.Service) ovnlb.LBOpts {
-	return ovnlb.LBOpts{
+	opts := ovnlb.LBOpts{
 		Unidling: svcNeedsIdling(service.GetAnnotations()),
-		Affinity: service.Spec.SessionAffinity == v1.ServiceAffinityClientIP,
 		SkipSNAT: false, // never service-wide, ExternalTrafficPolicy-specific
 	}
+
+	if service.Spec.SessionAffinity == v1.ServiceAffinityClientIP {
+		opts.Affinity = true
+		// Kube-apiserver side guarantees SessionAffinityConfig won't be nil when session affinity type is ClientIP
+		opts.Timeout = int(*service.Spec.SessionAffinityConfig.ClientIP.TimeoutSeconds)
+	}
+
+	return opts
 }
 
 // mergeLBs joins two LBs together if it is safe to do so.

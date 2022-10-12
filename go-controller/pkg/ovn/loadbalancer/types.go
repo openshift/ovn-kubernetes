@@ -24,6 +24,7 @@ type LBOpts struct {
 
 	// If true, then enable per-client-IP affinity.
 	Affinity bool
+	Timeout  int
 
 	// If true, then disable SNAT entirely
 	SkipSNAT bool

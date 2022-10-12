@@ -266,6 +266,9 @@ func buildLB(lb *LB) *nbdb.LoadBalancer {
 			nbdb.LoadBalancerSelectionFieldsIPSrc,
 			nbdb.LoadBalancerSelectionFieldsIPDst,
 		}
+		if lb.Opts.Timeout > 0 {
+			options["affinity_timeout"] = fmt.Sprintf("%d", lb.Opts.Timeout)
+		}
 	}
 
 	// vipMap
