@@ -110,15 +110,12 @@ func newService(name, namespace string) *v1.Service {
 	}
 }
 
-func newEndpointSlice(name, namespace, service string) *discovery.EndpointSlice {
+func newEndpointSlice(name, namespace string) *discovery.EndpointSlice {
 	return &discovery.EndpointSlice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			UID:       types.UID(name),
 			Namespace: namespace,
-			Labels: map[string]string{
-				discovery.LabelServiceName: service,
-			},
 		},
 	}
 }
@@ -421,7 +418,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 
 		It("is called for each existing endpointSlice", func() {
-			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default", "myService"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default"))
 			testExisting(EndpointSliceType, "", nil)
 		})
 
@@ -512,8 +509,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 
 		It("calls ADD for each existing endpointSlices", func() {
-			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default", "myService"))
-			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice2", "default", "myService"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice2", "default"))
 			testExisting(EndpointSliceType)
 		})
 
@@ -1091,7 +1088,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		added := newEndpointSlice("myEndpointSlice", "default", "myService")
+		added := newEndpointSlice("myEndpointSlice", "default")
 		h, c := addHandler(wf, EndpointSliceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				epSlice := obj.(*discovery.EndpointSlice)
