@@ -94,6 +94,7 @@ type egressNode struct{}
 var (
 	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
 	ServiceType                           reflect.Type = reflect.TypeOf(&kapi.Service{})
+	EndpointsType                         reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
 	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
 	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
 	NamespaceType                         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
@@ -152,6 +153,15 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			noAlternateProxySelector())
 	})
 
+	wf.iFactory.InformerFor(&kapi.Endpoints{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredEndpointsInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noHeadlessServiceSelector())
+	})
+
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
@@ -162,6 +172,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	})
 
 	var err error
+
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues)
@@ -169,6 +180,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[EndpointsType], err = newInformer(EndpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +296,15 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			noAlternateProxySelector())
 	})
 
+	wf.iFactory.InformerFor(&kapi.Endpoints{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredEndpointsInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noHeadlessServiceSelector())
+	})
+
 	// For Pods, only select pods scheduled to this node
 	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
@@ -320,15 +344,19 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[ServiceType], err = newInformer(
-		ServiceType,
-		wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
 	if err != nil {
 		return nil, err
 	}
+	wf.informers[EndpointsType], err = newInformer(EndpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
+	if err != nil {
+		return nil, err
+	}
+
 	wf.informers[EndpointSliceType], err = newInformer(
 		EndpointSliceType,
 		wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +387,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case ServiceType:
 		if service, ok := obj.(*kapi.Service); ok {
 			return &service.ObjectMeta, nil
+		}
+	case EndpointsType:
+		if endpoints, ok := obj.(*kapi.Endpoints); ok {
+			return &endpoints.ObjectMeta, nil
 		}
 	case PolicyType:
 		if policy, ok := obj.(*knet.NetworkPolicy); ok {
@@ -549,6 +581,21 @@ func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 	wf.removeHandler(ServiceType, handler)
 }
 
+// AddEndpointsHandler adds a handler function that will be executed on Endpoints object changes
+func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(EndpointsType, "", nil, handlerFuncs, processExisting)
+}
+
+// AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
+func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(EndpointsType, namespace, sel, handlerFuncs, processExisting)
+}
+
+// RemoveEndpointsHandler removes a Endpoints object event handler function
+func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) {
+	wf.removeHandler(EndpointsType, handler)
+}
+
 // AddEndpointSliceHandler adds a handler function that will be executed on EndpointSlice object changes
 func (wf *WatchFactory) AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 	return wf.addHandler(EndpointSliceType, "", nil, handlerFuncs, processExisting)
@@ -685,6 +732,18 @@ func (wf *WatchFactory) GetService(namespace, name string) (*kapi.Service, error
 	return serviceLister.Services(namespace).Get(name)
 }
 
+// GetEndpoints returns the endpoints list in a given namespace
+func (wf *WatchFactory) GetEndpoints(namespace string) ([]*kapi.Endpoints, error) {
+	endpointsLister := wf.informers[EndpointsType].lister.(listers.EndpointsLister)
+	return endpointsLister.Endpoints(namespace).List(labels.Everything())
+}
+
+// GetEndpoint returns a specific endpoint in a given namespace
+func (wf *WatchFactory) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
+	endpointsLister := wf.informers[EndpointsType].lister.(listers.EndpointsLister)
+	return endpointsLister.Endpoints(namespace).Get(name)
+}
+
 func (wf *WatchFactory) GetCloudPrivateIPConfig(name string) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
 	cloudPrivateIPConfigLister := wf.informers[CloudPrivateIPConfigType].lister.(ocpcloudnetworklister.CloudPrivateIPConfigLister)
 	return cloudPrivateIPConfigLister.Get(name)
@@ -774,6 +833,56 @@ func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 
 func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer {
 	return wf.egressQoSFactory.K8s().V1().EgressQoSes()
+}
+
+// withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the
+// watcher for EndpointSlices) that will only choose EndpointSlices with a non-empty
+// "kubernetes.io/service-name" label and without "service.kubernetes.io/headless"
+// label.
+func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// LabelServiceName must exist
+	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+	// LabelServiceName value must be non-empty
+	notEmptySvcName, err := labels.NewRequirement(discovery.LabelServiceName, selection.NotEquals, []string{""})
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+	// headless service label must not be there
+	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	selector := labels.NewSelector().Add(*svcNameLabel, *notEmptySvcName, *noHeadlessService)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = selector.String()
+	}
+}
+
+// noHeadlessServiceSelector is a LabelSelector added to the watch for
+// Endpoints (and, eventually, EndpointSlices) that excludes endpoints
+// for headless services.
+// This matches the behavior of kube-proxy
+func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// if the service is headless, skip it
+	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	labelSelector := labels.NewSelector().Add(*noHeadlessEndpoints)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = labelSelector.String()
+	}
 }
 
 // noServiceNameSelector is a LabelSelector added to the watch for
