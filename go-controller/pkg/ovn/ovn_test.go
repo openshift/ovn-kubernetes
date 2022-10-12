@@ -48,7 +48,6 @@ type FakeOVN struct {
 	dbSetup      libovsdbtest.TestSetup
 	nbsbCleanup  *libovsdbtest.Cleanup
 	egressQoSWg  *sync.WaitGroup
-	egressSVCWg  *sync.WaitGroup
 }
 
 func NewFakeOVN() *FakeOVN {
@@ -56,7 +55,6 @@ func NewFakeOVN() *FakeOVN {
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
 		egressQoSWg:  &sync.WaitGroup{},
-		egressSVCWg:  &sync.WaitGroup{},
 	}
 }
 
@@ -98,7 +96,6 @@ func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
 	o.egressQoSWg.Wait()
-	o.egressSVCWg.Wait()
 	o.nbsbCleanup.Cleanup()
 }
 
