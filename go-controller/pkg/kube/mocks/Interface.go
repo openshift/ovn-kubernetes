@@ -4,14 +4,14 @@ package mocks
 
 import (
 	egressfirewallv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	apicorev1 "k8s.io/api/core/v1"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mock "github.com/stretchr/testify/mock"
+
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 )
@@ -44,6 +44,29 @@ func (_m *Interface) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *v1.CloudPr
 	return r0, r1
 }
 
+// CreateEndpoint provides a mock function with given fields: namespace, ep
+func (_m *Interface) CreateEndpoint(namespace string, ep *corev1.Endpoints) (*corev1.Endpoints, error) {
+	ret := _m.Called(namespace, ep)
+
+	var r0 *corev1.Endpoints
+	if rf, ok := ret.Get(0).(func(string, *corev1.Endpoints) *corev1.Endpoints); ok {
+		r0 = rf(namespace, ep)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*corev1.Endpoints)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, *corev1.Endpoints) error); ok {
+		r1 = rf(namespace, ep)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // DeleteCloudPrivateIPConfig provides a mock function with given fields: name
 func (_m *Interface) DeleteCloudPrivateIPConfig(name string) error {
 	ret := _m.Called(name)
@@ -59,15 +82,15 @@ func (_m *Interface) DeleteCloudPrivateIPConfig(name string) error {
 }
 
 // Events provides a mock function with given fields:
-func (_m *Interface) Events() corev1.EventInterface {
+func (_m *Interface) Events() typedcorev1.EventInterface {
 	ret := _m.Called()
 
-	var r0 corev1.EventInterface
-	if rf, ok := ret.Get(0).(func() corev1.EventInterface); ok {
+	var r0 typedcorev1.EventInterface
+	if rf, ok := ret.Get(0).(func() typedcorev1.EventInterface); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(corev1.EventInterface)
+			r0 = ret.Get(0).(typedcorev1.EventInterface)
 		}
 	}
 
@@ -166,16 +189,39 @@ func (_m *Interface) GetEgressIPs() (*egressipv1.EgressIPList, error) {
 	return r0, r1
 }
 
+// GetEndpoint provides a mock function with given fields: namespace, name
+func (_m *Interface) GetEndpoint(namespace string, name string) (*corev1.Endpoints, error) {
+	ret := _m.Called(namespace, name)
+
+	var r0 *corev1.Endpoints
+	if rf, ok := ret.Get(0).(func(string, string) *corev1.Endpoints); ok {
+		r0 = rf(namespace, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*corev1.Endpoints)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNamespaces provides a mock function with given fields: labelSelector
-func (_m *Interface) GetNamespaces(labelSelector metav1.LabelSelector) (*apicorev1.NamespaceList, error) {
+func (_m *Interface) GetNamespaces(labelSelector metav1.LabelSelector) (*corev1.NamespaceList, error) {
 	ret := _m.Called(labelSelector)
 
-	var r0 *apicorev1.NamespaceList
-	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) *apicorev1.NamespaceList); ok {
+	var r0 *corev1.NamespaceList
+	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) *corev1.NamespaceList); ok {
 		r0 = rf(labelSelector)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.NamespaceList)
+			r0 = ret.Get(0).(*corev1.NamespaceList)
 		}
 	}
 
@@ -190,15 +236,15 @@ func (_m *Interface) GetNamespaces(labelSelector metav1.LabelSelector) (*apicore
 }
 
 // GetNode provides a mock function with given fields: name
-func (_m *Interface) GetNode(name string) (*apicorev1.Node, error) {
+func (_m *Interface) GetNode(name string) (*corev1.Node, error) {
 	ret := _m.Called(name)
 
-	var r0 *apicorev1.Node
-	if rf, ok := ret.Get(0).(func(string) *apicorev1.Node); ok {
+	var r0 *corev1.Node
+	if rf, ok := ret.Get(0).(func(string) *corev1.Node); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.Node)
+			r0 = ret.Get(0).(*corev1.Node)
 		}
 	}
 
@@ -213,15 +259,15 @@ func (_m *Interface) GetNode(name string) (*apicorev1.Node, error) {
 }
 
 // GetNodes provides a mock function with given fields:
-func (_m *Interface) GetNodes() (*apicorev1.NodeList, error) {
+func (_m *Interface) GetNodes() (*corev1.NodeList, error) {
 	ret := _m.Called()
 
-	var r0 *apicorev1.NodeList
-	if rf, ok := ret.Get(0).(func() *apicorev1.NodeList); ok {
+	var r0 *corev1.NodeList
+	if rf, ok := ret.Get(0).(func() *corev1.NodeList); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.NodeList)
+			r0 = ret.Get(0).(*corev1.NodeList)
 		}
 	}
 
@@ -236,15 +282,15 @@ func (_m *Interface) GetNodes() (*apicorev1.NodeList, error) {
 }
 
 // GetPods provides a mock function with given fields: namespace, labelSelector
-func (_m *Interface) GetPods(namespace string, labelSelector metav1.LabelSelector) (*apicorev1.PodList, error) {
+func (_m *Interface) GetPods(namespace string, labelSelector metav1.LabelSelector) (*corev1.PodList, error) {
 	ret := _m.Called(namespace, labelSelector)
 
-	var r0 *apicorev1.PodList
-	if rf, ok := ret.Get(0).(func(string, metav1.LabelSelector) *apicorev1.PodList); ok {
+	var r0 *corev1.PodList
+	if rf, ok := ret.Get(0).(func(string, metav1.LabelSelector) *corev1.PodList); ok {
 		r0 = rf(namespace, labelSelector)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.PodList)
+			r0 = ret.Get(0).(*corev1.PodList)
 		}
 	}
 
@@ -273,11 +319,11 @@ func (_m *Interface) PatchEgressIP(name string, patchData []byte) error {
 }
 
 // PatchNode provides a mock function with given fields: old, new
-func (_m *Interface) PatchNode(old *apicorev1.Node, new *apicorev1.Node) error {
+func (_m *Interface) PatchNode(old *corev1.Node, new *corev1.Node) error {
 	ret := _m.Called(old, new)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*apicorev1.Node, *apicorev1.Node) error); ok {
+	if rf, ok := ret.Get(0).(func(*corev1.Node, *corev1.Node) error); ok {
 		r0 = rf(old, new)
 	} else {
 		r0 = ret.Error(0)
@@ -287,11 +333,11 @@ func (_m *Interface) PatchNode(old *apicorev1.Node, new *apicorev1.Node) error {
 }
 
 // RemoveTaintFromNode provides a mock function with given fields: nodeName, taint
-func (_m *Interface) RemoveTaintFromNode(nodeName string, taint *apicorev1.Taint) error {
+func (_m *Interface) RemoveTaintFromNode(nodeName string, taint *corev1.Taint) error {
 	ret := _m.Called(nodeName, taint)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *apicorev1.Taint) error); ok {
+	if rf, ok := ret.Get(0).(func(string, *corev1.Taint) error); ok {
 		r0 = rf(nodeName, taint)
 	} else {
 		r0 = ret.Error(0)
@@ -343,11 +389,11 @@ func (_m *Interface) SetAnnotationsOnPod(namespace string, podName string, annot
 }
 
 // SetTaintOnNode provides a mock function with given fields: nodeName, taint
-func (_m *Interface) SetTaintOnNode(nodeName string, taint *apicorev1.Taint) error {
+func (_m *Interface) SetTaintOnNode(nodeName string, taint *corev1.Taint) error {
 	ret := _m.Called(nodeName, taint)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *apicorev1.Taint) error); ok {
+	if rf, ok := ret.Get(0).(func(string, *corev1.Taint) error); ok {
 		r0 = rf(nodeName, taint)
 	} else {
 		r0 = ret.Error(0)
@@ -408,11 +454,11 @@ func (_m *Interface) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 }
 
 // UpdateNodeStatus provides a mock function with given fields: node
-func (_m *Interface) UpdateNodeStatus(node *apicorev1.Node) error {
+func (_m *Interface) UpdateNodeStatus(node *corev1.Node) error {
 	ret := _m.Called(node)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*apicorev1.Node) error); ok {
+	if rf, ok := ret.Get(0).(func(*corev1.Node) error); ok {
 		r0 = rf(node)
 	} else {
 		r0 = ret.Error(0)
