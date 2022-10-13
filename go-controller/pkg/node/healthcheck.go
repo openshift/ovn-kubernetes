@@ -52,26 +52,7 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
 }
 
 func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
-	// if the ETP values have changed between local and cluster,
-	// we need to update health checks accordingly
-	// HealthCheckNodePort is used only in ETP=local mode
-	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster &&
-		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal {
-		l.AddService(new)
-		epSlices, err := l.watchFactory.GetEndpointSlices(new.Namespace, new.Name)
-		if err != nil {
-			klog.V(4).Infof("Could not fetch endpointslices for service %s/%s during health check update service", new.Namespace, new.Name)
-		}
-		namespacedName := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
-		l.Lock()
-		l.endpoints[namespacedName] = l.GetLocalEndpointAddressesCount(epSlices)
-		_ = l.server.SyncEndpoints(l.endpoints)
-		l.Unlock()
-	}
-	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal &&
-		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster {
-		l.DeleteService(old)
-	}
+	// HealthCheckNodePort can't be changed on update
 }
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
