@@ -646,6 +646,86 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	return nil
 }
 
+func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+
+	svc, err := npw.watchFactory.GetService(ep.Namespace, ep.Name)
+	if err != nil {
+		// This is not necessarily an error. For e.g when there are endpoints
+		// without a corresponding service.
+		klog.V(5).Infof("No service found for endpoint %s in namespace %s during add", ep.Name, ep.Namespace)
+		return
+	}
+
+	if !util.ServiceTypeHasClusterIP(svc) || !util.IsClusterIPSet(svc) {
+		return
+	}
+
+	klog.V(5).Infof("Adding endpoints %s in namespace %s", ep.Name, ep.Namespace)
+	nodeIPs := npw.nodeIPManager.ListAddresses()
+	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints_old(ep, nodeIPs)
+
+	// Here we make sure the correct rules are programmed whenever an AddEndpoint
+	// event is received, only alter flows if we need to, i.e if cache wasn't
+	// set or if it was and hasLocalHostNetworkEp state changed, to prevent flow churn
+	out, exists := npw.getAndSetServiceInfo(name, svc, hasLocalHostNetworkEp)
+	if !exists {
+		klog.V(5).Infof("Endpoint %s ADD event in namespace %s is creating rules", ep.Name, ep.Namespace)
+		addServiceRules(svc, hasLocalHostNetworkEp, npw)
+		return
+	}
+
+	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp {
+		klog.V(5).Infof("Endpoint %s ADD event in namespace %s is updating rules", ep.Name, ep.Namespace)
+		delServiceRules(svc, npw)
+		addServiceRules(svc, hasLocalHostNetworkEp, npw)
+	}
+
+}
+
+func (npw *nodePortWatcher) DeleteEndpoints(ep *kapi.Endpoints) {
+	var hasLocalHostNetworkEp = false
+
+	klog.V(5).Infof("Deleting endpoints %s in namespace %s", ep.Name, ep.Namespace)
+	// remove rules for endpoints and add back normal ones
+	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	if svcConfig, exists := npw.updateServiceInfo(name, nil, &hasLocalHostNetworkEp); exists {
+		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
+		// we have to do this because deleting and adding iptables rules is slow.
+		npw.serviceInfoLock.Lock()
+		defer npw.serviceInfoLock.Unlock()
+
+		delServiceRules(svcConfig.service, npw)
+		addServiceRules(svcConfig.service, hasLocalHostNetworkEp, npw)
+	}
+}
+
+func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: old.Namespace, Name: old.Name}
+
+	if reflect.DeepEqual(new.Subsets, old.Subsets) {
+		return
+	}
+
+	klog.V(5).Infof("Updating endpoints %s in namespace %s", old.Name, old.Namespace)
+
+	// Delete old endpoint rules and add normal ones back
+	if len(new.Subsets) == 0 {
+		if _, exists := npw.getServiceInfo(name); exists {
+			npw.DeleteEndpoints(old)
+		}
+	}
+
+	// Update rules if hasLocalHostNetworkEpNew status changed.
+	nodeIPs := npw.nodeIPManager.ListAddresses()
+	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints_old(old, nodeIPs)
+	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints_old(new, nodeIPs)
+	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew {
+		npw.DeleteEndpoints(old)
+		npw.AddEndpoints(new)
+	}
+}
+
 func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	svcName := epSlice.Labels[discovery.LabelServiceName]
 	svc, err := npw.watchFactory.GetService(epSlice.Namespace, svcName)

@@ -12,6 +12,12 @@ type ServiceEventHandler interface {
 	SyncServices([]interface{}) error
 }
 
+type EndpointsEventHandler interface {
+	AddEndpoints(*kapi.Endpoints)
+	DeleteEndpoints(*kapi.Endpoints)
+	UpdateEndpoints(old, new *kapi.Endpoints)
+}
+
 type EndpointSliceEventHandler interface {
 	AddEndpointSlice(*discovery.EndpointSlice)
 	DeleteEndpointSlice(*discovery.EndpointSlice)
@@ -21,4 +27,5 @@ type EndpointSliceEventHandler interface {
 type ServiceAndEndpointsEventHandler interface {
 	ServiceEventHandler
 	EndpointSliceEventHandler
+	EndpointsEventHandler
 }
