@@ -362,6 +362,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return listers.NewPodLister(sharedInformer.GetIndexer()), nil
 	case ServiceType:
 		return listers.NewServiceLister(sharedInformer.GetIndexer()), nil
+	case EndpointsType:
+		return listers.NewEndpointsLister(sharedInformer.GetIndexer()), nil
 	case NamespaceType:
 		return listers.NewNamespaceLister(sharedInformer.GetIndexer()), nil
 	case NodeType:
