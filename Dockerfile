@@ -32,8 +32,8 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-ARG ovsver=2.16.0-33.el8fdp
-ARG ovnver=21.12.0-58.el8fdp
+ARG ovsver=2.16.0-89.3.el8fdp
+ARG ovnver=21.12.0-84.el8fdp
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
