@@ -490,14 +490,14 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
-	epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
+	ep, err := npw.watchFactory.GetEndpoint(service.Namespace, service.Name)
 	if err != nil {
-		klog.V(5).Infof("No endpointslice found for service %s in namespace %s during service Add", service.Name, service.Namespace)
+		klog.V(5).Infof("No endpoint found for service %s in namespace %s during service Add", service.Name, service.Namespace)
 		// No endpoint object exists yet so default to false
 		hasLocalHostNetworkEp = false
 	} else {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints_old(ep, nodeIPs)
 	}
 
 	// If something didn't already do it add correct Service rules
@@ -615,13 +615,13 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			continue
 		}
 
-		epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
+		ep, err := npw.watchFactory.GetEndpoint(service.Namespace, service.Name)
 		if err != nil {
-			klog.V(5).Infof("No endpointslice found for service %s in namespace %s during sync", service.Name, service.Namespace)
+			klog.V(5).Infof("No endpoint found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints_old(ep, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
 		// Delete OF rules for service if they exist
 		npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp)
