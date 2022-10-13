@@ -89,6 +89,49 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 	return nil
 }
 
+func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	l.Lock()
+	defer l.Unlock()
+	if _, exists := l.services[name]; exists {
+		l.endpoints[name] = countLocalEndpoints(ep, l.nodeName)
+		_ = l.server.SyncEndpoints(l.endpoints)
+	}
+}
+
+func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
+	l.Lock()
+	defer l.Unlock()
+	if _, exists := l.services[name]; exists {
+		l.endpoints[name] = countLocalEndpoints(new, l.nodeName)
+		_ = l.server.SyncEndpoints(l.endpoints)
+	}
+
+}
+
+func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	l.Lock()
+	defer l.Unlock()
+	delete(l.endpoints, name)
+	_ = l.server.SyncEndpoints(l.endpoints)
+}
+
+func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
+	num := 0
+	for i := range ep.Subsets {
+		ss := &ep.Subsets[i]
+		for i := range ss.Addresses {
+			addr := &ss.Addresses[i]
+			if addr.NodeName != nil && *addr.NodeName == nodeName {
+				num++
+			}
+		}
+	}
+	return num
+}
+
 func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) {
 	namespacedName := namespacedNameFromEPSlice(epSlice)
 	epSlices, err := l.watchFactory.GetEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
@@ -140,6 +183,24 @@ func (l *loadBalancerHealthChecker) GetLocalEndpointAddressesCount(endpointSlice
 		}
 	}
 	return len(localEndpoints)
+}
+
+// hasLocalHostNetworkEndpoints_old returns true if there is at least one host-networked endpoint
+// in the provided list that is local to this node.
+// It returns false if none of the endpoints are local host-networked endpoints or if ep.Subsets is nil.
+func hasLocalHostNetworkEndpoints_old(ep *kapi.Endpoints, nodeAddresses []net.IP) bool {
+	for i := range ep.Subsets {
+		ss := &ep.Subsets[i]
+		for i := range ss.Addresses {
+			addr := &ss.Addresses[i]
+			for _, nodeIP := range nodeAddresses {
+				if nodeIP.String() == addr.IP {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint

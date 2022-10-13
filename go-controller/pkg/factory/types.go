@@ -16,6 +16,8 @@ type ObjectCacheInterface interface {
 	GetNodes() ([]*kapi.Node, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpoints(namespace string) ([]*kapi.Endpoints, error)
+	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 	GetNamespace(name string) (*kapi.Namespace, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
@@ -34,6 +36,10 @@ type NodeWatchFactory interface {
 	AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
 	AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
 	RemoveServiceHandler(handler *Handler)
+
+	AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	RemoveEndpointsHandler(handler *Handler)
 
 	AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
 	RemoveEndpointSliceHandler(handler *Handler)
@@ -54,6 +60,7 @@ type NodeWatchFactory interface {
 	ListNodes(selector labels.Selector) ([]*kapi.Node, error)
 
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 }
 
