@@ -189,25 +189,46 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 		return err
 	}
 
-	_, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+	// _, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+	// 	AddFunc: func(obj interface{}) {
+	// 		epSlice := obj.(*discovery.EndpointSlice)
+	// 		g.AddEndpointSlice(epSlice)
+	// 	},
+	// 	UpdateFunc: func(old, new interface{}) {
+	// 		oldEpSlice := old.(*discovery.EndpointSlice)
+	// 		newEpSlice := new.(*discovery.EndpointSlice)
+	// 		g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+	// 	},
+	// 	DeleteFunc: func(obj interface{}) {
+	// 		epSlice := obj.(*discovery.EndpointSlice)
+	// 		g.DeleteEndpointSlice(epSlice)
+	// 	},
+	// }, nil)
+	// if err != nil {
+	// 	klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
+	// 	return err
+	// }
+
+	_, err = wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.AddEndpointSlice(epSlice)
+			ep := obj.(*kapi.Endpoints)
+			g.AddEndpoints(ep)
 		},
 		UpdateFunc: func(old, new interface{}) {
-			oldEpSlice := old.(*discovery.EndpointSlice)
-			newEpSlice := new.(*discovery.EndpointSlice)
-			g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+			oldEp := old.(*kapi.Endpoints)
+			newEp := new.(*kapi.Endpoints)
+			g.UpdateEndpoints(oldEp, newEp)
 		},
 		DeleteFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.DeleteEndpointSlice(epSlice)
+			ep := obj.(*kapi.Endpoints)
+			g.DeleteEndpoints(ep)
 		},
 	}, nil)
 	if err != nil {
 		klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
 		return err
 	}
+
 	return nil
 }
 
