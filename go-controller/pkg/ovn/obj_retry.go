@@ -1226,14 +1226,14 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) er
 	case factory.EgressFirewallType:
 		syncFunc = oc.syncEgressFirewall
 
-	case factory.EgressIPType:
+	case factory.EgressIPNamespaceType:
 		syncFunc = oc.syncEgressIPs
 
 	case factory.EgressNodeType:
 		syncFunc = oc.initClusterEgressPolicies
 
 	case factory.EgressIPPodType,
-		factory.EgressIPNamespaceType,
+		factory.EgressIPType,
 		factory.CloudPrivateIPConfigType:
 		syncFunc = nil
 
