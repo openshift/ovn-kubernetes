@@ -1072,7 +1072,7 @@ func (oc *Controller) WatchEgressIP() {
 				klog.Errorf("Unable to delete EgressIP: %s, err: %v", eIP.Name, err)
 			}
 		},
-	}, oc.syncEgressIPs)
+	}, nil)
 }
 
 func (oc *Controller) WatchEgressIPNamespaces() {
@@ -1096,7 +1096,7 @@ func (oc *Controller) WatchEgressIPNamespaces() {
 				klog.Errorf("Unable to delete egress IP matching namespace: %s, err: %v", namespace.Name, err)
 			}
 		},
-	}, nil)
+	}, oc.syncEgressIPs)
 }
 
 func (oc *Controller) WatchEgressIPPods() {
