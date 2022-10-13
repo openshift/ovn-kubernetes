@@ -137,6 +137,33 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 	}
 }
 
+func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
+	if g.loadBalancerHealthChecker != nil {
+		g.loadBalancerHealthChecker.AddEndpoints(ep)
+	}
+	if g.nodePortWatcher != nil {
+		g.nodePortWatcher.AddEndpoints(ep)
+	}
+}
+
+func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
+	if g.loadBalancerHealthChecker != nil {
+		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
+	}
+	if g.nodePortWatcher != nil {
+		g.nodePortWatcher.UpdateEndpoints(old, new)
+	}
+}
+
+func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
+	if g.loadBalancerHealthChecker != nil {
+		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
+	}
+	if g.nodePortWatcher != nil {
+		g.nodePortWatcher.DeleteEndpoints(ep)
+	}
+}
+
 func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	err := g.initFunc()
 	if err != nil {
