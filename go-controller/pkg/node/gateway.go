@@ -111,27 +111,27 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 }
 
 func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
-	}
+	// if g.loadBalancerHealthChecker != nil {
+	//	g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
+	// }
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.AddEndpointSlice(epSlice)
 	}
 }
 
 func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
-	}
+	// if g.loadBalancerHealthChecker != nil {
+	// 	g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+	// }
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 	}
 }
 
 func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
-	}
+	// if g.loadBalancerHealthChecker != nil {
+	// 	g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
+	// }
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.DeleteEndpointSlice(epSlice)
 	}
@@ -141,27 +141,27 @@ func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.AddEndpoints(ep)
 	}
-	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddEndpoints(ep)
-	}
+	// if g.nodePortWatcher != nil {
+	// 	g.nodePortWatcher.AddEndpoints(ep)
+	// }
 }
 
 func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
 	}
-	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateEndpoints(old, new)
-	}
+	// if g.nodePortWatcher != nil {
+	// 	g.nodePortWatcher.UpdateEndpoints(old, new)
+	// }
 }
 
 func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
 	}
-	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteEndpoints(ep)
-	}
+	// if g.nodePortWatcher != nil {
+	// 	g.nodePortWatcher.DeleteEndpoints(ep)
+	// }
 }
 
 func (g *gateway) Init(wf factory.NodeWatchFactory) error {
@@ -189,25 +189,25 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 		return err
 	}
 
-	// _, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
-	// 	AddFunc: func(obj interface{}) {
-	// 		epSlice := obj.(*discovery.EndpointSlice)
-	// 		g.AddEndpointSlice(epSlice)
-	// 	},
-	// 	UpdateFunc: func(old, new interface{}) {
-	// 		oldEpSlice := old.(*discovery.EndpointSlice)
-	// 		newEpSlice := new.(*discovery.EndpointSlice)
-	// 		g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
-	// 	},
-	// 	DeleteFunc: func(obj interface{}) {
-	// 		epSlice := obj.(*discovery.EndpointSlice)
-	// 		g.DeleteEndpointSlice(epSlice)
-	// 	},
-	// }, nil)
-	// if err != nil {
-	// 	klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
-	// 	return err
-	// }
+	_, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			epSlice := obj.(*discovery.EndpointSlice)
+			g.AddEndpointSlice(epSlice)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldEpSlice := old.(*discovery.EndpointSlice)
+			newEpSlice := new.(*discovery.EndpointSlice)
+			g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+		},
+		DeleteFunc: func(obj interface{}) {
+			epSlice := obj.(*discovery.EndpointSlice)
+			g.DeleteEndpointSlice(epSlice)
+		},
+	}, nil)
+	if err != nil {
+		klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
+		return err
+	}
 
 	_, err = wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
