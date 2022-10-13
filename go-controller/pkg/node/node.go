@@ -633,13 +633,14 @@ func (n *OvnNode) WatchEndpointSlices() error {
 			for _, oldPort := range oldEndpointSlice.Ports {
 				for _, oldEndpoint := range oldEndpointSlice.Endpoints {
 					for _, oldIP := range oldEndpoint.Addresses {
-						if doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIP, *oldPort.Port, *oldPort.Protocol) {
+						oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
+						if doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
 							continue
 						}
 						if *oldPort.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(oldIP, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
+							err := util.DeleteConntrack(oldIPStr, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
 							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIP, err)
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
 							}
 						}
 					}
@@ -651,10 +652,11 @@ func (n *OvnNode) WatchEndpointSlices() error {
 			for _, port := range endpointSlice.Ports {
 				for _, endpoint := range endpointSlice.Endpoints {
 					for _, ip := range endpoint.Addresses {
+						ipStr := utilnet.ParseIPSloppy(ip).String()
 						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(ip, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
+							err := util.DeleteConntrack(ipStr, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
 							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", ipStr, err)
 							}
 						}
 					}
@@ -811,7 +813,7 @@ func doesEPSliceContainReadyEndpoint(epSlice *discovery.EndpointSlice,
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
-				if ip == epIP && *port.Port == epPort && *port.Protocol == protocol {
+				if utilnet.ParseIPSloppy(ip).String() == epIP && *port.Port == epPort && *port.Protocol == protocol {
 					return true
 				}
 			}
