@@ -801,6 +801,32 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 	return nil
 }
 
+// type epAddressItem struct {
+// 	ip       string
+// 	port     int32
+// 	protocol kapi.Protocol
+// }
+
+// //buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
+// func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
+// 	epMap := make(map[epAddressItem]struct{})
+// 	for _, subset := range epSubsets {
+// 		for _, address := range subset.Addresses {
+// 			for _, port := range subset.Ports {
+// 				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
+// 					epMap[epAddressItem{
+// 						ip:       address.IP,
+// 						port:     port.Port,
+// 						protocol: port.Protocol,
+// 					}] = struct{}{}
+// 				}
+// 			}
+// 		}
+// 	}
+
+// 	return epMap
+// }
+
 // doesEPSliceContainEndpoint checks whether the endpointslice
 // contains a specific endpoint with IP/Port/Protocol
 func doesEPSliceContainEndpoint(epSlice *discovery.EndpointSlice,
