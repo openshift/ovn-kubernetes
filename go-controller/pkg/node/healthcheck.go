@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -91,13 +92,18 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 }
 
 func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) {
-	namespacedName := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	if err != nil {
+		klog.Errorf("[SyncEndPointSlices] riccardo: SKIP no service for this endpoint slice: %v", err)
+		return
+	}
 	epSlices, err := l.watchFactory.GetEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
 	if err != nil {
 		// should be a rare occurence
 		klog.V(4).Infof("Could not fetch endpointslices for %v during health check", namespacedName)
 	}
 	if len(epSlices) == 0 {
+		klog.Infof("[SyncEndPointSlices] riccardo len(epSlices) == 0, %s", namespacedName.String())
 		// let's delete it from cache and wait for the next update; this will show as 0 endpoints for health checks
 		delete(l.endpoints, namespacedName)
 	} else {
@@ -107,7 +113,11 @@ func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.Endpoi
 }
 
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
-	namespacedName := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	if err != nil {
+		klog.Errorf("[AddEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		return
+	}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
@@ -116,7 +126,12 @@ func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.Endpoint
 }
 
 func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
-	namespacedName := namespacedNameFromEPSlice(newEpSlice)
+	namespacedName, err := namespacedNameFromEPSlice(newEpSlice)
+	if err != nil {
+		klog.Errorf("[UpdateEndpointSlice] riccardo: no service label for new epslice, SKIP: %v", err)
+		return
+	}
+
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
@@ -125,6 +140,11 @@ func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *
 }
 
 func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+	_, err := namespacedNameFromEPSlice(epSlice)
+	if err != nil {
+		klog.Errorf("[DeleteEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		return
+	}
 	l.Lock()
 	defer l.Unlock()
 	l.SyncEndPointSlices(epSlice)
@@ -136,10 +156,14 @@ func (l *loadBalancerHealthChecker) GetLocalEndpointAddressesCount(endpointSlice
 	for _, endpointSlice := range endpointSlices {
 		for _, endpoint := range endpointSlice.Endpoints {
 			if endpoint.NodeName != nil && *endpoint.NodeName == l.nodeName {
+				klog.Infof("[GetLocalEndpointAddressesCount] riccardo: found local endpoint %v (node=%s)",
+					endpoint, l.nodeName)
 				localEndpoints.Insert(endpoint.Addresses...)
 			}
 		}
 	}
+	klog.Infof("[GetLocalEndpointAddressesCount] riccardo: res=%v for endpointSlices=%v",
+		len(localEndpoints), endpointSlices)
 	return len(localEndpoints)
 }
 
@@ -152,12 +176,17 @@ func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddre
 			for _, ip := range endpoint.Addresses {
 				for _, nodeIP := range nodeAddresses {
 					if nodeIP.String() == ip {
+						klog.Infof("[hasLocalHostNetworkEndpoints] riccardo: %v : true, epslice=%v",
+							ip, epSlice)
 						return true
 					}
 				}
 			}
 		}
 	}
+	klog.Infof("[hasLocalHostNetworkEndpoints] riccardo: false (epSlices=%v, nodeAddresses=%v)",
+		epSlices, nodeAddresses)
+
 	return false
 }
 
@@ -432,7 +461,15 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
 	return nil
 }
 
-func namespacedNameFromEPSlice(epSlice *discovery.EndpointSlice) ktypes.NamespacedName {
-	svcName := epSlice.Labels[discovery.LabelServiceName]
-	return ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+func namespacedNameFromEPSlice(epSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
+	// Return the namespaced name of the corresponding service
+	var serviceNamespacedName ktypes.NamespacedName
+	svcName := epSlice.Labels[discovery.LabelServiceName] // should never be empty since we filter out epslices with an empty label
+	klog.Infof("[namespacedNameFromEPSlice] riccardo svcName=%s, namespace=%s", svcName, epSlice.Namespace)
+	if svcName == "" {
+		return serviceNamespacedName,
+			fmt.Errorf("Endpointslice %s/%s: empty value for label %s",
+				epSlice.Namespace, epSlice.Name, discovery.LabelServiceName)
+	}
+	return ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}, nil
 }
