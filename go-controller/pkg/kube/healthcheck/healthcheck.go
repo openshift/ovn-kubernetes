@@ -24,7 +24,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 )
@@ -216,14 +216,17 @@ func (hcs *server) SyncEndpoints(newEndpoints map[types.NamespacedName]int) erro
 
 	for nsn, count := range newEndpoints {
 		if hcs.services[nsn] == nil {
-			klog.V(5).Infof("Not saving endpoints for unknown healthcheck %q", nsn.String())
+			klog.Infof("[SyncEndpoints] riccardo: Not saving endpoints for unknown healthcheck %q", nsn.String())
 			continue
 		}
-		klog.V(5).Infof("Reporting %d endpoints for healthcheck %q", count, nsn.String())
+		klog.Infof("[SyncEndpoints] riccardo: Reporting %d endpoints for healthcheck %q",
+			count, nsn.String())
 		hcs.services[nsn].endpoints = count
 	}
 	for nsn, hci := range hcs.services {
 		if _, found := newEndpoints[nsn]; !found {
+			klog.Infof("[SyncEndpoints] riccardo: %v not found in newEndpoints, setting count=0", nsn.String())
+
 			hci.endpoints = 0
 		}
 	}
