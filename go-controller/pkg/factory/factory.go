@@ -773,7 +773,11 @@ func (wf *WatchFactory) GetEndpointSlices(namespace, svcName string) ([]*discove
 		discovery.LabelServiceName: svcName,
 	}).AsSelectorPreValidated()
 	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
-	return endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
+	res, err := endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
+	klog.Infof("[GetEndpointSlices] riccardo: namespace=%s, svcName=%s, len_result=%d,  err=%v, result=%v",
+		namespace, svcName, len(res), err, res)
+	return res, err
+
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
@@ -862,19 +866,21 @@ func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 // label.
 func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOptions) {
 	// LabelServiceName must exist
-	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+	var svcNameLabel, notEmptySvcName, noHeadlessService *labels.Requirement
+	var err error
+	svcNameLabel, err = labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
 	if err != nil {
 		// cannot occur
 		panic(err)
 	}
 	// LabelServiceName value must be non-empty
-	notEmptySvcName, err := labels.NewRequirement(discovery.LabelServiceName, selection.NotEquals, []string{""})
+	notEmptySvcName, err = labels.NewRequirement(discovery.LabelServiceName, selection.NotEquals, []string{""})
 	if err != nil {
 		// cannot occur
 		panic(err)
 	}
 	// headless service label must not be there
-	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	noHeadlessService, err = labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
 		// cannot occur
 		panic(err)

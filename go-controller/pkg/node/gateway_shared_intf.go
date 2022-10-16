@@ -747,7 +747,12 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice
 	// event is received, only alter flows if we need to, i.e if cache wasn't
 	// set or if it was and hasLocalHostNetworkEp state changed, to prevent flow churn
-	namespacedName := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	if err != nil {
+		klog.Errorf("[AddEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		return
+	}
+
 	out, exists := npw.getAndSetServiceInfo(namespacedName, svc, hasLocalHostNetworkEp)
 	if !exists {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is creating rules", epSlice.Name, epSlice.Namespace)
@@ -768,7 +773,12 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	namespacedName := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	if err != nil {
+		klog.Errorf("[AddEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		return
+	}
+
 	if svcConfig, exists := npw.updateServiceInfo(namespacedName, nil, &hasLocalHostNetworkEp); exists {
 		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
 		// we have to do this because deleting and adding iptables rules is slow.
@@ -795,7 +805,11 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 		return
 	}
 
-	namespacedName := namespacedNameFromEPSlice(oldEpSlice)
+	namespacedName, err := namespacedNameFromEPSlice(oldEpSlice)
+	if err != nil {
+		klog.Errorf("[UpdateEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		return
+	}
 
 	if _, exists := npw.getServiceInfo(namespacedName); !exists {
 		// When a service is updated from externalName to nodeport type, it won't be

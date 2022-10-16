@@ -111,6 +111,13 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 }
 
 func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
+	nsn, err := namespacedNameFromEPSlice(epSlice)
+	if err != nil {
+		klog.Errorf("[AddEndpointSlice] riccardo skip: %v", err)
+		return
+	}
+	klog.Infof("[AddEndpointSlice] riccardo: epSlice %s/%s, corresponding service %s",
+		epSlice.Namespace, epSlice.Name, nsn.String())
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
 	}
@@ -120,6 +127,13 @@ func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 }
 
 func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+	nsn, err := namespacedNameFromEPSlice(newEpSlice)
+	if err != nil {
+		klog.Errorf("[UpdateEndpointSlice] riccardo skip: %v", err)
+		return
+	}
+	klog.Infof("[UpdateEndpointSlice] riccardo: epSlice %s/%s, corresponding service %s",
+		newEpSlice.Namespace, newEpSlice.Name, nsn.String())
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 	}
@@ -129,6 +143,14 @@ func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.Endpoint
 }
 
 func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+	nsn, err := namespacedNameFromEPSlice(epSlice)
+	if err != nil {
+		klog.Errorf("[DeleteEndpointSlice] riccardo skip: %v", err)
+		return
+	}
+	klog.Infof("[DeleteEndpointSlice] riccardo: epSlice %s/%s, corresponding service %s",
+		epSlice.Namespace, epSlice.Name, nsn.String())
+
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
 	}
@@ -138,27 +160,38 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 }
 
 func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
-	// if g.loadBalancerHealthChecker != nil {
-	// 	g.loadBalancerHealthChecker.AddEndpoints(ep)
-	// }
+	klog.Infof("[AddEndpoints] riccardo: ep %s/%s", ep.Namespace, ep.Name)
+	// dry run for loadBalancerHealthChecker
+	if g.loadBalancerHealthChecker != nil {
+		g.loadBalancerHealthChecker.AddEndpoints(ep)
+	}
+	// nodePortWatcher runs on endpoints
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.AddEndpoints(ep)
 	}
 }
 
 func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
-	// if g.loadBalancerHealthChecker != nil {
-	// 	g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
-	// }
+	klog.Infof("[UpdateEndpoints] riccardo: ep %s/%s", new.Namespace, new.Name)
+
+	// dry run for loadBalancerHealthChecker
+	if g.loadBalancerHealthChecker != nil {
+		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
+	}
+	// nodePortWatcher runs on endpoints
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.UpdateEndpoints(old, new)
 	}
 }
 
 func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
-	// if g.loadBalancerHealthChecker != nil {
-	// 	g.loadBalancerHealthChecker.DeleteEndpoints(ep)
-	// }
+	klog.Infof("[DeleteEndpoints] riccardo: ep %s/%s", ep.Namespace, ep.Name)
+
+	// dry run for loadBalancerHealthChecker
+	if g.loadBalancerHealthChecker != nil {
+		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
+	}
+	// nodeportwatcher runs on endpoints
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.DeleteEndpoints(ep)
 	}
