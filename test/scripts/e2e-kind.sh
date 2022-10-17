@@ -25,9 +25,6 @@ should have ipv4 and ipv6 internal node ip
 kube-proxy
 should set TCP CLOSE_WAIT timeout
 
-# not implemented - OVN doesn't support time
-should have session affinity timeout work
-
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 
