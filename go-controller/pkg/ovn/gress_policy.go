@@ -266,21 +266,6 @@ func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 	return true
 }
 
-// addNamespaceAddressSets adds namespace address sets to the gress policy.
-func (gp *gressPolicy) addNamespaceAddressSets(namespaces []interface{}) {
-	if len(namespaces) <= 0 {
-		return
-	}
-	for _, nsInterface := range namespaces {
-		namespace, ok := nsInterface.(*v1.Namespace)
-		if !ok {
-			klog.Errorf("Spurious object in addNamespaceAddressSets: %v", nsInterface)
-			continue
-		}
-		gp.addNamespaceAddressSet(namespace.Name)
-	}
-}
-
 // delNamespaceAddressSet removes a namespace address set from the gress policy
 // and returns whether the address set was in the policy or not.
 func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {

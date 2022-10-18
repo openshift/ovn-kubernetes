@@ -1033,10 +1033,8 @@ func (oc *Controller) handleLocalPodSelector(
 		return err
 	}
 
-	retryLocalPods := NewRetryObjs(
+	retryLocalPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.LocalPodSelectorType,
-		policy.Namespace,
-		sel,
 		handleInitialItems,
 		&NetworkPolicyExtraParameters{
 			policy:                   policy,
@@ -1045,7 +1043,7 @@ func (oc *Controller) handleLocalPodSelector(
 			portGroupEgressDenyName:  portGroupEgressDenyName,
 		})
 
-	podHandler, err := oc.WatchResource(retryLocalPods)
+	podHandler, err := retryLocalPods.WatchResourceFiltered(policy.Namespace, sel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for handleLocalPodSelector: %v", err)
 		return err
@@ -1332,7 +1330,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 			// rollback failed, add to retry to cleanup
 			key := getPolicyNamespacedName(policy)
 			oc.retryNetworkPolicies.DoWithLock(key, func(key string) {
-				oc.retryNetworkPolicies.initRetryObjWithDelete(policy, key, np, false)
+				oc.retryNetworkPolicies.InitRetryObjWithDelete(policy, key, np, false)
 			})
 		}
 		return fmt.Errorf("unable to ensure namespace for network policy: %s, namespace: %s, error: %v",
@@ -1584,13 +1582,12 @@ type NetworkPolicyExtraParameters struct {
 func (oc *Controller) handlePeerService(
 	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) error {
 	// start watching services in the same namespace as the network policy
-	retryPeerServices := NewRetryObjs(
+	retryPeerServices := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerServiceType,
-		policy.Namespace,
-		nil, nil,
+		nil,
 		&NetworkPolicyExtraParameters{gp: gp})
 
-	serviceHandler, err := oc.WatchResource(retryPeerServices)
+	serviceHandler, err := retryPeerServices.WatchResourceFiltered(policy.Namespace, nil)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for handlePeerService: %v", err)
 		return err
@@ -1609,13 +1606,11 @@ func (oc *Controller) handlePeerPodSelector(
 
 	// start watching pods in the same namespace as the network policy and selected by the
 	// label selector
-	retryPeerPods := NewRetryObjs(
-		factory.PeerPodSelectorType,
-		policy.Namespace,
-		sel, nil,
+	retryPeerPods := oc.newRetryFrameworkMasterWithParameters(
+		factory.PeerPodSelectorType, nil,
 		&NetworkPolicyExtraParameters{gp: gp})
 
-	podHandler, err := oc.WatchResource(retryPeerPods)
+	podHandler, err := retryPeerPods.WatchResourceFiltered(np.namespace, sel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for handlePeerPodSelector: %v", err)
 		return err
@@ -1638,16 +1633,16 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 	// start watching namespaces selected by the namespace selector nsSel;
 	// upon namespace add event, start watching pods in that namespace selected
 	// by the label selector podSel
-	retryPeerNamespaces := NewRetryObjs(
+	retryPeerNamespaces := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerNamespaceAndPodSelectorType,
-		"", nsSel, nil,
+		nil,
 		&NetworkPolicyExtraParameters{
 			gp:          gp,
 			np:          np,
 			podSelector: podSel}, // will be used in the addFunc to create a pod handler
 	)
 
-	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", nsSel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for handlePeerNamespaceAndPodSelector: %v", err)
 		return err
@@ -1688,13 +1683,13 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	sel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
 
 	// start watching namespaces selected by the namespace selector
-	retryPeerNamespaces := NewRetryObjs(
+	retryPeerNamespaces := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerNamespaceSelectorType,
-		"", sel, nil,
+		nil,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
 	)
 
-	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", sel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for handlePeerNamespaceSelector: %v", err)
 		return err
