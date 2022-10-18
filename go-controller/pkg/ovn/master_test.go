@@ -24,6 +24,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -1041,15 +1042,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			initRetryObjWithAdd(testNode, testNode.Name, clusterController.retryNodes)
-			gomega.Expect(retryObjsLen(clusterController.retryNodes)).To(gomega.Equal(1))
-			if retryEntry, found := getRetryObj(testNode.Name, clusterController.retryNodes); found {
-				gomega.Expect(retryEntry).ToNot(gomega.BeNil())
-				gomega.Expect(retryEntry.newObj).ToNot(gomega.BeNil())
-				gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
-			}
-			deleteRetryObj(testNode.Name, clusterController.retryNodes)
-			gomega.Expect(checkRetryObj(testNode.Name, clusterController.retryNodes)).To(gomega.BeFalse())
+			retry.InitRetryObjWithAdd(testNode, testNode.Name, clusterController.retryNodes)
+			gomega.Expect(retry.RetryObjsLen(clusterController.retryNodes)).To(gomega.Equal(1))
+
+			retry.CheckRetryObjectMultipleFieldsEventually(
+				testNode.Name,
+				clusterController.retryNodes,
+				gomega.BeNil(),             // oldObj should be nil
+				gomega.Not(gomega.BeNil()), // newObj should not be nil
+			)
+
+			retry.DeleteRetryObj(testNode.Name, clusterController.retryNodes)
+			gomega.Expect(retry.CheckRetryObj(testNode.Name, clusterController.retryNodes)).To(gomega.BeFalse())
 			var clusterSubnets []*net.IPNet
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
@@ -1319,15 +1323,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			ginkgo.By("update should have failed with a retry present")
+			ginkgo.By("update should have failed with a retry being present")
 			// check to see if the retry cache has an entry for this node
-			checkRetryObjectEventually(testNode.Name, true, clusterController.retryNodes)
-			retryEntry, found := getRetryObj(testNode.Name, clusterController.retryNodes)
-			gomega.Expect(found).To(gomega.BeTrue())
-			ginkgo.By("retry entry new obj should not be nil")
-			gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
-			ginkgo.By("retry entry old obj should be nil")
-			gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
+			// In the retry entry, old obj should be nil, new obj should not be nil
+			retry.CheckRetryObjectMultipleFieldsEventually(
+				testNode.Name,
+				clusterController.retryNodes,
+				gomega.BeNil(),             // oldObj should be nil
+				gomega.Not(gomega.BeNil()), // newObj should not be nil
+			)
 
 			// check that a node event was posted
 			gomega.Eventually(func() []string {
@@ -1344,10 +1348,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			defer cancel()
 			ginkgo.By("bring up NBDB")
 			resetNBClient(connCtx, clusterController.nbClient)
-			setRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
+			retry.SetRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
 			clusterController.retryNodes.RequestRetryObjs() // retry the failed entry
 			ginkgo.By("should be no retry entry after update completes")
-			checkRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
+			retry.CheckRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
 			for _, data := range expectedDatabaseState {
 				if route, ok := data.(*nbdb.LogicalRouterStaticRoute); ok {
 					if route.Nexthop == "172.16.16.1" {
@@ -1412,23 +1416,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), testNode.Name, metav1.DeleteOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// check to see if the retry cache has an entry for this node
-			checkRetryObjectEventually(testNode.Name, true, clusterController.retryNodes)
-			retryEntry, found := getRetryObj(testNode.Name, clusterController.retryNodes)
-			gomega.Expect(found).To(gomega.BeTrue())
-			ginkgo.By("retry entry new obj should be nil")
-			gomega.Expect(retryEntry.newObj).To(gomega.BeNil())
-			ginkgo.By("retry entry old obj should not be nil")
-			gomega.Expect(retryEntry.oldObj).NotTo(gomega.BeNil())
+			// check the retry entry for this node
+			ginkgo.By("retry entry: old obj should not be nil, new obj should be nil")
+			retry.CheckRetryObjectMultipleFieldsEventually(
+				testNode.Name,
+				clusterController.retryNodes,
+				gomega.Not(gomega.BeNil()), // oldObj should not be nil
+				gomega.BeNil(),             // newObj should be nil
+			)
 
 			// Add the LRP back to allow the delete the continue
 			err = libovsdbops.CreateOrUpdateLogicalRouterPorts(libovsdbOvnNBClient,
 				lr, []*nbdb.LogicalRouterPort{lrp}, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
+			retry.SetRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
 			clusterController.retryNodes.RequestRetryObjs() // retry the failed entry
 
-			checkRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
+			retry.CheckRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
 			return nil
 		}
 
@@ -1463,8 +1467,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			gomega.Expect(
-				clusterController.addResource(
-					clusterController.retryNodes, &testNode, false)).To(
+				clusterController.retryNodes.ResourceHandler.AddResource(
+					&testNode, false)).To(
 				gomega.MatchError(
 					"nodeAdd: error adding node \"node1\": error allocating networks for node node1: 1 subnets expected only new 0 subnets allocated"))
 
@@ -1474,7 +1478,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			ginkgo.By("adding the node becomes possible")
-			gomega.Expect(clusterController.addResource(clusterController.retryNodes, &testNode, false)).To(gomega.Succeed())
+			gomega.Expect(clusterController.retryNodes.ResourceHandler.AddResource(&testNode, false)).To(gomega.Succeed())
 
 			return nil
 		}
