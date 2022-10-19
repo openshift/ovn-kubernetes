@@ -492,7 +492,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
 	if err != nil {
-		klog.V(5).Infof("No endpointslice found for service %s in namespace %s during service Add", service.Name, service.Namespace)
+		klog.V(4).Infof("No endpointslice found for service %s in namespace %s during service Add", service.Name, service.Namespace)
 		// No endpoint object exists yet so default to false
 		hasLocalHostNetworkEp = false
 	} else {
@@ -617,7 +617,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 
 		epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
 		if err != nil {
-			klog.V(5).Infof("No endpointslice found for service %s in namespace %s during sync", service.Name, service.Namespace)
+			klog.V(4).Infof("No endpointslice found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()

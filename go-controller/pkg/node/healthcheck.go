@@ -45,17 +45,29 @@ func newLoadBalancerHealthChecker(nodeName string, watchFactory factory.NodeWatc
 }
 
 func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
+	klog.Infof("[AddService] riccardo:  %s/%s", svc.Namespace, svc.Name)
+
+	// TODO aren't we hitting this code at all?
+	// Why is the l.services[name] entry never created??
 	if svc.Spec.HealthCheckNodePort != 0 {
 		l.Lock()
 		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
+		klog.Infof("[AddService] riccardo:  %s/%s calling l.server.SyncServices on %v",
+			svc.Namespace, svc.Name, l.services)
 		_ = l.server.SyncServices(l.services)
+	} else {
+		klog.Infof("[AddService] riccardo:  %s/%s, "+
+			"svc.Spec.HealthCheckNodePort == 0 (%v), SKIP",
+			svc.Namespace, svc.Name, svc.Spec.HealthCheckNodePort)
 	}
 }
 
 func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
 	// HealthCheckNodePort can't be changed on update
+	klog.Infof("[UpdateService] riccardo:  %s/%s, nothing to do", new.Namespace, new.Name)
+
 }
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
@@ -66,7 +78,13 @@ func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 		delete(l.services, name)
 		delete(l.endpoints, name)
 		delete(l.endpoints_dry, name)
+		klog.Infof("[DeleteService] riccardo:  %s/%s calling l.server.SyncServices on %v",
+			svc.Namespace, svc.Name, l.services)
 		_ = l.server.SyncServices(l.services)
+	} else {
+		klog.Infof("[DeleteService] riccardo:  %s/%s, "+
+			"svc.Spec.HealthCheckNodePort == 0 (%v), SKIP",
+			svc.Namespace, svc.Name, svc.Spec.HealthCheckNodePort)
 	}
 }
 
