@@ -46,13 +46,19 @@ type gateway struct {
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
+	klog.Infof("[AddService] riccardo:  %s/%s", svc.Namespace, svc.Name)
+
 	if g.portClaimWatcher != nil {
 		g.portClaimWatcher.AddService(svc)
 	}
 	if g.loadBalancerHealthChecker != nil {
+		klog.Infof("[AddService] riccardo:  %s/%s, loadBalancerHealthChecker",
+			svc.Namespace, svc.Name)
 		g.loadBalancerHealthChecker.AddService(svc)
 	}
 	if g.nodePortWatcher != nil {
+		klog.Infof("[AddService] riccardo:  %s/%s, nodePortWatcher",
+			svc.Namespace, svc.Name)
 		g.nodePortWatcher.AddService(svc)
 	}
 	if g.nodePortWatcherIptables != nil {
@@ -61,13 +67,20 @@ func (g *gateway) AddService(svc *kapi.Service) {
 }
 
 func (g *gateway) UpdateService(old, new *kapi.Service) {
+	klog.Infof("[UpdateService] riccardo:  %s/%s => %s/%s",
+		old.Namespace, old.Name, new.Namespace, new.Name)
+
 	if g.portClaimWatcher != nil {
 		g.portClaimWatcher.UpdateService(old, new)
 	}
 	if g.loadBalancerHealthChecker != nil {
+		klog.Infof("[UpdateService] riccardo:  %s/%s => %s/%s, loadBalancerHealthChecker",
+			old.Namespace, old.Name, new.Namespace, new.Name)
 		g.loadBalancerHealthChecker.UpdateService(old, new)
 	}
 	if g.nodePortWatcher != nil {
+		klog.Infof("[UpdateService] riccardo:  %s/%s => %s/%s, nodePortWatcher",
+			old.Namespace, old.Name, new.Namespace, new.Name)
 		g.nodePortWatcher.UpdateService(old, new)
 	}
 	if g.nodePortWatcherIptables != nil {
@@ -76,13 +89,19 @@ func (g *gateway) UpdateService(old, new *kapi.Service) {
 }
 
 func (g *gateway) DeleteService(svc *kapi.Service) {
+	klog.Infof("[DeleteService] riccardo:  %s/%s", svc.Namespace, svc.Name)
+
 	if g.portClaimWatcher != nil {
 		g.portClaimWatcher.DeleteService(svc)
 	}
 	if g.loadBalancerHealthChecker != nil {
+		klog.Infof("[DeleteService] riccardo:  %s/%s, loadBalancerHealthChecker",
+			svc.Namespace, svc.Name)
 		g.loadBalancerHealthChecker.DeleteService(svc)
 	}
 	if g.nodePortWatcher != nil {
+		klog.Infof("[DeleteService] riccardo:  %s/%s, nodePortWatcher",
+			svc.Namespace, svc.Name)
 		g.nodePortWatcher.DeleteService(svc)
 	}
 	if g.nodePortWatcherIptables != nil {
@@ -91,14 +110,18 @@ func (g *gateway) DeleteService(svc *kapi.Service) {
 }
 
 func (g *gateway) SyncServices(objs []interface{}) error {
+	klog.Infof("[SyncServices] riccardo")
+
 	var err error
 	if g.portClaimWatcher != nil {
 		err = g.portClaimWatcher.SyncServices(objs)
 	}
 	if err == nil && g.loadBalancerHealthChecker != nil {
+		klog.Infof("[SyncServices] riccardo: loadBalancerHealthChecker")
 		err = g.loadBalancerHealthChecker.SyncServices(objs)
 	}
 	if err == nil && g.nodePortWatcher != nil {
+		klog.Infof("[SyncServices] riccardo: nodePortWatcher")
 		err = g.nodePortWatcher.SyncServices(objs)
 	}
 	if err == nil && g.nodePortWatcherIptables != nil {
