@@ -793,7 +793,9 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
 	endpointsAddress := make([]string, 0)
 	for _, endpoint := range endpointSlice.Endpoints {
-		endpointsAddress = append(endpointsAddress, endpoint.Addresses...)
+		if isEndpointReady(endpoint) {
+			endpointsAddress = append(endpointsAddress, endpoint.Addresses...)
+		}
 	}
 	return endpointsAddress
 }
@@ -807,7 +809,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	namespacedName, err := namespacedNameFromEPSlice(oldEpSlice)
 	if err != nil {
-		klog.Errorf("[UpdateEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		klog.Errorf("Skipping %s/%s: %v", newEpSlice.Namespace, newEpSlice.Name, err)
 		return
 	}
 
