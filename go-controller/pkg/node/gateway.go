@@ -136,10 +136,10 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	nsn, err := namespacedNameFromEPSlice(epSlice)
 	if err != nil {
-		klog.Errorf("[AddEndpointSlice] riccardo skip: %v", err)
+		klog.Errorf("[AddEndpointSlice (dry run2)] riccardo skip: %v", err)
 		return
 	}
-	klog.Infof("[AddEndpointSlice] riccardo: epSlice %s/%s, corresponding service %s",
+	klog.Infof("[AddEndpointSlice (dry run2)] riccardo: epSlice %s/%s, corresponding service %s",
 		epSlice.Namespace, epSlice.Name, nsn.String())
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
@@ -168,10 +168,10 @@ func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.Endpoint
 func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 	nsn, err := namespacedNameFromEPSlice(epSlice)
 	if err != nil {
-		klog.Errorf("[DeleteEndpointSlice] riccardo skip: %v", err)
+		klog.Errorf("[DeleteEndpointSlice (dry run2)] riccardo skip: %v", err)
 		return
 	}
-	klog.Infof("[DeleteEndpointSlice] riccardo: epSlice %s/%s, corresponding service %s",
+	klog.Infof("[DeleteEndpointSlice (dry run2)] riccardo: epSlice %s/%s, corresponding service %s",
 		epSlice.Namespace, epSlice.Name, nsn.String())
 
 	if g.loadBalancerHealthChecker != nil {
