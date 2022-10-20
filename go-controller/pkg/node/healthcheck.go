@@ -93,44 +93,47 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 }
 
 func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
+	// Real run for add operation on endpoints
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints_dry[name] = countLocalEndpoints(ep, l.nodeName)
-		klog.Infof("[AddEndpoints, DRY RUN] riccardo: for %s, local endpoints: %d, calling SyncEndpoints on l.endpoints_dry=%v",
+		klog.Infof("[AddEndpoints, REAL RUN] riccardo: for %s, local endpoints: %d, calling SyncEndpoints on l.endpoints_dry=%v",
 			name, l.endpoints_dry[name], l.endpoints_dry)
-		// _ = l.server.SyncEndpoints(l.endpoints)
+		_ = l.server.SyncEndpoints(l.endpoints_dry)
 	} else {
-		klog.Infof("[AddEndpoints, DRY RUN] riccardo: SKIP %s, not in l.services: %v",
+		klog.Infof("[AddEndpoints, REAL RUN] riccardo: SKIP %s, not in l.services: %v",
 			name.String(), l.services)
 	}
 }
 
 func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
+	// Real run for update operation on endpoints
 	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints_dry[name] = countLocalEndpoints(new, l.nodeName)
-		klog.Infof("[UpdateEndpoints, DRY RUN] riccardo: for %s, local endpoints: %d, calling SyncEndpoints on l.endpoints_dry=%v",
+		klog.Infof("[UpdateEndpoints, REAL RUN] riccardo: for %s, local endpoints: %d, calling SyncEndpoints on l.endpoints_dry=%v",
 			name, l.endpoints_dry[name], l.endpoints_dry)
-		// _ = l.server.SyncEndpoints(l.endpoints)
+		_ = l.server.SyncEndpoints(l.endpoints_dry)
 	} else {
-		klog.Infof("[UpdateEndpoints, DRY RUN] riccardo: SKIP %s, not in l.services: %v",
+		klog.Infof("[UpdateEndpoints, REAL RUN] riccardo: SKIP %s, not in l.services: %v",
 			name.String(), l.services)
 	}
 
 }
 
 func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
+	// DRY run for delete operation on endpoints
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
 	l.Lock()
 	defer l.Unlock()
 	delete(l.endpoints_dry, name)
 	klog.Infof("[DeleteEndpoints, DRY RUN] riccardo: for %s, calling SyncEndpoints on l.endpoints_dry=%v",
 		name, l.endpoints_dry)
-	// 	_ = l.server.SyncEndpoints(l.endpoints)
+	// _ = l.server.SyncEndpoints(l.endpoints_dry)
 }
 
 func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
@@ -148,7 +151,7 @@ func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
 	return num
 }
 
-func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) {
+func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice, dryRun bool) {
 	// Get all endpointslices for the service that corresponds to this epSlice
 	// Count the # of local endpoints for these endpoint slices
 	// Call SyncEndpoints on all endpoints stored in cache l.endpoints
@@ -169,60 +172,68 @@ func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.Endpoi
 	} else {
 		l.endpoints[namespacedName] = l.GetLocalEndpointAddressesCount(epSlices)
 	}
-	klog.Infof("[SyncEndPointSlices] riccardo: for svc %s, calling SyncEndpoints on l.endpoints=%v",
-		namespacedName.String(), l.endpoints)
 
-	_ = l.server.SyncEndpoints(l.endpoints)
+	if !dryRun {
+		klog.Infof("[SyncEndPointSlices, REAL RUN] riccardo: for svc %s, calling SyncEndpoints on l.endpoints=%v",
+			namespacedName.String(), l.endpoints)
+		_ = l.server.SyncEndpoints(l.endpoints)
+	} else {
+		klog.Infof("[SyncEndPointSlices, DRY RUN] riccardo: for svc %s, calling SyncEndpoints on l.endpoints=%v",
+			namespacedName.String(), l.endpoints)
+	}
 }
 
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
+	// DRY run for the ADD operation on endpointslice events
 	namespacedName, err := namespacedNameFromEPSlice(epSlice)
 	if err != nil {
-		klog.Errorf("[AddEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		klog.Errorf("[AddEndpointSlice, DRY RUN] riccardo: no service label for epslice, SKIP: %v", err)
 		return
 	}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
-		klog.Infof("[AddEndpointSlice] riccardo: %s/%v, calling SyncEndpointSlices",
+		klog.Infof("[AddEndpointSlice, DRY RUN] riccardo: %s/%v, calling SyncEndpointSlices",
 			epSlice.Namespace, epSlice.Name)
-		l.SyncEndPointSlices(epSlice)
+		l.SyncEndPointSlices(epSlice, true) // dryRun=True
 	} else {
-		klog.Infof("[AddEndpointSlice] riccardo: SKIP %s, not in l.services: %v",
+		klog.Infof("[AddEndpointSlice, DRY RUN] riccardo: SKIP %s, not in l.services: %v",
 			namespacedName.String(), l.services)
 	}
 }
 
 func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+	// DRY RUN for the update operation on endpointslice events
 	namespacedName, err := namespacedNameFromEPSlice(newEpSlice)
 	if err != nil {
-		klog.Errorf("[UpdateEndpointSlice] riccardo: no service label for new epslice, SKIP: %v", err)
+		klog.Errorf("[UpdateEndpointSlice, DRY RUN] riccardo: no service label for new epslice, SKIP: %v", err)
 		return
 	}
 
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
-		klog.Infof("[UpdateEndpointSlice] riccardo: %s/%v, calling SyncEndpointSlices",
+		klog.Infof("[UpdateEndpointSlice, DRY RUN] riccardo: %s/%v, calling SyncEndpointSlices",
 			newEpSlice.Namespace, newEpSlice.Name)
-		l.SyncEndPointSlices(newEpSlice)
+		l.SyncEndPointSlices(newEpSlice, true) // dryRun=True
 	} else {
-		klog.Infof("[UpdateEndpointSlice] riccardo: SKIP %s, not in l.services: %v",
+		klog.Infof("[UpdateEndpointSlice, DRY RUN] riccardo: SKIP %s, not in l.services: %v",
 			namespacedName.String(), l.services)
 	}
 }
 
 func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+	// Real RUN for the delete operation on endpointslice events
 	_, err := namespacedNameFromEPSlice(epSlice)
 	if err != nil {
-		klog.Errorf("[DeleteEndpointSlice] riccardo: no service label for epslice, SKIP: %v", err)
+		klog.Errorf("[DeleteEndpointSlice, REAL RUN] riccardo: no service label for epslice, SKIP: %v", err)
 		return
 	}
 	l.Lock()
 	defer l.Unlock()
-	klog.Infof("[DeleteEndpointSlice] riccardo: %s/%v, calling SyncEndpointSlices",
+	klog.Infof("[DeleteEndpointSlice, REAL RUN] riccardo: %s/%v, calling SyncEndpointSlices",
 		epSlice.Namespace, epSlice.Name)
-	l.SyncEndPointSlices(epSlice)
+	l.SyncEndPointSlices(epSlice, false) // dryRun=False
 }
 
 // GetLocalEndpointAddresses returns the number of endpoints that are local to the node for a service
