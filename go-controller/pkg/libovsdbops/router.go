@@ -456,3 +456,17 @@ func DeleteNATsFromRouter(nbClient libovsdbclient.Client, routerName string, nat
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
+
+// LOGICAL ROUTER POLICY OPs
+
+type logicalRouterPolicyPredicate func(*nbdb.LogicalRouterPolicy) bool
+
+// FindLogicalRouterPoliciesWithPredicate looks up logical router policies from
+// the cache based on a given predicate
+func FindLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, p logicalRouterPolicyPredicate) ([]*nbdb.LogicalRouterPolicy, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	found := []*nbdb.LogicalRouterPolicy{}
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
