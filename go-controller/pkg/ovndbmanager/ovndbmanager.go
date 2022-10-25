@@ -419,9 +419,9 @@ func upgradeDBSchema(schemaFile, serverSock, dbName string) error {
 	}
 	dbSchemaVersion := strings.TrimSpace(stdout)
 
-	_, _, err = util.RunOVSDBTool("compare-versions", dbSchemaVersion, "<", schemaTarget)
-	if err != nil {
-		klog.Infof("No %s DB schema upgrade is required. Current version: %s, target: %s",
+	_, _, err = util.RunOVSDBTool("compare-versions", dbSchemaVersion, "==", schemaTarget)
+	if err == nil {
+		klog.Infof("No %s DB schema upgrade is required. Current version: %s is equal to the target schema version: %s",
 			dbName, dbSchemaVersion, schemaTarget)
 		return nil
 	}
