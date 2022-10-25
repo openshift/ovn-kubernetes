@@ -1180,13 +1180,13 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) er
 
 	switch r.oType {
 	case factory.PodType:
-		syncFunc = oc.syncPodsRetriable
+		syncFunc = oc.syncPods
 
 	case factory.PolicyType:
 		syncFunc = oc.syncNetworkPolicies
 
 	case factory.NodeType:
-		syncFunc = oc.syncNodesRetriable
+		syncFunc = oc.syncNodes
 
 	case factory.PeerServiceType,
 		factory.PeerNamespaceAndPodSelectorType:
@@ -1226,14 +1226,14 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) er
 	case factory.EgressFirewallType:
 		syncFunc = oc.syncEgressFirewall
 
-	case factory.EgressIPType:
+	case factory.EgressIPNamespaceType:
 		syncFunc = oc.syncEgressIPs
 
 	case factory.EgressNodeType:
 		syncFunc = oc.initClusterEgressPolicies
 
 	case factory.EgressIPPodType,
-		factory.EgressIPNamespaceType,
+		factory.EgressIPType,
 		factory.CloudPrivateIPConfigType:
 		syncFunc = nil
 
@@ -1344,7 +1344,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 						" add of type %v with the same key: %s",
 						objectsToRetry.oType, key)
 					internalCacheEntry := oc.getInternalCacheEntry(objectsToRetry.oType, obj)
-					if err := oc.deleteResource(objectsToRetry, obj, internalCacheEntry); err != nil {
+					if err := oc.deleteResource(objectsToRetry, retryEntry.oldObj, internalCacheEntry); err != nil {
 						klog.Errorf("Failed to delete old object %s of type %v,"+
 							" during add event: %v", key, objectsToRetry.oType, err)
 						oc.recordErrorEvent(objectsToRetry.oType, obj, err)
