@@ -34,8 +34,6 @@ import (
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 
-	utilnet "k8s.io/utils/net"
-
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -246,20 +244,6 @@ const (
 	// SCTP is the constant string for the string "SCTP"
 	SCTP = "SCTP"
 )
-
-func GetIPFullMask(ip string) string {
-	const (
-		// IPv4FullMask is the maximum prefix mask for an IPv4 address
-		IPv4FullMask = "/32"
-		// IPv6FullMask is the maxiumum prefix mask for an IPv6 address
-		IPv6FullMask = "/128"
-	)
-
-	if utilnet.IsIPv6(net.ParseIP(ip)) {
-		return IPv6FullMask
-	}
-	return IPv4FullMask
-}
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
@@ -763,7 +747,7 @@ func (oc *Controller) WatchPods() {
 			}
 			oc.checkAndDeleteRetryPod(pod)
 		},
-	}, oc.syncPods)
+	}, oc.syncPods, oc.watchFactory.GetHandlerPriority(""))
 
 	go func() {
 		// track the retryPods map and every 30 seconds check if any pods need to be retried
@@ -1035,7 +1019,7 @@ func (oc *Controller) WatchEgressNodes() {
 				}
 			}
 		},
-	}, oc.initClusterEgressPolicies)
+	}, oc.initClusterEgressPolicies, oc.watchFactory.GetHandlerPriority("EgressNodeType"))
 }
 
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
@@ -1088,7 +1072,7 @@ func (oc *Controller) WatchEgressIP() {
 				klog.Errorf("Unable to delete EgressIP: %s, err: %v", eIP.Name, err)
 			}
 		},
-	}, oc.syncEgressIPs)
+	}, nil)
 }
 
 func (oc *Controller) WatchEgressIPNamespaces() {
@@ -1112,7 +1096,7 @@ func (oc *Controller) WatchEgressIPNamespaces() {
 				klog.Errorf("Unable to delete egress IP matching namespace: %s, err: %v", namespace.Name, err)
 			}
 		},
-	}, nil)
+	}, oc.syncEgressIPs, oc.watchFactory.GetHandlerPriority("EgressIPNamespaceType"))
 }
 
 func (oc *Controller) WatchEgressIPPods() {
@@ -1143,7 +1127,7 @@ func (oc *Controller) WatchEgressIPPods() {
 				klog.Errorf("Unable to delete egress IP matching pod: %s/%s, err: %v", pod.Name, pod.Namespace, err)
 			}
 		},
-	}, nil)
+	}, nil, oc.watchFactory.GetHandlerPriority("EgressIPPodType"))
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
@@ -1163,7 +1147,7 @@ func (oc *Controller) WatchNamespaces() {
 			ns := obj.(*kapi.Namespace)
 			oc.deleteNamespace(ns)
 		},
-	}, oc.syncNamespaces)
+	}, oc.syncNamespaces, oc.watchFactory.GetHandlerPriority(""))
 	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
 }
 
@@ -1360,7 +1344,7 @@ func (oc *Controller) WatchNodes() {
 			gatewaysFailed.Delete(node.Name)
 			nodeClusterRouterPortFailed.Delete(node.Name)
 		},
-	}, oc.syncNodes)
+	}, oc.syncNodes, oc.watchFactory.GetHandlerPriority(""))
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
 }
 

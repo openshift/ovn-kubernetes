@@ -113,7 +113,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
 				klog.Errorf("Failed to delete VF representor %s. %s", vfRepName, err)
 			}
 		},
-	}, nil)
+	}, nil, n.watchFactory.GetHandlerPriority(""))
 }
 
 // getVfRepName returns the VF's representor of the VF assigned to the pod

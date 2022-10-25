@@ -326,7 +326,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	Context("when a processExisting is given", func() {
-		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector) {
+		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority uint32) {
 			wf, err = NewMasterWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -336,52 +336,117 @@ var _ = Describe("Watch Factory Operations", func() {
 				func(objs []interface{}) {
 					defer GinkgoRecover()
 					Expect(len(objs)).To(Equal(1))
-				})
+				}, wf.GetHandlerPriority(""))
 			Expect(h).NotTo(BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(h.priority).To(Equal(priority))
+			wf.removeHandler(objType, h)
+		}
+
+		testExistingFilteredHandler := func(objType reflect.Type, realObj string, namespace string, sel labels.Selector, priority uint32) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			h := wf.AddFilteredPodHandler(namespace, sel,
+				cache.ResourceEventHandlerFuncs{},
+				func(objs []interface{}) {
+					defer GinkgoRecover()
+					Expect(len(objs)).To(Equal(1))
+				}, wf.GetHandlerPriority(realObj))
+			Expect(h).NotTo(BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(h.priority).To(Equal(priority))
 			wf.removeHandler(objType, h)
 		}
 
 		It("is called for each existing pod", func() {
 			pods = append(pods, newPod("pod1", "default"))
-			testExisting(podType, "", nil)
+			testExisting(podType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing namespace", func() {
 			namespaces = append(namespaces, newNamespace("default"))
-			testExisting(namespaceType, "", nil)
+			testExisting(namespaceType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing node", func() {
 			nodes = append(nodes, newNode("default"))
-			testExisting(nodeType, "", nil)
+			testExisting(nodeType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing policy", func() {
 			policies = append(policies, newPolicy("denyall", "default"))
-			testExisting(policyType, "", nil)
+			pods = append(pods, newPod("pod1", "default"))
+			testExisting(policyType, "", nil, defaultHandlerPriority)
+		})
+
+		It("is called for each existing policy: PeerPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(podType, "PeerPodSelectorType", "default", nil, 2)
+		})
+
+		It("is called for each existing policy: LocalPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(podType, "LocalPodSelectorType", "default", nil, 4)
+		})
+
+		It("is called for each existing policy: PeerPodForNamespaceAndPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(podType, "PeerPodForNamespaceAndPodSelectorType", "default", nil, 3)
+		})
+
+		It("is called for each existing policy: PeerNamespaceAndPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(namespaceType, "PeerNamespaceAndPodSelectorType", "default", nil, 3)
+		})
+
+		It("is called for each existing policy: PeerNamespaceSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(namespaceType, "PeerNamespaceSelectorType", "default", nil, 2)
 		})
 
 		It("is called for each existing endpoints", func() {
 			endpoints = append(endpoints, newEndpoints("myendpoint", "default"))
-			testExisting(endpointsType, "", nil)
+			testExisting(endpointsType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing service", func() {
 			services = append(services, newService("myservice", "default"))
-			testExisting(serviceType, "", nil)
+			testExisting(serviceType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing egressFirewall", func() {
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myEgressFirewall", "default"))
-			testExisting(egressFirewallType, "", nil)
+			testExisting(egressFirewallType, "", nil, defaultHandlerPriority)
 		})
+
 		It("is called for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
-			testExisting(egressIPType, "", nil)
+			pods = append(pods, newPod("pod1", "default"))
+			testExisting(egressIPType, "", nil, defaultHandlerPriority)
 		})
+
+		It("is called for each existing egressIP: EgressIPPodType", func() {
+			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(podType, "EgressIPPodType", "default", nil, 1)
+		})
+
+		It("is called for each existing egressIP: EgressIPNamespaceType", func() {
+			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(namespaceType, "EgressIPNamespaceType", "default", nil, 1)
+		})
+
 		It("is called for each existing cloudPrivateIPConfig", func() {
 			cloudPrivateIPConfigs = append(cloudPrivateIPConfigs, newCloudPrivateIPConfig("192.168.176.25"))
-			testExisting(cloudPrivateIPConfigType, "", nil)
+			testExisting(cloudPrivateIPConfigType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
@@ -396,7 +461,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			testExisting(podType, "default", sel)
+			testExisting(podType, "default", sel, defaultHandlerPriority)
 		})
 	})
 
@@ -414,7 +479,7 @@ var _ = Describe("Watch Factory Operations", func() {
 					},
 					UpdateFunc: func(old, new interface{}) {},
 					DeleteFunc: func(obj interface{}) {},
-				}, nil)
+				}, nil, wf.GetHandlerPriority(""))
 			Expect(int(addCalls)).To(Equal(2))
 			wf.removeHandler(objType, h)
 		}
@@ -498,7 +563,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 	})
 
-	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
+	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, realObjType string, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}
 		h := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -516,13 +581,17 @@ var _ = Describe("Watch Factory Operations", func() {
 				atomic.AddInt32(&calls.deleted, 1)
 				funcs.DeleteFunc(obj)
 			},
-		}, nil)
+		}, nil, wf.GetHandlerPriority(realObjType))
 		Expect(h).NotTo(BeNil())
 		return h, &calls
 	}
 
 	addHandler := func(wf *WatchFactory, objType reflect.Type, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
-		return addFilteredHandler(wf, objType, "", nil, funcs)
+		return addFilteredHandler(wf, objType, "", "", nil, funcs)
+	}
+
+	addPriorityHandler := func(wf *WatchFactory, objType reflect.Type, realObjType string, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
+		return addFilteredHandler(wf, objType, realObjType, "", nil, funcs)
 	}
 
 	It("responds to pod add/update/delete events", func() {
@@ -961,6 +1030,174 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveNamespaceHandler(h)
 	})
 
+	It("correctly orders add events across prioritized handlers sharing the same object type", func() {
+		type opTest struct {
+			mu        sync.Mutex
+			namespace *v1.Namespace
+			added     int
+			updated   int
+		}
+		testNamespaces := make(map[string]*opTest)
+
+		for i := 0; i < 998; i++ {
+			name := fmt.Sprintf("mynamespace-%d", i)
+			namespace := newNamespace(name)
+			testNamespaces[name] = &opTest{namespace: namespace}
+			// Add all namespaces to the initial list
+			namespaces = append(namespaces, namespace)
+		}
+
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		nsh, c1 := addPriorityHandler(wf, namespaceType, "NamespaceType", cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(0))
+				ot.added++
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(0))
+				ot.updated++
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+			DeleteFunc: func(obj interface{}) {},
+		})
+
+		eipnsh, c2 := addPriorityHandler(wf, namespaceType, "EgressIPNamespaceType", cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(1), "add for EIP namespace %s processed before initial namespace add!", namespace.Name)
+				ot.added = ot.added * 10
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(1), "update for EIP namespace %s processed before initial namespace update!", newNamespace.Name)
+				ot.updated = ot.updated * 10
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+			DeleteFunc: func(obj interface{}) {},
+		})
+		peernsh, c3 := addPriorityHandler(wf, namespaceType, "PeerNamespaceSelectorType", cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(10), "add for peer namespace %s processed before EIP namespace add!", namespace.Name)
+				ot.added = ot.added - 2
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(10), "update for peer namespace %s processed before EIP namespace update!", newNamespace.Name)
+				ot.updated = ot.updated - 2
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+			DeleteFunc: func(obj interface{}) {},
+		})
+		peerpodnsh, c4 := addPriorityHandler(wf, namespaceType, "PeerNamespaceAndPodSelectorType", cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(8), "add for peerPod namespace %s processed before peer namespace add!", namespace.Name)
+				ot.added = ot.added / 2
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for peerPod namespace %s processed before peerPod namespace add!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(8), "update for peerPod namespace %s processed before peer namespace update!", newNamespace.Name)
+				ot.updated = ot.updated / 2
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+			DeleteFunc: func(obj interface{}) {},
+		})
+		done := make(chan bool)
+		go func() {
+			// Send an update event for each namespace
+			for _, n := range namespaces {
+				n.Status.Phase = v1.NamespaceTerminating
+				namespaceWatch.Modify(n)
+			}
+			done <- true
+		}()
+
+		// Adds are done synchronously at handler addition time
+		for _, ot := range testNamespaces {
+			ot.mu.Lock()
+			// ((((0 + 1) * 10) - 2) / 2) = 4
+			Expect(ot.added).To(Equal(4), "missing add for namespace %s", ot.namespace.Name)
+			ot.mu.Unlock()
+		}
+		Expect(c1.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c2.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c3.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c4.getAdded()).To(Equal(len(testNamespaces)))
+		<-done
+		// Updates are async and may take a bit longer to finish
+		Eventually(c1.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c2.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c3.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c4.getUpdated, 10).Should(Equal(len(testNamespaces)))
+
+		for _, ot := range testNamespaces {
+			ot.mu.Lock()
+			// ((((0 + 1) * 10) - 2) / 2) = 4
+			Expect(ot.updated).To(Equal(4), "missing update for namespace %s", ot.namespace.Name)
+			ot.mu.Unlock()
+		}
+
+		wf.RemoveNamespaceHandler(nsh)
+		wf.RemoveNamespaceHandler(eipnsh)
+		wf.RemoveNamespaceHandler(peernsh)
+		wf.RemoveNamespaceHandler(peerpodnsh)
+	})
+
 	It("responds to policy add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
@@ -1234,6 +1471,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		_, c := addFilteredHandler(wf,
 			podType,
+			"PodType",
 			"default",
 			sel,
 			cache.ResourceEventHandlerFuncs{
@@ -1302,6 +1540,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		equalPod := pod
 		h, c := addFilteredHandler(wf,
 			podType,
+			"PodType",
 			"default",
 			sel,
 			cache.ResourceEventHandlerFuncs{
