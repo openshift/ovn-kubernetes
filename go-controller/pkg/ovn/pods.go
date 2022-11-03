@@ -727,7 +727,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 	// observe the pod creation latency metric.
-	metrics.RecordPodCreated(pod)
+	// if pod was annotated (needs IP will be false) or had an lsp when addLogicalPort was called do not record pod metrics
+	if needsIP && !lspExist {
+		metrics.RecordPodCreated(pod)
+	}
 	return nil
 }
 
