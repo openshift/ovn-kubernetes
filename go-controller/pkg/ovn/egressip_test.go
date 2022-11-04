@@ -3894,22 +3894,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					node1GR.Nat = []string{podEIPSNAT.UUID}
 					node2GR.Nat = []string{}
 				}
-				// TODO, seems like the reroute policy isn't getting deleted corectly in 4.10: This should be fixed
-				/*the extra elements were
-				<[]*nbdb.LogicalRouterPolicy | len:1, cap:1>: [
-					{
-						UUID: "d8d5bd91-9125-4c82-b73b-38199cf80683",
-						Action: "reroute",
-						ExternalIDs: {"name": "egressip"},
-						Match: "ip4.src == 10.128.0.3",
-						Nexthop: nil,
-						Nexthops: [],
-						Options: nil,
-						Priority: 100,
-					},
-				]
-
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))*/
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 
 				// delete the second egressIP object to make sure the cache is updated podKey should be gone since nothing is managing it anymore
 				err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName2, metav1.DeleteOptions{})
