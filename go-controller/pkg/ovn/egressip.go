@@ -3,6 +3,7 @@ package ovn
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -1917,7 +1918,10 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 // deletePodEgressIPAssignment deletes the OVN programmed egress IP
 // configuration mentioned for addPodEgressIPAssignment.
 func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, podIPs []*net.IPNet) error {
-	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); err != nil {
+	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); errors.Is(err, libovsdbclient.ErrNotFound) {
+		// if the gateway router join IP setup is already gone, then don't count it as error.
+		klog.Warningf("Unable to delete logical router policy, err: %v", err)
+	} else if err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
 	ops, err := deleteNATRuleOps(e.nbClient, []ovsdb.Operation{}, podIPs, status, egressIPName)
@@ -1985,12 +1989,12 @@ func (e *egressIPController) deleteExternalGWPodSNAT(pod *kapi.Pod, podIPs []*ne
 func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
 	gatewayIPs, err := util.GetLRPAddrs(e.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
 	if err != nil {
-		klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
+		return nil, fmt.Errorf("attempt at finding node gateway router network information failed, err: %w", err)
 	}
-	if gatewayIP, err := util.MatchIPNetFamily(wantsIPv6, gatewayIPs); gatewayIP != nil {
-		return gatewayIP.IP, nil
-	} else {
+	if gatewayIP, err := util.MatchIPNetFamily(wantsIPv6, gatewayIPs); err != nil {
 		return nil, fmt.Errorf("could not find node %s gateway router: %v", node, err)
+	} else {
+		return gatewayIP.IP, nil
 	}
 }
 
@@ -2002,7 +2006,7 @@ func (e *egressIPController) handleEgressReroutePolicy(podIPNets []*net.IPNet, s
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
 	if err != nil {
-		return fmt.Errorf("unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %v", status.Node, isEgressIPv6, err)
+		return fmt.Errorf("unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %w", status.Node, isEgressIPv6, err)
 	}
 	if isEgressIPv6 {
 		gatewayRouterIPv6 = gatewayRouterIP.String()
@@ -2131,56 +2135,39 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egressipv1.EgressIPStatusItem) error {
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
-	if err != nil {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
+		// if the gateway router join IP setup is already gone, then don't count it as error. Unfortunately we won't remove
+		// any SNATs in this case however if joinIP setup is gone, its safe to assume the GR and all SNATs on it are also gone.
+		klog.Warningf("Unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %v", status.Node, isEgressIPv6, err)
+	} else if err != nil {
 		return fmt.Errorf("unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %v", status.Node, isEgressIPv6, err)
 	}
 
+	ops := []ovsdb.Operation{}
+
+	if gatewayRouterIP != nil {
+		gwIP := gatewayRouterIP.String()
+		policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
+			hasGatewayRouterIPNexthop := false
+			for _, nexthop := range item.Nexthops {
+				if nexthop == gwIP {
+					hasGatewayRouterIPNexthop = true
+					break
+				}
+			}
+			return item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == name && hasGatewayRouterIPNexthop
+		}
+		ops, err = libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(e.nbClient, nil, types.OVNClusterRouter, policyPred, gwIP)
+		if err != nil {
+			return fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
+				gatewayRouterIP, name, types.OVNClusterRouter, err)
+		}
+	}
 	nat := nbdb.NAT{}
 	natResult := []nbdb.NAT{}
 	natLogicalRouter := nbdb.LogicalRouter{}
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
-		Nexthops: []string{gatewayRouterIP.String()},
-	}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+
 	opsModel := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPolicy,
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				hasGatewayRouterIPNexthop := false
-				for _, nexthop := range lrp.Nexthops {
-					if nexthop == gatewayRouterIP.String() {
-						hasGatewayRouterIPNexthop = true
-						break
-					}
-				}
-				return lrp.Priority == types.EgressIPReroutePriority && lrp.ExternalIDs["name"] == name && hasGatewayRouterIPNexthop
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouterPolicy.Nexthops,
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				tmp := []nbdb.LogicalRouterPolicy{}
-				for _, lrp := range logicalRouterPolicyRes {
-					if len(lrp.Nexthops) == 1 && lrp.Nexthops[0] == gatewayRouterIP.String() {
-						tmp = append(tmp, lrp)
-					}
-				}
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&tmp)
-			},
-			BulkOp: true,
-		},
-		{
-			Model: &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				return lr.Name == types.OVNClusterRouter
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-			ErrNotFound: true,
-		},
 		{
 			Model: &nat,
 			ModelPredicate: func(nat *nbdb.NAT) bool {
@@ -2210,8 +2197,13 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 			},
 		},
 	}
-	if err := e.modelClient.Delete(opsModel...); err != nil {
-		return fmt.Errorf("unable to remove egress IP status setup, err: %v", err)
+	ops, err = e.modelClient.DeleteOps(ops, opsModel...)
+	if err != nil {
+		return fmt.Errorf("unable to remove logical router policies of egress IP status setup, err: %v", err)
+	}
+	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("unable to transact removal of egress IP status setup, err: %v", err)
 	}
 	return nil
 }
