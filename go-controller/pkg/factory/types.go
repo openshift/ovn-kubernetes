@@ -55,6 +55,8 @@ type NodeWatchFactory interface {
 
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
+
+	GetNamespace(name string) (*kapi.Namespace, error)
 }
 
 type Shutdownable interface {
