@@ -53,7 +53,8 @@ import (
 )
 
 const (
-	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
+	egressFirewallDNSDefaultDuration  = 30 * time.Minute
+	egressIPReachabilityCheckInterval = 5 * time.Second
 )
 
 // ACL logging severity levels
@@ -278,13 +279,14 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		lspEgressDenyCache:    make(map[string]int),
 		lspMutex:              &sync.Mutex{},
 		eIPC: egressIPController{
-			egressIPAssignmentMutex: &sync.Mutex{},
-			podAssignmentMutex:      &sync.Mutex{},
-			podAssignment:           make(map[string]*podAssignmentState),
-			allocator:               allocator{&sync.Mutex{}, make(map[string]*egressNode)},
-			nbClient:                libovsdbOvnNBClient,
-			modelClient:             modelClient,
-			watchFactory:            wf,
+			egressIPAssignmentMutex:   &sync.Mutex{},
+			podAssignmentMutex:        &sync.Mutex{},
+			podAssignment:             make(map[string]*podAssignmentState),
+			allocator:                 allocator{&sync.Mutex{}, make(map[string]*egressNode)},
+			nbClient:                  libovsdbOvnNBClient,
+			modelClient:               modelClient,
+			watchFactory:              wf,
+			reachabilityCheckInterval: egressIPReachabilityCheckInterval,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -963,10 +965,8 @@ func (oc *Controller) WatchEgressNodes() {
 				oc.setNodeEgressReady(node.Name, true)
 			}
 			isReachable := oc.isEgressNodeReachable(node)
-			if isReachable {
-				oc.setNodeEgressReachable(node.Name, true)
-			}
 			if hasEgressLabel && isReachable && isReady {
+				oc.setNodeEgressReachable(node.Name, true)
 				if err := oc.addEgressNode(node.Name); err != nil {
 					klog.Error(err)
 				}
@@ -1005,11 +1005,11 @@ func (oc *Controller) WatchEgressNodes() {
 			isNewReady := oc.isEgressNodeReady(newNode)
 			isNewReachable := oc.isEgressNodeReachable(newNode)
 			oc.setNodeEgressReady(newNode.Name, isNewReady)
-			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if !oldHadEgressLabel && newHasEgressLabel {
 				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
 				oc.setNodeEgressAssignable(newNode.Name, true)
 				if isNewReady && isNewReachable {
+					oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 					if err := oc.addEgressNode(newNode.Name); err != nil {
 						klog.Error(err)
 					}
@@ -1028,6 +1028,7 @@ func (oc *Controller) WatchEgressNodes() {
 				}
 			} else if isNewReady && isNewReachable {
 				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+				oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 				if err := oc.addEgressNode(newNode.Name); err != nil {
 					klog.Error(err)
 				}
