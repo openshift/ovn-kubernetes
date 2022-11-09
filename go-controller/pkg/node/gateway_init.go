@@ -75,7 +75,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
 func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
-	allIPs, err := util.GetNetworkInterfaceIPs(iface)
+	allIPs, err := util.GetNetworkInterfaceIPs(iface) // TODO should return IP addrs of br-ex
 	if err != nil {
 		return nil, fmt.Errorf("could not find IP addresses: %v", err)
 	}
@@ -137,8 +137,8 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 		}
 	}
 	gatewayIntf := config.Gateway.Interface
-	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
-		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf)
+	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" { // ******if nothing found above******
+		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf) // looks ok from logs, so nothing found above in config
 		if err != nil {
 			return nil, "", err
 		}
@@ -265,13 +265,13 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 
 	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
 		loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name, n.watchFactory)
-		portClaimWatcher, err = newPortClaimWatcher(n.recorder)
+		portClaimWatcher, err = newPortClaimWatcher(n.recorder) // TODO here it'll print " Node local addresses initialized to:...
 		if err != nil {
 			return err
 		}
 	}
-
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+	// find the next hops for the default route (through gw br-ex)
+	gatewayNextHops, gatewayIntf, err := getGatewayNextHops() // looks OK in logs
 	if err != nil {
 		return err
 	}
@@ -280,12 +280,12 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	if config.Gateway.EgressGWInterface != "" {
 		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
-
-	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
+	// get all ip addresses from br-ex
+	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf) // TODO here!
 	if err != nil {
 		return err
 	}
-
+	klog.Infof("riccardo: Found these IP addresses on %s: %v", gatewayIntf, ifAddrs)
 	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
 	// internal IP address.
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
@@ -297,7 +297,9 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 
 	v4IfAddr, _ := util.MatchIPNetFamily(false, ifAddrs)
 	v6IfAddr, _ := util.MatchIPNetFamily(true, ifAddrs)
+	klog.Infof("riccardo: %s: v4=%v, v6=%v", gatewayIntf, v4IfAddr, v6IfAddr)
 
+	// TODO here it already sets fd::69 on failing nodes...
 	if err := util.SetNodePrimaryIfAddr(nodeAnnotator, v4IfAddr, v6IfAddr); err != nil {
 		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
@@ -306,11 +308,14 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
+		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf,
+			egressGWInterface, ifAddrs, nodeAnnotator,
 			managementPortConfig, n.Kube, n.watchFactory)
 	case config.GatewayModeShared:
+		// TODO here it sets L4 gateway annotation with IPs found above
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
+		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf,
+			egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
 			managementPortConfig, n.watchFactory)
 	case config.GatewayModeDisabled:
 		var chassisID string

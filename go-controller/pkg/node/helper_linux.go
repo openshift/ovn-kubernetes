@@ -32,7 +32,7 @@ func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error)
 	}
 
 	if config.IPv6Mode {
-		intfIPv6Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V6, gwIface)
+		intfIPv6Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V6, gwIface) // here it prints the correct gw IP
 		if err != nil {
 			return "", gatewayIPs, err
 		}

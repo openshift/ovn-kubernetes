@@ -366,11 +366,11 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	// Now, we get IP addresses for the bridge
 	if len(gwIPs) > 0 {
 		// use gwIPs if provided
-		res.ips = gwIPs
+		res.ips = gwIPs // TODO what's provided as input then?
 	} else {
 		// get IP addresses from OVS bridge. If IP does not exist,
 		// error out.
-		res.ips, err = getNetworkInterfaceIPAddresses(gwIntf)
+		res.ips, err = getNetworkInterfaceIPAddresses(gwIntf) // TODO shouldn't we filter out some values here?
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get interface details for %s", gwIntf)
 		}
