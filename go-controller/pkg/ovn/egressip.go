@@ -2034,6 +2034,8 @@ type egressIPController struct {
 	watchFactory *factory.WatchFactory
 	// EgressIP Node reachability total timeout configuration
 	egressIPTotalTimeout int
+	// reachability check interval
+	reachabilityCheckInterval time.Duration
 }
 
 // addStandByEgressIPAssignment does the same setup that is done by addPodEgressIPAssignments but for
@@ -2318,7 +2320,7 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 // is important because egress IP is based upon routing traffic to these nodes,
 // and if they aren't reachable we shouldn't be using them for egress IP.
 func (oc *Controller) checkEgressNodesReachability() {
-	timer := time.NewTicker(5 * time.Second)
+	timer := time.NewTicker(oc.eIPC.reachabilityCheckInterval)
 	defer timer.Stop()
 	for {
 		select {
