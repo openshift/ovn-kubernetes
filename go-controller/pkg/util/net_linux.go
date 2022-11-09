@@ -10,8 +10,10 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/j-keck/arping"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -478,7 +480,7 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 
 	var ips []*net.IPNet
 	for _, addr := range addrs {
-		if addr.IP.IsLinkLocalUnicast() {
+		if addr.IP.IsLinkLocalUnicast() || isAddressReservedForInternalUse(addr.IPNet) {
 			continue
 		}
 		// Ignore addresses marked as secondary or deprecated since they may
@@ -491,6 +493,22 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 		ips = append(ips, addr.IPNet)
 	}
 	return ips, nil
+}
+
+func isAddressReservedForInternalUse(addr *net.IPNet) bool {
+	var subnetStr string
+	if addr.IP.To4() != nil {
+		subnetStr = types.V4MasqueradeSubnet
+	} else {
+		subnetStr = types.V6MasqueradeSubnet
+	}
+	_, subnet, err := net.ParseCIDR(subnetStr)
+	if err != nil {
+		klog.Errorf("Could not determine if %s is in reserved subnet %v: %v",
+			addr, subnetStr, err)
+		return false
+	}
+	return subnet.Contains(addr.IP)
 }
 
 // GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
