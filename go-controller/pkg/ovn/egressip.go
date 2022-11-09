@@ -2034,6 +2034,8 @@ type egressIPController struct {
 	watchFactory *factory.WatchFactory
 	// EgressIP Node reachability total timeout configuration
 	egressIPTotalTimeout int
+	// reachability check interval
+	reachabilityCheckInterval time.Duration
 }
 
 // addStandByEgressIPAssignment does the same setup that is done by addPodEgressIPAssignments but for

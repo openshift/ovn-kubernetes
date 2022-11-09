@@ -47,7 +47,8 @@ import (
 )
 
 const (
-	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
+	egressFirewallDNSDefaultDuration  = 30 * time.Minute
+	egressIPReachabilityCheckInterval = 5 * time.Second
 )
 
 // ACL logging severity levels
@@ -245,6 +246,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			nbClient:                          libovsdbOvnNBClient,
 			watchFactory:                      wf,
 			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
+			reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
 		},
 		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
 		multicastSupport:          config.EnableMulticast,
