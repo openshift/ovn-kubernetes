@@ -499,10 +499,8 @@ func (h *masterEventHandler) AddResource(obj interface{}, fromRetryLoop bool) er
 			h.oc.setNodeEgressReady(node.Name, true)
 		}
 		isReachable := h.oc.isEgressNodeReachable(node)
-		if isReachable {
-			h.oc.setNodeEgressReachable(node.Name, true)
-		}
 		if hasEgressLabel && isReachable && isReady {
+			h.oc.setNodeEgressReachable(node.Name, true)
 			if err := h.oc.addEgressNode(node.Name); err != nil {
 				return err
 			}
@@ -631,11 +629,11 @@ func (h *masterEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryC
 		isNewReady := h.oc.isEgressNodeReady(newNode)
 		isNewReachable := h.oc.isEgressNodeReachable(newNode)
 		h.oc.setNodeEgressReady(newNode.Name, isNewReady)
-		h.oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 		if !oldHadEgressLabel && newHasEgressLabel {
 			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
 			h.oc.setNodeEgressAssignable(newNode.Name, true)
 			if isNewReady && isNewReachable {
+				h.oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 				if err := h.oc.addEgressNode(newNode.Name); err != nil {
 					return err
 				}
@@ -655,6 +653,7 @@ func (h *masterEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryC
 			}
 		} else if isNewReady && isNewReachable {
 			klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+			h.oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if err := h.oc.addEgressNode(newNode.Name); err != nil {
 				return err
 			}
