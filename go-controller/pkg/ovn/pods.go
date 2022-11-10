@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -267,7 +268,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		allOps = append(allOps, ops...)
 	}
 	ops, err = oc.delLSPOps(logicalPort, nodeName, portUUID)
-	if err != nil {
+	// Tolerate cases where logical switch of the logical port no longer exist in OVN.
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to create delete ops for the lsp: %s: %s", logicalPort, err)
 	}
 	allOps = append(allOps, ops...)
@@ -838,6 +840,10 @@ func (oc *Controller) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]o
 		klog.Errorf("Error getting logical switch for node %s: switch not in logical switch cache", logicalSwitch)
 		// Not in cache: Try getting the logical switch from ovn database (slower method)
 		if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, logicalSwitch); err != nil {
+			if err == libovsdbclient.ErrNotFound {
+				// ls doesn't exist; nothing to do
+				return allOps, nil
+			}
 			return nil, fmt.Errorf("can't find switch for node %s: %v", logicalSwitch, err)
 		}
 	} else {

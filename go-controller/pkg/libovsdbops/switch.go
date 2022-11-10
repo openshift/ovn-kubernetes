@@ -149,6 +149,20 @@ func FindSwitchByName(nbClient libovsdbclient.Client, name string) (*nbdb.Logica
 	return &switches[0], nil
 }
 
+// DeleteLogicalSwitch deletes the provided logical switch
+func DeleteLogicalSwitch(nbClient libovsdbclient.Client, swName string) error {
+	sw, err := FindSwitchByName(nbClient, swName)
+	if err != nil {
+		return err
+	}
+	var ops []libovsdb.Operation
+	if ops, err = nbClient.Where(sw).Delete(); err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}
+
 func AddLoadBalancersToSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lswitch *nbdb.LogicalSwitch, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
