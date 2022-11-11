@@ -321,7 +321,8 @@ func TestLinkAddrAdd(t *testing.T) {
 
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
-			err := LinkAddrAdd(tc.inputLink, tc.inputNewAddr)
+			// TODO: Test with flags
+			err := LinkAddrAdd(tc.inputLink, tc.inputNewAddr, 0)
 			t.Log(err)
 			if tc.errExp {
 				assert.Error(t, err)
