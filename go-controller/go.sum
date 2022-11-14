@@ -375,8 +375,8 @@ github.com/openshift/api v0.0.0-20211201215911-5a82bae32e46/go.mod h1:RsQCVJu4qh
 github.com/openshift/build-machinery-go v0.0.0-20210712174854-1bb7fd1518d3/go.mod h1:b1BuldmJlbA/xYtdZvKi+7j5YGB44qJUJDZ9zwiNCfE=
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366 h1:/llKlbXC7F6rqTkAl2GE//9GDR0iDsqJEFvvJ1kLJXg=
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366/go.mod h1:HJeHsH6mPyrrOVS/2j1zcztGAJG9ETKbqtlyohs84yY=
-github.com/ovn-org/libovsdb v0.6.1-0.20220826133223-e4d2d8648be7 h1:5QygTHBNvCe3A78OAl9UqllaIGX4TL00te/OIBiHHEo=
-github.com/ovn-org/libovsdb v0.6.1-0.20220826133223-e4d2d8648be7/go.mod h1:j6GV+8zVENVmWFxHg5nNcn88ge67sq35yyoAEso7TD8=
+github.com/ovn-org/libovsdb v0.6.1-0.20221101143603-8f21d188c3a5 h1:Cw0JXIHSGp8etz5/P7zNQ0tCMmTljBGBr8Rn2P1PuzQ=
+github.com/ovn-org/libovsdb v0.6.1-0.20221101143603-8f21d188c3a5/go.mod h1:S/+Hux9//oB7yLaPsUKnXTzZc6S1C4a9HP0UifXfKz0=
 github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
