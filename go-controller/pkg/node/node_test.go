@@ -226,10 +226,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
+						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-enable-lflow-cache=true",
-						nodeIP, interval, ofintval, nodeName),
+						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
@@ -286,10 +287,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
+						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-enable-lflow-cache=true",
-						nodeIP, interval, ofintval, nodeName),
+						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
@@ -359,12 +361,13 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
+						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-enable-lflow-cache=false "+
 						"external_ids:ovn-limit-lflow-cache=1000 "+
-						"external_ids:ovn-limit-lflow-cache-kb=100000",
-						nodeIP, interval, ofintval, nodeName),
+						"external_ids:ovn-memlimit-lflow-cache-kb=100000",
+						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
@@ -424,10 +427,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
+						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-enable-lflow-cache=true",
-						nodeIP, interval, ofintval, nodeName),
+						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -495,10 +499,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
+						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-enable-lflow-cache=true",
-						nodeIP, interval, ofintval, nodeName),
+						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -566,10 +571,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
+						"other_config:bundle-idle-timeout=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-enable-lflow-cache=true",
-						nodeIP, interval, ofintval, nodeName),
+						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
