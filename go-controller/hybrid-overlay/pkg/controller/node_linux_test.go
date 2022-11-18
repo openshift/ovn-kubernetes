@@ -207,7 +207,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		_ = netns.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ovntest.AddLink(extBridgeName)
-
+			ovntest.AddLink(fmt.Sprintf(OVSVXLANDeviceTemplate, config.HybridOverlay.VXLANPort))
 			// Set up management interface with its address
 			link := ovntest.AddLink(types.K8sMgmtIntfName)
 			_, thisNet, err := net.ParseCIDR(thisSubnet)

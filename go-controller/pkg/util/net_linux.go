@@ -16,6 +16,8 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -166,6 +168,29 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup link %s: %v", interfaceName, err)
 	}
+	err = netLinkOps.LinkSetUp(link)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set the link %s up: %v", interfaceName, err)
+	}
+	return link, nil
+}
+
+// LinkSetUpWithPolling returns the netlink device with its state marked up
+func LinkSetUpWithPolling(interfaceName string, interval, timeout time.Duration) (netlink.Link, error) {
+	var link netlink.Link
+	var err error
+	// First wait for the VXLAN device to be created by master, timeout is 1 second
+	if err = wait.PollImmediate(interval, timeout, func() (bool, error) {
+		klog.Infof("polling %s...", interfaceName) // TODO remove this
+		if link, err = netLinkOps.LinkByName(interfaceName); err != nil {
+			klog.Errorf("polling %s...error: %v", interfaceName, err) // TODO remove this
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return nil, fmt.Errorf("timed out waiting for %s to be created: %v", interfaceName, err)
+	}
+
 	err = netLinkOps.LinkSetUp(link)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set the link %s up: %v", interfaceName, err)
