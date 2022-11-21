@@ -378,7 +378,7 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// delete egress firewall acls off any logical switch which has it,
 	// then manually remove the egressFirewall ACLs instead of relying on ovsdb garbage collection to do so
 	pSwitch := func(item *nbdb.LogicalSwitch) bool { return true }
-	err = libovsdbops.DeleteACLs(oc.nbClient, nil, pSwitch, egressFirewallACLs...)
+	err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, pSwitch, egressFirewallACLs...)
 	if err != nil {
 		return err
 	}

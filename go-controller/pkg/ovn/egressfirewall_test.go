@@ -182,8 +182,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				// Direction of both ACLs will be converted to
 				keepACL.Direction = t.DirectionToLPort
 
+				// purgeACL ACL will be deleted when test server starts deleting dereferenced ACLs
+				// for now we need to update its fields, since it is present in the db
+				purgeACL.Direction = t.DirectionToLPort
+
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
+					purgeACL,
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
@@ -574,6 +579,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				nodeSwitch1.ACLs = []string{}
 				nodeSwitch2.ACLs = []string{}
 				expectedDatabaseState = []libovsdb.TestData{
+					// this ACL will be deleted when test server starts deleting dereferenced ACLs
+					ipv4ACL,
 					nodeSwitch1,
 					nodeSwitch2,
 					clusterRouter,
@@ -684,8 +691,25 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ipv4ACL.Action = nbdb.ACLActionDrop
+				// egress firewall is updated by deleting and creating from scratch.
+				// since old acl won't be garbage-collected by the test server, it will stay,
+				// but won't be referenced from the switch
+				ipv4ACLStale := libovsdbops.BuildACL(
+					"",
+					t.DirectionToLPort,
+					t.EgressFirewallStartPriority,
+					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
+					nbdb.ACLActionAllow,
+					"",
+					"",
+					false,
+					map[string]string{"egressFirewall": "namespace1"},
+					nil,
+				)
+				ipv4ACLStale.UUID = "ipv4ACLStale-UUID"
 
+				ipv4ACL.Action = nbdb.ACLActionDrop
+				expectedDatabaseState = append(expectedDatabaseState, ipv4ACLStale)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
@@ -818,6 +842,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				nodeSwitch1.ACLs = []string{}
 				nodeSwitch2.ACLs = []string{}
 				expectedDatabaseState = []libovsdb.TestData{
+					// this ACL will be deleted when test server starts deleting dereferenced ACLs
+					ipv4ACL,
 					nodeSwitch1,
 					nodeSwitch2,
 					clusterRouter,
@@ -956,7 +982,27 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
 				}).Should(gomega.BeNil())
+
+				// egress firewall is updated by deleting and creating from scratch.
+				// since old acl won't be garbage-collected by the test server, it will stay,
+				// but won't be referenced from the switch
+				ipv4ACLStale := libovsdbops.BuildACL(
+					"",
+					t.DirectionToLPort,
+					t.EgressFirewallStartPriority,
+					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
+					nbdb.ACLActionAllow,
+					"",
+					"",
+					false,
+					map[string]string{"egressFirewall": "namespace1"},
+					nil,
+				)
+				ipv4ACLStale.UUID = "ipv4ACLStale-UUID"
+
 				ipv4ACL.Action = nbdb.ACLActionDrop
+				expectedDatabaseState = append(expectedDatabaseState, ipv4ACLStale)
+
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
@@ -1102,8 +1148,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				// Direction of both ACLs will be converted to
 				keepACL.Direction = t.DirectionToLPort
 
+				// purgeACL ACL will be deleted when test server starts deleting dereferenced ACLs
+				// for now we need to update its fields, since it is present in the db
+				purgeACL.Direction = t.DirectionToLPort
+
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
+					purgeACL,
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
@@ -1465,7 +1516,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// join switch should return to orignal state, egfw was deleted
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(fakeOVN.dbSetup.NBData))
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(append(fakeOVN.dbSetup.NBData,
+					// this ACL will be deleted when test server starts deleting dereferenced ACLs
+					ipv4ACL)))
 
 				return nil
 			}
@@ -1556,8 +1609,25 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// egress firewall is updated by deleting and creating from scratch
+				// since old acl won't be garbage-collected by the test server, it will stay,
+				// but won't be referenced from the switch
+				ipv4ACLStale := libovsdbops.BuildACL(
+					"",
+					t.DirectionToLPort,
+					t.EgressFirewallStartPriority,
+					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
+					nbdb.ACLActionAllow,
+					"",
+					"",
+					false,
+					map[string]string{"egressFirewall": "namespace1"},
+					nil,
+				)
+				ipv4ACLStale.UUID = "ipv4ACLStale-UUID"
 
 				ipv4ACL.Action = nbdb.ACLActionDrop
+				expectedDatabaseState = append(expectedDatabaseState, ipv4ACLStale)
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
