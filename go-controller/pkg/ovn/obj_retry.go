@@ -15,7 +15,6 @@ import (
 	knet "k8s.io/api/networking/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/cache"
 
 	"k8s.io/klog/v2"
@@ -251,7 +250,8 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressIPPodType,
 		factory.EgressNodeType,
 		factory.CloudPrivateIPConfigType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.NamespaceType:
 		return true
 	}
 	return false
@@ -341,6 +341,9 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 		// force update path for EgressIP resource.
 		return false, nil
 
+	case factory.NamespaceType:
+		// force update path for Namespace resource.
+		return false, nil
 	}
 
 	return false, fmt.Errorf("no object comparison for type %v", objType)
@@ -356,7 +359,7 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		return getPolicyNamespacedName(np), nil
+		return getPolicyKey(np), nil
 
 	case factory.NodeType,
 		factory.EgressNodeType:
@@ -386,7 +389,8 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 
 	case factory.PeerNamespaceAndPodSelectorType,
 		factory.PeerNamespaceSelectorType,
-		factory.EgressIPNamespaceType:
+		factory.EgressIPNamespaceType,
+		factory.NamespaceType:
 		namespace, ok := obj.(*kapi.Namespace)
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
@@ -477,7 +481,8 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 
 	case factory.PeerNamespaceAndPodSelectorType,
 		factory.PeerNamespaceSelectorType,
-		factory.EgressIPNamespaceType:
+		factory.EgressIPNamespaceType,
+		factory.NamespaceType:
 		obj, err = oc.watchFactory.GetNamespace(key)
 
 	case factory.EgressFirewallType:
@@ -583,7 +588,8 @@ func resourceNeedsUpdate(objType reflect.Type) bool {
 		factory.EgressIPType,
 		factory.EgressIPPodType,
 		factory.EgressIPNamespaceType,
-		factory.CloudPrivateIPConfigType:
+		factory.CloudPrivateIPConfigType,
+		factory.NamespaceType:
 		return true
 	}
 	return false
@@ -647,66 +653,29 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceAdd(extraParameters.gp, service)
+		return oc.handlePeerServiceAdd(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		extraParameters.np.RLock()
-		alreadyDeleted := extraParameters.np.deleted
-		extraParameters.np.RUnlock()
-		if alreadyDeleted {
-			return nil
-		}
-
-		// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
-		retryPeerPods := NewRetryObjs(
-			factory.PeerPodForNamespaceAndPodSelectorType,
-			namespace.Name,
-			extraParameters.podSelector,
-			nil,
-			&NetworkPolicyExtraParameters{gp: extraParameters.gp},
-		)
-		// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
-		// on existing pods so we can't be holding the lock at this point
-		podHandler, err := oc.WatchResource(retryPeerPods)
-		if err != nil {
-			klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorTypeVar: %v", err)
-			return err
-		}
-
-		extraParameters.np.Lock()
-		defer extraParameters.np.Unlock()
-		if extraParameters.np.deleted {
-			oc.watchFactory.RemovePodHandler(podHandler)
-			return nil
-		}
-		extraParameters.np.podHandlerList = append(extraParameters.np.podHandlerList, podHandler)
+		return oc.handlePeerNamespaceAndPodAdd(extraParameters.np, extraParameters.gp,
+			extraParameters.podSelector, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Update the ACL ...
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the added address set was not already in the 'gress policy
-			return extraParameters.gp.addNamespaceAddressSet(namespace.Name)
-		})
+		return oc.handlePeerNamespaceSelectorAdd(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -765,6 +734,13 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
 
+	case factory.NamespaceType:
+		ns, ok := obj.(*kapi.Namespace)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
+		}
+		return oc.AddNamespace(ns)
+
 	default:
 		return fmt.Errorf("no add function for object type %v", objectsToRetry.oType)
 	}
@@ -809,19 +785,16 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			newObj)
 
 	case factory.EgressIPType:
@@ -903,6 +876,10 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
+
+	case factory.NamespaceType:
+		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
+		return oc.updateNamespace(oldNs, newNs)
 	}
 
 	return fmt.Errorf("no update function for object type %v", objectsToRetry.oType)
@@ -910,7 +887,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 
 // Given a *retryObjs instance, an object and optionally a cachedObj, deleteResource deletes the object from the cluster
 // according to the delete logic of its resource type. cachedObj is the internal cache entry for this object,
-// used for now for pods and network policies.
+// used for now only for pods.
 func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj interface{}) error {
 	switch objectsToRetry.oType {
 	case factory.PodType:
@@ -924,18 +901,11 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 		return oc.removePod(pod, portInfo)
 
 	case factory.PolicyType:
-		var cachedNP *networkPolicy
 		knp, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
-
-		if cachedObj != nil {
-			if cachedNP, ok = cachedObj.(*networkPolicy); !ok {
-				cachedNP = nil
-			}
-		}
-		return oc.deleteNetworkPolicy(knp, cachedNP)
+		return oc.deleteNetworkPolicy(knp)
 
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
@@ -950,57 +920,28 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceDelete(extraParameters.gp, service)
+		return oc.handlePeerServiceDelete(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		// when the namespace labels no longer apply
-		// remove the namespaces pods from the address_set
-		var errs []error
-		namespace := obj.(*kapi.Namespace)
-		pods, _ := oc.watchFactory.GetPods(namespace.Name)
-
-		for _, pod := range pods {
-			if err := oc.handlePeerPodSelectorDelete(extraParameters.gp, pod); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		return kerrorsutil.NewAggregate(errs)
+		return oc.handlePeerNamespaceAndPodDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Remove namespace address set from the *gress policy in cache
-		// (done in gress.delNamespaceAddressSet()), and then update ACLs
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the removed address set was in the 'gress policy
-			return extraParameters.gp.delNamespaceAddressSet(namespace.Name)
-		})
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
-			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
-			obj)
+		return oc.handlePeerNamespaceSelectorDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -1041,6 +982,10 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
+
+	case factory.NamespaceType:
+		ns := obj.(*kapi.Namespace)
+		return oc.deleteNamespace(ns)
 
 	default:
 		return fmt.Errorf("object type %v not supported", objectsToRetry.oType)
@@ -1188,39 +1133,12 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) er
 	case factory.NodeType:
 		syncFunc = oc.syncNodes
 
-	case factory.PeerServiceType,
-		factory.PeerNamespaceAndPodSelectorType:
-		syncFunc = nil
-
-	case factory.PeerPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerNamespaceSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		// the function below will never fail, so there's no point in making it retriable...
-		syncFunc = func(i []interface{}) error {
-			// This needs to be a write lock because there's no locking around 'gress policies
-			extraParameters.np.Lock()
-			defer extraParameters.np.Unlock()
-			// We load the existing address set into the 'gress policy.
-			// Notice that this will make the AddFunc for this initial
-			// address set a noop.
-			// The ACL must be set explicitly after setting up this handler
-			// for the address set to be considered.
-			extraParameters.gp.addNamespaceAddressSets(i)
-			return nil
-		}
-
-	case factory.LocalPodSelectorType:
+	case factory.LocalPodSelectorType,
+		factory.PeerServiceType,
+		factory.PeerNamespaceAndPodSelectorType,
+		factory.PeerPodSelectorType,
+		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.PeerNamespaceSelectorType:
 		syncFunc = r.syncFunc
 
 	case factory.EgressFirewallType:
@@ -1236,6 +1154,9 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) er
 		factory.EgressIPType,
 		factory.CloudPrivateIPConfigType:
 		syncFunc = nil
+
+	case factory.NamespaceType:
+		syncFunc = oc.syncNamespaces
 
 	default:
 		return nil, fmt.Errorf("no sync function for object type %v", r.oType)

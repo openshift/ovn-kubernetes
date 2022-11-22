@@ -24,6 +24,7 @@ import (
 
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -53,45 +54,6 @@ const (
 type ACLLoggingLevels struct {
 	Allow string `json:"allow,omitempty"`
 	Deny  string `json:"deny,omitempty"`
-}
-
-// namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
-// or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
-// nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
-// manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
-type namespaceInfo struct {
-	sync.RWMutex
-
-	// addressSet is an address set object that holds the IP addresses
-	// of all pods in the namespace.
-	addressSet addressset.AddressSet
-
-	// map from NetworkPolicy name to networkPolicy. You must hold the
-	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
-	// networkPolicy's mutex (and not necessarily the namespaceInfo's) to work with
-	// the policy itself.
-	networkPolicies map[string]*networkPolicy
-
-	hybridOverlayExternalGW net.IP
-	hybridOverlayVTEP       net.IP
-
-	// routingExternalGWs is a slice of net.IP containing the values parsed from
-	// annotation k8s.ovn.org/routing-external-gws
-	routingExternalGWs gatewayInfo
-
-	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
-	// exgw IPs
-	// key is <namespace>_<pod name>
-	routingExternalPodGWs map[string]gatewayInfo
-
-	multicastEnabled bool
-
-	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
-	aclLogging ACLLoggingLevels
-
-	// Per-namespace port group default deny UUIDs
-	portGroupIngressDenyName string // Port group Name for ingress deny rule
-	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -149,16 +111,19 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
-	// For each logical port, the number of network policies that want
-	// to add an ingress deny rule.
-	lspIngressDenyCache map[string]int
+	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
+	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
+	// network policy is only deleted from this map after successful cleanup.
+	// Allowed order of locking is namespace Lock -> oc.networkPolicies key Lock -> networkPolicy.Lock
+	// Don't take namespace Lock while holding networkPolicy key lock to avoid deadlock.
+	networkPolicies *syncmap.SyncMap[*networkPolicy]
 
-	// For each logical port, the number of network policies that want
-	// to add an egress deny rule.
-	lspEgressDenyCache map[string]int
-
-	// A mutex for lspIngressDenyCache and lspEgressDenyCache
-	lspMutex *sync.Mutex
+	// map of existing shared port groups for network policies
+	// port group exists in the db if and only if port group key is present in this map
+	// key is namespace
+	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
+	// make sure to keep this order to avoid deadlocks
+	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
 	// Supports multicast?
 	multicastSupport bool
@@ -220,6 +185,8 @@ type Controller struct {
 	retryNodes *retryObjs
 	// Objects for Cloud private IP config that need to be retried
 	retryCloudPrivateIPConfig *retryObjs
+	// Objects for namespaces that need to be retried
+	retryNamespaces *retryObjs
 	// Node-specific syncMap used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
@@ -262,19 +229,18 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory:          wf,
-		stopChan:              stopChan,
-		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
-		lsManager:             lsm.NewLogicalSwitchManager(),
-		logicalPortCache:      newPortCache(stopChan),
-		namespaces:            make(map[string]*namespaceInfo),
-		namespacesMutex:       sync.Mutex{},
-		externalGWCache:       make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:        sync.RWMutex{},
-		addressSetFactory:     addressSetFactory,
-		lspIngressDenyCache:   make(map[string]int),
-		lspEgressDenyCache:    make(map[string]int),
-		lspMutex:              &sync.Mutex{},
+		watchFactory:           wf,
+		stopChan:               stopChan,
+		masterSubnetAllocator:  subnetallocator.NewSubnetAllocator(),
+		lsManager:              lsm.NewLogicalSwitchManager(),
+		logicalPortCache:       newPortCache(stopChan),
+		namespaces:             make(map[string]*namespaceInfo),
+		namespacesMutex:        sync.Mutex{},
+		externalGWCache:        make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:         sync.RWMutex{},
+		addressSetFactory:      addressSetFactory,
+		networkPolicies:        syncmap.NewSyncMap[*networkPolicy](),
+		sharedNetpolPortGroups: syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -300,6 +266,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryEgressIPPods:         NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
 		retryEgressNodes:          NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
 		retryCloudPrivateIPConfig: NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
+		retryNamespaces:           NewRetryObjs(factory.NamespaceType, "", nil, nil, nil),
 		recorder:                  recorder,
 		nbClient:                  libovsdbOvnNBClient,
 		sbClient:                  libovsdbOvnSBClient,
@@ -600,27 +567,8 @@ func (oc *Controller) WatchEgressIPPods() error {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() error {
-	start := time.Now()
-	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			oc.AddNamespace(ns)
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
-			oc.updateNamespace(oldNs, newNs)
-		},
-		DeleteFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			oc.deleteNamespace(ns)
-		},
-	}, oc.syncNamespaces)
-	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
-	if err != nil {
-		klog.Errorf("Failed to watch namespaces err: %v", err)
-		return err
-	}
-	return nil
+	_, err := oc.WatchResource(oc.retryNamespaces)
+	return err
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
@@ -664,19 +612,6 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 func (oc *Controller) WatchNodes() error {
 	_, err := oc.WatchResource(oc.retryNodes)
 	return err
-}
-
-// GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
-func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
-		return &ACLLoggingLevels{
-			Allow: "",
-			Deny:  "",
-		}
-	}
-	defer nsUnlock()
-	return &nsInfo.aclLogging
 }
 
 // Verify if controller can support ACL logging and validate annotation
