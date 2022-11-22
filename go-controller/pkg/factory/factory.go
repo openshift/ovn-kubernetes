@@ -2,7 +2,9 @@ package factory
 
 import (
 	"fmt"
+	"github.com/ovn-org/libovsdb/client"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -88,7 +90,7 @@ var (
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
-func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
+func NewMasterWatchFactory(ovnClientset *util.OVNClientset, nbClient client.Client, netPolObjects *sync.Map) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
@@ -135,7 +137,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-		defaultNumEventQueues)
+		defaultNumEventQueues, nbClient, netPolObjects)
 	if err != nil {
 		return nil, err
 	}
@@ -152,12 +154,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
-		wf.stopChan, defaultNumEventQueues)
+		wf.stopChan, defaultNumEventQueues, nbClient, &sync.Map{})
 	if err != nil {
 		return nil, err
 	}
 	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
-		defaultNumEventQueues)
+		defaultNumEventQueues, nbClient, &sync.Map{})
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +274,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		return nil, err
 	}
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-		defaultNumEventQueues)
+		defaultNumEventQueues, nil, &sync.Map{})
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +378,7 @@ func (wf *WatchFactory) GetHandlerPriority(objType string) (priority uint32) {
 	}
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}),  priority uint32) *Handler {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}), priority uint32) *Handler {
 	inf, ok := wf.informers[objType]
 	if !ok {
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)

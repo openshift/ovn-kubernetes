@@ -2,6 +2,8 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/libovsdb/ovsdb"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"net"
 	"strconv"
 	"strings"
@@ -133,7 +135,7 @@ func (gp *gressPolicy) deletePeerSvcVip(nbClient client.Client, service *v1.Serv
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
-func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
+func (gp *gressPolicy) addPeerPods(transact bool, pods ...*v1.Pod) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
 			gp.policyName)
@@ -151,8 +153,20 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 		}
 		ips = append(ips, podIPs...)
 	}
+	if transact {
+		return gp.peerAddressSet.AddIPs(ips)
+	}
 
-	return gp.peerAddressSet.AddIPs(ips)
+	// single pod case with pod handler
+	ops, err := gp.peerAddressSet.AddIPsReturnOps(ips)
+	if err == nil {
+		namespacedName := ktypes.NamespacedName{Namespace: pods[0].Namespace, Name: pods[0].Name}
+		if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
+			newOps := append(existingOps.([]ovsdb.Operation), ops...)
+			NetPolObjects.Store(namespacedName, newOps)
+		}
+	}
+	return err
 }
 
 func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
@@ -160,7 +174,15 @@ func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	if err != nil {
 		return err
 	}
-	return gp.peerAddressSet.DeleteIPs(ips)
+	ops, err := gp.peerAddressSet.DeleteIPsReturnOps(ips)
+	if err == nil {
+		namespacedName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+		if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
+			newOps := append(existingOps.([]ovsdb.Operation), ops...)
+			NetPolObjects.Store(namespacedName, newOps)
+		}
+	}
+	return err
 }
 
 // If the port is not specified, it implies all ports for that protocol

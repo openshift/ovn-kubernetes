@@ -3,6 +3,7 @@ package ovn
 import (
 	"errors"
 	"fmt"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"net"
 	"reflect"
 	"strings"
@@ -1013,12 +1014,22 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, 
 		klog.Errorf(err.Error())
 	}
 
+	pod := obj.(*kapi.Pod)
+	namespacedName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+	if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
+		newOps := append(existingOps.([]ovsdb.Operation), ops...)
+		NetPolObjects.Store(namespacedName, newOps)
+	}
+
+	/**
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, obj)
 		klog.Errorf(err.Error())
 		return
 	}
+
+	*/
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, np *networkPolicy,
@@ -1051,12 +1062,22 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 		klog.Errorf(err.Error())
 	}
 
+	pod := obj.(*kapi.Pod)
+	namespacedName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+	if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
+		newOps := append(existingOps.([]ovsdb.Operation), ops...)
+		NetPolObjects.Store(namespacedName, newOps)
+	}
+
+	/**
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		oc.processLocalPodSelectorSetPods(policy, np, obj)
 		klog.Errorf(err.Error())
 		return
 	}
+
+	*/
 }
 
 func (oc *Controller) handleLocalPodSelector(
@@ -1545,7 +1566,24 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 // handlePeerPodSelectorAddUpdate adds the IP address of a pod that has been
 // selected as a peer by a NetworkPolicy's ingress/egress section to that
 // ingress/egress address set
-func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...interface{}) {
+func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, obj interface{}) {
+	pod := obj.(*kapi.Pod)
+	if pod.Spec.NodeName == "" {
+		return
+	}
+
+	// If no IP is found, the pod handler may not have added it by the time the network policy handler
+	// processed this pod event. It will grab it during the pod update event to add the annotation,
+	// so don't log an error here.
+	if err := gp.addPeerPods(false, pod); err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
+		klog.Errorf(err.Error())
+	}
+}
+
+// handlePeerPodSelectorAddUpdate adds the IP address of a pod that has been
+// selected as a peer by a NetworkPolicy's ingress/egress section to that
+// ingress/egress address set
+func (oc *Controller) handlePeerPodSelectorAddUpdateTransact(gp *gressPolicy, objs ...interface{}) {
 	pods := make([]*kapi.Pod, 0, len(objs))
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
@@ -1557,7 +1595,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 	// If no IP is found, the pod handler may not have added it by the time the network policy handler
 	// processed this pod event. It will grab it during the pod update event to add the annotation,
 	// so don't log an error here.
-	if err := gp.addPeerPods(pods...); err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
+	if err := gp.addPeerPods(true, pods...); err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 		klog.Errorf(err.Error())
 	}
 }
@@ -1654,7 +1692,7 @@ func (oc *Controller) handlePeerPodSelector(
 				}
 			},
 		}, func(objs []interface{}) {
-			oc.handlePeerPodSelectorAddUpdate(gp, objs...)
+			oc.handlePeerPodSelectorAddUpdateTransact(gp, objs...)
 		}, oc.watchFactory.GetHandlerPriority("PeerPodSelectorType"))
 	np.podHandlerList = append(np.podHandlerList, h)
 }
@@ -1699,7 +1737,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 							}
 						},
 					}, func(objs []interface{}) {
-						oc.handlePeerPodSelectorAddUpdate(gp, objs...)
+						oc.handlePeerPodSelectorAddUpdateTransact(gp, objs...)
 					}, oc.watchFactory.GetHandlerPriority("PeerPodForNamespaceAndPodSelectorType"))
 				np.Lock()
 				defer np.Unlock()
