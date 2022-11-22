@@ -1,6 +1,7 @@
 package logicalswitchmanager
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -15,6 +16,9 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
+
+// SwitchNotFound is used to inform the logical switch was not found in the cache
+var SwitchNotFound = errors.New("switch not found")
 
 // logicalSwitchInfo contains information corresponding to the node. It holds the
 // subnet allocations (v4 and v6) as well as the IPAM allocator instances for each
@@ -168,9 +172,9 @@ func (manager *LogicalSwitchManager) AllocateUntilFull(nodeName string) error {
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
 	if !ok {
-		return fmt.Errorf("unable to allocate ips, node: %s does not exist in logical switch manager", nodeName)
+		return fmt.Errorf("unable to allocate IPs for node: %s: %w", nodeName, SwitchNotFound)
 	} else if len(lsi.ipams) == 0 {
-		return fmt.Errorf("unable to allocate ips for node: %s. logical switch manager has no IPAM", nodeName)
+		return fmt.Errorf("unable to allocate IPs for node: %s because logical switch manager has no IPAM", nodeName)
 	}
 	var err error
 	for err != ipam.ErrFull {
@@ -191,10 +195,9 @@ func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
 	if !ok {
-		return fmt.Errorf("unable to allocate ips: %v, node: %s does not exist in logical switch manager",
-			ipnets, nodeName)
+		return fmt.Errorf("unable to allocate IPs: %v for node %s: %w", ipnets, nodeName, SwitchNotFound)
 	} else if len(lsi.ipams) == 0 {
-		return fmt.Errorf("unable to allocate ips %v for node: %s. logical switch manager has no IPAM",
+		return fmt.Errorf("unable to allocate IPs: %v for node: %s: logical switch manager has no IPAM",
 			ipnets, nodeName)
 
 	}
@@ -244,7 +247,7 @@ func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 	lsi, ok := manager.cache[nodeName]
 
 	if !ok {
-		return nil, fmt.Errorf("node %s not found in the logical switch manager cache", nodeName)
+		return nil, fmt.Errorf("failed to allocate IPs for node %s: %w", nodeName, SwitchNotFound)
 	}
 
 	if len(lsi.ipams) == 0 {
@@ -301,7 +304,7 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(nodeName string, hybr
 
 	lsi, ok := manager.cache[nodeName]
 	if !ok {
-		return nil, fmt.Errorf("node %s not found in the logical switch manager cache", nodeName)
+		return nil, fmt.Errorf("unable to allocate hybrid overlay for node %s: %w", nodeName, SwitchNotFound)
 	}
 	// determine if ipams are ipv4
 	var ipv4IPAMS []ipam.Interface
@@ -348,8 +351,7 @@ func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 	}
 	lsi, ok := manager.cache[nodeName]
 	if !ok {
-		return fmt.Errorf("node %s not found in the logical switch manager cache",
-			nodeName)
+		return fmt.Errorf("unable to release ips for node %s: %w", nodeName, SwitchNotFound)
 	}
 	if len(lsi.ipams) == 0 {
 		return fmt.Errorf("failed to release IPs for node %s because there is no IPAM instance", nodeName)
