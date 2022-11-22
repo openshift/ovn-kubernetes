@@ -15,6 +15,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for
@@ -118,7 +119,7 @@ func hasLocalHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses []net.IP) bo
 		for i := range ss.Addresses {
 			addr := &ss.Addresses[i]
 			for _, nodeIP := range nodeAddresses {
-				if nodeIP.String() == addr.IP {
+				if nodeIP.String() == utilnet.ParseIPSloppy(addr.IP).String() {
 					return true
 				}
 			}
