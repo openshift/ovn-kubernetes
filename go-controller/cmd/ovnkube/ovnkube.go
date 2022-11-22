@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"io"
 	"io/ioutil"
 	"os"
@@ -21,7 +22,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -223,14 +223,7 @@ func runOvnKube(ctx *cli.Context) error {
 	var masterWatchFactory *factory.WatchFactory
 	if master != "" {
 		var err error
-		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset)
-		if err != nil {
-			return err
-		}
-		watchFactory = masterWatchFactory
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
 		}
@@ -238,6 +231,12 @@ func runOvnKube(ctx *cli.Context) error {
 		if libovsdbOvnSBClient, err = libovsdb.NewSBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
+		// create factory and start the controllers asked for
+		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset, libovsdbOvnNBClient, &ovn.NetPolObjects)
+		if err != nil {
+			return err
+		}
+		watchFactory = masterWatchFactory
 
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start

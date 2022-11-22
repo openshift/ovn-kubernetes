@@ -2,6 +2,9 @@ package factory
 
 import (
 	"fmt"
+	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -94,15 +97,25 @@ type informer struct {
 	shutdownWg     sync.WaitGroup
 	queueMap       map[ktypes.NamespacedName]*queueMapEntry
 	queueMapLock   sync.Mutex
+	nbClient       client.Client
 }
 
-func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
+func (i *informer) forEachQueuedHandler(f func(h *Handler), postObjects *sync.Map, key ktypes.NamespacedName) {
 	i.RLock()
 	defer i.RUnlock()
 
 	for priority := 0; uint32(priority) <= minHandlerPriority; priority++ { // loop over priority higest to lowest
 		for _, handler := range i.handlers[uint32(priority)] {
 			f(handler)
+		}
+	}
+
+	if ops, loaded := postObjects.LoadAndDelete(key); loaded {
+		_, err := libovsdbops.TransactAndCheck(i.nbClient, ops.([]ovsdb.Operation))
+		if err != nil {
+			klog.Errorf("TROZET: failed to transact post objects")
+		} else {
+			klog.Infof("TROZET: executed post transact ops for key: %s", key.String())
 		}
 	}
 }
@@ -285,7 +298,7 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler(numEventQueues uint32, postObjects *sync.Map) cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -295,7 +308,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj)
-				})
+				}, postObjects, key)
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, entry, false)
 			})
@@ -307,7 +320,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnUpdate(e.oldObj, e.obj)
-				})
+				}, postObjects, key)
 				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, entry, false)
 			})
@@ -324,7 +337,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnDelete(e.obj)
-				})
+				}, postObjects, key)
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, entry, true)
 			})
@@ -440,8 +453,9 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 }
 
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
-	stopChan chan struct{}, numEventQueues uint32) (*informer, error) {
+	stopChan chan struct{}, numEventQueues uint32, nbClient client.Client, postObjects *sync.Map) (*informer, error) {
 	i, err := newBaseInformer(oType, sharedInformer)
+	i.nbClient = nbClient
 	if err != nil {
 		return nil, err
 	}
@@ -495,6 +509,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// Wait until all the object additions have been processed
 		queueWg.Wait()
 	}
-	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
+
+	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues, postObjects))
 	return i, nil
 }

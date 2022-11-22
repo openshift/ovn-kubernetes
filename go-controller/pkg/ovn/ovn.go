@@ -245,6 +245,8 @@ const (
 	SCTP = "SCTP"
 )
 
+var NetPolObjects sync.Map
+
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,

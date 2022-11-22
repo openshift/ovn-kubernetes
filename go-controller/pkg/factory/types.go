@@ -45,7 +45,7 @@ type NodeWatchFactory interface {
 	AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}), priority uint32) *Handler
 	RemoveNamespaceHandler(handler *Handler)
 
-	GetHandlerPriority(objType string) (uint32)
+	GetHandlerPriority(objType string) uint32
 
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
