@@ -550,7 +550,7 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
-		return fmt.Errorf("failed to ensurePod %s/%s since it is not yet scheduled", pod.Namespace, pod.Name)
+		return nil
 	}
 
 	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
@@ -722,7 +722,7 @@ func (oc *Controller) WatchPods() {
 				return
 			}
 
-			if err := oc.ensurePod(oldPod, pod, oc.checkAndSkipRetryPod(pod)); err != nil {
+			if err := oc.ensurePod(oldPod, pod, oc.checkAndSkipRetryPod(pod) || util.PodScheduled(oldPod) != util.PodScheduled(newerPod)); err != nil {
 				oc.recordPodEvent(err, pod)
 				klog.Errorf("Failed to update pod %s, error: %v",
 					getPodNamespacedName(pod), err)

@@ -881,6 +881,12 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		}
 
 		logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
+
+		// if this pod is somehow already added to this policy, skip
+		if _, ok := np.localPods.Load(logicalPort); ok {
+			return
+		}
+
 		var portInfo *lpInfo
 
 		// Get the logical port info from the cache, if that fails, retry
