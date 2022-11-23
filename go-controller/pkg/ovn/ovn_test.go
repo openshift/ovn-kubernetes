@@ -90,11 +90,11 @@ func (o *FakeOVN) shutdown() {
 
 func (o *FakeOVN) init() {
 	var err error
-	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
+	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient, o.nbClient, &NetPolPodDelayedTxns)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.watcher.Start()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.stopChan = make(chan struct{})

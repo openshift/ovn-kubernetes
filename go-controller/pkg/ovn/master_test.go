@@ -924,7 +924,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, nil, &sync.Map{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1112,7 +1112,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, nil, &sync.Map{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1437,7 +1437,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
-			f, err := factory.NewMasterWatchFactory(fakeClient)
+			f, err := factory.NewMasterWatchFactory(fakeClient, nil, &sync.Map{})
 			if err != nil {
 				t.Fatalf("Error creating master watch factory: %v", err)
 			}
@@ -1539,7 +1539,7 @@ func TestController_syncNodesRetriable(t *testing.T) {
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
-			f, err := factory.NewMasterWatchFactory(fakeClient)
+			f, err := factory.NewMasterWatchFactory(fakeClient, nil, &sync.Map{})
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}

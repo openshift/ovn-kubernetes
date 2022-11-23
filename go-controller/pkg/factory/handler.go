@@ -98,9 +98,23 @@ type informer struct {
 	queueMap       map[ktypes.NamespacedName]*queueMapEntry
 	queueMapLock   sync.Mutex
 	nbClient       client.Client
+	// ktypes.NamespacedName: *DelayedTxn
+	delayedTransactions *sync.Map
 }
 
-func (i *informer) forEachQueuedHandler(f func(h *Handler), postObjects *sync.Map, key ktypes.NamespacedName) {
+type DelayedTxn struct {
+	Ops          []ovsdb.Operation
+	ErrCallbacks []func()
+}
+
+func (t *DelayedTxn) AddOps(ops []ovsdb.Operation, errCallback func()) {
+	t.Ops = append(t.Ops, ops...)
+	if errCallback != nil {
+		t.ErrCallbacks = append(t.ErrCallbacks, errCallback)
+	}
+}
+
+func (i *informer) forEachQueuedHandler(f func(h *Handler), key ktypes.NamespacedName) {
 	i.RLock()
 	defer i.RUnlock()
 
@@ -110,12 +124,13 @@ func (i *informer) forEachQueuedHandler(f func(h *Handler), postObjects *sync.Ma
 		}
 	}
 
-	if ops, loaded := postObjects.LoadAndDelete(key); loaded {
-		_, err := libovsdbops.TransactAndCheck(i.nbClient, ops.([]ovsdb.Operation))
+	if obj, loaded := i.delayedTransactions.LoadAndDelete(key); loaded {
+		delayedTxn := obj.(*DelayedTxn)
+		_, err := libovsdbops.TransactAndCheck(i.nbClient, delayedTxn.Ops)
 		if err != nil {
-			klog.Errorf("TROZET: failed to transact post objects")
-		} else {
-			klog.Infof("TROZET: executed post transact ops for key: %s", key.String())
+			for _, callback := range delayedTxn.ErrCallbacks {
+				callback()
+			}
 		}
 	}
 }
@@ -298,7 +313,7 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler(numEventQueues uint32, postObjects *sync.Map) cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -308,7 +323,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32, postObjects 
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj)
-				}, postObjects, key)
+				}, key)
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, entry, false)
 			})
@@ -320,7 +335,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32, postObjects 
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnUpdate(e.oldObj, e.obj)
-				}, postObjects, key)
+				}, key)
 				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, entry, false)
 			})
@@ -337,7 +352,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32, postObjects 
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnDelete(e.obj)
-				}, postObjects, key)
+				}, key)
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, entry, true)
 			})
@@ -453,9 +468,10 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 }
 
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
-	stopChan chan struct{}, numEventQueues uint32, nbClient client.Client, postObjects *sync.Map) (*informer, error) {
+	stopChan chan struct{}, numEventQueues uint32, nbClient client.Client, delayedTransactions *sync.Map) (*informer, error) {
 	i, err := newBaseInformer(oType, sharedInformer)
 	i.nbClient = nbClient
+	i.delayedTransactions = delayedTransactions
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +526,6 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		queueWg.Wait()
 	}
 
-	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues, postObjects))
+	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
 	return i, nil
 }

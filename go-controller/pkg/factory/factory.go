@@ -2,12 +2,12 @@ package factory
 
 import (
 	"fmt"
-	"github.com/ovn-org/libovsdb/client"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 

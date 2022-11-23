@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"io"
 	"io/ioutil"
 	"os"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -232,7 +232,7 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
 		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset, libovsdbOvnNBClient, &ovn.NetPolObjects)
+		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset, libovsdbOvnNBClient, &ovn.NetPolPodDelayedTxns)
 		if err != nil {
 			return err
 		}

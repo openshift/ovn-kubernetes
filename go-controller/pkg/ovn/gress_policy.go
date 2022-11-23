@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"net"
 	"strconv"
@@ -161,10 +160,7 @@ func (gp *gressPolicy) addPeerPods(transact bool, pods ...*v1.Pod) error {
 	ops, err := gp.peerAddressSet.AddIPsReturnOps(ips)
 	if err == nil {
 		namespacedName := ktypes.NamespacedName{Namespace: pods[0].Namespace, Name: pods[0].Name}
-		if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
-			newOps := append(existingOps.([]ovsdb.Operation), ops...)
-			NetPolObjects.Store(namespacedName, newOps)
-		}
+		addNetPolDelayedTxn(namespacedName, ops, nil)
 	}
 	return err
 }
@@ -177,10 +173,7 @@ func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	ops, err := gp.peerAddressSet.DeleteIPsReturnOps(ips)
 	if err == nil {
 		namespacedName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-		if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
-			newOps := append(existingOps.([]ovsdb.Operation), ops...)
-			NetPolObjects.Store(namespacedName, newOps)
-		}
+		addNetPolDelayedTxn(namespacedName, ops, nil)
 	}
 	return err
 }

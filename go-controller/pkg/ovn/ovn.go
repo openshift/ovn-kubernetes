@@ -15,6 +15,7 @@ import (
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -245,7 +246,20 @@ const (
 	SCTP = "SCTP"
 )
 
-var NetPolObjects sync.Map
+// pod's ktypes.NamespacedName: *factory.DelayedTxn
+var NetPolPodDelayedTxns sync.Map
+
+func addNetPolDelayedTxn(podKey ktypes.NamespacedName, ops []ovsdb.Operation, errCallback func()) {
+	newTxn := &factory.DelayedTxn{
+		Ops:          ops,
+		ErrCallbacks: []func(){errCallback},
+	}
+	if existingObj, loaded := NetPolPodDelayedTxns.LoadOrStore(podKey, newTxn); loaded {
+		// one pod key is handled sequentially, no other threads should modify this object at the same time
+		existingTxn := existingObj.(*factory.DelayedTxn)
+		existingTxn.AddOps(ops, errCallback)
+	}
+}
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy

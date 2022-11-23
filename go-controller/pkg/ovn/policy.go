@@ -1000,36 +1000,33 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, 
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, obj)
 		klog.Errorf(err.Error())
+		return
 	}
 
 	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupEgressDenyName, egressDenyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, obj)
 		klog.Errorf(err.Error())
+		return
 	}
 
 	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, obj)
 		klog.Errorf(err.Error())
+		return
 	}
 
 	pod := obj.(*kapi.Pod)
 	namespacedName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-	if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
-		newOps := append(existingOps.([]ovsdb.Operation), ops...)
-		NetPolObjects.Store(namespacedName, newOps)
-	}
-
-	/**
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
+	addNetPolDelayedTxn(namespacedName, ops, func() {
+		np.RLock()
+		defer np.RUnlock()
+		if np.deleted {
+			return
+		}
 		oc.processLocalPodSelectorDelPods(np, obj)
-		klog.Errorf(err.Error())
-		return
-	}
-
-	*/
+	})
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, np *networkPolicy,
@@ -1060,24 +1057,19 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 	if err != nil {
 		oc.processLocalPodSelectorSetPods(policy, np, obj)
 		klog.Errorf(err.Error())
+		return
 	}
 
 	pod := obj.(*kapi.Pod)
 	namespacedName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-	if existingOps, loaded := NetPolObjects.LoadOrStore(namespacedName, ops); loaded {
-		newOps := append(existingOps.([]ovsdb.Operation), ops...)
-		NetPolObjects.Store(namespacedName, newOps)
-	}
-
-	/**
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
+	addNetPolDelayedTxn(namespacedName, ops, func() {
+		np.RLock()
+		defer np.RUnlock()
+		if np.deleted {
+			return
+		}
 		oc.processLocalPodSelectorSetPods(policy, np, obj)
-		klog.Errorf(err.Error())
-		return
-	}
-
-	*/
+	})
 }
 
 func (oc *Controller) handleLocalPodSelector(
