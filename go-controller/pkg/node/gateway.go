@@ -232,18 +232,45 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		return nil, nil, err
 	}
 
-	if !config.Gateway.DisablePacketMTUCheck {
+	// Set annotation that determines if options:gateway_mtu shall be set for this node.
+	enableGatewayMTU := true
+	if config.Gateway.DisablePacketMTUCheck {
+		klog.Warningf("Config option disable-pkt-mtu-check is set to true. " +
+			"options:gateway_mtu will be disabled on gateway routers. " +
+			"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+		enableGatewayMTU = false
+	} else {
 		chkPktLengthSupported, err := util.DetectCheckPktLengthSupport(gatewayBridge.bridgeName)
 		if err != nil {
 			return nil, nil, err
 		}
-
 		if !chkPktLengthSupported {
-			klog.Warningf("OVS on this node does not support check packet length action in kernel datapath. This "+
-				"will cause incoming packets destined to OVN and larger than pod MTU: %d to the node, being dropped "+
-				"without sending fragmentation needed", config.Default.MTU)
-			config.Gateway.DisablePacketMTUCheck = true
+			klog.Warningf("OVS does not support check_packet_length action. " +
+				"options:gateway_mtu will be disabled on gateway routers. " +
+				"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+			enableGatewayMTU = false
+		} else {
+			/* This is a work around. In order to have the most optimal performance, the packet MTU check should be
+			 * disabled when OVS HW Offload is enabled on the node. The reason is that OVS HW Offload does not support
+			 * packet MTU checks properly without the offload support for sFlow.
+			 * The patches for sFlow in OvS: https://patchwork.ozlabs.org/project/openvswitch/list/?series=290804
+			 * As of writing these offload support patches for sFlow are in review.
+			 * TODO: This workaround should be removed once the offload support for sFlow patches are merged upstream OvS.
+			 */
+			ovsHardwareOffloadEnabled, err := util.IsOvsHwOffloadEnabled()
+			if err != nil {
+				return nil, nil, err
+			}
+			if ovsHardwareOffloadEnabled {
+				klog.Warningf("OVS hardware offloading is enabled. " +
+					"options:gateway_mtu will be disabled on gateway routers for performance reasons. " +
+					"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+				enableGatewayMTU = false
+			}
 		}
+	}
+	if err := util.SetGatewayMTUSupport(nodeAnnotator, enableGatewayMTU); err != nil {
+		return nil, nil, err
 	}
 
 	if config.Default.EnableUDPAggregation {
@@ -289,11 +316,6 @@ func gatewayReady(patchPort string) (bool, error) {
 
 func (g *gateway) GetGatewayBridgeIface() string {
 	return g.openflowManager.defaultBridge.bridgeName
-}
-
-// getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
-func getMaxFrameLength() int {
-	return config.Default.MTU + 14
 }
 
 type bridgeConfiguration struct {
