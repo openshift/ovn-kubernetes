@@ -566,7 +566,8 @@ func (h *masterEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryC
 		mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
 		_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
+			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode) ||
+			nodeGatewayMTUSupportChanged(oldNode, newNode))
 		_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 
 		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
