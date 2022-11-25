@@ -1360,6 +1360,86 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("cleans stale LSPs and ignore cleanup of stale ports on nodes with no LS", func() {
+			// may occur if sync nodes runs out of host subnets to assign therefore a logical switch for a node never gets created.
+			// expect reconciliation not to fail and to continue reconciliation for existing pods.
+			// this test proves reconciliation continues for existing pods by checking a pod that doesn't exist in kapi
+			// is cleaned up in OVN.
+			app.Action = func(ctx *cli.Context) error {
+				initialDB := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitchPort{
+							UUID:      "namespace1_non-existing-pod-UUID",
+							Name:      "namespace1_non-existing-pod",
+							Addresses: []string{"0a:58:0a:80:02:03", "10.128.2.3"},
+							ExternalIDs: map[string]string{
+								"pod": "true",
+							},
+						},
+						&nbdb.LogicalSwitch{
+							UUID:  "ls-uuid",
+							Name:  "node1",
+							Ports: []string{"namespace1_non-existing-pod-UUID"},
+						},
+					},
+				}
+				testNodeWithLS := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				}
+				testNodeWithoutLS := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node2",
+					},
+				}
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNodeWithLS,
+							testNodeWithoutLS,
+						},
+					},
+					// no pods - we want to test that cleanup of pod LSP is successful within OVN DB despite one node having
+					// no logical switch
+					&v1.PodList{
+						Items: []v1.Pod{},
+					},
+				)
+				// we don't know the real switch UUID in the db, but it can be found by name
+				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, testNodeWithLS.Name)
+				fakeOvn.controller.lsManager.AddNode(testNodeWithLS.Name, swUUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				fakeOvn.controller.WatchPods()
+				// expect stale logical switch port removed if reconciliation is successful
+				expectData := []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:  "ls-uuid",
+						Name:  testNodeWithLS.Name,
+						Ports: []string{},
+					},
+				}
+
+				// TODO(ff): the testing ovsdb server does not automatically remove orphan non-root objects from
+				// the database. Being so, let's tolerate the lsp still being present. What really matters is that
+				// the logical switch no longer has the logical port mentioned in its ports.
+				expectData = append(expectData, &nbdb.LogicalSwitchPort{
+					UUID:      "namespace1_non-existing-pod-UUID",
+					Name:      "namespace1_non-existing-pod",
+					Addresses: []string{"0a:58:0a:80:02:03", "10.128.2.3"},
+					ExternalIDs: map[string]string{
+						"pod": "true",
+					},
+				})
+
+				gomega.Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(expectData))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("Negative test: fails to add existing pod with an existing logical switch port on wrong node", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("namespace1")

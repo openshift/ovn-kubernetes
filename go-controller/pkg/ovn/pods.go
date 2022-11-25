@@ -114,10 +114,15 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		// find the logical switch for the node
 		ls := &nbdb.LogicalSwitch{}
 		if lsUUID, ok := oc.lsManager.GetUUID(n.Name); !ok {
-			klog.Errorf("Error getting logical switch for node %s: %s", n.Name, "Switch not in logical switch cache")
+			klog.Warningf("Error getting logical switch for node %s: %s", n.Name, "Switch not in logical switch cache")
 
 			// Not in cache: Try getting the logical switch from ovn database (slower method)
+			// It is possible that logical switch is removed and we can safely skip it, since there
+			// are no stale ports to worry about in that case.
 			if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, n.Name); err != nil {
+				if errors.Is(err, libovsdbclient.ErrNotFound) {
+					continue
+				}
 				return fmt.Errorf("can't find switch for node %s: %v", n.Name, err)
 			}
 		} else {
