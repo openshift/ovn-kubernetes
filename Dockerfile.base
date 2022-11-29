@@ -8,13 +8,17 @@
 FROM registry.ci.openshift.org/ocp/4.12:base
 
 # install selinux-policy first to avoid a race
-RUN yum install -y  \
-	selinux-policy && \
-	yum clean all
+RUN \
+    dnf install -y selinux-policy && \
+    dnf clean all
 
 ARG ovsver=2.17.0-62.el8fdp
 ARG ovnver=22.09.0-5.el8fdp
-RUN echo $ovsver > /ovs-version && echo $ovnver > /ovn-version
+
+RUN \
+    dnf install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "openvswitch2.17-devel = $ovsver" "python3-openvswitch2.17 = $ovsver" "openvswitch2.17-ipsec = $ovsver" && \
+    dnf install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.09 = $ovnver" "ovn22.09-central = $ovnver" "ovn22.09-host = $ovnver" "ovn22.09-vtep = $ovnver" && \
+    dnf clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
