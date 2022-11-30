@@ -187,7 +187,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 			return warnings, err
 		}
 
-		err = util.LinkRoutesAddOrUpdateMTU(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
+		err = util.LinkRoutesApply(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
 		if err != nil {
 			return warnings, err
 		}
@@ -280,7 +280,7 @@ func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNe
 	return cfg, nil
 }
 
-//DelMgtPortIptRules delete all the iptable rules for the management port.
+// DelMgtPortIptRules delete all the iptable rules for the management port.
 func DelMgtPortIptRules() {
 	// Clean up all iptables and ip6tables remnants that may be left around
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)

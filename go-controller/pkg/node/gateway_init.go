@@ -248,7 +248,7 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 			mtu = config.Default.RoutableMTU
 		}
 
-		err = util.LinkRoutesAddOrUpdateMTU(link, gwIP[0], []*net.IPNet{subnet}, mtu)
+		err = util.LinkRoutesApply(link, gwIP[0], []*net.IPNet{subnet}, mtu)
 		if err != nil {
 			return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
 		}

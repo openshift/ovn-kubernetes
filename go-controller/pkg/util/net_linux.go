@@ -297,20 +297,26 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 	return nil
 }
 
-func LinkRoutesAddOrUpdateMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
+// LinkRoutesApply applies routes for given subnets.
+// For each subnet it searches for an existing route by destination(subnet) on link:
+// * if found and gwIP or mtu changed the route will be updated
+// * if not found it adds a new route
+func LinkRoutesApply(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
 	for _, subnet := range subnets {
 		route, err := LinkRouteGetFilteredRoute(filterRouteByDst(link, subnet))
 		if err != nil {
 			return err
 		}
 		if route != nil {
-			if route.MTU == mtu {
-				return nil
-			}
-			route.MTU = mtu
-			err = netLinkOps.RouteReplace(route)
-			if err != nil {
-				return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v", subnet.String(), gwIP.String(), mtu, err)
+			if route.MTU != mtu || !gwIP.Equal(route.Gw) {
+				route.MTU = mtu
+				route.Gw = gwIP
+
+				err = netLinkOps.RouteReplace(route)
+				if err != nil {
+					return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v",
+						subnet.String(), gwIP.String(), mtu, err)
+				}
 			}
 		} else {
 			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu)

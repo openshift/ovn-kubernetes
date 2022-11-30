@@ -481,7 +481,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 					} else {
 						gwIP = mgmtPortConfig.ipv6.gwIP
 					}
-					err := util.LinkRoutesAddOrUpdateMTU(link, gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
+					err := util.LinkRoutesApply(link, gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
 					if err != nil {
 						return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
 					}
@@ -755,7 +755,7 @@ type epAddressItem struct {
 	protocol kapi.Protocol
 }
 
-//buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
+// buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
 func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
 	epMap := make(map[epAddressItem]struct{})
 	for _, subset := range epSubsets {
