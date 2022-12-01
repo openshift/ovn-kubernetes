@@ -441,13 +441,8 @@ func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []
 				rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, false)...)
 			}
 		}
-		externalIPs := make([]string, 0, len(service.Spec.ExternalIPs)+len(service.Status.LoadBalancer.Ingress))
-		externalIPs = append(externalIPs, service.Spec.ExternalIPs...)
-		for _, ingress := range service.Status.LoadBalancer.Ingress {
-			if len(ingress.IP) > 0 {
-				externalIPs = append(externalIPs, ingress.IP)
-			}
-		}
+
+		externalIPs := util.GetExternalAndLBIPs(service)
 
 		for _, externalIP := range externalIPs {
 			err := util.ValidatePort(svcPort.Protocol, svcPort.Port)

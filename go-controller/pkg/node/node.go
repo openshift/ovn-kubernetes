@@ -763,7 +763,7 @@ func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]
 			for _, port := range subset.Ports {
 				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
 					epMap[epAddressItem{
-						ip:       address.IP,
+						ip:       utilnet.ParseIPSloppy(address.IP).String(),
 						port:     port.Port,
 						protocol: port.Protocol,
 					}] = struct{}{}

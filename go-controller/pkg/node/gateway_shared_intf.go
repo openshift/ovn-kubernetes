@@ -191,7 +191,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		// NodePort/Ingress access in the OVS bridge will only ever come from outside of the host
 		for _, ing := range service.Status.LoadBalancer.Ingress {
 			if len(ing.IP) > 0 {
-				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, ing.IP, "Ingress")
+				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, utilnet.ParseIPSloppy(ing.IP).String(), "Ingress")
 				if err != nil {
 					klog.Errorf(err.Error())
 				}
@@ -199,7 +199,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		}
 		// flows for externalIPs
 		for _, externalIP := range service.Spec.ExternalIPs {
-			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, externalIP, "External")
+			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, utilnet.ParseIPSloppy(externalIP).String(), "External")
 			if err != nil {
 				klog.Errorf(err.Error())
 			}

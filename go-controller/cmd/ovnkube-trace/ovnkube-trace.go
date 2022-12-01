@@ -24,6 +24,7 @@ import (
 
 	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilnet "k8s.io/utils/net"
 )
 
 type AddrInfo struct {
@@ -175,10 +176,11 @@ func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		klog.V(1).Infof("ClusterIP for service %s in namespace %s not available\n", svcName, namespace)
 		return nil, err
 	}
-	klog.V(5).Infof("==>Got service %s ClusterIP is %s\n", svcName, clusterIP)
+	clusterIPStr := utilnet.ParseIPSloppy(clusterIP).String()
+	klog.V(5).Infof("==>Got service %s ClusterIP is %s\n", svcName, clusterIPStr)
 
 	svcInfo = &SvcInfo{
-		IP: svc.Spec.ClusterIP,
+		IP: clusterIPStr,
 	}
 
 	ep, err := coreclient.Endpoints(namespace).Get(context.TODO(), svcName, metav1.GetOptions{})
@@ -196,7 +198,7 @@ func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 			klog.V(5).Infof("==>Got Address %v for service %s in namespace %s\n", epAddress, svcName, namespace)
 			svcInfo.PodName = epAddress.TargetRef.Name
 			svcInfo.PodNamespace = epAddress.TargetRef.Namespace
-			svcInfo.PodIP = epAddress.IP
+			svcInfo.PodIP = utilnet.ParseIPSloppy(epAddress.IP).String()
 			addrFound = true
 			break
 		}
@@ -231,7 +233,7 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	}
 
 	podInfo = &PodInfo{
-		IP: pod.Status.PodIP,
+		IP: utilnet.ParseIPSloppy(pod.Status.PodIP).String(),
 	}
 
 	// Get the node on which the pod runs on
@@ -616,19 +618,21 @@ func main() {
 		if found {
 			klog.V(5).Infof("  Name: %s is a master", node.Name)
 			for _, s := range node.Status.Addresses {
-				klog.V(5).Infof("  Address Type: %s - Address: %s", s.Type, s.Address)
+				addrStr := utilnet.ParseIPSloppy(s.Address).String()
+				klog.V(5).Infof("  Address Type: %s - Address: %s", s.Type, addrStr)
 				//if s.Type == corev1client.NodeInternalIP {
 				if s.Type == "InternalIP" {
-					masters[node.Name] = s.Address
+					masters[node.Name] = addrStr
 				}
 			}
 		} else {
 			klog.V(5).Infof("  Name: %s is a worker", node.Name)
 			for _, s := range node.Status.Addresses {
-				klog.V(5).Infof("  Address Type: %s - Address: %s", s.Type, s.Address)
+				addrStr := utilnet.ParseIPSloppy(s.Address).String()
+				klog.V(5).Infof("  Address Type: %s - Address: %s", s.Type, addrStr)
 				//if s.Type == corev1client.NodeInternalIP {
 				if s.Type == "InternalIP" {
-					workers[node.Name] = s.Address
+					workers[node.Name] = addrStr
 				}
 			}
 		}
