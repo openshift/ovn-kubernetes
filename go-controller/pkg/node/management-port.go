@@ -24,6 +24,13 @@ type ManagementPort interface {
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
 	CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{})
+	// Not all management ports have an IP address. Some cases where a management port would not have an IP address
+	// are as follows:
+	//   - Full mode with HW backed device (e.g. Virtual Function Representor).
+	//   - DPU mode with Virtual Function Representor.
+	// It is up to the implementation of the ManagementPort to report whether an IP address can be assigned for the
+	// type of ManagementPort.
+	HasIpAddr() bool
 }
 
 // NewManagementPorts creates a new ManagementPorts
@@ -116,6 +123,11 @@ func (mp *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, s
 		},
 		30*time.Second,
 		stopChan)
+}
+
+// OVS Internal Port Netdev should have IP addresses assignable to them.
+func (mp *managementPort) HasIpAddr() bool {
+	return true
 }
 
 func managementPortReady() (bool, error) {

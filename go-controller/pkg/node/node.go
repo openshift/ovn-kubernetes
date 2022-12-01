@@ -611,6 +611,10 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	// start management ports health check
 	for _, mgmtPort := range mgmtPorts {
 		mgmtPort.port.CheckManagementPortHealth(mgmtPort.config, n.stopChan)
+		// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
+		if err := n.startEgressIPHealthCheckingServer(wg, mgmtPort); err != nil {
+			return err
+		}
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
@@ -649,16 +653,11 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}
 
-	// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
-	if err := n.startEgressIPHealthCheckingServer(wg, mgmtPortConfig); err != nil {
-		return err
-	}
-
 	klog.Infof("OVN Kube Node initialized and ready.")
 	return nil
 }
 
-func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPortConfig *managementPortConfig) error {
+func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPortEntry managementPortEntry) error {
 	healthCheckPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
 	if healthCheckPort == 0 {
 		klog.Infof("Egress IP health check server skipped: no port specified")
@@ -666,16 +665,23 @@ func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPort
 	}
 
 	var nodeMgmtIP net.IP
-	if mgmtPortConfig.ipv4 != nil {
-		nodeMgmtIP = mgmtPortConfig.ipv4.ifAddr.IP
-	} else if mgmtPortConfig.ipv6 != nil {
-		nodeMgmtIP = mgmtPortConfig.ipv6.ifAddr.IP
-		// Wait for IPv6 address to become usable.
-		if err := ip.SettleAddresses(mgmtPortConfig.ifName, 10); err != nil {
-			return fmt.Errorf("failed start health checking server due to unsettled IPv6: %w", err)
+	var mgmtPortConfig *managementPortConfig = mgmtPortEntry.config
+	// Not all management port interfaces can have IP addresses assignable to them.
+	if mgmtPortEntry.port.HasIpAddr() {
+		if mgmtPortConfig.ipv4 != nil {
+			nodeMgmtIP = mgmtPortConfig.ipv4.ifAddr.IP
+		} else if mgmtPortConfig.ipv6 != nil {
+			nodeMgmtIP = mgmtPortConfig.ipv6.ifAddr.IP
+			// Wait for IPv6 address to become usable.
+			if err := ip.SettleAddresses(mgmtPortConfig.ifName, 10); err != nil {
+				return fmt.Errorf("failed to start Egress IP health checking server due to unsettled IPv6: %w on interface %s", err, mgmtPortConfig.ifName)
+			}
+		} else {
+			return fmt.Errorf("unable to start Egress IP health checking server on interface %s: no mgmt ip", mgmtPortConfig.ifName)
 		}
 	} else {
-		return fmt.Errorf("unable to start health checking server: no mgmt ip")
+		klog.Infof("Skipping interface %s as it should not have an IP address", mgmtPortConfig.ifName)
+		return nil
 	}
 
 	healthServer, err := healthcheck.NewEgressIPHealthServer(nodeMgmtIP, healthCheckPort)
