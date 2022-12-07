@@ -25,6 +25,8 @@ import (
 const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
+	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
+	egressFirewallACLExtIdKey = "egressFirewall"
 )
 
 type egressFirewall struct {
@@ -149,7 +151,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	ovnEgressFirewalls := make(map[string]struct{})
 
 	for _, egressFirewallACL := range egressFirewallACLs {
-		if ns, ok := egressFirewallACL.ExternalIDs["egressFirewall"]; ok {
+		if ns, ok := egressFirewallACL.ExternalIDs[egressFirewallACLExtIdKey]; ok {
 			// Most egressFirewalls will have more then one ACL but we only need to know if there is one for the namespace
 			// so a map is fine and we will add an entry every iteration but because it is a map will overwrite the previous
 			// entry if it already existed
@@ -336,7 +338,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		Direction:   types.DirectionToLPort,
 		Match:       match,
 		Action:      action,
-		ExternalIDs: map[string]string{"egressFirewall": externalID},
+		ExternalIDs: map[string]string{egressFirewallACLExtIdKey: externalID},
 	}
 
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressFirewallACL)
@@ -363,7 +365,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
 	pACL := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs["egressFirewall"] == externalID
+		return item.ExternalIDs[egressFirewallACLExtIdKey] == externalID
 	}
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, pACL)
 	if err != nil {
