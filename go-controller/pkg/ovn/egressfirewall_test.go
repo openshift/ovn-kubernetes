@@ -87,7 +87,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "none"},
+					map[string]string{egressFirewallACLExtIdKey: "none"},
 				)
 				purgeACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -100,7 +100,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 				)
 				keepACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -114,7 +114,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 				)
 				otherACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -335,7 +335,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv6ACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -431,7 +431,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 
 				udpACL.UUID = libovsdbops.BuildNamedUUID()
@@ -528,7 +528,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -632,7 +632,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -711,7 +711,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "none"},
+					map[string]string{egressFirewallACLExtIdKey: "none"},
 				)
 				purgeACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -724,7 +724,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 				)
 				keepACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -738,7 +738,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 				)
 				otherACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -866,7 +866,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -949,7 +949,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv6ACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -1042,7 +1042,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 
 				udpACL.UUID = libovsdbops.BuildNamedUUID()
@@ -1123,7 +1123,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -1211,7 +1211,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 				)
 				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
 
