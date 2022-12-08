@@ -21,6 +21,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -968,11 +969,13 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, 
 		return
 	}
 
-	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
-	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, objs...)
-		klog.Errorf(err.Error())
-		return
+	if !PortGroupHasPorts(oc.nbClient, np.portGroupName, policyPorts) {
+		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
+		if err != nil {
+			oc.processLocalPodSelectorDelPods(np, objs...)
+			klog.Errorf(err.Error())
+			return
+		}
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
@@ -1749,4 +1752,17 @@ func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 		oc.watchFactory.RemovePodHandler(value.(*factory.Handler))
 		return true
 	})
+}
+
+// PortGroupHasPorts returns true if a port group contains all given ports
+func PortGroupHasPorts(nbClient libovsdbclient.Client, pgName string, portUUIDs []string) bool {
+	pg := &nbdb.PortGroup{
+		Name: pgName,
+	}
+	pg, err := libovsdbops.GetPortGroup(nbClient, pg)
+	if err != nil {
+		return false
+	}
+
+	return sets.NewString(pg.Ports...).HasAll(portUUIDs...)
 }
