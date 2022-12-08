@@ -490,6 +490,10 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 
 	uniqIPs := ipsToStringUnique(ips)
 
+	if as.hasIPs(uniqIPs...) {
+		return nil, nil
+	}
+
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), uniqIPs)
 
 	addrset := nbdb.AddressSet{
@@ -502,6 +506,20 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 	}
 
 	return ops, nil
+}
+
+// hasIPs returns true if an address set contains all given IPs
+func (as *ovnAddressSet) hasIPs(ips ...string) bool {
+	existingIPs, err := as.getIPs()
+	if err != nil {
+		return false
+	}
+
+	if len(existingIPs) == 0 {
+		return false
+	}
+
+	return sets.NewString(existingIPs...).HasAll(ips...)
 }
 
 // deleteIPs removes selected IPs from the existing address_set
