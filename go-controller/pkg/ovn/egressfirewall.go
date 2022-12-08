@@ -287,11 +287,16 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 			break
 		}
 	}
+	// delete acls first, then dns address set that is referenced in these acls
+	if err := oc.deleteEgressFirewallRules(egressFirewallObj.Namespace); err != nil {
+		return err
+	}
+
 	if deleteDNS {
 		oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace)
 	}
 
-	return oc.deleteEgressFirewallRules(egressFirewallObj.Namespace)
+	return nil
 }
 
 func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
