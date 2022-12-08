@@ -854,20 +854,25 @@ subnet=%s
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		app             *cli.App
-		f               *factory.WatchFactory
-		stopChan        chan struct{}
-		wg              *sync.WaitGroup
-		libovsdbCleanup *libovsdbtest.Cleanup
+		app      *cli.App
+		f        *factory.WatchFactory
+		stopChan chan struct{}
+		wg       *sync.WaitGroup
 
-		dbSetup                                  libovsdbtest.TestSetup
-		node1                                    tNode
-		testNode                                 v1.Node
-		fakeClient                               *util.OVNClientset
-		kubeFakeClient                           *fake.Clientset
-		clusterController                        *Controller
-		nodeAnnotator                            kube.Annotator
-		libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbOvnNBClient libovsdbclient.Client
+		libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbCleanup     *libovsdbtest.Cleanup
+
+		dbSetup           libovsdbtest.TestSetup
+		node1             tNode
+		testNode          v1.Node
+		fakeClient        *util.OVNClientset
+		kubeFakeClient    *fake.Clientset
+		clusterController *Controller
+		nodeAnnotator     kube.Annotator
+		events            []string
+		eventsLock        sync.Mutex
+		recorder          *record.FakeRecorder
 	)
 
 	const (
@@ -884,6 +889,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
+		events = make([]string, 0)
 
 		libovsdbCleanup = nil
 
@@ -961,13 +967,32 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		err = f.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+		recorder = record.NewFakeRecorder(10)
 		clusterController = NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+			libovsdbOvnNBClient, libovsdbOvnSBClient, recorder)
 		clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
 		clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		err = clusterController.masterSubnetAllocator.InitRanges(subnets)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		// record events for testcases to check
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				event, ok := <-recorder.Events
+				if !ok {
+					return
+				}
+				eventsLock.Lock()
+				events = append(events, event)
+				eventsLock.Unlock()
+			}
+		}()
 
 		clusterController.SCTPSupport = true
 		clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -978,6 +1003,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		libovsdbCleanup.Cleanup()
 		close(stopChan)
 		f.Shutdown()
+		close(recorder.Events)
 		wg.Wait()
 	})
 
@@ -1056,34 +1082,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					newClusterJoinSwitch(),
-					expectedNodeSwitch,
-					expectedOVNClusterRouter,
-					expectedClusterRouterPortGroup,
-					expectedClusterPortGroup,
-					expectedClusterLBGroup,
-				},
-			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
-			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
-			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()
@@ -1198,34 +1198,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					newClusterJoinSwitch(),
-					expectedNodeSwitch,
-					expectedOVNClusterRouter,
-					expectedClusterRouterPortGroup,
-					expectedClusterPortGroup,
-					expectedClusterLBGroup,
-				},
-			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
-			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
-			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()
@@ -1452,37 +1426,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					"name": types.ClusterPortGroupName,
 				},
 			}
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: types.OVNJoinSwitch + "-UUID",
-						Name: types.OVNJoinSwitch,
-					},
-					expectedNodeSwitch,
-					expectedOVNClusterRouter,
-					expectedClusterRouterPortGroup,
-					expectedClusterPortGroup,
-					expectedClusterLBGroup,
-				},
-			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
-			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
-			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 			// ensure db is consistent
@@ -1542,60 +1489,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.It("use node retry with updating a node", func() {
 
 		app.Action = func(ctx *cli.Context) error {
-			node1 := tNode{
-				Name:                 "node1",
-				NodeIP:               "1.2.3.4",
-				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
-				LrpIP:                "100.64.0.2",
-				LrpIPv6:              "fd98::2",
-				DrLrpIP:              "100.64.0.1",
-				PhysicalBridgeMAC:    "11:22:33:44:55:66",
-				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
-				NodeSubnet:           "10.1.1.0/24",
-				GWRouter:             types.GWRouterPrefix + "node1",
-				GatewayRouterIPMask:  "172.16.16.2/24",
-				GatewayRouterIP:      "172.16.16.2",
-				GatewayRouterNextHop: "172.16.16.1",
-				PhysicalBridgeName:   "br-eth0",
-				NodeGWIP:             "10.1.1.1/24",
-				NodeMgmtPortIP:       "10.1.1.2",
-				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
-				DnatSnatIP:           "169.254.0.1",
-			}
-
-			testNode := node1.k8sNode()
-
-			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{testNode},
-			})
-			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			egressIPFakeClient := &egressipfake.Clientset{}
-			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-			}
-
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
-			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
-			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = nodeAnnotator.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			f, err = factory.NewMasterWatchFactory(fakeClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = f.Start()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
@@ -1603,34 +1499,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					newClusterJoinSwitch(),
-					expectedNodeSwitch,
-					expectedOVNClusterRouter,
-					expectedClusterRouterPortGroup,
-					expectedClusterPortGroup,
-					expectedClusterLBGroup,
-				},
-			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
-			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
-			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()
 			// ensure db is consistent
@@ -1642,6 +1513,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 
 			skipSnat := false
+			l3Config := node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat, node1.NodeMgmtPortIP)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 			ginkgo.By("Bringing down NBDB")
@@ -1669,6 +1541,14 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
 			ginkgo.By("retry entry old obj should be nil")
 			gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
+
+			// check that a node event was posted
+			gomega.Eventually(func() []string {
+				eventsLock.Lock()
+				defer eventsLock.Unlock()
+				eventsCopy := make([]string, 0, len(events))
+				return append(eventsCopy, events...)
+			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("Warning ErrorReconcilingNode error creating gateway for node node1")))
 
 			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 			defer cancel()
@@ -1701,55 +1581,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 	ginkgo.It("use node retry with deleting a node", func() {
 		app.Action = func(ctx *cli.Context) error {
-			node1 := tNode{
-				Name:                 "node1",
-				NodeIP:               "1.2.3.4",
-				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
-				LrpIP:                "100.64.0.2",
-				LrpIPv6:              "fd98::2",
-				DrLrpIP:              "100.64.0.1",
-				PhysicalBridgeMAC:    "11:22:33:44:55:66",
-				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
-				NodeSubnet:           "10.1.1.0/24",
-				GWRouter:             types.GWRouterPrefix + "node1",
-				GatewayRouterIPMask:  "172.16.16.2/24",
-				GatewayRouterIP:      "172.16.16.2",
-				GatewayRouterNextHop: "172.16.16.1",
-				PhysicalBridgeName:   "br-eth0",
-				NodeGWIP:             "10.1.1.1/24",
-				NodeMgmtPortIP:       "10.1.1.2",
-				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
-				DnatSnatIP:           "169.254.0.1",
-			}
-
-			testNode := node1.k8sNode()
-
-			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{testNode},
-			})
-			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			egressIPFakeClient := &egressipfake.Clientset{}
-			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-			}
-
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
-			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
-			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = nodeAnnotator.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1758,43 +1592,14 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = f.Start()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					newClusterJoinSwitch(),
-					expectedNodeSwitch,
-					expectedOVNClusterRouter,
-					expectedClusterRouterPortGroup,
-					expectedClusterPortGroup,
-					expectedClusterLBGroup,
-				},
-			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
-			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
-			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-
-			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()
@@ -1804,9 +1609,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			// Delete the node's gateway Logical Router Port to force an error. But save
+			// it first so we can add it back to let the delete proceed after we know the
+			// retry was successful
+			gatewayRouter := types.GWRouterPrefix + node1.Name
+			lr := &nbdb.LogicalRouter{Name: gatewayRouter}
+			lrp := &nbdb.LogicalRouterPort{Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter}
+			lrp, err = libovsdbops.GetLogicalRouterPort(libovsdbOvnNBClient, lrp)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbops.DeleteLogicalRouterPorts(libovsdbOvnNBClient, lr, lrp)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			// Node delete will fail with Failed to delete node node1,
-			// error: error deleting node node1 HostSubnet 10.1.1.0/24:
-			// error deleting subnet 10.1.1.0/24 for node "node1": network 10.1.1.0/24 does not belong to any known range
 			err = fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), testNode.Name, metav1.DeleteOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1820,8 +1634,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(retryEntry.newObj).To(gomega.BeNil())
 			ginkgo.By("retry entry old obj should not be nil")
 			gomega.Expect(retryEntry.oldObj).NotTo(gomega.BeNil())
-			// allocate subnet to allow delete to continue
-			clusterController.masterSubnetAllocator.AddNetworkRange(subnet, 24)
+			// Add the LRP back to allow the delete the continue
+			err = libovsdbops.CreateOrUpdateLogicalRouterPorts(libovsdbOvnNBClient,
+				lr, []*nbdb.LogicalRouterPort{lrp}, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			clusterController.retryNodes.requestRetryObjs() // retry the failed entry
 
 			gomega.Eventually(func() *retryObjEntry {
@@ -1898,287 +1714,6 @@ func newNodeSNAT(uuid, logicalIP, externalIP string) *nbdb.NAT {
 		Options: map[string]string{
 			"stateless": "false",
 		},
-	}
-}
-
-func TestController_allocateNodeSubnets(t *testing.T) {
-	tests := []struct {
-		name          string
-		networkRanges []string
-		networkLen    int
-		configIPv4    bool
-		configIPv6    bool
-		node          *kapi.Node
-		// to be converted during the test to []*net.IPNet
-		wantStr   []string
-		allocated int
-		wantErr   bool
-	}{
-		{
-			name:          "new node, IPv4 only cluster",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"172.16.0.0/24"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "new node, IPv6 only cluster",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLen:    64,
-			configIPv4:    false,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"2001:db2::/64"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "existing annotated node, IPv4 only cluster",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "172.16.8.0/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.8.0/24"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "existing annotated node, IPv6 only cluster",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLen:    64,
-			configIPv4:    false,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "2001:db2:1:2:3:4::/64"}`,
-					}},
-			},
-			wantStr:   []string{"2001:db2:1:2:3:4::/64"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "new node, dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"172.16.0.0/24", "2000::/24"},
-			allocated: 2,
-			wantErr:   false,
-		},
-		{
-			name:          "annotated node, dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2000:2::/24"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24", "2000:2::/24"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "single IPv4 to dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "172.16.5.0/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24", "2000::/24"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "single IPv6 to dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000:1::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "2000:1::/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"2000::/24", "172.16.0.0/24"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "dual stack cluster to single IPv4",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2000:2::/24"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "dual stack cluster to single IPv6",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLen:    64,
-			configIPv4:    false,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2001:db2:1:2:3:4::/64"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"2001:db2:1:2:3:4::/64"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "new node, OVN wrong configuration: IPv4 only cluster but IPv6 range",
-			networkRanges: []string{"2001:db2::/64"},
-			networkLen:    112,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   nil,
-			allocated: 0,
-			wantErr:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// create cluster config
-			config.IPv4Mode = tt.configIPv4
-			config.IPv6Mode = tt.configIPv6
-			// create fake OVN controller
-			stopChan := make(chan struct{})
-			defer close(stopChan)
-			kubeFakeClient := fake.NewSimpleClientset()
-			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			egressIPFakeClient := &egressipfake.Clientset{}
-			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-				EgressQoSClient:      egressQoSFakeClient,
-			}
-			f, err := factory.NewMasterWatchFactory(fakeClient)
-			if err != nil {
-				t.Fatalf("Error creating master watch factory: %v", err)
-			}
-			if err := f.Start(); err != nil {
-				t.Fatalf("Error starting master watch factory: %v", err)
-			}
-
-			expectedClusterLBGroup := newLoadBalancerGroup()
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					expectedClusterLBGroup,
-				},
-			}
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
-			if err != nil {
-				t.Fatalf("Error creating libovsdb test harness %v", err)
-			}
-			t.Cleanup(libovsdbCleanup.Cleanup)
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
-			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
-
-			// configure the cluster allocators
-			for _, subnetString := range tt.networkRanges {
-				_, subnet, err := net.ParseCIDR(subnetString)
-				if err != nil {
-					t.Fatalf("Error parsing subnet %s", subnetString)
-				}
-				clusterController.masterSubnetAllocator.AddNetworkRange(subnet, tt.networkLen)
-			}
-			// test network allocation works correctly
-			got, allocated, err := clusterController.allocateNodeSubnets(tt.node)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Controller.addNode() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			var want []*net.IPNet
-			for _, netStr := range tt.wantStr {
-				_, ipnet, err := net.ParseCIDR(netStr)
-				if err != nil {
-					t.Fatalf("Error parsing subnet %s", netStr)
-				}
-				want = append(want, ipnet)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("Controller.allocateNodeSubnets() = %v, want %v", got, want)
-			}
-
-			if len(allocated) != tt.allocated {
-				t.Errorf("Expected %d subnets allocated, received %d", tt.allocated, len(allocated))
-			}
-		})
 	}
 }
 
