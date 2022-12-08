@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"net"
 	"sync"
 
@@ -104,7 +103,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// hybridNode-owned address set, should stay
 			fakeOvn.asf.NewAddressSet(ovntypes.HybridRoutePolicyPrefix+"node", []net.IP{net.ParseIP("1.1.1.5")})
 			// egress firewall-owned address set, should stay
-			// needs exiting ACL to distinguish from namespace-owned
+			// needs existing ACL to distinguish from namespace-owned
 			dnsAS, err := fakeOvn.asf.NewAddressSet("dnsname", []net.IP{net.ParseIP("1.1.1.6")})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			dnsHashName, _ := dnsAS.GetASHashNames()
