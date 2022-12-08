@@ -992,6 +992,7 @@ func (oc *Controller) getExistingLocalPolicyPorts(np *networkPolicy,
 
 // denyPGAddPorts adds ports to default deny port groups.
 // It also can take existing ops e.g. to add port to network policy port group and transact it.
+// It only adds new ports that do not already exist in the deny port groups.
 func (oc *Controller) denyPGAddPorts(np *networkPolicy, portNamesToUUIDs map[string]string, ops []ovsdb.Operation) error {
 	var err error
 	ingressDenyPGName := defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
@@ -1107,9 +1108,11 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(np *networkPolicy, objs ...i
 		var err error
 		// add pods to policy port group
 		var ops []ovsdb.Operation
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, np.portGroupName, policyPortUUIDs...)
-		if err != nil {
-			return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
+		if !PortGroupHasPorts(oc.nbClient, np.portGroupName, policyPortUUIDs) {
+			ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, np.portGroupName, policyPortUUIDs...)
+			if err != nil {
+				return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
+			}
 		}
 		// add pods to default deny port group
 		// make sure to only pass newly added pods
@@ -2031,4 +2034,17 @@ func getPolicyKey(policy *knet.NetworkPolicy) string {
 
 func (np *networkPolicy) getKey() string {
 	return fmt.Sprintf("%v/%v", np.namespace, np.name)
+}
+
+// PortGroupHasPorts returns true if a port group contains all given ports
+func PortGroupHasPorts(nbClient libovsdbclient.Client, pgName string, portUUIDs []string) bool {
+	pg := &nbdb.PortGroup{
+		Name: pgName,
+	}
+	pg, err := libovsdbops.GetPortGroup(nbClient, pg)
+	if err != nil {
+		return false
+	}
+
+	return sets.NewString(pg.Ports...).HasAll(portUUIDs...)
 }
