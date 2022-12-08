@@ -3,6 +3,7 @@ package factory
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,6 +61,7 @@ type WatchFactory struct {
 	informers        map[reflect.Type]*informer
 
 	stopChan chan struct{}
+	Wg       sync.WaitGroup
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
@@ -92,11 +94,21 @@ type peerPodForNamespaceAndPodSelector struct{} // created during the add functi
 type peerNamespaceSelector struct{}
 type peerPodSelector struct{}
 type localPodSelector struct{}
+
+// types for handlers related to egress IP
 type egressIPPod struct{}
 type egressIPNamespace struct{}
 type egressNode struct{}
 
+// types for handlers in use by ovn-k node
+type namespaceExGw struct{}
+type endpointSliceForStaleConntrackRemoval struct{}
+type serviceForGateway struct{}
+type endpointSliceForGateway struct{}
+type serviceForFakeNodePortWatcher struct{} // only for unit tests
+
 var (
+	// Resource types used in ovnk master
 	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
 	ServiceType                           reflect.Type = reflect.TypeOf(&kapi.Service{})
 	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
@@ -116,6 +128,13 @@ var (
 	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	PeerPodSelectorType                   reflect.Type = reflect.TypeOf(&peerPodSelector{})
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
+
+	// Resource types used in ovnk node
+	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
+	EndpointSliceForStaleConntrackRemovalType reflect.Type = reflect.TypeOf(&endpointSliceForStaleConntrackRemoval{})
+	ServiceForGatewayType                     reflect.Type = reflect.TypeOf(&serviceForGateway{})
+	EndpointSliceForGatewayType               reflect.Type = reflect.TypeOf(&endpointSliceForGateway{})
+	ServiceForFakeNodePortWatcherType         reflect.Type = reflect.TypeOf(&serviceForFakeNodePortWatcher{}) // only for unit tests
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -346,6 +365,11 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	return wf, nil
 }
 
+func (wf *WatchFactory) WaitForWatchFactoryStopChannel(stopChan chan struct{}) {
+	<-wf.stopChan
+	close(stopChan)
+}
+
 func (wf *WatchFactory) Shutdown() {
 	close(wf.stopChan)
 
@@ -353,6 +377,8 @@ func (wf *WatchFactory) Shutdown() {
 	for _, inf := range wf.informers {
 		inf.shutdown()
 	}
+
+	wf.Wg.Wait() //waiting for periodicallyRetry to return
 }
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
@@ -434,7 +460,7 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority uint3
 func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandlerFuncType, error) {
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
-	case NamespaceType:
+	case NamespaceType, NamespaceExGwType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNamespaceHandler(funcs, processExisting)
@@ -452,7 +478,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddNodeHandler(funcs, processExisting, priority)
 		}, nil
 
-	case PeerServiceType:
+	case PeerServiceType, ServiceForGatewayType, ServiceForFakeNodePortWatcherType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
@@ -487,6 +513,13 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddCloudPrivateIPConfigHandler(funcs, processExisting)
 		}, nil
+
+	case EndpointSliceForStaleConntrackRemovalType, EndpointSliceForGatewayType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddEndpointSliceHandler(funcs, processExisting)
+		}, nil
+
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
@@ -736,6 +769,12 @@ func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
 func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.Get(name)
+}
+
+// GetEndpointSlice returns the endpointSlice indexed by the given namespace and name
+func (wf *WatchFactory) GetEndpointSlice(namespace, name string) (*discovery.EndpointSlice, error) {
+	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
+	return endpointSliceLister.EndpointSlices(namespace).Get(name)
 }
 
 // GetServiceEndpointSlice returns the endpointSlice associated with a service
