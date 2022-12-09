@@ -80,6 +80,7 @@ type networkPolicy struct {
 	// localPods is a list of pods affected by ths policy
 	// this is a sync map so we can handle multiple pods at once
 	// map of string -> *lpInfo
+	// only update when corresponding db transaction succeeded
 	localPods sync.Map
 
 	portGroupName string
@@ -865,7 +866,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 }
 
 func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
-	np *networkPolicy, objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string) {
+	np *networkPolicy, objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string, localPodsInfo map[string]*lpInfo) {
 	klog.Infof("Processing NetworkPolicy %s/%s to have %d local pods...", np.namespace, np.name, len(objs))
 
 	// get list of pods and their logical ports to add
@@ -877,6 +878,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 	// thread safe helper vars used by the `getPortInfo` go-routine
 	getPortsInfoMap := sync.Map{}
 	getPolicyPortsWg := &sync.WaitGroup{}
+	localPodsMap := sync.Map{}
 
 	getPortInfo := func(pod *kapi.Pod) {
 		defer getPolicyPortsWg.Done()
@@ -927,11 +929,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 			return
 		}
 
-		// if this pod is somehow already added to this policy, then skip
-		if _, ok := np.localPods.LoadOrStore(portInfo.name, portInfo); ok {
-			return
-		}
-
+		localPodsMap.Store(portInfo.name, portInfo)
 		getPortsInfoMap.Store(portInfo.uuid, portInfo)
 	}
 
@@ -957,17 +955,25 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		return true
 	})
 
+	localPodsInfo = map[string]*lpInfo{}
+	localPodsMap.Range(func(key interface{}, value interface{}) bool {
+		localPodsInfo[key.(string)] = value.(*lpInfo)
+		return true
+	})
+
 	ingressDenyPorts, egressDenyPorts = oc.localPodAddDefaultDeny(policy, policyPortsInfo...)
 
 	return
 }
 
 func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
-	objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string) {
+	objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts, localPodsInfo []string) {
 	klog.Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", np.namespace, np.name, len(objs))
 
 	policyPorts = make([]string, 0, len(objs))
 	policyPortsInfo := make([]*lpInfo, 0, len(objs))
+	localPodsInfo = make([]string, 0, len(objs))
+
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
@@ -976,19 +982,20 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 		}
 
 		logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
+		// If we never saw this pod, short-circuit
+		if _, ok := np.localPods.Load(logicalPort); !ok {
+			continue
+		}
+
 		portInfo, err := oc.logicalPortCache.get(logicalPort)
 		if err != nil {
 			klog.Errorf(err.Error())
 			return
 		}
 
-		// If we never saw this pod, short-circuit
-		if _, ok := np.localPods.LoadAndDelete(logicalPort); !ok {
-			continue
-		}
-
 		policyPortsInfo = append(policyPortsInfo, portInfo)
 		policyPorts = append(policyPorts, portInfo.uuid)
+		localPodsInfo = append(localPodsInfo, logicalPort)
 	}
 
 	ingressDenyPorts, egressDenyPorts = oc.localPodDelDefaultDeny(np, policyPortsInfo...)
@@ -998,38 +1005,45 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 
 // handleLocalPodSelectorAddFunc adds a new pod to an existing NetworkPolicy
 func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, np *networkPolicy,
-	portGroupIngressDenyName, portGroupEgressDenyName string, obj interface{}) {
+	portGroupIngressDenyName, portGroupEgressDenyName string, objs ...interface{}) {
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
 		return
 	}
 
-	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, obj)
+	policyPorts, ingressDenyPorts, egressDenyPorts, localPodsInfo := oc.processLocalPodSelectorSetPods(policy, np, objs...)
 
 	ops, err := libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, portGroupIngressDenyName, ingressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
+		oc.processLocalPodSelectorDelPods(np, objs...)
 		klog.Errorf(err.Error())
+		return
 	}
 
 	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupEgressDenyName, egressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
+		oc.processLocalPodSelectorDelPods(np, objs...)
 		klog.Errorf(err.Error())
+		return
 	}
 
 	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
+		oc.processLocalPodSelectorDelPods(np, objs...)
 		klog.Errorf(err.Error())
+		return
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
+		oc.processLocalPodSelectorDelPods(np, objs...)
 		klog.Errorf(err.Error())
 		return
+	}
+	// update local pods after successful transaction
+	for podName, portInfo := range localPodsInfo {
+		np.localPods.Store(podName, portInfo)
 	}
 }
 
@@ -1041,7 +1055,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 		return
 	}
 
-	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorDelPods(np, obj)
+	policyPorts, ingressDenyPorts, egressDenyPorts, localPodsInfo := oc.processLocalPodSelectorDelPods(np, obj)
 
 	ops, err := libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, nil, portGroupIngressDenyName, ingressDenyPorts...)
 	if err != nil {
@@ -1069,11 +1083,14 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 		klog.Errorf(err.Error())
 		return
 	}
+	// update local pods after successful transaction
+	for _, podName := range localPodsInfo {
+		np.localPods.Delete(podName)
+	}
 }
 
 func (oc *Controller) handleLocalPodSelector(
-	policy *knet.NetworkPolicy, np *networkPolicy, portGroupIngressDenyName, portGroupEgressDenyName string,
-	handleInitialItems func([]interface{})) {
+	policy *knet.NetworkPolicy, np *networkPolicy, portGroupIngressDenyName, portGroupEgressDenyName string) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
@@ -1095,7 +1112,7 @@ func (oc *Controller) handleLocalPodSelector(
 				}
 			},
 		}, func(objs []interface{}) {
-			handleInitialItems(objs)
+			oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, objs...)
 		}, oc.watchFactory.GetHandlerPriority("LocalPodSelectorType"))
 
 	np.Lock()
@@ -1236,45 +1253,17 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 	// selects will be eventually added to this port group.
 	pg := libovsdbops.BuildPortGroup(np.portGroupName, readableGroupName, nil, acls)
 
-	// Add a handler to update the policy and deny port groups with the pods
-	// this policy applies to.
-	// Handle initial items locally to minimize DB ops.
-	var selectedPods []interface{}
-	handleInitialSelectedPods := func(objs []interface{}) {
-		selectedPods = objs
-		policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, selectedPods...)
-		pg.Ports = append(pg.Ports, policyPorts...)
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupIngressDenyName, ingressDenyPorts...)
-		if err != nil {
-			oc.processLocalPodSelectorDelPods(np, selectedPods...)
-			klog.Errorf(err.Error())
-		}
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupEgressDenyName, egressDenyPorts...)
-		if err != nil {
-			oc.processLocalPodSelectorDelPods(np, selectedPods...)
-			klog.Errorf(err.Error())
-		}
-	}
-	oc.handleLocalPodSelector(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, handleInitialSelectedPods)
-
-	np.Lock()
-	defer np.Unlock()
-	if np.deleted {
-		oc.processLocalPodSelectorDelPods(np, selectedPods...)
-		return nil
-	}
-
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(oc.nbClient, ops, pg)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, selectedPods...)
 		return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
 	}
-
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, selectedPods...)
 		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
 	}
+
+	oc.handleLocalPodSelector(policy, np, portGroupIngressDenyName, portGroupEgressDenyName)
+
 	np.created = true
 	return nil
 }
