@@ -71,6 +71,11 @@ type networkPolicy struct {
 	podHandlerList  []*factory.Handler
 	svcHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
+	// peer namespaced pod handlers, the only type of handler that can be dynamically deleted without deleting the whole
+	// networkPolicy. When namespace is deleted, podHandler for that namespace should be deleted too.
+	// Can be used by multiple PeerNamespace handlers in parallel for different keys
+	// namespace(string): *factory.Handler
+	namespacedPodHandlers sync.Map
 
 	// localPods is a list of pods affected by ths policy
 	// this is a sync map so we can handle multiple pods at once
@@ -84,15 +89,16 @@ type networkPolicy struct {
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	np := &networkPolicy{
-		name:            policy.Name,
-		namespace:       policy.Namespace,
-		policy:          policy,
-		ingressPolicies: make([]*gressPolicy, 0),
-		egressPolicies:  make([]*gressPolicy, 0),
-		podHandlerList:  make([]*factory.Handler, 0),
-		svcHandlerList:  make([]*factory.Handler, 0),
-		nsHandlerList:   make([]*factory.Handler, 0),
-		localPods:       sync.Map{},
+		name:                  policy.Name,
+		namespace:             policy.Namespace,
+		policy:                policy,
+		ingressPolicies:       make([]*gressPolicy, 0),
+		egressPolicies:        make([]*gressPolicy, 0),
+		podHandlerList:        make([]*factory.Handler, 0),
+		svcHandlerList:        make([]*factory.Handler, 0),
+		nsHandlerList:         make([]*factory.Handler, 0),
+		namespacedPodHandlers: sync.Map{},
+		localPods:             sync.Map{},
 	}
 	return np
 }
@@ -1713,7 +1719,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 					oc.watchFactory.RemovePodHandler(podHandler)
 					return
 				}
-				np.podHandlerList = append(np.podHandlerList, podHandler)
+				np.namespacedPodHandlers.Store(namespace.Name, podHandler)
 			},
 			DeleteFunc: func(obj interface{}) {
 				// when the namespace labels no longer apply
@@ -1723,6 +1729,10 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 
 				for _, pod := range pods {
 					oc.handlePeerPodSelectorDelete(gp, pod)
+				}
+				if handler, ok := np.namespacedPodHandlers.Load(namespace.Name); ok {
+					oc.watchFactory.RemovePodHandler(handler.(*factory.Handler))
+					np.namespacedPodHandlers.Delete(namespace.Name)
 				}
 
 			},
@@ -1805,4 +1815,8 @@ func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 	for _, handler := range np.svcHandlerList {
 		oc.watchFactory.RemoveServiceHandler(handler)
 	}
+	np.namespacedPodHandlers.Range(func(_, value interface{}) bool {
+		oc.watchFactory.RemovePodHandler(value.(*factory.Handler))
+		return true
+	})
 }
