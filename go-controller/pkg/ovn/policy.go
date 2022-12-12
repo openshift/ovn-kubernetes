@@ -1415,7 +1415,13 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				nsSel, _ := metav1.LabelSelectorAsSelector(handler.namespaceSelector)
+				if nsSel.Empty() {
+					// namespace is not limited by a selector, just use pod selector with empty namespace
+					err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, "")
+				} else {
+					err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				}
 			} else if handler.namespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
@@ -1423,7 +1429,7 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 			} else if handler.podSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np)
+				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, np.namespace)
 			} else if handler.serviceSelector {
 				err = oc.addPeerServiceHandler(policy, handler.gress, np)
 			}
@@ -1752,7 +1758,7 @@ func (oc *Controller) addPeerServiceHandler(
 // PeerPodSelectorType uses handlePeerPodSelectorAddUpdate on Add and Update,
 // and handlePeerPodSelectorDelete on Delete.
 func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) error {
+	gp *gressPolicy, np *networkPolicy, namespace string) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
@@ -1766,7 +1772,7 @@ func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
 	}
 	retryPeerPods := NewRetryObjs(
 		factory.PeerPodSelectorType,
-		np.namespace,
+		namespace,
 		sel, syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
