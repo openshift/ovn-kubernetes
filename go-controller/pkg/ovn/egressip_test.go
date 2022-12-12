@@ -1698,19 +1698,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				expectedDatabaseState = []libovsdbtest.TestData{
-					// This will never happen during real operations because OVS
-					// DB server will GC unreferenced non-root items. However
-					// until https://github.com/ovn-org/libovsdb/issues/219 is
-					// done, libovsdb test server won't
-					&nbdb.LogicalRouterPolicy{
-						Priority: types.EgressIPReroutePriority,
-						Match:    fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP),
-						Action:   nbdb.LogicalRouterPolicyActionReroute,
-						ExternalIDs: map[string]string{
-							"name": eIP.Name,
-						},
-						UUID: "reroute-UUID",
-					},
 					&nbdb.LogicalRouter{
 						Name: ovntypes.OVNClusterRouter,
 						UUID: ovntypes.OVNClusterRouter + "-UUID",
@@ -2910,8 +2897,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []v1.Pod{egressPod1},
 					},
 				)
+				// we don't know the real switch UUID in the db, but it can be found by name
+				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, node1.Name)
+				fakeOvn.controller.lsManager.AddNode(node1.Name, swUUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 
-				fakeOvn.controller.lsManager.AddNode(node1.Name, node1.Name+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchEgressIPNamespaces()
 				fakeOvn.controller.WatchEgressIPPods()

@@ -1335,7 +1335,7 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 		}
 
 		if err := oc.destroyNetworkPolicy(np, false); err != nil {
-			return fmt.Errorf("failed to destroy network policy: %s/%s", policy.Namespace, policy.Name)
+			return fmt.Errorf("failed to destroy network policy %s/%s: %v", policy.Namespace, policy.Name, err)
 		}
 		return nil
 	}
@@ -1357,7 +1357,7 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 	}
 	isLastPolicyInNamespace := len(nsInfo.networkPolicies) == expectedLastPolicyNum
 	if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
-		return fmt.Errorf("failed to destroy network policy: %s/%s", policy.Namespace, policy.Name)
+		return fmt.Errorf("failed to destroy network policy %s/%s: %v", policy.Namespace, policy.Name, err)
 	}
 
 	delete(nsInfo.networkPolicies, policy.Name)
