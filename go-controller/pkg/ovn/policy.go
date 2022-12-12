@@ -1168,7 +1168,13 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			// For each rule that contains both peer namespace selector and
 			// peer pod selector, we create a watcher for each matching namespace
 			// that populates the addressSet
-			oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+			nsSel, _ := metav1.LabelSelectorAsSelector(handler.namespaceSelector)
+			if nsSel.Empty() {
+				// namespace is not limited by a selector, just use pod selector with empty namespace
+				oc.handlePeerPodSelector(policy, handler.podSelector, handler.gress, np, "")
+			} else {
+				oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+			}
 		} else if handler.namespaceSelector != nil {
 			// For each peer namespace selector, we create a watcher that
 			// populates ingress.peerAddressSets
@@ -1177,7 +1183,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			// For each peer pod selector, we create a watcher that
 			// populates the addressSet
 			oc.handlePeerPodSelector(policy, handler.podSelector,
-				handler.gress, np)
+				handler.gress, np, np.namespace)
 		}
 	}
 
@@ -1577,12 +1583,12 @@ func (oc *Controller) handlePeerService(
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) {
+	gp *gressPolicy, np *networkPolicy, namespace string) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
+	h := oc.watchFactory.AddFilteredPodHandler(namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)
