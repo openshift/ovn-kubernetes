@@ -60,7 +60,8 @@ type retryObjs struct {
 	syncFunc func([]interface{}) error
 	// extra parameters needed by specific types, for now
 	// in use by network policy dynamic handlers
-	extraParameters interface{}
+	extraParameters   interface{}
+	terminatedObjects sync.Map
 }
 
 // NewRetryObjs returns a new retryObjs instance, packed with the desired input parameters.
@@ -81,6 +82,7 @@ func NewRetryObjs(
 		labelSelectorForFilteredHandler: labelSelectorForFilteredHandler,
 		syncFunc:                        syncFunc,
 		extraParameters:                 extraParameters,
+		terminatedObjects:               sync.Map{},
 	}
 }
 
@@ -1193,6 +1195,14 @@ var (
 // already. The add or update event is not valid for such object, which we now remove from the cluster in order to
 // free its resources. (for now, this applies to completed pods)
 func (oc *Controller) processObjectInTerminalState(objectsToRetry *retryObjs, obj interface{}, key string, event resourceEvent) {
+	_, loaded := objectsToRetry.terminatedObjects.LoadOrStore(key, true)
+	if loaded {
+		// object was already terminated
+		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be " +
+			"ignored as it has already been processed")
+		return
+	}
+
 	// The object is in a terminal state: delete it from the cluster, delete its retry entry and return.
 	klog.Infof("Detected object %s of type %v in terminal state (e.g. completed)"+
 		" during %s event: will remove it", key, objectsToRetry.oType, event)
@@ -1322,13 +1332,20 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 					// When processing an object in terminal state there is a chance that it was already removed from
 					//  the API server. Since delete events for objects in terminal state are skipped delete it here.
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods).
-					if kerrors.IsNotFound(err) && oc.isObjectInTerminalState(objectsToRetry.oType, newer) {
-						klog.Warningf("%s %s is in terminal state but no longer exists in informer cache, removing",
-							objectsToRetry.oType, newKey)
-						oc.processObjectInTerminalState(objectsToRetry, newer, newKey, resourceEventUpdate)
+					if kerrors.IsNotFound(err) {
+						if oc.isObjectInTerminalState(objectsToRetry.oType, newer) {
+							klog.Warningf("%s %s is in terminal state but no longer exists in informer cache, removing",
+								objectsToRetry.oType, newKey)
+							oc.processObjectInTerminalState(objectsToRetry, newer, newKey, resourceEventUpdate)
+						} else {
+							klog.V(5).Infof("Ignoring update event for %s %s as it was not found in"+
+								" informer cache and is not in a terminal state", objectsToRetry.oType, newKey)
+						}
 					} else {
-						klog.Warningf("Unable to get %s %s from informer cache (perhaps it was already"+
-							" deleted?), skipping update: %v", objectsToRetry.oType, newKey, err)
+						// This should never happen. The cache storage backend type cannot return any error
+						// other than not found
+						klog.Errorf("Unhandled error while trying to retrieve %s %s from informer cache: %v",
+							objectsToRetry.oType, newKey, err)
 					}
 					return
 				}
@@ -1432,8 +1449,16 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 				// If object is in terminal state, we would have already deleted it during update.
 				// No reason to attempt to delete it here again.
 				if oc.isObjectInTerminalState(objectsToRetry.oType, obj) {
-					klog.Infof("Ignoring delete event for completed resource %v %s", objectsToRetry.oType, key)
-					return
+					// If object is in terminal state, check if we have already processed it in a previous update.
+					// We cannot blindly handle multiple delete operations for the same pod currently. There can be races
+					// where other pod handlers are removing IP addresses from address sets when they shouldn't be, etc.
+					// See: https://github.com/ovn-org/ovn-kubernetes/pull/3318#issuecomment-1349804450
+					if _, loaded := objectsToRetry.terminatedObjects.LoadAndDelete(key); loaded {
+						// object was already terminated
+						klog.Infof("Ignoring delete event for resource in terminal state %s %s",
+							objectsToRetry.oType, key)
+						return
+					}
 				}
 				objectsToRetry.skipRetryObj(key)
 				internalCacheEntry := oc.getInternalCacheEntry(objectsToRetry.oType, obj)
