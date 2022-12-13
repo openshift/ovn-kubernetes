@@ -1272,14 +1272,6 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				initialDB = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
-						&nbdb.LogicalSwitch{
-							Name:  "node1",
-							Ports: []string{t1.portUUID},
-						},
-						&nbdb.LogicalSwitch{
-							Name:  "node2",
-							Ports: []string{t2.portUUID},
-						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      t1.portUUID,
 							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
@@ -1309,6 +1301,14 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 								//"iface-id-ver": is empty to check that it won't be set on update
 							},
 							PortSecurity: []string{fmt.Sprintf("%s %s", t2.podMAC, t2.podIP)},
+						},
+						&nbdb.LogicalSwitch{
+							Name:  "node1",
+							Ports: []string{t1.portUUID},
+						},
+						&nbdb.LogicalSwitch{
+							Name:  "node2",
+							Ports: []string{t2.portUUID},
 						},
 					},
 				}

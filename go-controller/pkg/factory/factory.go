@@ -376,7 +376,7 @@ func (wf *WatchFactory) GetHandlerPriority(objType string) (priority uint32) {
 	}
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}),  priority uint32) *Handler {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}), priority uint32) *Handler {
 	inf, ok := wf.informers[objType]
 	if !ok {
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
