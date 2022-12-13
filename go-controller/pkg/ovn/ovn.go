@@ -208,7 +208,8 @@ type Controller struct {
 	// channel to indicate we need to retry policy immediately
 	retryPolicyChan chan struct{}
 
-	metricsRecorder *metrics.ControlPlaneRecorder
+	metricsRecorder   *metrics.ControlPlaneRecorder
+	terminatedObjects sync.Map
 }
 
 type retryEntry struct {
@@ -301,6 +302,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcFactory:               svcFactory,
 		modelClient:              modelClient,
 		metricsRecorder:          metrics.NewControlPlaneRecorder(),
+		terminatedObjects:        sync.Map{},
 	}
 }
 
@@ -583,8 +585,17 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 // already. The add or update event is not valid for such object, which we now remove from the cluster in order to
 // free its resources. (for now, this applies to completed pods)
 func (oc *Controller) processPodInTerminalState(pod *kapi.Pod) {
+	podKey := getPodNamespacedName(pod)
+	_, loaded := oc.terminatedObjects.LoadOrStore(podKey, true)
+	if loaded {
+		// object was already terminated
+		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be " +
+			"ignored as it has already been processed")
+		return
+	}
+
 	// pod is in completed state, remove it
-	klog.Infof("Detected completed pod: %s. Will remove.", getPodNamespacedName(pod))
+	klog.Infof("Detected completed pod: %s. Will remove.", podKey)
 	oc.initRetryDelPod(pod)
 	oc.removeAddRetry(pod)
 	oc.logicalPortCache.remove(util.GetLogicalPortName(pod.Namespace, pod.Name))
@@ -598,7 +609,7 @@ func (oc *Controller) processPodInTerminalState(pod *kapi.Pod) {
 	if err := oc.removePod(pod, portInfo); err != nil {
 		oc.recordPodEvent(err, pod)
 		klog.Errorf("Failed to delete completed pod %s, error: %v",
-			getPodNamespacedName(pod), err)
+			podKey, err)
 		oc.unSkipRetryPod(pod)
 		return
 	}
@@ -677,13 +688,20 @@ func (oc *Controller) WatchPods() {
 			if err != nil {
 				// When processing an object in terminal state there is a chance that it was already removed from
 				// the API server. Since delete events for objects in terminal state are skipped delete it here.
-				if kerrors.IsNotFound(err) && util.PodCompleted(newerPod) {
-					klog.Warningf("Pod %s/%s is in terminal state but no longer exists in informer cache, removing",
-						podNs, podName)
-					oc.processPodInTerminalState(newerPod)
+				if kerrors.IsNotFound(err) {
+					if util.PodCompleted(newerPod) {
+						klog.Warningf("Pod %s/%s is in terminal state but no longer exists in informer cache, removing",
+							podNs, podName)
+						oc.processPodInTerminalState(newerPod)
+					} else {
+						klog.V(5).Infof("Ignoring update event for pod %s/%s as it was not found in"+
+							" informer cache and is not in a terminal state", podNs, podName)
+					}
 				} else {
-					klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
-						podNs, podName)
+					// This should never happen. The cache storage backend type cannot return any error
+					// other than not found
+					klog.Errorf("Unhandled error while trying to retrieve pod %s/%s from informer cache: %v",
+						podNs, podName, err)
 				}
 				return
 			}
@@ -724,8 +742,16 @@ func (oc *Controller) WatchPods() {
 			// If object is in terminal state, we would have already deleted it during update.
 			// No reason to attempt to delete it here again.
 			if util.PodCompleted(pod) {
-				klog.Infof("Ignoring delete event for completed pod %s/%s", pod.Namespace, pod.Name)
-				return
+				// If object is in terminal state, check if we have already processed it in a previous update.
+				// We cannot blindly handle multiple delete operations for the same pod currently. There can be races
+				// where other pod handlers are removing IP addresses from address sets when they shouldn't be, etc.
+				// See: https://github.com/ovn-org/ovn-kubernetes/pull/3318#issuecomment-1349804450
+				podKey := getPodNamespacedName(pod)
+				if _, loaded := oc.terminatedObjects.LoadAndDelete(podKey); loaded {
+					// object was already terminated
+					klog.Infof("Ignoring delete event for completed pod %s/%s", pod.Namespace, pod.Name)
+					return
+				}
 			}
 			oc.initRetryDelPod(pod)
 			// we have a copy of portInfo in the retry cache now, we can remove it from
