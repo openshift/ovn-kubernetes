@@ -295,7 +295,7 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(nodeName string, hybr
 		}
 		// attempt to allocate the IP address that is annotated on the node. The only way there would be a collision is if the annotations of podIP or hybridOverlayDRIP
 		// where manually edited and we do not support that
-		err := manager.AllocateIPs(switchName, allocateAddresses)
+		err := manager.AllocateIPs(nodeName, allocateAddresses)
 		if err != nil && err != ipallocator.ErrAllocated {
 			return nil, err
 		}

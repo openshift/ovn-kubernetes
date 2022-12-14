@@ -106,6 +106,8 @@ func (oc *Controller) syncPods(pods []interface{}) error {
 			}
 		}
 	}
+	// all pods present before ovn-kube startup have been processed
+	atomic.StoreUint32(&oc.allInitialPodsProcessed, 1)
 
 	if config.HybridOverlay.Enabled {
 		// allocate all previously annoted hybridOverlay Distributed Router IP addresses. Allocation needs to happen here
@@ -121,8 +123,6 @@ func (oc *Controller) syncPods(pods []interface{}) error {
 			}
 		}
 	}
-	// all pods present before ovn-kube startup have been processed
-	atomic.StoreUint32(&oc.allInitialPodsProcessed, 1)
 
 	// get all the nodes from the watchFactory
 	nodes, err := oc.watchFactory.GetNodes()
