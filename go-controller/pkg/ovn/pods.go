@@ -11,9 +11,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -22,7 +24,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
@@ -52,8 +54,23 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			}
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
+			// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
+			// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
+			// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
+			if _, err := oc.watchFactory.GetNode(pod.Spec.NodeName); kerrors.IsNotFound(err) &&
+				oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) == nil {
+				if util.PodTerminating(pod) {
+					klog.Infof("Ignoring IP allocation for terminating pod: %s/%s, on deleted "+
+						"node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
+					continue
+				} else {
+					// unknown condition how we are getting a non-terminating pod without a node here
+					klog.Errorf("Pod IP allocation found for a non-existent node in API with unknown "+
+						"condition. Pod: %s/%s, node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
+				}
+			}
 			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
-				return fmt.Errorf("failed to wait for node %s to be added to cache. IP allocation may fail!",
+				return fmt.Errorf("failed to wait for node %s to be added to cache. IP allocation may fail",
 					pod.Spec.NodeName)
 			}
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
@@ -97,10 +114,15 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		// find the logical switch for the node
 		ls := &nbdb.LogicalSwitch{}
 		if lsUUID, ok := oc.lsManager.GetUUID(n.Name); !ok {
-			klog.Errorf("Error getting logical switch for node %s: %s", n.Name, "Switch not in logical switch cache")
+			klog.Warningf("Error getting logical switch for node %s: %s", n.Name, "Switch not in logical switch cache")
 
 			// Not in cache: Try getting the logical switch from ovn database (slower method)
+			// It is possible that logical switch is removed and we can safely skip it, since there
+			// are no stale ports to worry about in that case.
 			if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, n.Name); err != nil {
+				if errors.Is(err, libovsdbclient.ErrNotFound) {
+					continue
+				}
 				return fmt.Errorf("can't find switch for node %s: %v", n.Name, err)
 			}
 		} else {
@@ -297,11 +319,15 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 	// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 	// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
-	// while it is now on another pod
+	// while it is now on another pod. Releasing IPs may fail at this point if cache knows nothing about it,
+	// which is okay since node may have been deleted.
 	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
 		util.JoinIPNetIPs(podIfAddrs, " "))
 	if err := oc.lsManager.ReleaseIPs(nodeName, podIfAddrs); err != nil {
-		return fmt.Errorf("cannot release IPs for pod %s: %w", podDesc, err)
+		if !errors.Is(err, logicalswitchmanager.SwitchNotFound) {
+			return fmt.Errorf("cannot release IPs for pod %s on node %s: %w", podDesc, nodeName, err)
+		}
+		klog.Warningf("Ignoring release IPs failure for pod %s on node %s: %w", podDesc, nodeName, err)
 	}
 
 	return nil
@@ -441,6 +467,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	defer func() {
 		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
+
+	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
+	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
+	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
+	// We cannot wire a pod that has no node/switch, so retry again later
+	if _, err := oc.watchFactory.GetNode(pod.Spec.NodeName); kerrors.IsNotFound(err) &&
+		oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) == nil {
+		podState := "unknown"
+		if util.PodTerminating(pod) {
+			podState = "terminating"
+		}
+		return fmt.Errorf("[%s/%s] Non-existent node: %s in API for pod with %s state",
+			pod.Namespace, pod.Name, pod.Spec.NodeName, podState)
+	}
 
 	logicalSwitch := pod.Spec.NodeName
 	ls, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
