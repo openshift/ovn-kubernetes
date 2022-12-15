@@ -589,8 +589,8 @@ func (oc *Controller) processPodInTerminalState(pod *kapi.Pod) {
 	_, loaded := oc.terminatedObjects.LoadOrStore(podKey, true)
 	if loaded {
 		// object was already terminated
-		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be " +
-			"ignored as it has already been processed")
+		klog.Infof("Detected pod %s in terminal state (e.g. completed) will be "+
+			"ignored as it has already been processed", podKey)
 		return
 	}
 
