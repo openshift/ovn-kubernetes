@@ -1198,8 +1198,8 @@ func (oc *Controller) processObjectInTerminalState(objectsToRetry *retryObjs, ob
 	_, loaded := objectsToRetry.terminatedObjects.LoadOrStore(key, true)
 	if loaded {
 		// object was already terminated
-		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be " +
-			"ignored as it has already been processed")
+		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be "+
+			"ignored as it has already been processed", key, objectsToRetry.oType)
 		return
 	}
 
