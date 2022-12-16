@@ -992,6 +992,7 @@ func (oc *Controller) getExistingLocalPolicyPorts(np *networkPolicy,
 
 // denyPGAddPorts adds ports to default deny port groups.
 // It also can take existing ops e.g. to add port to network policy port group and transact it.
+// It only adds new ports that do not already exist in the deny port groups.
 func (oc *Controller) denyPGAddPorts(np *networkPolicy, portNamesToUUIDs map[string]string, ops []ovsdb.Operation) error {
 	var err error
 	ingressDenyPGName := defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
@@ -1107,9 +1108,11 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(np *networkPolicy, objs ...i
 		var err error
 		// add pods to policy port group
 		var ops []ovsdb.Operation
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, np.portGroupName, policyPortUUIDs...)
-		if err != nil {
-			return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
+		if !PortGroupHasPorts(oc.nbClient, np.portGroupName, policyPortUUIDs) {
+			ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, np.portGroupName, policyPortUUIDs...)
+			if err != nil {
+				return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
+			}
 		}
 		// add pods to default deny port group
 		// make sure to only pass newly added pods
@@ -1412,7 +1415,13 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				nsSel, _ := metav1.LabelSelectorAsSelector(handler.namespaceSelector)
+				if nsSel.Empty() {
+					// namespace is not limited by a selector, just use pod selector with empty namespace
+					err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, "")
+				} else {
+					err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				}
 			} else if handler.namespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
@@ -1420,7 +1429,7 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 			} else if handler.podSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np)
+				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, np.namespace)
 			} else if handler.serviceSelector {
 				err = oc.addPeerServiceHandler(policy, handler.gress, np)
 			}
@@ -1749,7 +1758,7 @@ func (oc *Controller) addPeerServiceHandler(
 // PeerPodSelectorType uses handlePeerPodSelectorAddUpdate on Add and Update,
 // and handlePeerPodSelectorDelete on Delete.
 func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) error {
+	gp *gressPolicy, np *networkPolicy, namespace string) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
@@ -1763,7 +1772,7 @@ func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
 	}
 	retryPeerPods := NewRetryObjs(
 		factory.PeerPodSelectorType,
-		np.namespace,
+		namespace,
 		sel, syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
@@ -2037,4 +2046,17 @@ func getPolicyKey(policy *knet.NetworkPolicy) string {
 
 func (np *networkPolicy) getKey() string {
 	return fmt.Sprintf("%v/%v", np.namespace, np.name)
+}
+
+// PortGroupHasPorts returns true if a port group contains all given ports
+func PortGroupHasPorts(nbClient libovsdbclient.Client, pgName string, portUUIDs []string) bool {
+	pg := &nbdb.PortGroup{
+		Name: pgName,
+	}
+	pg, err := libovsdbops.GetPortGroup(nbClient, pg)
+	if err != nil {
+		return false
+	}
+
+	return sets.NewString(pg.Ports...).HasAll(portUUIDs...)
 }
