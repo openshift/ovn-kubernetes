@@ -21,6 +21,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -968,11 +969,13 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, 
 		return
 	}
 
-	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
-	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, objs...)
-		klog.Errorf(err.Error())
-		return
+	if !PortGroupHasPorts(oc.nbClient, np.portGroupName, policyPorts) {
+		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
+		if err != nil {
+			oc.processLocalPodSelectorDelPods(np, objs...)
+			klog.Errorf(err.Error())
+			return
+		}
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
@@ -1165,7 +1168,13 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			// For each rule that contains both peer namespace selector and
 			// peer pod selector, we create a watcher for each matching namespace
 			// that populates the addressSet
-			oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+			nsSel, _ := metav1.LabelSelectorAsSelector(handler.namespaceSelector)
+			if nsSel.Empty() {
+				// namespace is not limited by a selector, just use pod selector with empty namespace
+				oc.handlePeerPodSelector(policy, handler.podSelector, handler.gress, np, "")
+			} else {
+				oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+			}
 		} else if handler.namespaceSelector != nil {
 			// For each peer namespace selector, we create a watcher that
 			// populates ingress.peerAddressSets
@@ -1174,7 +1183,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			// For each peer pod selector, we create a watcher that
 			// populates the addressSet
 			oc.handlePeerPodSelector(policy, handler.podSelector,
-				handler.gress, np)
+				handler.gress, np, np.namespace)
 		}
 	}
 
@@ -1574,12 +1583,12 @@ func (oc *Controller) handlePeerService(
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) {
+	gp *gressPolicy, np *networkPolicy, namespace string) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
+	h := oc.watchFactory.AddFilteredPodHandler(namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)
@@ -1749,4 +1758,17 @@ func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 		oc.watchFactory.RemovePodHandler(value.(*factory.Handler))
 		return true
 	})
+}
+
+// PortGroupHasPorts returns true if a port group contains all given ports
+func PortGroupHasPorts(nbClient libovsdbclient.Client, pgName string, portUUIDs []string) bool {
+	pg := &nbdb.PortGroup{
+		Name: pgName,
+	}
+	pg, err := libovsdbops.GetPortGroup(nbClient, pg)
+	if err != nil {
+		return false
+	}
+
+	return sets.NewString(pg.Ports...).HasAll(portUUIDs...)
 }
