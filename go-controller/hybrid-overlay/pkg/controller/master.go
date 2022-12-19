@@ -108,7 +108,7 @@ func NewMaster(kube kube.Interface,
 
 	// Add our hybrid overlay CIDRs to the subnetallocator
 	klog.Infof("Allocating subnets")
-	if err := m.allocator.InitRanges(config.Default.ClusterSubnets); err != nil {
+	if err := m.allocator.InitRanges(config.HybridOverlay.ClusterSubnets); err != nil {
 		klog.Errorf("Failed to initialize host subnet allocator ranges: %v", err)
 		return nil, err
 	}
