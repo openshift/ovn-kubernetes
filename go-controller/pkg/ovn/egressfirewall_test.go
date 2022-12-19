@@ -92,7 +92,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "none"},
+					map[string]string{egressFirewallACLExtIdKey: "none"},
 					nil,
 				)
 				purgeACL.UUID = "purgeACL-UUID"
@@ -106,7 +106,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				keepACL.UUID = "keepACL-UUID"
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				otherACL.UUID = "otherACL-UUID"
@@ -258,7 +258,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -350,7 +350,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv6ACL.UUID = "ipv6ACL-UUID"
@@ -450,7 +450,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				udpACL.UUID = "udpACL-UUID"
@@ -549,7 +549,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -658,7 +658,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -769,7 +769,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -905,7 +905,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1012,7 +1012,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "none"},
+					map[string]string{egressFirewallACLExtIdKey: "none"},
 					nil,
 				)
 				purgeACL.UUID = "purgeACL-UUID"
@@ -1026,7 +1026,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				keepACL.UUID = "keepACL-UUID"
@@ -1041,7 +1041,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				otherACL.UUID = "otherACL-UUID"
@@ -1173,7 +1173,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1260,7 +1260,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv6ACL.UUID = "ipv6ACL-UUID"
@@ -1357,7 +1357,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 
@@ -1441,7 +1441,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1532,7 +1532,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
