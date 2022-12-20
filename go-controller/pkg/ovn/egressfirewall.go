@@ -26,6 +26,8 @@ const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
 	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
+	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
+	egressFirewallACLExtIdKey = "egressFirewall"
 )
 
 type egressFirewall struct {
@@ -176,7 +178,7 @@ func (oc *Controller) syncEgressFirewallRetriable(egressFirewalls []interface{})
 	ovnEgressFirewalls := make(map[string]struct{})
 
 	for _, egressFirewallACL := range egressFirewallACLs {
-		if ns, ok := egressFirewallACL.ExternalIDs["egressFirewall"]; ok {
+		if ns, ok := egressFirewallACL.ExternalIDs[egressFirewallACLExtIdKey]; ok {
 			// Most egressFirewalls will have more then one ACL but we only need to know if there is one for the namespace
 			// so a map is fine and we will add an entry every iteration but because it is a map will overwrite the previous
 			// entry if it already existed
@@ -285,11 +287,16 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 			break
 		}
 	}
+	// delete acls first, then dns address set that is referenced in these acls
+	if err := oc.deleteEgressFirewallRules(egressFirewallObj.Namespace); err != nil {
+		return err
+	}
+
 	if deleteDNS {
 		oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace)
 	}
 
-	return oc.deleteEgressFirewallRules(egressFirewallObj.Namespace)
+	return nil
 }
 
 func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
@@ -362,7 +369,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		Direction:   types.DirectionToLPort,
 		Match:       match,
 		Action:      action,
-		ExternalIDs: map[string]string{"egressFirewall": externalID},
+		ExternalIDs: map[string]string{egressFirewallACLExtIdKey: externalID},
 	}
 
 	// add it's UUID to the necessary logical switches
@@ -408,7 +415,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 // deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
 func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
-	egressFirewallACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{"egressFirewall": externalID})
+	egressFirewallACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{egressFirewallACLExtIdKey: externalID})
 	if err != nil {
 		return fmt.Errorf("unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
 	}
