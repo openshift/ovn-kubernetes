@@ -740,16 +740,18 @@ func Test_buildClusterLBs(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:              "node-a",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.1")},
-			gatewayRouterName: "gr-node-a",
-			switchName:        "switch-node-a",
+			name:               "node-a",
+			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.1")},
+			hostAddresses:      []net.IP{net.ParseIP("10.0.0.1")},
+			gatewayRouterName:  "gr-node-a",
+			switchName:         "switch-node-a",
 		},
 		{
-			name:              "node-b",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.2")},
-			gatewayRouterName: "gr-node-b",
-			switchName:        "switch-node-b",
+			name:               "node-b",
+			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.2")},
+			hostAddresses:      []net.IP{net.ParseIP("10.0.0.2")},
+			gatewayRouterName:  "gr-node-b",
+			switchName:         "switch-node-b",
 		},
 	}
 
@@ -963,18 +965,20 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:              "node-a",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.1")},
-			gatewayRouterName: "gr-node-a",
-			switchName:        "switch-node-a",
-			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
+			name:               "node-a",
+			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.1")},
+			hostAddresses:      []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.111")},
+			gatewayRouterName:  "gr-node-a",
+			switchName:         "switch-node-a",
+			podSubnets:         []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
-			name:              "node-b",
-			nodeIPs:           []net.IP{net.ParseIP("10.0.0.2")},
-			gatewayRouterName: "gr-node-b",
-			switchName:        "switch-node-b",
-			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
+			name:               "node-b",
+			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.2")},
+			hostAddresses:      []net.IP{net.ParseIP("10.0.0.2")},
+			gatewayRouterName:  "gr-node-b",
+			switchName:         "switch-node-b",
+			podSubnets:         []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 	}
 
@@ -1061,6 +1065,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
 						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "10.128.0.2", Port: 8080}},
+						},
 					},
 				},
 				{
@@ -1088,6 +1096,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 						{
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "10.128.0.2", Port: 8080}},
 						},
 					},
 				},
@@ -1144,6 +1156,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
 						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "169.254.169.2", Port: 8080}},
+						},
 					},
 				},
 				{
@@ -1159,6 +1175,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 						{
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 				},
@@ -1195,6 +1215,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
 						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "169.254.169.2", Port: 8080}},
+						},
 					},
 				},
 				{
@@ -1210,6 +1234,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 						{
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 				},
@@ -1286,6 +1314,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
 						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "169.254.169.2", Port: 8080}},
+						},
 					},
 				},
 				{
@@ -1305,6 +1337,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 						{
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "169.254.169.3", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 80},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
 						},
 					},
 				},
@@ -1686,6 +1726,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Source:  ovnlb.Addr{"10.0.0.1", 34345},
 							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
 						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "169.254.169.2", Port: 8080}},
+						},
 					},
 				},
 				{
@@ -1703,8 +1747,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 34345},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  ovnlb.Addr{IP: "10.0.0.1", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "169.254.169.3", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 				},
@@ -1769,6 +1821,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Source:  ovnlb.Addr{"10.0.0.1", 34345},
 							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
 						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "169.254.169.2", Port: 8080}},
+						},
 					},
 				},
 				{
@@ -1786,8 +1842,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
 						},
 						{
-							Source:  ovnlb.Addr{"10.0.0.1", 34345},
-							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+							Source:  ovnlb.Addr{IP: "10.0.0.1", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "169.254.169.3", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{IP: "10.0.0.111", Port: 34345},
+							Targets: []ovnlb.Addr{{IP: "10.0.0.1", Port: 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
 						},
 					},
 				},
@@ -1874,18 +1938,20 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:              "node-a",
-			nodeIPs:           []string{"10.0.0.1"},
-			gatewayRouterName: "gr-node-a",
-			switchName:        "switch-node-a",
-			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
+			name:               "node-a",
+			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.1")},
+			hostAddresses:      []net.IP{net.ParseIP("10.0.0.1")},
+			gatewayRouterName:  "gr-node-a",
+			switchName:         "switch-node-a",
+			podSubnets:         []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
-			name:              "node-b",
-			nodeIPs:           []string{"10.0.0.2"},
-			gatewayRouterName: "gr-node-b",
-			switchName:        "switch-node-b",
-			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
+			name:               "node-b",
+			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.2")},
+			hostAddresses:      []net.IP{net.ParseIP("10.0.0.2")},
+			gatewayRouterName:  "gr-node-b",
+			switchName:         "switch-node-b",
+			podSubnets:         []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 	}
 

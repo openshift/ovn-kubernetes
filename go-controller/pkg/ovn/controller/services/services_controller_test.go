@@ -641,7 +641,7 @@ func nodeRouterLoadBalancer(node *nodeInfo, nodePort int32, serviceName string, 
 		Options:  servicesOptions(),
 		Protocol: &nbdb.LoadBalancerProtocolTCP,
 		Vips: map[string]string{
-			endpoint(node.nodeIPs[0], nodePort): computeEndpoints(outputPort, endpointIPs...),
+			endpoint(node.hostAddressesStr()[0], nodePort): computeEndpoints(outputPort, endpointIPs...),
 		},
 		ExternalIDs: serviceExternalIDs(namespacedServiceName(serviceNamespace, serviceName)),
 	}
@@ -661,10 +661,11 @@ func endpoint(ip string, port int32) string {
 
 func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
 	return &nodeInfo{
-		name:              nodeName,
-		nodeIPs:           []net.IP{net.ParseIP(nodeIP)},
-		gatewayRouterName: nodeGWRouterName(nodeName),
-		switchName:        nodeSwitchName(nodeName),
+		name:               nodeName,
+		l3gatewayAddresses: []net.IP{net.ParseIP(nodeIP)},
+		hostAddresses:      []net.IP{net.ParseIP(nodeIP)},
+		gatewayRouterName:  nodeGWRouterName(nodeName),
+		switchName:         nodeSwitchName(nodeName),
 	}
 }
 
