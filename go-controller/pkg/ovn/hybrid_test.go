@@ -700,6 +700,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			//assuming all the pods have finished processing
+			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
@@ -862,6 +864,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
+			//assuming all the pods have finished processing
+			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
@@ -1123,6 +1127,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
+			//assuming all the pods have finished processing
+			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
