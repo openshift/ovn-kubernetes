@@ -1853,6 +1853,8 @@ type egressIPController struct {
 	modelClient libovsdbops.ModelClient
 	// watchFactory watching k8s objects
 	watchFactory *factory.WatchFactory
+	// reachability check interval
+	reachabilityCheckInterval time.Duration
 }
 
 // addStandByEgressIPAssignment does the same setup that is done by addPodEgressIPAssignments but for
@@ -2213,36 +2215,47 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 // is important because egress IP is based upon routing traffic to these nodes,
 // and if they aren't reachable we shouldn't be using them for egress IP.
 func (oc *Controller) checkEgressNodesReachability() {
+	timer := time.NewTicker(oc.eIPC.reachabilityCheckInterval)
+	defer timer.Stop()
 	for {
-		reAddOrDelete := map[string]bool{}
-		oc.eIPC.allocator.Lock()
-		for _, eNode := range oc.eIPC.allocator.cache {
-			if eNode.isEgressAssignable && eNode.isReady {
-				wasReachable := eNode.isReachable
-				isReachable := oc.isReachable(eNode)
-				if wasReachable && !isReachable {
-					reAddOrDelete[eNode.name] = true
-				} else if !wasReachable && isReachable {
-					reAddOrDelete[eNode.name] = false
-				}
-				eNode.isReachable = isReachable
+		select {
+		case <-timer.C:
+			checkEgressNodesReachabilityIterate(oc)
+		case <-oc.stopChan:
+			klog.V(5).Infof("Stop channel got triggered: will stop checkEgressNodesReachability")
+			return
+		}
+	}
+}
+
+func checkEgressNodesReachabilityIterate(oc *Controller) {
+	reAddOrDelete := map[string]bool{}
+	oc.eIPC.allocator.Lock()
+	for _, eNode := range oc.eIPC.allocator.cache {
+		if eNode.isEgressAssignable && eNode.isReady {
+			wasReachable := eNode.isReachable
+			isReachable := oc.isReachable(eNode)
+			if wasReachable && !isReachable {
+				reAddOrDelete[eNode.name] = true
+			} else if !wasReachable && isReachable {
+				reAddOrDelete[eNode.name] = false
+			}
+			eNode.isReachable = isReachable
+		}
+	}
+	oc.eIPC.allocator.Unlock()
+	for nodeName, shouldDelete := range reAddOrDelete {
+		if shouldDelete {
+			klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
+			if err := oc.deleteEgressNode(nodeName); err != nil {
+				klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
+			}
+		} else {
+			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
+			if err := oc.addEgressNode(nodeName); err != nil {
+				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		}
-		oc.eIPC.allocator.Unlock()
-		for nodeName, shouldDelete := range reAddOrDelete {
-			if shouldDelete {
-				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
-				if err := oc.deleteEgressNode(nodeName); err != nil {
-					klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
-				}
-			} else {
-				klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
-				if err := oc.addEgressNode(nodeName); err != nil {
-					klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
-				}
-			}
-		}
-		time.Sleep(5 * time.Second)
 	}
 }
 
