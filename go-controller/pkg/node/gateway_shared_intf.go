@@ -1069,7 +1069,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
 				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
 
-		physicalIP, err := util.MatchIPNetFamily(false, bridgeIPs)
+		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
 		}
@@ -1125,7 +1125,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
 				"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
 
-		physicalIP, err := util.MatchIPNetFamily(true, bridgeIPs)
+		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv6 physical IP of host: %v", err)
 		}

@@ -419,7 +419,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 
 	for _, podIfAddr := range podAnnotation.IPs {
 		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-		nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+		nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
 		if err != nil {
 			return err
 		}
