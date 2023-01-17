@@ -5873,6 +5873,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							&nbdb.LogicalRouter{
 								Name: types.OVNClusterRouter,
 							},
+							&nbdb.LogicalRouter{
+								Name: ovntypes.GWRouterPrefix + node1.Name,
+								UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+							},
+							&nbdb.LogicalRouter{
+								Name: ovntypes.GWRouterPrefix + node2.Name,
+								UUID: ovntypes.GWRouterPrefix + node2.Name + "-UUID",
+							},
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
@@ -5930,6 +5938,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
+				expectedNatLogicalPort := "k8s-node2"
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -5953,10 +5962,32 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 						UUID: "reroute-UUID",
 					},
+					&nbdb.NAT{
+						UUID:       "egressip-nat-UUID",
+						LogicalIP:  podV4IP,
+						ExternalIP: egressIP1,
+						ExternalIDs: map[string]string{
+							"name": egressIPName,
+						},
+						Type:        nbdb.NATTypeSNAT,
+						LogicalPort: &expectedNatLogicalPort,
+						Options: map[string]string{
+							"stateless": "false",
+						},
+					},
 					&nbdb.LogicalRouter{
 						Name:     ovntypes.OVNClusterRouter,
 						UUID:     ovntypes.OVNClusterRouter + "-UUID",
 						Policies: []string{"reroute-UUID", "default-no-reroute-UUID", "no-reroute-service-UUID"},
+					},
+					&nbdb.LogicalRouter{
+						Name: ovntypes.GWRouterPrefix + node1.Name,
+						UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+					},
+					&nbdb.LogicalRouter{
+						Name: ovntypes.GWRouterPrefix + node2.Name,
+						UUID: ovntypes.GWRouterPrefix + node2.Name + "-UUID",
+						Nat:  []string{"egressip-nat-UUID"},
 					},
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name + "-UUID",
