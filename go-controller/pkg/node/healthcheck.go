@@ -21,23 +21,28 @@ import (
 // ServiceTypeLoadBalancer services
 
 type loadBalancerHealthChecker struct {
-	nodeName  string
-	server    healthcheck.Server
-	services  map[ktypes.NamespacedName]uint16
-	endpoints map[ktypes.NamespacedName]int
+	sync.Mutex
+	nodeName     string
+	server       healthcheck.Server
+	services     map[ktypes.NamespacedName]uint16
+	endpoints    map[ktypes.NamespacedName]int
+	watchFactory factory.NodeWatchFactory
 }
 
-func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
+func newLoadBalancerHealthChecker(nodeName string, watchFactory factory.NodeWatchFactory) *loadBalancerHealthChecker {
 	return &loadBalancerHealthChecker{
-		nodeName:  nodeName,
-		server:    healthcheck.NewServer(nodeName, nil, nil, nil),
-		services:  make(map[ktypes.NamespacedName]uint16),
-		endpoints: make(map[ktypes.NamespacedName]int),
+		nodeName:     nodeName,
+		server:       healthcheck.NewServer(nodeName, nil, nil, nil),
+		services:     make(map[ktypes.NamespacedName]uint16),
+		endpoints:    make(map[ktypes.NamespacedName]int),
+		watchFactory: watchFactory,
 	}
 }
 
 func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
 	if svc.Spec.HealthCheckNodePort != 0 {
+		l.Lock()
+		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
 		_ = l.server.SyncServices(l.services)
@@ -45,11 +50,32 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
 }
 
 func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
-	// HealthCheckNodePort can't be changed on update
+	// if the ETP values have changed between local and cluster,
+	// we need to update health checks accordingly
+	// HealthCheckNodePort is used only in ETP=local mode
+	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster &&
+		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal {
+		l.AddService(new)
+		ep, err := l.watchFactory.GetEndpoint(new.Namespace, new.Name)
+		if err != nil {
+			klog.V(4).Infof("Could not fetch endpoint for service %s/%s during health check update service", new.Namespace, new.Name)
+		}
+		namespacedName := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
+		l.Lock()
+		l.endpoints[namespacedName] = countLocalEndpoints(ep, l.nodeName)
+		_ = l.server.SyncEndpoints(l.endpoints)
+		l.Unlock()
+	}
+	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal &&
+		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster {
+		l.DeleteService(old)
+	}
 }
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 	if svc.Spec.HealthCheckNodePort != 0 {
+		l.Lock()
+		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		delete(l.services, name)
 		delete(l.endpoints, name)
@@ -61,6 +87,8 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
 
 func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	l.Lock()
+	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(ep, l.nodeName)
 		_ = l.server.SyncEndpoints(l.endpoints)
@@ -69,6 +97,8 @@ func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
 
 func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
 	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
+	l.Lock()
+	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(new, l.nodeName)
 		_ = l.server.SyncEndpoints(l.endpoints)
@@ -78,6 +108,8 @@ func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
 
 func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	l.Lock()
+	defer l.Unlock()
 	delete(l.endpoints, name)
 	_ = l.server.SyncEndpoints(l.endpoints)
 }
