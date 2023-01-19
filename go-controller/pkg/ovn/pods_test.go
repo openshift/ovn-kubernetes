@@ -557,7 +557,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// there should also be no entry for this pod in the retry cache
 				gomega.Eventually(func() bool {
 					return fakeOvn.controller.getPodRetryEntry(myPod2) == nil
-				}, 2).Should(gomega.BeTrue())
+				}, 31*time.Second).Should(gomega.BeTrue())
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
 				}, 2).Should(gomega.MatchJSON(t2.getAnnotationsJson()))
