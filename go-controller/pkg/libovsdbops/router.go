@@ -595,3 +595,32 @@ func DeleteNextHopFromLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
+
+// DeleteNATsWithPredicateOps looks up NATs from the cache based on a given
+// predicate, deletes them, removes them from associated logical routers and
+// returns the corresponding ops
+func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, natPredicate func(*nbdb.NAT) bool) ([]libovsdb.Operation, error) {
+	deleted := []*nbdb.NAT{}
+	router := &nbdb.LogicalRouter{}
+	natUUIDs := sets.String{}
+	opsModel := []OperationModel{
+		{
+			ModelPredicate: natPredicate,
+			ExistingResult: &deleted,
+			DoAfter: func() {
+				router.Nat = ExtractUUIDsFromModels(&deleted)
+				natUUIDs.Insert(router.Nat...)
+			},
+			BulkOp: true,
+		},
+		{
+			Model:            router,
+			ModelPredicate:   func(lr *nbdb.LogicalRouter) bool { return natUUIDs.HasAny(lr.Nat...) },
+			OnModelMutations: []interface{}{&router.Nat},
+			ErrNotFound:      false,
+			BulkOp:           true,
+		},
+	}
+	m := NewModelClient(nbClient)
+	return m.DeleteOps(ops, opsModel...)
+}
