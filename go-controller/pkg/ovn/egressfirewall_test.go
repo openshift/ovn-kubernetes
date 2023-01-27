@@ -1058,7 +1058,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				ipv6Mode:       true,
 				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", false}},
 				ports:          nil,
-				output:         "(ip4.dst == 1.2.3.4/32) && (ip4.src == $testv4 || ip6.src == $testv6)",
+				output:         "(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4",
 			},
 			{
 				clusterSubnets: []string{"10.128.0.0/14", "2002:0:0:1234::/64"},
@@ -1088,7 +1088,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				ipv6Mode:       true,
 				destinations:   []matchTarget{{matchKindV6CIDR, "2001::/64", false}},
 				ports:          nil,
-				output:         "(ip6.dst == 2001::/64) && (ip4.src == $testv4 || ip6.src == $testv6)",
+				output:         "(ip6.dst == 2001::/64) && ip6.src == $testv6",
 			},
 			{
 				clusterSubnets: []string{"2002:0:0:1234::/64"},
@@ -1109,7 +1109,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				ipv6Mode:       false,
 				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", true}},
 				ports:          nil,
-				output:         "(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4 && ip4.dst != 10.128.0.0/14",
+				output:         "(ip4.dst == 1.2.3.4/32 && ip4.dst != 10.128.0.0/14) && ip4.src == $testv4",
 			},
 			{
 				clusterSubnets: []string{"2002:0:0:1234::/64"},
@@ -1119,7 +1119,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				ipv6Mode:       true,
 				destinations:   []matchTarget{{matchKindV6AddressSet, "destv6", true}},
 				ports:          nil,
-				output:         "(ip6.dst == $destv6) && ip6.src == $testv6 && ip6.dst != 2002:0:0:1234::/64",
+				output:         "(ip6.dst == $destv6) && ip6.src == $testv6",
 			},
 			{
 				clusterSubnets: []string{"10.128.0.0/14", "2002:0:0:1234::/64"},
@@ -1129,7 +1129,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				ipv6Mode:       true,
 				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", true}},
 				ports:          nil,
-				output:         "(ip4.dst == 1.2.3.4/32) && (ip4.src == $testv4 || ip6.src == $testv6) && ip4.dst != 10.128.0.0/14 && ip6.dst != 2002:0:0:1234::/64",
+				output:         "(ip4.dst == 1.2.3.4/32 && ip4.dst != 10.128.0.0/14) && ip4.src == $testv4",
 			},
 		}
 
