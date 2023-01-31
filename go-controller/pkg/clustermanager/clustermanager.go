@@ -2,11 +2,13 @@ package clustermanager
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"reflect"
 	"sync"
 	"time"
 
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
@@ -14,9 +16,11 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	clientset "k8s.io/client-go/kubernetes"
 )
 
 type ovnkubeClusterManagerLeaderMetrics struct{}
@@ -36,11 +40,14 @@ func (_ ovnkubeClusterManagerLeaderMetricsProvider) NewLeaderMetric() leaderelec
 }
 
 // ClusterManager structure is the object which manages the cluster nodes.
-// It creates a default network controller for the default network.
+// It creates a default network controller for the default network and a
+// secondary network cluster controller manager to manage the multi networks.
 type ClusterManager struct {
-	client                      clientset.Interface
-	defaultNetClusterController *defaultNetworkClusterController
-	wf                          *factory.WatchFactory
+	client                               clientset.Interface
+	defaultNetClusterController          *defaultNetworkClusterController
+	wf                                   *factory.WatchFactory
+	stopChan                             chan struct{}
+	secondaryNetClusterControllerManager *secondaryNetworkClusterControllerManager
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 }
@@ -53,9 +60,13 @@ func NewClusterManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		client:                      ovnClient.KubeClient,
 		defaultNetClusterController: newDefaultNetworkClusterController(ovnClient, wf),
 		wf:                          wf,
+		stopChan:                    make(chan struct{}),
 		recorder:                    recorder,
 	}
 
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		cm.secondaryNetClusterControllerManager = newSecondaryNetworkClusterControllerManager(ovnClient, wf, recorder)
+	}
 	return cm
 }
 
@@ -134,8 +145,13 @@ func (cm *ClusterManager) Start(nodeName string, wg *sync.WaitGroup, ctx context
 }
 
 func (cm *ClusterManager) Stop() {
+	close(cm.stopChan)
 	metrics.UnRegisterClusterManagerFunctional()
 	cm.defaultNetClusterController.Stop()
+
+	if cm.secondaryNetClusterControllerManager != nil {
+		cm.secondaryNetClusterControllerManager.Stop()
+	}
 }
 
 // Run starts the actual watching.
@@ -145,12 +161,101 @@ func (cm *ClusterManager) Run() error {
 		return err
 	}
 
+	if cm.secondaryNetClusterControllerManager != nil {
+		if err := cm.secondaryNetClusterControllerManager.Start(); err != nil {
+			return err
+		}
+	}
+
 	// Start and sync the watch factory to begin listening for events
 	if err := cm.wf.Start(); err != nil {
 		return err
 	}
 
-	return cm.defaultNetClusterController.Run()
+	if err := cm.defaultNetClusterController.Run(); err != nil {
+		return err
+	}
+
+	if cm.secondaryNetClusterControllerManager != nil {
+		klog.Infof("Starting multi network attach manager")
+		return cm.secondaryNetClusterControllerManager.Run(cm.stopChan)
+	}
+
+	return nil
+}
+
+// secondaryNetworkClusterControllerManager object manages the multi net-attach-def controllers.
+// It implements networkAttachDefController.NetworkControllerManager and can be used
+// by NetAttachDefinitionController to add and delete NADs.
+type secondaryNetworkClusterControllerManager struct {
+	// net-attach-def controller handle net-attach-def and create/delete network controllers
+	nadController *nad.NetAttachDefinitionController
+	client        clientset.Interface
+	ovnClient     *util.OVNClientset
+	kube          kube.Interface
+	watchFactory  *factory.WatchFactory
+}
+
+func newSecondaryNetworkClusterControllerManager(ovnClient *util.OVNClientset,
+	wf *factory.WatchFactory, recorder record.EventRecorder) *secondaryNetworkClusterControllerManager {
+	klog.Infof("Creates new Multi Network cluster manager")
+	kube := &kube.Kube{
+		KClient:              ovnClient.KubeClient,
+		EIPClient:            ovnClient.EgressIPClient,
+		EgressFirewallClient: ovnClient.EgressFirewallClient,
+		CloudNetworkClient:   ovnClient.CloudNetworkClient,
+	}
+	sncm := &secondaryNetworkClusterControllerManager{
+		ovnClient:    ovnClient,
+		client:       ovnClient.KubeClient,
+		kube:         kube,
+		watchFactory: wf,
+	}
+	sncm.nadController = nad.NewNetAttachDefinitionController(
+		sncm, ovnClient, recorder)
+	return sncm
+}
+
+func (sncm *secondaryNetworkClusterControllerManager) Run(stopChan <-chan struct{}) error {
+	klog.Infof("Starting net-attach-def controller")
+	return sncm.nadController.Run(stopChan)
+}
+
+// Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
+func (sncm *secondaryNetworkClusterControllerManager) Start() error {
+	klog.Infof("Start secondary network controller of network")
+	return nil
+}
+
+func (sncm *secondaryNetworkClusterControllerManager) Stop() {
+	// stops each network controller associated with net-attach-def; it is ok
+	// to call GetAllControllers here as net-attach-def controller has been stopped,
+	// and no more change of network controllers
+	klog.Infof("Stops net-attach-def controller")
+	for _, oc := range sncm.nadController.GetAllNetworkControllers() {
+		oc.Stop()
+	}
+}
+
+func (sncm *secondaryNetworkClusterControllerManager) NewNetworkController(nInfo util.NetInfo,
+	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
+	klog.Infof("New net-attach-def controller for network %s called", nInfo.GetNetworkName())
+	topoType := netConfInfo.TopologyType()
+	if topoType == ovntypes.Layer3Topology {
+		stopChan := make(chan struct{})
+		sncm := newSecondaryNetworkClusterController(sncm.ovnClient, sncm.watchFactory,
+			stopChan, &sync.WaitGroup{}, nInfo, netConfInfo, nInfo.GetNetworkName())
+
+		sncm.initRetryFramework()
+		return sncm, nil
+	}
+	return nil, fmt.Errorf("topology type %s not supported", topoType)
+
+}
+
+func (sncm *secondaryNetworkClusterControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
+	// Nothing need to be done here
+	return nil
 }
 
 // hasResourceAnUpdateFunc returns true if the given resource type has a dedicated update function.

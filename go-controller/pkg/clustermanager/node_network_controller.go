@@ -137,5 +137,42 @@ func (nnc *NodeNetworkController) updateNodeAnnotationWithRetry(nodeName string,
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)
 	}
+
+	return nil
+}
+
+func (nnc *NodeNetworkController) cleanup(networkName string) error {
+	if nnc.networkName != networkName {
+		return nil
+	}
+
+	// remove hostsubnet annotation for this network
+	klog.Infof("Remove node-subnets annotation for network %s on all nodes", networkName)
+	existingNodes, err := nnc.watchFactory.GetNodes()
+	if err != nil {
+		klog.Errorf("Error in getting the nodes: %v", err)
+		return nil
+	}
+
+	for _, node := range existingNodes {
+		if util.NoHostSubnet(node) {
+			klog.V(5).Infof("Node %s is not managed by OVN", node.Name)
+			continue
+		}
+
+		//updateFunc := func(nodeAnnotations map[string]string) (map[string]string, error) {
+		//	return util.UpdateNodeHostSubnetAnnotation(nodeAnnotations, nil, nnc.networkName)
+		//}
+
+		hostSubnetsMap := map[string][]*net.IPNet{nnc.networkName: nil}
+		err = nnc.updateNodeAnnotationWithRetry(node.Name, hostSubnetsMap)
+		if err != nil {
+			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
+				node.Name, networkName)
+		}
+
+		nnc.clusterSubnetAllocator.ReleaseAllNodeSubnets(node.Name)
+	}
+
 	return nil
 }
