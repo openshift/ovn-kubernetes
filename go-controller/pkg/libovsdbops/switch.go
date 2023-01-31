@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -203,6 +204,10 @@ func RemoveLoadBalancersFromSwitchOps(nbClient libovsdbclient.Client, ops []libo
 
 	err := findSwitchUUID(nbClient, lswitch)
 	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			// if we want to delete loadbalancer from the switch that doesn't exist, that is noop
+			return ops, nil
+		}
 		return nil, err
 	}
 

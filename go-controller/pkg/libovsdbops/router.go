@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -86,6 +87,10 @@ func RemoveLoadBalancersFromRouterOps(nbClient libovsdbclient.Client, ops []libo
 
 	_, err := findRouter(nbClient, router)
 	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			// if we want to delete loadbalancer from the router that doesn't exist, that is noop
+			return ops, nil
+		}
 		return nil, err
 	}
 
