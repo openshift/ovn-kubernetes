@@ -878,7 +878,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
-			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = fakeOvn.controller.gatewayInit(
@@ -1038,7 +1038,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
-			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = fakeOvn.controller.gatewayInit(
