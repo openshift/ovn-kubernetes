@@ -875,6 +875,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		events            []string
 		eventsLock        sync.Mutex
 		recorder          *record.FakeRecorder
+
+		l3GatewayConfig *util.L3GatewayConfig
+		nodeHostAddrs   sets.String
 	)
 
 	const (
@@ -950,13 +953,14 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		config.Kubernetes.HostNetworkNamespace = ""
 		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, fakeClient.EgressIPClient, fakeClient.EgressFirewallClient, nil}, testNode.Name)
-		l3Config := node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
-		err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+		l3GatewayConfig = node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
+		err = util.SetL3GatewayConfig(nodeAnnotator, l3GatewayConfig)
 		err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress...))
+		nodeHostAddrs = sets.NewString(node1.NodeHostAddress...)
+		err = util.SetNodeHostAddresses(nodeAnnotator, nodeHostAddrs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = nodeAnnotator.Run()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1134,7 +1138,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			clusterSubnets := startFakeController(oc, wg)
+			var clusterSubnets []*net.IPNet
+			for _, clusterSubnet := range config.Default.ClusterSubnets {
+				clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
+			}
+			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			// add stale route
@@ -1145,24 +1154,33 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			ginkgo.By("Creating stale route")
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool { return false }
-			err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient,
+			err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(clusterController.nbClient,
 				types.OVNClusterRouter, badRoute, p)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Syncing node with OVNK")
-			node, err := oc.kube.GetNode(testNode.Name)
+			node, err := clusterController.kube.GetNode(testNode.Name)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = oc.syncNodeManagementPort(node, []*net.IPNet{subnet})
+			err = clusterController.syncNodeManagementPort(node, []*net.IPNet{subnet})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			err = clusterController.syncGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Stale route should have been removed")
 
 			skipSnat := false
+			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+			expectedDatabaseState := []libovsdbtest.TestData{}
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter,
+				expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
+
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
 				skipSnat, node1.NodeMgmtPortIP, "1400")
-			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(clusterController.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			return nil
 		}
