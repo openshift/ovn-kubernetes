@@ -97,6 +97,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 
 	// Only Monitor Required SBDB tables to reduce memory overhead
 	chassisPrivate := sbdb.ChassisPrivate{}
+	igmpGroup := sbdb.IGMPGroup{}
 	_, err = c.Monitor(ctx,
 		c.NewMonitor(
 			// used by unidling controller
@@ -107,6 +108,8 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 			client.WithTable(&sbdb.Chassis{}),
 			// used by node sync, only interested in names
 			client.WithTable(&chassisPrivate, &chassisPrivate.Name),
+			// used by node sync, only interested in Chassis reference
+			client.WithTable(&igmpGroup, &igmpGroup.Chassis),
 			// used for metrics
 			client.WithTable(&sbdb.SBGlobal{}),
 			// used for metrics
