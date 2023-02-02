@@ -252,9 +252,10 @@ func buildLB(lb *LB) *nbdb.LoadBalancer {
 	}
 
 	options := map[string]string{
-		"reject":    reject,
-		"event":     event,
-		"skip_snat": skipSNAT,
+		"reject":             reject,
+		"event":              event,
+		"skip_snat":          skipSNAT,
+		"neighbor_responder": "none",
 	}
 
 	// Session affinity

@@ -609,9 +609,10 @@ func nodeSwitchRouterLoadBalancerName(nodeName string, serviceNamespace string, 
 
 func servicesOptions() map[string]string {
 	return map[string]string{
-		"event":     "false",
-		"reject":    "true",
-		"skip_snat": "false",
+		"event":              "false",
+		"reject":             "true",
+		"skip_snat":          "false",
+		"neighbor_responder": "none",
 	}
 }
 
