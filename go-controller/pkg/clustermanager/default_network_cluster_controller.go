@@ -10,6 +10,7 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
@@ -50,6 +51,11 @@ type defaultNetworkClusterController struct {
 
 	hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 
+	// Join switch subnet allocator for each zone.
+	zoneJoinSubnetAllocator *subnetallocator.BaseSubnetAllocator
+	zoneJoinSubnetCache     map[string]([]*net.IPNet)
+	zoneJoinSubnetCacheLock sync.Mutex
+
 	nodeIdBitmap    *bitmapallocator.AllocationBitmap
 	nodeIdCache     map[string]int
 	nodeIdCacheLock sync.Mutex
@@ -81,8 +87,10 @@ func newDefaultNetworkClusterController(ovnClient *util.OVNClusterManagerClients
 		},
 		defaultNetworkController:     newNodeNetworkController(kube, wf, ovntypes.DefaultNetworkName),
 		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
+		zoneJoinSubnetAllocator:      &subnetallocator.BaseSubnetAllocator{},
 		nodeIdBitmap:                 nodeIdBitmap,
 		nodeIdCache:                  make(map[string]int),
+		zoneJoinSubnetCache:          make(map[string]([]*net.IPNet)),
 	}
 
 	ncm.initRetryFramework()
@@ -104,6 +112,13 @@ func (ncm *defaultNetworkClusterController) Init() error {
 		if err := ncm.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets); err != nil {
 			return fmt.Errorf("failed to initialize hybrid overlay subnet allocator ranges: %w", err)
 		}
+	}
+
+	for _, entry := range config.ClusterManager.ZoneJoinSubnets {
+		if err := ncm.zoneJoinSubnetAllocator.AddNetworkRange(entry.CIDR, entry.HostSubnetLength); err != nil {
+			return err
+		}
+		klog.V(5).Infof("Added network range %s to zone subnet allocator", entry.CIDR)
 	}
 
 	return nil
@@ -195,7 +210,8 @@ func (ncm *defaultNetworkClusterController) releaseHybridOverlayNodeSubnet(nodeN
 	klog.Infof("Deleted hybrid overlay HostSubnets for node %s", nodeName)
 }
 
-func (ncm *defaultNetworkClusterController) updateNodeAnnotationWithRetry(nodeName string, nodeId int) error {
+func (ncm *defaultNetworkClusterController) updateNodeAnnotationWithRetry(nodeName string, nodeId int,
+	zoneJoinSubnets []*net.IPNet) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -207,7 +223,17 @@ func (ncm *defaultNetworkClusterController) updateNodeAnnotationWithRetry(nodeNa
 		}
 
 		cnode := node.DeepCopy()
-		cnode.Annotations = util.UpdateNodeIdAnnotation(cnode.Annotations, nodeId)
+		if nodeId != -1 {
+			cnode.Annotations = util.UpdateNodeIdAnnotation(cnode.Annotations, nodeId)
+		}
+
+		if zoneJoinSubnets != nil {
+			cnode.Annotations, err = util.UpdateZoneJoinSubnetsAnnotation(cnode.Annotations, zoneJoinSubnets, ovntypes.DefaultNetworkName)
+			if err != nil {
+				return fmt.Errorf("failed to update node %q annotation subnet %s",
+					node.Name, util.JoinIPNets(zoneJoinSubnets, ","))
+			}
+		}
 		return ncm.kube.UpdateNode(cnode)
 	})
 	if resultErr != nil {
@@ -258,12 +284,29 @@ func (ncm *defaultNetworkClusterController) addNode(node *corev1.Node) error {
 		return err
 	}
 
+	updateNodeAnnotations := false
 	if allocatedNodeId == util.GetNodeId(node) {
-		// Nothing to update.
-		return nil
+		allocatedNodeId = -1
+	} else {
+		updateNodeAnnotations = true
 	}
 
-	return ncm.updateNodeAnnotationWithRetry(node.Name, allocatedNodeId)
+	zoneJoinSubnets, err := ncm.allocateZoneJoinSubnets(node)
+	if err != nil {
+		return err
+	}
+
+	if !ncm.isNodeJoinSubnetAnnotationOutOfSync(node, zoneJoinSubnets) {
+		zoneJoinSubnets = nil
+	} else {
+		updateNodeAnnotations = true
+	}
+
+	if updateNodeAnnotations {
+		return ncm.updateNodeAnnotationWithRetry(node.Name, allocatedNodeId, zoneJoinSubnets)
+	}
+
+	return nil
 }
 
 func (ncm *defaultNetworkClusterController) deleteNode(node *corev1.Node) error {
@@ -295,6 +338,18 @@ func (ncm *defaultNetworkClusterController) syncNodes(nodes []interface{}) error
 				if err := ncm.hybridOverlaySubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnet); err != nil {
 					klog.Errorf("Failed to mark the subnet %v as allocated in the hybrid subnet allocator for node %s: %w", hostSubnet, node.Name, err)
 				}
+			}
+		}
+
+		nodeZone := util.GetNodeZone(node)
+		zoneSubnets, err := util.ParseZoneJoinSubnetsAnnotation(node, ovntypes.DefaultNetworkName)
+		if err != nil {
+			klog.Warning(err.Error())
+		} else if zoneSubnets != nil {
+			_, found := ncm.zoneJoinSubnetCache[nodeZone]
+			if !found {
+				ncm.zoneJoinSubnetCache[nodeZone] = zoneSubnets
+				_ = ncm.zoneJoinSubnetAllocator.MarkAllocatedNetworks(ovntypes.DefaultNetworkName, zoneSubnets...)
 			}
 		}
 	}
@@ -391,6 +446,102 @@ func (ncm *defaultNetworkClusterController) removeNodeId(nodeName string, nodeId
 		ncm.nodeIdBitmap.Release(nodeId)
 	}
 	delete(ncm.nodeIdCache, nodeName)
+}
+
+func (ncm *defaultNetworkClusterController) allocateZoneJoinSubnets(node *corev1.Node) ([]*net.IPNet, error) {
+	ncm.zoneJoinSubnetCacheLock.Lock()
+	defer ncm.zoneJoinSubnetCacheLock.Unlock()
+
+	nodeZone := util.GetNodeZone(node)
+	allocatedZoneSubnets, found := ncm.zoneJoinSubnetCache[nodeZone]
+	if found {
+		return allocatedZoneSubnets, nil
+	}
+
+	allocatedSubnets := []*net.IPNet{}
+	if config.IPv4Mode {
+		allocatedSubnet, err := ncm.zoneJoinSubnetAllocator.AllocateIPv4Network(ovntypes.DefaultNetworkName)
+		if err != nil {
+			return nil, fmt.Errorf("error allocating join IPv4 network for zone %s: %v", nodeZone, err)
+		}
+
+		allocatedSubnets = append(allocatedSubnets, allocatedSubnet)
+	}
+
+	if config.IPv6Mode {
+		allocatedSubnet, err := ncm.zoneJoinSubnetAllocator.AllocateIPv6Network(ovntypes.DefaultNetworkName)
+		if err != nil {
+			return nil, fmt.Errorf("error allocating join IPv6 network for zone %s: %v", nodeZone, err)
+		}
+
+		allocatedSubnets = append(allocatedSubnets, allocatedSubnet)
+	}
+
+	ncm.zoneJoinSubnetCache[nodeZone] = allocatedSubnets
+	return allocatedSubnets, nil
+}
+
+func (ncm *defaultNetworkClusterController) isNodeJoinSubnetAnnotationOutOfSync(node *corev1.Node,
+	zoneJoinSubnets []*net.IPNet) bool {
+
+	nodeZoneJoinSubnets, err := util.ParseZoneJoinSubnetsAnnotation(node, ovntypes.DefaultNetworkName)
+	if err != nil {
+		// Out of sync - Zone join subnet annotations not set for the node.
+		return true
+	}
+
+	return !ncm.areIPNetsEqual(zoneJoinSubnets, nodeZoneJoinSubnets)
+}
+
+func (ncm *defaultNetworkClusterController) areIPNetsEqual(ipNet1 []*net.IPNet, ipNet2 []*net.IPNet) bool {
+	if ipNet1 == nil || ipNet2 == nil {
+		return false
+	}
+
+	if len(ipNet1) != len(ipNet2) {
+		return false
+	}
+
+	ipNet1v4Ips := 0
+	ipNet1v6Ips := 0
+	ipNet2v4Ips := 0
+	ipNet2v6Ips := 0
+
+	for _, ip := range ipNet1 {
+		if utilnet.IsIPv4(ip.IP) {
+			ipNet1v4Ips++
+		} else {
+			ipNet1v6Ips++
+		}
+	}
+
+	for _, ip := range ipNet2 {
+		if utilnet.IsIPv4(ip.IP) {
+			ipNet2v4Ips++
+		} else {
+			ipNet2v6Ips++
+		}
+	}
+
+	if ipNet1v4Ips != ipNet2v4Ips || ipNet1v6Ips != ipNet2v6Ips {
+		return false
+	}
+
+	for _, ip1 := range ipNet1 {
+		found := false
+		for _, ip2 := range ipNet2 {
+			if ip1.String() == ip2.String() {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (h *defaultNetworkClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {

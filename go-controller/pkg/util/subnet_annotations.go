@@ -36,6 +36,9 @@ import (
 const (
 	// ovnNodeSubnets is the constant string representing the node subnets annotation key
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+
+	// ovnZoneJoinSubnets is the constant string representing the zone join switch subnets annotation key
+	ovnZoneJoinSubnets = "k8s.ovn.org/zone-join-subnets"
 )
 
 // updateSubnetAnnotation add the hostSubnets of the given network to the input node annotations;
@@ -175,6 +178,35 @@ func ParseNodeHostSubnetAnnotation(node *kapi.Node, netName string) ([]*net.IPNe
 	subnets, ok := subnetsMap[netName]
 	if !ok {
 		return nil, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNodeSubnets, netName)
+	}
+
+	return subnets, nil
+}
+
+// UpdateZoneJoinSubnetsAnnotation updates a "k8s.ovn.org/zone-join-subnets" annotation for network "netName",
+// with the specified network, suitable for passing to kube.SetAnnotationsOnNode. If zoneSubnets is empty,
+// it deleted the "k8s.ovn.org/zone-join-subnets" annotation for network "netName"
+func UpdateZoneJoinSubnetsAnnotation(annotations map[string]string, zoneSubnets []*net.IPNet, netName string) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateSubnetAnnotation(annotations, ovnZoneJoinSubnets, netName, zoneSubnets)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
+}
+
+// ParseZoneJoinSubnetsAnnotation parses the "k8s.ovn.org/zone-join-subnets" annotation
+// on a node and returns the zone subnet for the given network.
+func ParseZoneJoinSubnetsAnnotation(node *kapi.Node, netName string) ([]*net.IPNet, error) {
+	subnetsMap, err := parseSubnetAnnotation(node.Annotations, ovnZoneJoinSubnets)
+	if err != nil {
+		return nil, err
+	}
+	subnets, ok := subnetsMap[netName]
+	if !ok {
+		return nil, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnZoneJoinSubnets, netName)
 	}
 
 	return subnets, nil

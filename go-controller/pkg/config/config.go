@@ -166,6 +166,10 @@ var (
 	OvnKubeNode = OvnKubeNodeConfig{
 		Mode: types.NodeModeFull,
 	}
+
+	ClusterManager = ClusterManagerConfig{
+		RawZoneJoinSwitchSubnets: "100.64.0.0/16/19,fd98::/48/64",
+	}
 )
 
 const (
@@ -439,6 +443,16 @@ type OvnKubeNodeConfig struct {
 	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
+// ClusterManagerConfig holds configuration for ovnkube-cluster-manager
+type ClusterManagerConfig struct {
+	// RawZoneJoinSwitchSubnets holds the unparsed zone join switch subnets.
+	// Should only be used inside config module.
+	RawZoneJoinSwitchSubnets string `gcfg:"zone-join-switch-subnets"`
+	// ZoneJoinSubnets holds parsed cluster manager join switch subnet entries and
+	// may be used outside the config module.
+	ZoneJoinSubnets []CIDRNetworkEntry
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -468,6 +482,7 @@ type config struct {
 	ClusterMgrHA         HAConfig
 	HybridOverlay        HybridOverlayConfig
 	OvnKubeNode          OvnKubeNodeConfig
+	ClusterManager       ClusterManagerConfig
 }
 
 var (
@@ -486,6 +501,8 @@ var (
 	savedClusterMgrHA         HAConfig
 	savedHybridOverlay        HybridOverlayConfig
 	savedOvnKubeNode          OvnKubeNodeConfig
+	savedClusterManager       ClusterManagerConfig
+
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -512,6 +529,7 @@ func init() {
 	savedMasterHA = MasterHA
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
+	savedClusterManager = ClusterManager
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
@@ -541,6 +559,7 @@ func PrepareTestConfig() error {
 	MasterHA = savedMasterHA
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
+	ClusterManager = savedClusterManager
 
 	if err := completeConfig(); err != nil {
 		return err
@@ -1310,6 +1329,21 @@ var OvnKubeNodeFlags = []cli.Flag{
 	},
 }
 
+// ClusterManagerFlags captures ovnkube-cluster-manager specific configurations
+var ClusterManagerFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:  "cluster-manager-zone-join-switch-subnets",
+		Value: ClusterManager.RawZoneJoinSwitchSubnets,
+		Usage: "A comma separated set of IP subnets and the associated" +
+			"hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
+			"to use for the zone join subnets. Each entry is given " +
+			"in the form IP address/subnet mask/hostsubnetlength, " +
+			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
+			"hostsubnetlength defines how many IP addresses are dedicated to each zone.",
+		Destination: &cliConfig.ClusterManager.RawZoneJoinSwitchSubnets,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
@@ -1331,6 +1365,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, MonitoringFlags...)
 	flags = append(flags, IPFIXFlags...)
 	flags = append(flags, OvnKubeNodeFlags...)
+	flags = append(flags, ClusterManagerFlags...)
 	flags = append(flags, customFlags...)
 	return flags
 }
@@ -1761,6 +1796,36 @@ func completeHybridOverlayConfig(allSubnets *configSubnets) error {
 	return nil
 }
 
+func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&ClusterManager, &file.ClusterManager, &savedClusterManager); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&ClusterManager, &cli.ClusterManager, &savedClusterManager); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// completeClusterManagerConfig completes the HybridOverlay config by parsing raw values
+// into their final form.
+func completeClusterManagerConfig() error {
+	if len(ClusterManager.RawZoneJoinSwitchSubnets) == 0 {
+		return nil
+	}
+
+	var err error
+	ClusterManager.ZoneJoinSubnets, err = ParseClusterSubnetEntries(ClusterManager.RawZoneJoinSwitchSubnets)
+	if err != nil {
+		return fmt.Errorf("cluster manager zone join subnet invalid: %v", err)
+	}
+
+	return nil
+}
+
 func buildDefaultConfig(cli, file *config) error {
 	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
@@ -1855,6 +1920,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		MasterHA:             savedMasterHA,
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
+		ClusterManager:       savedClusterManager,
 	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
@@ -1972,6 +2038,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildClusterManagerConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
@@ -1999,6 +2069,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
+	klog.V(5).Infof("Ovnkube Cluster Manager config: %+v", ClusterManager)
 
 	return retConfigFile, nil
 }
@@ -2019,6 +2090,10 @@ func completeConfig() error {
 		return err
 	}
 	if err := completeHybridOverlayConfig(allSubnets); err != nil {
+		return err
+	}
+
+	if err := completeClusterManagerConfig(); err != nil {
 		return err
 	}
 
