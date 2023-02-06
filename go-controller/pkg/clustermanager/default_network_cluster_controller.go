@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	cache "k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -16,9 +17,15 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+)
+
+const (
+	// Maximum node Ids that can be generated. Limited to maximum nodes supported by k8s.
+	maxNodeIds = 5000
 )
 
 type networkClusterControllerBase struct {
@@ -42,6 +49,10 @@ type defaultNetworkClusterController struct {
 	defaultNetworkController *NodeNetworkController
 
 	hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
+
+	nodeIdBitmap    *bitmapallocator.AllocationBitmap
+	nodeIdCache     map[string]int
+	nodeIdCacheLock sync.Mutex
 }
 
 func newDefaultNetworkClusterController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *defaultNetworkClusterController {
@@ -57,6 +68,10 @@ func newDefaultNetworkClusterController(ovnClient *util.OVNClusterManagerClients
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
 	}
+
+	nodeIdBitmap := bitmapallocator.NewContiguousAllocationMap(maxNodeIds, "nodeIds")
+	_, _ = nodeIdBitmap.Allocate(0)
+
 	ncm := &defaultNetworkClusterController{
 		networkClusterControllerBase: networkClusterControllerBase{
 			kube:         kube,
@@ -66,6 +81,8 @@ func newDefaultNetworkClusterController(ovnClient *util.OVNClusterManagerClients
 		},
 		defaultNetworkController:     newNodeNetworkController(kube, wf, ovntypes.DefaultNetworkName),
 		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
+		nodeIdBitmap:                 nodeIdBitmap,
+		nodeIdCache:                  make(map[string]int),
 	}
 
 	ncm.initRetryFramework()
@@ -178,6 +195,28 @@ func (ncm *defaultNetworkClusterController) releaseHybridOverlayNodeSubnet(nodeN
 	klog.Infof("Deleted hybrid overlay HostSubnets for node %s", nodeName)
 }
 
+func (ncm *defaultNetworkClusterController) updateNodeAnnotationWithRetry(nodeName string, nodeId int) error {
+	// Retry if it fails because of potential conflict which is transient. Return error in the
+	// case of other errors (say temporary API server down), and it will be taken care of by the
+	// retry mechanism.
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		node, err := ncm.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return err
+		}
+
+		cnode := node.DeepCopy()
+		cnode.Annotations = util.UpdateNodeIdAnnotation(cnode.Annotations, nodeId)
+		return ncm.kube.UpdateNode(cnode)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update node %s annotation", nodeName)
+	}
+
+	return nil
+}
+
 func (ncm *defaultNetworkClusterController) addUpdateNodeEvent(node *corev1.Node) error {
 	if util.NoHostSubnet(node) {
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
@@ -201,13 +240,39 @@ func (ncm *defaultNetworkClusterController) addUpdateNodeEvent(node *corev1.Node
 }
 
 func (ncm *defaultNetworkClusterController) addNode(node *corev1.Node) error {
-	return ncm.defaultNetworkController.addUpdateNode(node)
+	var err error
+	if err = ncm.defaultNetworkController.addUpdateNode(node); err != nil {
+		return err
+	}
+
+	var allocatedNodeId int = -1
+	// Release the allocation on error
+	defer func() {
+		if err != nil {
+			ncm.removeNodeId(node.Name, allocatedNodeId)
+		}
+	}()
+
+	allocatedNodeId, err = ncm.allocateNodeId(node)
+	if err != nil {
+		return err
+	}
+
+	if allocatedNodeId == util.GetNodeId(node) {
+		// Nothing to update.
+		return nil
+	}
+
+	return ncm.updateNodeAnnotationWithRetry(node.Name, allocatedNodeId)
 }
 
 func (ncm *defaultNetworkClusterController) deleteNode(node *corev1.Node) error {
 	if config.HybridOverlay.Enabled {
 		ncm.releaseHybridOverlayNodeSubnet(node.Name)
 	}
+
+	nodeId := util.GetNodeId(node)
+	ncm.removeNodeId(node.Name, nodeId)
 
 	return ncm.defaultNetworkController.deleteNode(node)
 }
@@ -234,7 +299,98 @@ func (ncm *defaultNetworkClusterController) syncNodes(nodes []interface{}) error
 		}
 	}
 
+	err := ncm.syncNodeIds(nodes)
+	if err != nil {
+		return err
+	}
+
 	return ncm.defaultNetworkController.syncNodes(nodes)
+}
+
+func (ncm *defaultNetworkClusterController) syncNodeIds(nodes []interface{}) error {
+	ncm.nodeIdCacheLock.Lock()
+	defer ncm.nodeIdCacheLock.Unlock()
+
+	duplicateIdNodes := []string{}
+
+	for _, tmp := range nodes {
+		node, ok := tmp.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
+		}
+
+		nodeId := util.GetNodeId(node)
+		if nodeId != -1 {
+			klog.V(5).Infof("Node %s has the node id %d set", node.Name, nodeId)
+			reserved, _ := ncm.nodeIdBitmap.Allocate(nodeId)
+			if reserved {
+				ncm.nodeIdCache[node.Name] = nodeId
+			} else {
+				// The id set on this node is duplicate.
+				klog.V(5).Infof("Node %s has a duplicate node id %d set", node.Name, nodeId)
+				duplicateIdNodes = append(duplicateIdNodes, node.Name)
+			}
+		}
+	}
+
+	for i := range duplicateIdNodes {
+		newNodeId, allocated, _ := ncm.nodeIdBitmap.AllocateNext()
+		klog.V(5).Infof("Allocated new node id  %d for node %q", newNodeId, duplicateIdNodes[i])
+		if allocated {
+			// Store the allocated new id in the cache.  addNode() will update the node annotation
+			// with the new allocated id.
+			ncm.nodeIdCache[duplicateIdNodes[i]] = newNodeId
+		}
+	}
+
+	return nil
+}
+
+func (ncm *defaultNetworkClusterController) allocateNodeId(node *corev1.Node) (int, error) {
+	ncm.nodeIdCacheLock.Lock()
+	defer ncm.nodeIdCacheLock.Unlock()
+
+	nodeId := util.GetNodeId(node)
+
+	nodeIdInCache, ok := ncm.nodeIdCache[node.Name]
+	if ok {
+		klog.Infof("Allocate node id : found node id %d for node %q in the cache", nodeIdInCache, node.Name)
+	} else {
+		nodeIdInCache = -1
+	}
+
+	if nodeIdInCache != -1 && nodeId != nodeIdInCache {
+		//  Use the cached node id.
+		ncm.nodeIdCache[node.Name] = nodeIdInCache
+		return nodeIdInCache, nil
+	}
+
+	if nodeIdInCache == -1 && nodeId != -1 {
+		// Cache for this node is not set yet.  Cache the node id.
+		ncm.nodeIdCache[node.Name] = nodeId
+		return nodeId, nil
+	}
+
+	// We need to allocate the node id.
+	if nodeIdInCache == -1 && nodeId == -1 {
+		var allocated bool
+		nodeId, allocated, _ = ncm.nodeIdBitmap.AllocateNext()
+		klog.Infof("Allocate node id : Id allocated for node %q is %d", node.Name, nodeId)
+		if allocated {
+			ncm.nodeIdCache[node.Name] = nodeId
+		} else {
+			return -1, fmt.Errorf("failed to allocate id for the node %q", node.Name)
+		}
+	}
+
+	return nodeId, nil
+}
+
+func (ncm *defaultNetworkClusterController) removeNodeId(nodeName string, nodeId int) {
+	if nodeId != -1 {
+		ncm.nodeIdBitmap.Release(nodeId)
+	}
+	delete(ncm.nodeIdCache, nodeName)
 }
 
 func (h *defaultNetworkClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
