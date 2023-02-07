@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -80,6 +81,10 @@ func RemoveLoadBalancersFromGroupOps(nbClient libovsdbclient.Client, ops []libov
 
 	err := findLBGroup(nbClient, group)
 	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			// if we want to delete loadbalancer from the group that doesn't exist, that is noop
+			return ops, nil
+		}
 		return nil, err
 	}
 
