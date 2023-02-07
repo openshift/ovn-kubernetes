@@ -88,6 +88,10 @@ const (
 	// ovnGatewayRouterPortIPs is the annotation to store the node Gateway router port ips.
 	// It is set by network controller manager.
 	ovnGatewayRouterPortIPs = "k8s.ovn.org/ovn-gw-router-port-ips"
+
+	// ovnGatewayRouterPortIPs is the annotation tostore the node Transit switch port ips.
+	// It is set by cluster manager.
+	ovnTransitSwitchPortIps = "k8s.ovn.org/ovn-node-transit-switch-port-ips"
 )
 
 type L3GatewayConfig struct {
@@ -618,7 +622,7 @@ func GetNodeZone(node *kapi.Node) string {
 	return zoneName
 }
 
-func parseNodeAnnotationAddresses(node *kapi.Node, annotation string) ([]*net.IPNet, error) {
+func parseNodeAnnotationAddresses(node *kapi.Node, annotation string, subnet bool) ([]*net.IPNet, error) {
 	annotationIps, ok := node.Annotations[annotation]
 	if !ok {
 		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
@@ -631,12 +635,16 @@ func parseNodeAnnotationAddresses(node *kapi.Node, annotation string) ([]*net.IP
 
 	var ips []*net.IPNet
 	for _, ipStr := range ipaddrStrs {
-		_, ipNet, err := net.ParseCIDR(ipStr)
+		ip, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing %q value: %v", annotation, err)
 		}
 
-		ips = append(ips, ipNet)
+		if subnet {
+			ips = append(ips, ipNet)
+		} else {
+			ips = append(ips, &net.IPNet{IP: ip, Mask: ipNet.Mask})
+		}
 
 	}
 	return ips, nil
@@ -669,5 +677,37 @@ func UpdateNodeGatewayRouterPortIPsAnnotation(annotations map[string]string, ips
 // ParseNodeGRIPsAnnotation parses the node gateway router port ips stored in
 // in the ovnGatewayRouterPortIPs annotation.
 func ParseNodeGRIPsAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
-	return parseNodeAnnotationAddresses(node, ovnGatewayRouterPortIPs)
+	return parseNodeAnnotationAddresses(node, ovnGatewayRouterPortIPs, true)
+}
+
+// ParseNodeTransitSwitchPortAddresses parses the node Transit switch port ips stored in
+// in the ovnTransitSwitchPortIps annotation.
+func ParseNodeTransitSwitchPortAddresses(node *kapi.Node) ([]*net.IPNet, error) {
+	return parseNodeAnnotationAddresses(node, ovnTransitSwitchPortIps, false)
+}
+
+func updateTransitSwitchPortAddressesAnnotation(annotations map[string]string, annotationName string, tsPortIps []*net.IPNet) error {
+	ipaddrStrs := make([]string, len(tsPortIps))
+	for i, ip := range tsPortIps {
+		ipaddrStrs[i] = ip.String()
+	}
+	bytes, err := json.Marshal(ipaddrStrs)
+	if err != nil {
+		return err
+	}
+
+	annotations[annotationName] = string(bytes)
+	return nil
+}
+
+// UpdateNodeTransitSwitchPortAddressesAnnotation updates the ovnTransitSwitchPortIps annotation with the node Transit switch port ips.
+func UpdateNodeTransitSwitchPortAddressesAnnotation(annotations map[string]string, tsPortIps []*net.IPNet) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateTransitSwitchPortAddressesAnnotation(annotations, ovnTransitSwitchPortIps, tsPortIps)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
 }

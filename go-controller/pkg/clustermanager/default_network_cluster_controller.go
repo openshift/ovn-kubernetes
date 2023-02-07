@@ -2,6 +2,7 @@ package clustermanager
 
 import (
 	"fmt"
+	"math/big"
 	"net"
 	"reflect"
 	"sync"
@@ -59,6 +60,12 @@ type defaultNetworkClusterController struct {
 	nodeIdBitmap    *bitmapallocator.AllocationBitmap
 	nodeIdCache     map[string]int
 	nodeIdCacheLock sync.Mutex
+
+	transitSwitchv4Cidr   *net.IPNet
+	transitSwitchBasev4Ip *big.Int
+
+	transitSwitchv6Cidr   *net.IPNet
+	transitSwitchBasev6Ip *big.Int
 }
 
 func newDefaultNetworkClusterController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *defaultNetworkClusterController {
@@ -78,6 +85,19 @@ func newDefaultNetworkClusterController(ovnClient *util.OVNClusterManagerClients
 	nodeIdBitmap := bitmapallocator.NewContiguousAllocationMap(maxNodeIds, "nodeIds")
 	_, _ = nodeIdBitmap.Allocate(0)
 
+	var transitSwitchv4Cidr *net.IPNet
+	var transitSwitchBasev4Ip *big.Int
+	var transitSwitchv6Cidr *net.IPNet
+	var transitSwitchBasev6Ip *big.Int
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		_, transitSwitchv4Cidr, _ = net.ParseCIDR(config.ClusterManager.V4TransitSwitchSubnet)
+		_, transitSwitchv6Cidr, _ = net.ParseCIDR(config.ClusterManager.V6TransitSwitchSubnet)
+
+		transitSwitchBasev4Ip = utilnet.BigForIP(transitSwitchv4Cidr.IP)
+		transitSwitchBasev6Ip = utilnet.BigForIP(transitSwitchv6Cidr.IP)
+	}
+
 	ncm := &defaultNetworkClusterController{
 		networkClusterControllerBase: networkClusterControllerBase{
 			kube:         kube,
@@ -91,6 +111,10 @@ func newDefaultNetworkClusterController(ovnClient *util.OVNClusterManagerClients
 		nodeIdBitmap:                 nodeIdBitmap,
 		nodeIdCache:                  make(map[string]int),
 		zoneJoinSubnetCache:          make(map[string]([]*net.IPNet)),
+		transitSwitchv4Cidr:          transitSwitchv4Cidr,
+		transitSwitchBasev4Ip:        transitSwitchBasev4Ip,
+		transitSwitchv6Cidr:          transitSwitchv6Cidr,
+		transitSwitchBasev6Ip:        transitSwitchBasev6Ip,
 	}
 
 	ncm.initRetryFramework()
@@ -211,7 +235,7 @@ func (ncm *defaultNetworkClusterController) releaseHybridOverlayNodeSubnet(nodeN
 }
 
 func (ncm *defaultNetworkClusterController) updateNodeAnnotationWithRetry(nodeName string, nodeId int,
-	zoneJoinSubnets []*net.IPNet) error {
+	zoneJoinSubnets []*net.IPNet, nodeTransitSwitchPortIps []*net.IPNet) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -232,6 +256,14 @@ func (ncm *defaultNetworkClusterController) updateNodeAnnotationWithRetry(nodeNa
 			if err != nil {
 				return fmt.Errorf("failed to update node %q annotation subnet %s",
 					node.Name, util.JoinIPNets(zoneJoinSubnets, ","))
+			}
+		}
+
+		if nodeTransitSwitchPortIps != nil {
+			cnode.Annotations, err = util.UpdateNodeTransitSwitchPortAddressesAnnotation(cnode.Annotations, nodeTransitSwitchPortIps)
+			if err != nil {
+				return fmt.Errorf("failed to update node %q annotation transit port ips %s",
+					node.Name, util.JoinIPNets(nodeTransitSwitchPortIps, ","))
 			}
 		}
 		return ncm.kube.UpdateNode(cnode)
@@ -285,12 +317,6 @@ func (ncm *defaultNetworkClusterController) addNode(node *corev1.Node) error {
 	}
 
 	updateNodeAnnotations := false
-	if allocatedNodeId == util.GetNodeId(node) {
-		allocatedNodeId = -1
-	} else {
-		updateNodeAnnotations = true
-	}
-
 	zoneJoinSubnets, err := ncm.allocateZoneJoinSubnets(node)
 	if err != nil {
 		return err
@@ -302,8 +328,25 @@ func (ncm *defaultNetworkClusterController) addNode(node *corev1.Node) error {
 		updateNodeAnnotations = true
 	}
 
+	var nodeTransitSwitchPortIps []*net.IPNet
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		// Generate v4 and v6 transit switch port IPs for the node.
+		nodeTransitSwitchPortIps = ncm.syncNodeTransitSwitchPortIps(node, allocatedNodeId)
+		if nodeTransitSwitchPortIps != nil {
+			updateNodeAnnotations = true
+		}
+	}
+
+	if allocatedNodeId == util.GetNodeId(node) {
+		// Set allocatedNodeId to -1, so that updateNodeAnnotationWithRetry() doesn't
+		// update the node id annotation.
+		allocatedNodeId = -1
+	} else {
+		updateNodeAnnotations = true
+	}
+
 	if updateNodeAnnotations {
-		return ncm.updateNodeAnnotationWithRetry(node.Name, allocatedNodeId, zoneJoinSubnets)
+		return ncm.updateNodeAnnotationWithRetry(node.Name, allocatedNodeId, zoneJoinSubnets, nodeTransitSwitchPortIps)
 	}
 
 	return nil
@@ -542,6 +585,29 @@ func (ncm *defaultNetworkClusterController) areIPNetsEqual(ipNet1 []*net.IPNet, 
 	}
 
 	return true
+}
+
+func (ncm *defaultNetworkClusterController) syncNodeTransitSwitchPortIps(node *corev1.Node, nodeId int) []*net.IPNet {
+	var transitSwitchPortIps []*net.IPNet
+
+	parsedTransitSwitchPortIps, _ := util.ParseNodeTransitSwitchPortAddresses(node)
+	if config.IPv4Mode {
+		nodeTransitSwitchPortv4Ip := utilnet.AddIPOffset(ncm.transitSwitchBasev4Ip, nodeId)
+		transitSwitchPortIps = append(transitSwitchPortIps, &net.IPNet{IP: nodeTransitSwitchPortv4Ip, Mask: ncm.transitSwitchv4Cidr.Mask})
+	}
+
+	if config.IPv6Mode {
+		nodeTransitSwitchPortv6Ip := utilnet.AddIPOffset(ncm.transitSwitchBasev6Ip, nodeId)
+		transitSwitchPortIps = append(transitSwitchPortIps, &net.IPNet{IP: nodeTransitSwitchPortv6Ip, Mask: ncm.transitSwitchv6Cidr.Mask})
+	}
+
+	if !ncm.areIPNetsEqual(parsedTransitSwitchPortIps, transitSwitchPortIps) {
+		return transitSwitchPortIps
+	} else {
+		// return nil if the parsed transit switch port ips from the node annotations
+		// and the generated transit switch port ips are the same.
+		return nil
+	}
 }
 
 func (h *defaultNetworkClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {

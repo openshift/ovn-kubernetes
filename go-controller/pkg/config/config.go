@@ -169,6 +169,8 @@ var (
 
 	ClusterManager = ClusterManagerConfig{
 		RawZoneJoinSwitchSubnets: "100.64.0.0/16/19,fd98::/48/64",
+		V4TransitSwitchSubnet:    "169.254.0.0/16",
+		V6TransitSwitchSubnet:    "fd97::/64",
 	}
 )
 
@@ -350,6 +352,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
+	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -451,6 +454,11 @@ type ClusterManagerConfig struct {
 	// ZoneJoinSubnets holds parsed cluster manager join switch subnet entries and
 	// may be used outside the config module.
 	ZoneJoinSubnets []CIDRNetworkEntry
+
+	// V4TransitSwitchSubnet to be used in the cluster for interconnecting multiple zones
+	V4TransitSwitchSubnet string `gcfg:"v4-transit-switch-subnet"`
+	// V6TransitSwitchSubnet to be used in the cluster for interconnecting multiple zones
+	V6TransitSwitchSubnet string `gcfg:"v6-transit-switch-subnet"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -928,6 +936,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetwork,
 		Value:       OVNKubernetesFeature.EnableMultiNetwork,
 	},
+	&cli.BoolFlag{
+		Name:        "enable-interconnect",
+		Usage:       "Configure to enable interconnecting multiple zones.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
+		Value:       OVNKubernetesFeature.EnableInterconnect,
+	},
 }
 
 // K8sFlags capture Kubernetes-related options
@@ -1341,6 +1355,29 @@ var ClusterManagerFlags = []cli.Flag{
 			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
 			"hostsubnetlength defines how many IP addresses are dedicated to each zone.",
 		Destination: &cliConfig.ClusterManager.RawZoneJoinSwitchSubnets,
+	},
+	&cli.StringFlag{
+		Name:  "cluster-manager-transit-switch-subnet",
+		Value: ClusterManager.RawZoneJoinSwitchSubnets,
+		Usage: "A comma separated set of IP subnets and the associated" +
+			"hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
+			"to use for the zone join subnets. Each entry is given " +
+			"in the form IP address/subnet mask/hostsubnetlength, " +
+			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
+			"hostsubnetlength defines how many IP addresses are dedicated to each zone.",
+		Destination: &cliConfig.ClusterManager.RawZoneJoinSwitchSubnets,
+	},
+	&cli.StringFlag{
+		Name:        "cluster-manager-v4-transit-switch-subnet",
+		Usage:       "The v4 transit switch subnet used for assigning transit switch IPv4 addresses for interconnect",
+		Destination: &cliConfig.ClusterManager.V4TransitSwitchSubnet,
+		Value:       ClusterManager.V4TransitSwitchSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "cluster-manager-v6-transit-switch-subnet",
+		Usage:       "The v6 transit switch subnet used for assigning transit switch IPv6 addresses for interconnect",
+		Destination: &cliConfig.ClusterManager.V6TransitSwitchSubnet,
+		Value:       ClusterManager.V6TransitSwitchSubnet,
 	},
 }
 
@@ -1813,14 +1850,23 @@ func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
 // completeClusterManagerConfig completes the HybridOverlay config by parsing raw values
 // into their final form.
 func completeClusterManagerConfig() error {
-	if len(ClusterManager.RawZoneJoinSwitchSubnets) == 0 {
-		return nil
+	if len(ClusterManager.RawZoneJoinSwitchSubnets) != 0 {
+		var err error
+		ClusterManager.ZoneJoinSubnets, err = ParseClusterSubnetEntries(ClusterManager.RawZoneJoinSwitchSubnets)
+		if err != nil {
+			return fmt.Errorf("cluster manager zone join subnet invalid: %v", err)
+		}
 	}
 
-	var err error
-	ClusterManager.ZoneJoinSubnets, err = ParseClusterSubnetEntries(ClusterManager.RawZoneJoinSwitchSubnets)
-	if err != nil {
-		return fmt.Errorf("cluster manager zone join subnet invalid: %v", err)
+	// Validate v4 and v6 transit switch subnets
+	v4IP, _, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
+	if err != nil || utilnet.IsIPv6(v4IP) {
+		return fmt.Errorf("invalid transit switch v4 subnet specified, subnet: %s: error: %v", ClusterManager.V4TransitSwitchSubnet, err)
+	}
+
+	v6IP, _, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
+	if err != nil || !utilnet.IsIPv6(v6IP) {
+		return fmt.Errorf("invalid transit switch v4 join subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
 	}
 
 	return nil
