@@ -213,7 +213,7 @@ func isHostEndpoint(endpointIP string) bool {
 // isEndpointReady takes an endpoint from an endpoint slice and returns true if the endpoint is
 // to be considered ready.
 func isEndpointReady(endpoint discovery.Endpoint) bool {
-	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
+	return endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready
 }
 
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
