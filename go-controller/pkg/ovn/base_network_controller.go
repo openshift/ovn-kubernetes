@@ -105,6 +105,8 @@ type BaseNetworkController struct {
 	stopChan chan struct{}
 }
 
+const arpProxyAddress = "169.254.1.1"
+
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
 // configuration for secondary network controller
 type BaseSecondaryNetworkController struct {
@@ -134,7 +136,7 @@ func (bnc *BaseNetworkController) GetNetworkScopedName(name string) string {
 
 func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
 	if !bnc.IsSecondary() {
-		return util.GetLogicalPortName(pod.Namespace, pod.Name)
+		return util.GetLogicalPortName(pod)
 	} else {
 		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
 	}
@@ -209,16 +211,6 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 		}
 	}
 
-	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
-	var nodeLRPMAC net.HardwareAddr
-	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
-		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
-		if !utilnet.IsIPv6CIDR(hostSubnet) {
-			break
-		}
-	}
-
 	switchName := bnc.GetNetworkScopedName(node.Name)
 	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	lrpName := types.RouterToSwitchPrefix + switchName
@@ -229,7 +221,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     lrpName,
-		MAC:      nodeLRPMAC.String(),
+		MAC:      "0a:58:0a:f4:00:01",
 		Networks: lrpNetworks,
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
@@ -240,7 +232,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	}
 
 	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, &logicalRouter, &logicalRouterPort,
-		&gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
+		&gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks, &logicalRouterPort.Options)
 	if err != nil {
 		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
@@ -330,7 +322,10 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		Name:      types.SwitchToRouterPrefix + switchName,
 		Type:      "router",
 		Addresses: []string{"router"},
-		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + switchName},
+		Options: map[string]string{
+			"router-port": types.RouterToSwitchPrefix + switchName,
+			"arp_proxy":   arpProxyAddress,
+		},
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)

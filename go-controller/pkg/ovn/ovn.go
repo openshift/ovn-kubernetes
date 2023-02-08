@@ -13,6 +13,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
@@ -59,7 +60,7 @@ const (
 
 // getPodNamespacedName returns <namespace>_<podname> for the provided pod
 func getPodNamespacedName(pod *kapi.Pod) string {
-	return util.GetLogicalPortName(pod.Namespace, pod.Name)
+	return util.GetLogicalPortName(pod)
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -83,7 +84,7 @@ func (oc *DefaultNetworkController) syncPeriodic() {
 
 func (oc *DefaultNetworkController) getPortInfo(pod *kapi.Pod) *lpInfo {
 	var portInfo *lpInfo
-	key := util.GetLogicalPortName(pod.Namespace, pod.Name)
+	key := util.GetLogicalPortName(pod)
 	if !util.PodWantsNetwork(pod) {
 		// create dummy logicalPortInfo for host-networked pods
 		mac, _ := net.ParseMAC("00:00:00:00:00:00")
@@ -137,12 +138,24 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 			return fmt.Errorf("ensurePod failed %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	}
-
+	isLiveMigrationLefover, err := kubevirt.PodIsLiveMigrationLeftOver(oc.client, pod)
+	if err != nil {
+		return err
+	}
+	if isLiveMigrationLefover {
+		return nil
+	}
 	if util.PodWantsNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
 			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	} else {
+
+		if util.PodWantsNetwork(pod) && kubevirt.OwnsPod(pod) {
+			if err := oc.enrouteVirtualMachine(pod); err != nil {
+				return fmt.Errorf("failed enrouteVirtualMachine for %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+		}
 		// either pod is host-networked or its an update for a normal pod (addPort=false case)
 		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {

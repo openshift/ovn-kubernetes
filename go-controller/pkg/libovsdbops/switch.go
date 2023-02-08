@@ -392,6 +392,39 @@ func DeleteLogicalSwitchPorts(nbClient libovsdbclient.Client, sw *nbdb.LogicalSw
 	return err
 }
 
+func MoveLogicalSwitchPort(nbClient libovsdbclient.Client, sourceSw *nbdb.LogicalSwitch, targetSw *nbdb.LogicalSwitch, portToMove *nbdb.LogicalSwitchPort) error {
+	sourcePorts := []string{}
+	for _, portUUID := range sourceSw.Ports {
+		if portUUID != portToMove.UUID {
+			sourcePorts = append(sourcePorts, portUUID)
+		}
+	}
+	sourceSw.Ports = sourcePorts
+	targetSw.Ports = append(targetSw.Ports, portToMove.UUID)
+
+	opModels := []operationModel{}
+	opModel := operationModel{
+		Model:          sourceSw,
+		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sourceSw.Name },
+		OnModelUpdates: []interface{}{&sourceSw.Ports},
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+	opModels = append(opModels, opModel)
+	opModel = operationModel{
+		Model:          targetSw,
+		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == targetSw.Name },
+		OnModelUpdates: []interface{}{&targetSw.Ports},
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+	opModels = append(opModels, opModel)
+
+	m := newModelClient(nbClient)
+	_, err := m.CreateOrUpdate(opModels...)
+	return err
+}
+
 type logicalSwitchPortPredicate func(*nbdb.LogicalSwitchPort) bool
 
 // DeleteLogicalSwitchPortsWithPredicateOps looks up logical switch ports from

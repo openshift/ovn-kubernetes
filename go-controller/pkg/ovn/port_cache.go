@@ -45,7 +45,7 @@ func (c *portCache) get(pod *kapi.Pod, nadName string) (*lpInfo, error) {
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	if nadName == types.DefaultNetworkName {
-		logicalPort = util.GetLogicalPortName(pod.Namespace, pod.Name)
+		logicalPort = util.GetLogicalPortName(pod)
 	} else {
 		logicalPort = util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
 	}
@@ -80,7 +80,7 @@ func (c *portCache) add(pod *kapi.Pod, logicalSwitch, nadName, uuid string, mac 
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	if nadName == types.DefaultNetworkName {
-		logicalPort = util.GetLogicalPortName(pod.Namespace, pod.Name)
+		logicalPort = util.GetLogicalPortName(pod)
 	} else {
 		logicalPort = util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
 	}
@@ -110,7 +110,7 @@ func (c *portCache) remove(pod *kapi.Pod, nadName string) {
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	if nadName == types.DefaultNetworkName {
-		logicalPort = util.GetLogicalPortName(pod.Namespace, pod.Name)
+		logicalPort = util.GetLogicalPortName(pod)
 	} else {
 		logicalPort = util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
 	}
