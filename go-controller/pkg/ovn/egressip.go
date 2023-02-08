@@ -1624,7 +1624,7 @@ func (oc *DefaultNetworkController) generateCacheForEgressIP() (map[string]egres
 				// FIXME(trozet): potential race where pod is not yet added in the cache by the pod handler
 				logicalPort, err := oc.logicalPortCache.get(pod, types.DefaultNetworkName)
 				if err != nil {
-					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod.Namespace, pod.Name), err)
+					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod), err)
 					continue
 				}
 				podKey := getPodKey(pod)

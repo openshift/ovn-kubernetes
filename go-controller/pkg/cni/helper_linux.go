@@ -15,10 +15,13 @@ import (
 	"sync"
 	"time"
 
+	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -150,12 +153,17 @@ func moveIfToNetns(ifname string, netns ns.NetNS) error {
 	return nil
 }
 
-func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
+func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo, pod *kapi.Pod) error {
 	// make sure link is up
 	if link.Attrs().Flags&net.FlagUp == 0 {
 		if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
 			return fmt.Errorf("failed to set up interface %s: %v", link.Attrs().Name, err)
 		}
+	}
+
+	// For kubevirt VMs, addres, gateway and routes configured with DHCP
+	if kubevirt.OwnsPod(pod) {
+		return nil
 	}
 
 	// set the IP address
@@ -179,7 +187,7 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	return nil
 }
 
-func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo) (*current.Interface, *current.Interface, error) {
+func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pod *kapi.Pod) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
@@ -207,7 +215,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 			return fmt.Errorf("failed to lookup %s: %v", contIface.Name, err)
 		}
 
-		err = setupNetwork(link, ifInfo)
+		err = setupNetwork(link, ifInfo, pod)
 		if err != nil {
 			return err
 		}
@@ -252,7 +260,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 }
 
 // Setup sriov interface in the pod
-func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pciAddrs string) (*current.Interface, *current.Interface, error) {
+func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pciAddrs string, pod *kapi.Pod) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
@@ -288,7 +296,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 			return err
 		}
 
-		err = setupNetwork(link, ifInfo)
+		err = setupNetwork(link, ifInfo, pod)
 		if err != nil {
 			return err
 		}
@@ -349,13 +357,13 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 }
 
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
-func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
+func ConfigureOVS(ctx context.Context, pod *kapi.Pod, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
 
-	ifaceID := util.GetIfaceId(namespace, podName)
+	ifaceID := util.GetIfaceId(pod)
 	if ifInfo.NetName != types.DefaultNetworkName {
-		ifaceID = util.GetSecondaryNetworkIfaceId(namespace, podName, ifInfo.NADName)
+		ifaceID = util.GetSecondaryNetworkIfaceId(pod.Namespace, pod.Name, ifInfo.NADName)
 	}
 	initialPodUID := ifInfo.PodUID
 
@@ -365,7 +373,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	}
 
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v",
-		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
+		pod.Namespace, pod.Name, ifInfo.NetName, ifInfo.NADName, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -425,10 +433,10 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	}
 
 	if err := waitForPodInterface(ctx, ifInfo, hostIfaceName, ifaceID, podLister, kclient,
-		namespace, podName, initialPodUID); err != nil {
+		pod.Namespace, pod.Name, initialPodUID); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
-		klog.Warningf("[%s/%s %s] pod uid %s: %v", namespace, podName, sandboxID, initialPodUID, err)
+		klog.Warningf("[%s/%s %s] pod uid %s: %v", pod.Namespace, pod.Name, sandboxID, initialPodUID, err)
 		return err
 	}
 	return nil
@@ -442,19 +450,24 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	}
 	defer netns.Close()
 
+	pod, err := kclient.CoreV1().Pods(pr.PodNamespace).Get(pr.ctx, pr.PodName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
 	var hostIface, contIface *current.Interface
 
 	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
-		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
+		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID, pod)
 	} else {
 		if ifInfo.IsDPUHostMode {
 			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
 				"device ID must be provided")
 		}
 		// General case
-		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, ifInfo)
+		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pod)
 	}
 	if err != nil {
 		return nil, err
@@ -471,7 +484,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	// END OCP HACK
 
 	if !ifInfo.IsDPUHostMode {
-		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
+		err = ConfigureOVS(pr.ctx, pod, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient)
 		if err != nil {
 			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)

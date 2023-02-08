@@ -587,6 +587,8 @@ set_cluster_cidr_ip_families() {
 create_kind_cluster() {
   # Output of the j2 command
   KIND_CONFIG_LCL=${DIR}/kind-${KIND_CLUSTER_NAME}.yaml
+  local reg_name='kind-registry'
+  local reg_port='5000'
 
     ovn_ip_family=${IP_FAMILY} \
     ovn_ha=${OVN_HA} \
@@ -603,7 +605,41 @@ create_kind_cluster() {
   if kind get clusters | grep ovn; then
     delete
   fi
+  if [[ "${KIND_LOCAL_REGISTRY}" == true ]]; then
+      # create registry container unless it already exists
+      if [ "$(docker inspect -f '{{.State.Running}}' "${reg_name}" 2>/dev/null || true)" != 'true' ]; then
+        docker run \
+          -d --restart=always -p "127.0.0.1:${reg_port}:5000" --name "${reg_name}" \
+          registry:2
+      fi
+  fi
   kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image "${KIND_IMAGE}":"${K8S_VERSION}" --config=${KIND_CONFIG_LCL} --retain
+  # connect the registry to the cluster network if not already connected
+  if [ "$(docker inspect -f='{{json .NetworkSettings.Networks.kind}}' "${reg_name}")" = 'null' ]; then
+    docker network connect "kind" "${reg_name}"
+  fi
+  if [[ "${KIND_LOCAL_REGISTRY}" == true ]]; then
+    
+    # connect the registry to the cluster network if not already connected
+    if [ "$(docker inspect -f='{{json .NetworkSettings.Networks.kind}}' "${reg_name}")" = 'null' ]; then
+      docker network connect "kind" "${reg_name}"
+    fi
+
+    # Document the local registry
+    # https://github.com/kubernetes/enhancements/tree/master/keps/sig-cluster-lifecycle/generic/1755-communicating-a-local-registry
+    cat <<EOF | kubectl apply -f -
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: local-registry-hosting
+      namespace: kube-public
+    data:
+      localRegistryHosting.v1: |
+        host: "localhost:${reg_port}"
+        help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+EOF
+  fi
+
   cat "${KUBECONFIG}"
 }
 
@@ -673,7 +709,10 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    OVN_REPO=https://github.com/dceara/ovn 
+    OVN_BRANCH=bz2155306-arp-proxy-poc
+    OVN_DOCKERFILE=Dockerfile.fedora.dev
+    $OCI_BIN build --build-arg OVN_REPO=${OVN_REPO} --build-arg OVN_BRANCH=${OVN_BRANCH} -t "${OVN_IMAGE}" -f  ${OVN_DOCKERFILE} .
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
@@ -685,10 +724,16 @@ build_ovn_image() {
 }
 
 create_ovn_kube_manifests() {
+    local ovnkube_image=${OVN_IMAGE}
+    if [ "$KIND_LOCAL_REGISTRY" == true ];then
+      # When updating with local registry we have to reference the sha
+      ovnkube_image=$(docker inspect --format='{{index .RepoDigests 0}}' $OVN_IMAGE)
+    fi
     pushd ${DIR}/../dist/images
   ./daemonset.sh \
     --output-directory="${MANIFEST_OUTPUT_DIR}"\
     --image="${OVN_IMAGE}" \
+    --ovnkube-image="${ovnkube_image}" \
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
@@ -768,8 +813,9 @@ install_ovn() {
   run_kubectl apply -f ovnkube-node.yaml
   popd
 
-  # Force pod reload just the ones with golang containers
-  if [ "${KIND_CREATE}" == false ]; then
+  # When using internal registry force pod reload just the ones with 
+  # golang containers
+  if [ "${KIND_CREATE}" == false ] && [ "${KIND_LOCAL_REGISTRY}" == false ] ; then
     for pod in ${OVN_DEPLOY_PODS}; do
         run_kubectl delete pod -n ovn-kubernetes -l name=$pod
     done
