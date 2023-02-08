@@ -6,14 +6,19 @@ import (
 	"sync/atomic"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/dhcp"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -108,9 +113,29 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return nil
 	}
 
+	isLiveMigrationLefover, err := kubevirt.PodIsLiveMigrationLeftOver(oc.client, pod)
+	if err != nil {
+		return err
+	}
+
+	// For live migrated leftover pods keep the LSP, the LSP should be removed
+	// when the VM is removed
+	if isLiveMigrationLefover {
+		return nil
+	}
+
 	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, ovntypes.DefaultNetworkName)
 	if err != nil {
 		return err
+	}
+
+	if kubevirt.OwnsPod(pod) {
+		if err := oc.deleteDHCPOptions(pod); err != nil {
+			return err
+		}
+		if err := oc.deletePodEnrouting(pod); err != nil {
+			return err
+		}
 	}
 
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
@@ -248,9 +273,184 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+	if kubevirt.OwnsPod(pod) {
+		if err := oc.addDHCPOptions(pod, lsp); err != nil {
+			return err
+		}
+	}
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
 		metrics.RecordPodCreated(pod, oc.NetInfo)
 	}
 	return nil
+}
+
+func (oc *DefaultNetworkController) addDHCPOptions(pod *kapi.Pod, lsp *nbdb.LogicalSwitchPort) error {
+	ipPoolName, err := oc.getIPPoolName(pod)
+	if err != nil {
+		return err
+	}
+	var switchSubnets []*net.IPNet
+	if switchSubnets = oc.lsManager.GetSwitchSubnets(ipPoolName); switchSubnets == nil {
+		return fmt.Errorf("cannot retrieve subnet for assigning gateway routes switch: %s", ipPoolName)
+	}
+	// Fake router to delegate on proxy arp mechanism
+	router := "169.254.1.1"
+	cidr := switchSubnets[0].String()
+	dhcpOptions, err := dhcp.ComposeOptionsWithKubeDNS(oc.client, cidr, router)
+	if err != nil {
+		return fmt.Errorf("failed composing DHCP options: %v", err)
+	}
+	dhcpOptions.ExternalIDs = map[string]string{
+		"namespace":      pod.Namespace,
+		kubevirt.VMLabel: pod.Labels[kubevirt.VMLabel],
+	}
+	err = libovsdbops.CreateOrUpdateDhcpv4Options(oc.nbClient, lsp, dhcpOptions)
+	if err != nil {
+		return fmt.Errorf("failed adding ovn operations to add DHCP v4 options: %v", err)
+	}
+	return nil
+}
+
+func matchesKubevirtPod(pod *kapi.Pod, externalIDs map[string]string) bool {
+	return len(externalIDs) > 1 && externalIDs["namespace"] == pod.Namespace && externalIDs[kubevirt.VMLabel] == pod.Labels[kubevirt.VMLabel]
+}
+
+func (oc *DefaultNetworkController) deleteDHCPOptions(pod *kapi.Pod) error {
+	predicate := func(item *nbdb.DHCPOptions) bool {
+		return matchesKubevirtPod(pod, item.ExternalIDs)
+	}
+	return libovsdbops.DeleteDHCPOptionsWithPredicate(oc.nbClient, predicate)
+}
+
+func (oc *DefaultNetworkController) deletePodEnrouting(pod *kapi.Pod) error {
+	routePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return matchesKubevirtPod(pod, item.ExternalIDs)
+	}
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, routePredicate); err != nil {
+		return err
+	}
+	policyPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
+		return matchesKubevirtPod(pod, item.ExternalIDs)
+	}
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, policyPredicate); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (oc *DefaultNetworkController) deleteLiveMigrationLeftOverLSPs(pod *kapi.Pod) error {
+	// Delete LSP from source virt-launcher pod
+	vmPods, err := kubevirt.FindPodsByVMLabel(oc.client, pod)
+	if err != nil {
+		return fmt.Errorf("failed finding VM's pods: %v", err)
+	}
+	for _, vmPod := range vmPods {
+		if vmPod.Name == pod.Name {
+			continue
+		}
+		switchName, err := oc.getExpectedSwitchName(&vmPod)
+		if err != nil {
+			return fmt.Errorf("failed composing switch name: %v", err)
+		}
+		lsp, err := libovsdbops.GetLogicalSwitchPort(oc.nbClient, &nbdb.LogicalSwitchPort{Name: util.GetLogicalPortName(&vmPod)})
+		if err != nil {
+			if !errors.Is(err, libovsdbclient.ErrNotFound) {
+				return fmt.Errorf("failed getting logical switch port to delete: %v", err)
+			} else {
+				continue
+			}
+		}
+		if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &nbdb.LogicalSwitch{Name: switchName}, lsp); err != nil {
+			return fmt.Errorf("failed deleting live migration left over LSP: %v", err)
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNetworkController) enroutePodAddressesToNode(pod *kapi.Pod) error {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, "default")
+	if err != nil {
+		return err
+	}
+
+	nodeGwAddress, err := oc.lrpAddress(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + pod.Spec.NodeName)
+	if err != nil {
+		return err
+	}
+	for _, podIP := range podAnnotation.IPs {
+		podAddress := podIP.IP.String()
+		// Add a reroute policy to route VM n/s traffic to the node where the VM
+		// is running
+		egressPolicy := nbdb.LogicalRouterPolicy{
+			Match:    fmt.Sprintf("ip4.src == %s", podAddress),
+			Action:   nbdb.LogicalRouterPolicyActionReroute,
+			Nexthops: []string{nodeGwAddress},
+			Priority: 1,
+			ExternalIDs: map[string]string{
+				"namespace":      pod.Namespace,
+				kubevirt.VMLabel: pod.Labels[kubevirt.VMLabel],
+			},
+		}
+		if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &egressPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Priority == egressPolicy.Priority && item.Match == egressPolicy.Match && item.Action == egressPolicy.Action
+		}); err != nil {
+			return err
+		}
+
+		// Add a policy to force send an ARP to discover VMs MAC and send
+		// directly to it since there is no more routers in the middle
+		outputPort := types.RouterToSwitchPrefix + pod.Spec.NodeName
+		ingressRoute := nbdb.LogicalRouterStaticRoute{
+			IPPrefix:   podAddress,
+			Nexthop:    podAddress,
+			Policy:     &nbdb.LogicalRouterStaticRoutePolicyDstIP,
+			OutputPort: &outputPort,
+			ExternalIDs: map[string]string{
+				"namespace":      pod.Namespace,
+				kubevirt.VMLabel: pod.Labels[kubevirt.VMLabel],
+			},
+		}
+		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, types.OVNClusterRouter, &ingressRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			matches := item.IPPrefix == ingressRoute.IPPrefix && item.Nexthop == ingressRoute.Nexthop && item.Policy != nil && *item.Policy == *ingressRoute.Policy
+			return matches
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNetworkController) enrouteVirtualMachine(pod *kapi.Pod) error {
+	targetNode := pod.Labels[kubevirt.NodeNameLabel]
+	// There is no live migration or live migration has finished
+	if targetNode == "" || targetNode == pod.Spec.NodeName {
+		if err := oc.enroutePodAddressesToNode(pod); err != nil {
+			return fmt.Errorf("failed enroutePodAddressesToNode for  %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+		if err := oc.deleteLiveMigrationLeftOverLSPs(pod); err != nil {
+			return fmt.Errorf("failed deleteLiveMigrationLeftOverLSPs for %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNetworkController) lrpAddress(lrpName string) (string, error) {
+	lrp := &nbdb.LogicalRouterPort{
+		Name: lrpName,
+	}
+
+	lrp, err := libovsdbops.GetLogicalRouterPort(oc.nbClient, lrp)
+	if err != nil {
+		return "", err
+	}
+	lrpIP, _, err := net.ParseCIDR(lrp.Networks[0])
+	if err != nil {
+		return "", err
+	}
+	address := lrpIP.String()
+	if address == "" {
+		return "", fmt.Errorf("missing logical router port address")
+	}
+	return address, nil
 }

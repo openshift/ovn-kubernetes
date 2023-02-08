@@ -1,12 +1,14 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"time"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -14,6 +16,7 @@ import (
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -27,23 +30,26 @@ import (
 
 func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 	annotations *util.PodAnnotation, nadName string) (expectedLogicalPortName string, err error) {
-	switchName, err := bnc.getExpectedSwitchName(pod)
+
+	ipPoolName, err := bnc.getIPPoolName(pod)
 	if err != nil {
 		return "", err
 	}
+
 	if !util.PodScheduled(pod) || !util.PodWantsNetwork(pod) || util.PodCompleted(pod) {
 		return "", nil
 	}
 	// skip nodes that are not running ovnk (inferred from host subnets)
-	if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
+	if bnc.lsManager.IsNonHostSubnetSwitch(ipPoolName) {
 		return "", nil
 	}
+
 	expectedLogicalPortName = bnc.GetLogicalPortName(pod, nadName)
 	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
 	if _, err := bnc.watchFactory.GetNode(pod.Spec.NodeName); kerrors.IsNotFound(err) &&
-		bnc.lsManager.GetSwitchSubnets(switchName) == nil {
+		bnc.lsManager.GetSwitchSubnets(ipPoolName) == nil {
 		if util.PodTerminating(pod) {
 			klog.Infof("Ignoring IP allocation for terminating pod: %s/%s, on deleted "+
 				"node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
@@ -54,20 +60,20 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 				"condition. Pod: %s/%s, node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
 		}
 	}
-	if err := bnc.waitForNodeLogicalSwitchInCache(switchName); err != nil {
+	if err := bnc.waitForNodeLogicalSwitchInCache(ipPoolName); err != nil {
 		return expectedLogicalPortName, fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail!",
-			switchName)
+			ipPoolName)
 	}
-	if err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
+	if err = bnc.lsManager.AllocateIPs(ipPoolName, annotations.IPs); err != nil {
 		if err == ipallocator.ErrAllocated {
 			// already allocated: log an error but not stop syncPod from continuing
 			klog.Errorf("Already allocated IPs: %s for pod: %s on switchName: %s",
 				util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
-				switchName)
+				ipPoolName)
 		} else {
 			return expectedLogicalPortName, fmt.Errorf("couldn't allocate IPs: %s for pod: %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
-				switchName, err)
+				ipPoolName, err)
 		}
 	}
 	return expectedLogicalPortName, nil
@@ -485,12 +491,24 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 	if err != nil {
 		return nil, nil, nil, false, nil, nil, err
 	}
+
+	if kubevirt.OwnsPod(pod) {
+		if err := bnc.syncKubevirtPodIPConfig(pod); err != nil {
+			return nil, nil, nil, false, nil, nil, err
+		}
+	}
+
+	ipPoolName, err := bnc.getIPPoolName(pod)
+	if err != nil {
+		return nil, nil, nil, false, nil, nil, err
+	}
+
 	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
 	// We cannot wire a pod that has no node/switch, so retry again later
 	if _, err := bnc.watchFactory.GetNode(pod.Spec.NodeName); kerrors.IsNotFound(err) &&
-		bnc.lsManager.GetSwitchSubnets(switchName) == nil {
+		bnc.lsManager.GetSwitchSubnets(ipPoolName) == nil {
 		podState := "unknown"
 		if util.PodTerminating(pod) {
 			podState = "terminating"
@@ -526,13 +544,14 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 	lspExist = err != libovsdbclient.ErrNotFound
 
 	// Sanity check. If port exists, it should be in the logical switch obtained from the pod spec.
+	portFound := false
 	if lspExist {
-		portFound := false
 		ls, err = libovsdbops.GetLogicalSwitch(bnc.nbClient, ls)
 		if err != nil {
 			return nil, nil, nil, false, nil, nil, fmt.Errorf("[%s] unable to find logical switch %s in NBDB",
 				podDesc, switchName)
 		}
+
 		for _, currPortUUID := range ls.Ports {
 			if currPortUUID == existingLSP.UUID {
 				portFound = true
@@ -543,6 +562,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 			// This should never happen and indicates we failed to clean up an LSP for a pod that was recreated
 			return nil, nil, nil, false, nil, nil, fmt.Errorf("[%s] failed to locate existing logical port %s (%s) in logical switch %s",
 				podDesc, existingLSP.Name, existingLSP.UUID, switchName)
+
 		}
 	}
 
@@ -558,6 +578,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 	// (then ovn-controller won't bind the interface).
 	// May happen on upgrade, because ovnkube-node doesn't update
 	// existing OVS interfaces with new iface-id-ver option.
+
 	if !lspExist || len(existingLSP.Options["iface-id-ver"]) != 0 {
 		lsp.Options["iface-id-ver"] = string(pod.UID)
 	}
@@ -579,11 +600,11 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 
 	defer func() {
 		if releaseIPs && err != nil {
-			if relErr := bnc.lsManager.ReleaseIPs(switchName, podIfAddrs); relErr != nil {
+			if relErr := bnc.lsManager.ReleaseIPs(ipPoolName, podIfAddrs); relErr != nil {
 				klog.Errorf("Error when releasing IPs %s for switch: %s, err: %q",
-					util.JoinIPNetIPs(podIfAddrs, " "), switchName, relErr)
+					util.JoinIPNetIPs(podIfAddrs, " "), ipPoolName, relErr)
 			} else {
-				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), switchName)
+				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), ipPoolName)
 			}
 		}
 	}()
@@ -595,9 +616,8 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		// If the pod already has annotations use the existing static
 		// IP/MAC from the annotation.
 		lsp.DynamicAddresses = nil
-
 		// ensure we have reserved the IPs in the annotation
-		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+		if err = bnc.lsManager.AllocateIPs(ipPoolName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 			return nil, nil, nil, false, nil, nil, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 				podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
 		} else {
@@ -608,7 +628,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 	if needsIP {
 		if existingLSP != nil {
 			// try to get the MAC and IPs from existing OVN port first
-			podMac, podIfAddrs, err = bnc.getPortAddresses(switchName, existingLSP)
+			podMac, podIfAddrs, err = bnc.getPortAddresses(ipPoolName, existingLSP)
 			if err != nil {
 				return nil, nil, nil, false, nil, nil, fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
 					podDesc, switchName, err)
@@ -619,15 +639,15 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 		// ensure we have reserved the IPs found in OVN
 		if len(podIfAddrs) == 0 {
 			needsNewAllocation = true
-		} else if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
-				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, podDesc, switchName, err)
+		} else if err = bnc.lsManager.AllocateIPs(ipPoolName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s at ip pool %s, for pod %s on switch: %s"+
+				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, ipPoolName, podDesc, switchName, err)
 
 			needsNewAllocation = true
 		}
 		if needsNewAllocation {
 			// Previous attempts to use already configured IPs failed, need to assign new
-			podMac, podIfAddrs, err = bnc.assignPodAddresses(switchName)
+			podMac, podIfAddrs, err = bnc.assignPodAddresses(ipPoolName)
 			if err != nil {
 				return nil, nil, nil, false, nil, nil, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					podDesc, switchName, err)
@@ -662,7 +682,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkCont
 			MAC: podMac,
 		}
 		var nodeSubnets []*net.IPNet
-		if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil {
+		if nodeSubnets = bnc.lsManager.GetSwitchSubnets(ipPoolName); nodeSubnets == nil {
 			return nil, nil, nil, false, nil, nil, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 				podDesc, switchName)
 		}
@@ -836,4 +856,27 @@ func (bnc *BaseNetworkController) WatchPods() error {
 		bnc.podHandler = handler
 	}
 	return err
+}
+
+func (bnc *BaseNetworkController) syncKubevirtPodIPConfig(pod *kapi.Pod) error {
+	vmIPConfig, err := kubevirt.FindIPConfigByVMLabel(bnc.client, pod)
+	if err != nil {
+		return err
+	}
+	pod.Annotations[kubevirt.IPPoolNameAnnotation] = vmIPConfig.PoolName
+	if vmIPConfig.Annotation != "" {
+		pod.Annotations[util.OvnPodAnnotationName] = vmIPConfig.Annotation
+	}
+	if _, err := bnc.client.CoreV1().Pods(pod.Namespace).Update(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bnc *BaseNetworkController) getIPPoolName(pod *kapi.Pod) (string, error) {
+	ipPoolName, ok := pod.Annotations[kubevirt.IPPoolNameAnnotation]
+	if !ok {
+		return bnc.getExpectedSwitchName(pod)
+	}
+	return ipPoolName, nil
 }

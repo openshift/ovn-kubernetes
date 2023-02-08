@@ -663,7 +663,7 @@ func (oc *DefaultNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
-		logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)
+		logicalPortName := util.GetLogicalPortName(pod)
 		if _, ok := np.localPods.Load(logicalPortName); ok {
 			// port is already added for this policy
 			continue
@@ -720,7 +720,7 @@ func (oc *DefaultNetworkController) getExistingLocalPolicyPorts(np *networkPolic
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
-		logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)
+		logicalPortName := util.GetLogicalPortName(pod)
 		loadedPortUUID, ok := np.localPods.Load(logicalPortName)
 		if !ok {
 			// port is already deleted for this policy

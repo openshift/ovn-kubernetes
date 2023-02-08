@@ -20,6 +20,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -247,16 +248,16 @@ func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) s
 	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
 }
 
-func GetLogicalPortName(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
+func GetLogicalPortName(pod *kapi.Pod) string {
+	return composePortName(pod.Namespace, pod.Name)
 }
 
 func GetSecondaryNetworkIfaceId(podNamespace, podName, nadName string) string {
 	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
 }
 
-func GetIfaceId(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
+func GetIfaceId(pod *kapi.Pod) string {
+	return GetLogicalPortName(pod)
 }
 
 // composePortName should be called both for LogicalPortName and iface-id

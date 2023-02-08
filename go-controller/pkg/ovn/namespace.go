@@ -334,7 +334,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 					errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 				}
 				for _, pod := range existingPods {
-					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
+					logicalPort := util.GetLogicalPortName(pod)
 					if !util.PodWantsNetwork(pod) {
 						continue
 					}
