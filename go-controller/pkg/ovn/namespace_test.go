@@ -269,9 +269,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			fakeOvn.controller.multicastSupport = false
 			fakeOvn.controller.SCTPSupport = true
 
-			_, clusterNetwork, err := net.ParseCIDR(clusterCIDR)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			fakeOvn.controller.masterSubnetAllocator.AddNetworkRange(clusterNetwork, 24)
+			err = fakeOvn.controller.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets)
 
 			expectedDatabaseState := []libovsdb.TestData{}
 

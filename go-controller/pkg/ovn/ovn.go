@@ -112,7 +112,7 @@ type Controller struct {
 	stopChan              <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator *subnetallocator.SubnetAllocator
+	masterSubnetAllocator *subnetallocator.HostSubnetAllocator
 
 	hoMaster *hocontroller.MasterController
 
@@ -186,12 +186,6 @@ type Controller struct {
 	sbClient libovsdbclient.Client
 
 	modelClient libovsdbops.ModelClient
-
-	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
-	v4HostSubnetsUsed float64
-
-	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
-	v6HostSubnetsUsed float64
 
 	// Map of pods that need to be retried, and the timestamp of when they last failed
 	// The key is a string which holds "namespace_podName"
@@ -267,7 +261,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		},
 		watchFactory:          wf,
 		stopChan:              stopChan,
-		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
+		masterSubnetAllocator: subnetallocator.NewHostSubnetAllocator(),
 		lsManager:             lsm.NewLogicalSwitchManager(),
 		logicalPortCache:      newPortCache(stopChan),
 		namespaces:            make(map[string]*namespaceInfo),
@@ -1363,8 +1357,9 @@ func (oc *Controller) WatchNodes() {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			oc.deleteNode(node.Name, nodeSubnets)
+			if err := oc.deleteNode(node.Name); err != nil {
+				klog.Errorf("Error deleting node %s: %v", node.Name, err)
+			}
 			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
