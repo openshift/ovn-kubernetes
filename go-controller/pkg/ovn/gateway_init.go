@@ -88,8 +88,10 @@ func (oc *Controller) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.IPNet
 }
 
 // gatewayInit creates a gateway router for the local chassis.
+// enableGatewayMTU enables options:gateway_mtu for gateway routers.
 func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet) error {
+	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet,
+	enableGatewayMTU bool) error {
 
 	gwLRPIPs := make([]net.IP, 0)
 	for _, gwLRPIfAddr := range gwLRPIfAddrs {
@@ -178,14 +180,22 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
 	}
 
+	var options map[string]string
+	if enableGatewayMTU {
+		options = map[string]string{
+			"gateway_mtu": strconv.Itoa(config.Default.MTU),
+		}
+	}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     gwRouterPort,
 		MAC:      gwLRPMAC.String(),
 		Networks: gwLRPNetworks,
+		Options:  options,
 	}
 
 	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
+		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks,
+		&logicalRouterPort.Options)
 	if err != nil {
 		return fmt.Errorf("failed to create port %+v on router %+v: %v", logicalRouterPort, logicalRouter, err)
 	}

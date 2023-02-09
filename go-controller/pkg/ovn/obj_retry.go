@@ -29,7 +29,7 @@ import (
 const retryObjInterval = 30 * time.Second
 
 // retryObjEntry is a generic object caching with retry mechanism
-//that resources can use to eventually complete their intended operations.
+// that resources can use to eventually complete their intended operations.
 type retryObjEntry struct {
 	// newObj holds k8s resource failed during add operation
 	newObj interface{}
@@ -143,18 +143,6 @@ func (r *retryObjs) initRetryObjWithDelete(obj interface{}, key string, config i
 	}
 }
 
-// addDeleteToRetryObj adds an old object that needs to be cleaned up to a retry object
-// includes the config object as well in case the namespace is removed and the object is orphaned from
-// the namespace
-func (r *retryObjs) addDeleteToRetryObj(obj interface{}, key string, config interface{}) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
-		entry.oldObj = obj
-		entry.config = config
-	}
-}
-
 // removeDeleteFromRetryObj removes any old object from a retry entry
 func (r *retryObjs) removeDeleteFromRetryObj(key string) {
 	r.retryMutex.Lock()
@@ -211,7 +199,7 @@ func (r *retryObjs) requestRetryObjs() {
 	}
 }
 
-//getObjRetryEntry returns a copy of an object  retry entry from the cache
+// getObjRetryEntry returns a copy of an object  retry entry from the cache
 func (r *retryObjs) getObjRetryEntry(key string) *retryObjEntry {
 	r.retryMutex.Lock()
 	defer r.retryMutex.Unlock()
@@ -779,7 +767,9 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
 		_, failed = oc.gatewaysFailed.Load(newNode.Name)
 		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
+			nodeSubnetChanged(oldNode, newNode) ||
+			hostAddressesChanged(oldNode, newNode) ||
+			nodeGatewayMTUSupportChanged(oldNode, newNode))
 
 		return oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync})
 

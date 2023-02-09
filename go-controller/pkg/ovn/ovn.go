@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	ref "k8s.io/client-go/tools/reference"
+
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
@@ -40,7 +42,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
 
 	"k8s.io/klog/v2"
@@ -667,6 +668,11 @@ func nodeChassisChanged(oldNode, node *kapi.Node) bool {
 	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
 	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
 	return oldChassis != newChassis
+}
+
+// nodeGatewayMTUSupportChanged returns true if annotation "k8s.ovn.org/gateway-mtu-support" on the node was updated.
+func nodeGatewayMTUSupportChanged(oldNode, node *kapi.Node) bool {
+	return util.ParseNodeGatewayMTUSupport(oldNode) != util.ParseNodeGatewayMTUSupport(node)
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
