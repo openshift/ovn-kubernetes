@@ -239,7 +239,7 @@ func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.Str
 }
 
 func buildLB(lb *LB) *nbdb.LoadBalancer {
-	reject := "true"
+	reject := "false" // drop instead of rejecting
 	event := "false"
 
 	if lb.Opts.Unidling {
