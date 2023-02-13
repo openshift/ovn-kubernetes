@@ -109,7 +109,7 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 }
 
 func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) error {
-	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
 		return fmt.Errorf("skipping %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -131,7 +131,7 @@ func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.Endpoi
 }
 
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
-	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
 		return fmt.Errorf("cannot add %s/%s to loadBalancerHealthChecker: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -144,7 +144,7 @@ func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.Endpoint
 }
 
 func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
-	namespacedName, err := namespacedNameFromEPSlice(newEpSlice)
+	namespacedName, err := serviceNamespacedNameFromEndpointSlice(newEpSlice)
 	if err != nil {
 		return fmt.Errorf("cannot update %s/%s in loadBalancerHealthChecker: %v",
 			newEpSlice.Namespace, newEpSlice.Name, err)
@@ -170,7 +170,7 @@ func (l *loadBalancerHealthChecker) CountLocalEndpointAddresses(endpointSlices [
 	for _, endpointSlice := range endpointSlices {
 		for _, endpoint := range endpointSlice.Endpoints {
 			isLocal := endpoint.NodeName != nil && *endpoint.NodeName == l.nodeName
-			if isEndpointReady(endpoint) && isLocal {
+			if util.IsEndpointReady(endpoint) && isLocal {
 				localEndpointAddresses.Insert(endpoint.Addresses...)
 			}
 		}
@@ -184,7 +184,7 @@ func (l *loadBalancerHealthChecker) CountLocalEndpointAddresses(endpointSlices [
 func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses []net.IP) bool {
 	for _, epSlice := range epSlices {
 		for _, endpoint := range epSlice.Endpoints {
-			if !isEndpointReady(endpoint) {
+			if !util.IsEndpointReady(endpoint) {
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
@@ -207,13 +207,6 @@ func isHostEndpoint(endpointIP string) bool {
 		}
 	}
 	return true
-}
-
-// discovery.EndpointSlice reports in the same slice all endpoints along with their status.
-// isEndpointReady takes an endpoint from an endpoint slice and returns true if the endpoint is
-// to be considered ready.
-func isEndpointReady(endpoint discovery.Endpoint) bool {
-	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
 }
 
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
@@ -487,7 +480,7 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
 	return nil
 }
 
-func namespacedNameFromEPSlice(epSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
+func serviceNamespacedNameFromEndpointSlice(epSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
 	// Return the namespaced name of the corresponding service
 	var serviceNamespacedName ktypes.NamespacedName
 	svcName := epSlice.Labels[discovery.LabelServiceName]
