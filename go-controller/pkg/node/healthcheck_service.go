@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -162,7 +163,7 @@ func (l *loadBalancerHealthChecker) CountLocalEndpointAddresses(endpointSlices [
 	for _, endpointSlice := range endpointSlices {
 		for _, endpoint := range endpointSlice.Endpoints {
 			isLocal := endpoint.NodeName != nil && *endpoint.NodeName == l.nodeName
-			if isEndpointReady(endpoint) && isLocal {
+			if util.IsEndpointReady(endpoint) && isLocal {
 				localEndpointAddresses.Insert(endpoint.Addresses...)
 			}
 		}
@@ -176,7 +177,7 @@ func (l *loadBalancerHealthChecker) CountLocalEndpointAddresses(endpointSlices [
 func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses []net.IP) bool {
 	for _, epSlice := range epSlices {
 		for _, endpoint := range epSlice.Endpoints {
-			if !isEndpointReady(endpoint) {
+			if !util.IsEndpointReady(endpoint) {
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
@@ -199,13 +200,6 @@ func isHostEndpoint(endpointIP string) bool {
 		}
 	}
 	return true
-}
-
-// discovery.EndpointSlice reports in the same slice all endpoints along with their status.
-// isEndpointReady takes an endpoint from an endpoint slice and returns true if the endpoint is
-// to be considered ready.
-func isEndpointReady(endpoint discovery.Endpoint) bool {
-	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
 }
 
 func serviceNamespacedNameFromEndpointSlice(epSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {

@@ -554,7 +554,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
 		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
 	}
-	localEndpoints := npw.GetLocalEndpointAddresses(epSlices)
+	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, service)
 	// If something didn't already do it add correct Service rules
 	if exists := npw.addOrSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints); !exists {
 		klog.V(5).Infof("Service Add %s event in namespace %s came before endpoint event setting svcConfig",
@@ -706,7 +706,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()
 		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
-		localEndPoints := npw.GetLocalEndpointAddresses(epSlices)
+		localEndPoints := npw.GetLocalEndpointAddresses(epSlices, service)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndPoints)
 		// Delete OF rules for service if they exist
 		if err = npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp); err != nil {
@@ -793,7 +793,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	if err != nil {
 		klog.V(5).Infof("Could not fetch endpointslices for service %s/%s during endpointSliceAdd", svc.Name, svc.Namespace)
 	}
-	localEndpoints := npw.GetLocalEndpointAddresses(epSlices)
+	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice event is
 	// received, only alter flows if we need to, i.e if cache wasn't set or if it was and
 	// hasLocalHostNetworkEp or localEndpoints state (for LB svc where NPs=0) changed, to prevent flow churn
@@ -844,9 +844,15 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	}
 	epSlices, err := npw.watchFactory.GetEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
 	if err != nil {
-		return fmt.Errorf("could not fetch endpointslices for service %s during endpointSliceDelete", namespacedName)
+		return fmt.Errorf("could not fetch endpointslices for service %s during endpointSliceDelete: %v", namespacedName, err)
 	}
-	localEndpoints := npw.GetLocalEndpointAddresses(epSlices)
+
+	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
+	if err != nil && !kerrors.IsNotFound(err) {
+		return fmt.Errorf("error while retrieving service for endpointslice %s/%s during delete: %v",
+			epSlice.Namespace, epSlice.Name, err)
+	}
+	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
 	if svcConfig, exists := npw.updateServiceInfo(namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
 		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
 		// we have to do this because deleting and adding iptables rules is slow.
@@ -865,11 +871,14 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 }
 
 // GetLocalEndpointAddresses returns a list of endpoints that are local to the node
-func (npw *nodePortWatcher) GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice) sets.String {
+func (npw *nodePortWatcher) GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.String {
 	localEndpoints := sets.NewString()
+	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
 	for _, endpointSlice := range endpointSlices {
 		for _, endpoint := range endpointSlice.Endpoints {
-			if isEndpointReady(endpoint) && endpoint.NodeName != nil && *endpoint.NodeName == npw.nodeIPManager.nodeName {
+			if util.IsEndpointValid(endpoint, includeTerminating) &&
+				endpoint.NodeName != nil &&
+				*endpoint.NodeName == npw.nodeIPManager.nodeName {
 				localEndpoints.Insert(endpoint.Addresses...)
 			}
 		}
@@ -939,7 +948,8 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	if err != nil {
 		klog.V(5).Infof("Could not fetch endpointslices for service %s during endpointSliceDelete", namespacedName)
 	}
-	newLocalEndpoints := npw.GetLocalEndpointAddresses(epSlices)
+
+	newLocalEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
 	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew ||
 		(serviceInfo != nil && !reflect.DeepEqual(serviceInfo.localEndpoints, newLocalEndpoints)) {
 		if err = npw.DeleteEndpointSlice(oldEpSlice); err != nil {
