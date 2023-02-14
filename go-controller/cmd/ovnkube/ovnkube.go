@@ -332,7 +332,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		}
 
 		// register prometheus metrics that do not depend on becoming ovnkube-master leader
-		metrics.RegisterMasterBase()
+		metrics.RegisterNCMBase()
 
 		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
 		cm := controllerManager.NewNetworkControllerManager(ovnClientset, getNetworkControllerManagerIdentity(ctx),

@@ -27,20 +27,20 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type ovnkubeMasterLeaderMetrics struct{}
+type leaderMetrics struct{}
 
-func (ovnkubeMasterLeaderMetrics) On(string) {
-	metrics.MetricMasterLeader.Set(1)
+func (leaderMetrics) On(string) {
+	metrics.MetricNCMLeader.Set(1)
 }
 
-func (ovnkubeMasterLeaderMetrics) Off(string) {
-	metrics.MetricMasterLeader.Set(0)
+func (leaderMetrics) Off(string) {
+	metrics.MetricNCMLeader.Set(0)
 }
 
-type ovnkubeMasterLeaderMetricsProvider struct{}
+type metricsProvider struct{}
 
-func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
-	return ovnkubeMasterLeaderMetrics{}
+func (_ metricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+	return leaderMetrics{}
 }
 
 // networkControllerManager structure is the object manages all controllers for all networks
@@ -222,7 +222,7 @@ func (cm *networkControllerManager) Start(ctx context.Context, cancel context.Ca
 				start := time.Now()
 				defer func() {
 					end := time.Since(start)
-					metrics.MetricMasterReadyDuration.Set(end.Seconds())
+					metrics.MetricNCMReadyDuration.Set(end.Seconds())
 				}()
 
 				if err := cm.Init(); err != nil {
@@ -253,7 +253,7 @@ func (cm *networkControllerManager) Start(ctx context.Context, cancel context.Ca
 		},
 	}
 
-	leaderelection.SetProvider(ovnkubeMasterLeaderMetricsProvider{})
+	leaderelection.SetProvider(metricsProvider{})
 	leaderElector, err := leaderelection.NewLeaderElector(lec)
 	if err != nil {
 		return err
@@ -362,8 +362,8 @@ func (cm *networkControllerManager) enableOVNLogicalDataPathGroups() error {
 }
 
 func (cm *networkControllerManager) configureMetrics(stopChan <-chan struct{}) {
-	metrics.RegisterMasterPerformance(cm.nbClient)
-	metrics.RegisterMasterFunctional()
+	metrics.RegisterNCMPerformance(cm.nbClient)
+	metrics.RegisterNCMFunctional()
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
 	metrics.MonitorIPSec(cm.nbClient)
 }

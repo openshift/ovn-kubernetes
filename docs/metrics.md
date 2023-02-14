@@ -15,8 +15,16 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 |ovnkube_master_network_programming_ovn_duration_seconds| Histogram  | The duration for OVN to apply network configuration for a kind (e.g. pod, service, networkpolicy).
 
 ## Change log
-This list is to help notify if there are additions, changes or removals to metrics.
+This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 
+- Effect of OVN IC architecture:
+  - Move the following metrics from subsystem "master" to subsystem "clustermanager". Therefore, the follow metrics are renamed.
+    - `ovnkube_master_num_v4_host_subnets` -> `ovnkube_clustermanager_num_v4_host_subnets`
+    - `ovnkube_master_num_v6_host_subnets` -> `ovnkube_clustermanager_num_v6_host_subnets`
+    - `ovnkube_master_allocated_v4_host_subnets` -> `ovnkube_clustermanager_allocated_v4_host_subnets`
+    - `ovnkube_master_allocated_v6_host_subnets` -> `ovnkube_clustermanager_allocated_v6_host_subnets`
+  - Rename subsystem "master" to subsystem "networkcontrollermanager"
+    - e.g. previously a metric called `ovnkube_master_leader` will now be called `ovnkube_networkcontrollermanager_leader`
 - Update description of ovnkube_master_pod_creation_latency_seconds
 - Add libovsdb metrics - ovnkube_master_libovsdb_disconnects_total and ovnkube_master_libovsdb_monitors.
 - Add ovn_controller_southbound_database_connected metric (https://github.com/ovn-org/ovn-kubernetes/pull/3117).
