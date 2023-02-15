@@ -42,11 +42,14 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+
+	// Node healthcheck server for cloud load balancers
+	healthzServer *proxierHealthUpdater
 }
 
 // NewNode creates a new controller for node management
 func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
-	return &OvnNode{
+	n := &OvnNode{
 		name:         name,
 		client:       kubeClient,
 		Kube:         &kube.Kube{KClient: kubeClient},
@@ -54,6 +57,11 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
 	}
+	if len(config.Kubernetes.HealthzBindAddress) != 0 {
+		n.healthzServer = newNodeProxyHealthzServer(n.name, config.Kubernetes.HealthzBindAddress, n.recorder)
+	}
+
+	return n
 }
 
 func clearOVSFlowTargets() error {
@@ -559,6 +567,10 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		if err != nil {
 			return fmt.Errorf("failed to watch endpoints: %w", err)
 		}
+	}
+
+	if n.healthzServer != nil {
+		n.healthzServer.Start(n.stopChan, wg)
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
