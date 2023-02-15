@@ -346,7 +346,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 		case ovntypes.Layer3Topology:
 			for _, podIfAddr := range podAnnotation.IPs {
 				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-				nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+				nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
 				if err != nil {
 					return err
 				}
@@ -387,7 +387,7 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nad
 
 	for _, podIfAddr := range podAnnotation.IPs {
 		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-		nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+		nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
 		if err != nil {
 			return err
 		}
