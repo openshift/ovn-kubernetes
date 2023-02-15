@@ -1333,7 +1333,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
@@ -1479,7 +1479,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
+			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
