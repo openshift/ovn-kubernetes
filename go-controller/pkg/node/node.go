@@ -48,6 +48,9 @@ type OvnNode struct {
 	recorder     record.EventRecorder
 	gateway      Gateway
 
+	// Node healthcheck server for cloud load balancers
+	healthzServer *proxierHealthUpdater
+
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
 	// retry framework for endpoint slices, used for the removal of stale conntrack entries for services
@@ -631,9 +634,9 @@ func (n *OvnNode) Start(ctx context.Context) error {
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// start health check to ensure there are no stale OVS internal ports
-		go wait.Until(func() {
-			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
-		}, time.Minute, n.stopChan)
+		// go wait.Until(func() {
+		// 	checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
+		// }, time.Minute, n.stopChan)
 		util.SetARPTimeout()
 		err := n.WatchNamespaces()
 		if err != nil {
@@ -647,6 +650,10 @@ func (n *OvnNode) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to watch endpointSlices: %w", err)
 		}
+	}
+
+	if n.healthzServer != nil {
+		n.healthzServer.Start(n.stopChan, n.wg)
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
