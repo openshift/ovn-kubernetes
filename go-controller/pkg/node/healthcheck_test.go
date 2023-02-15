@@ -2,15 +2,20 @@ package node
 
 import (
 	"fmt"
+	"net/http"
+	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 )
 
 func genListStalePortsCmd() string {
@@ -147,6 +152,36 @@ var _ = Describe("Healthcheck tests", func() {
 				})
 				checkForStaleOVSRepresentorInterfaces(nodeName, factoryMock)
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
+			})
+		})
+	})
+
+	Describe("node proxy health-check", func() {
+		Context("healthz server is started", func() {
+			var (
+				wg     *sync.WaitGroup
+				stopCh chan struct{}
+			)
+
+			BeforeEach(func() {
+				stopCh = make(chan struct{})
+				wg = &sync.WaitGroup{}
+			})
+
+			AfterEach(func() {
+				close(stopCh)
+				wg.Wait()
+			})
+
+			It("it reports healthy", func() {
+				recorder := record.NewFakeRecorder(10)
+				const addr string = "127.0.0.1:10256"
+				hzs := newNodeProxyHealthzServer("some-node", addr, recorder)
+				hzs.Start(stopCh, wg)
+				resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
+				Expect(err).NotTo(HaveOccurred())
+				defer resp.Body.Close()
+				Expect(resp.StatusCode).To(Equal(http.StatusOK))
 			})
 		})
 	})
