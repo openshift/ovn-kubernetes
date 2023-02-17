@@ -115,7 +115,10 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 					end := time.Since(start)
 					metrics.MetricClusterManagerReadyDuration.Set(end.Seconds())
 				}()
-
+				// Cluster manager and master both setup LEs. However, LE only allows registering
+				// one metric type, therefore we set CM leader metrics manually. Remove when CM and master (NCM)
+				// are in separate processes.
+				metrics.MetricClusterManagerLeader.Set(1)
 				// run only on the active master node.
 				if err := cm.Run(); err != nil {
 					panic(err.Error())
@@ -128,17 +131,21 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 				// the cache. It is better to exit for now.
 				// kube will restart and this will become a follower.
 				klog.Infof("No longer leader; exiting")
+				metrics.MetricClusterManagerLeader.Set(0)
 				os.Exit(0)
 			},
 			OnNewLeader: func(newLeaderName string) {
 				if newLeaderName != cm.identity {
+					metrics.MetricClusterManagerLeader.Set(0)
 					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
 				}
 			},
 		},
 	}
 
-	leaderelection.SetProvider(ovnkubeClusterManagerLeaderMetricsProvider{})
+	// uncomment when cluster manager and master are split into separate processes
+	//leaderelection.SetProvider(ovnkubeClusterManagerLeaderMetricsProvider{})
+
 	leaderElector, err := leaderelection.NewLeaderElector(lec)
 	if err != nil {
 		return err
