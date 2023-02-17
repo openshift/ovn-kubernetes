@@ -178,7 +178,7 @@ func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNe
 }
 
 func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*net.IPNet) error {
-	_, _, ops, err := oc.addPodToNamespace(ns, ips)
+	_, _, _, ops, err := oc.addPodToNamespace(ns, ips)
 
 	if err == nil {
 		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
