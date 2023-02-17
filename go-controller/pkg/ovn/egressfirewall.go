@@ -52,7 +52,7 @@ type destination struct {
 	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
 	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
 	clusterSubnetIntersection bool
-	nodeAddrs                 sets.String
+	nodeAddrs                 sets.Set[string]
 	nodeSelector              *metav1.LabelSelector
 }
 
@@ -94,7 +94,7 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 		efr.to.clusterSubnetIntersection = intersect
 	} else {
 		efr.to.nodeSelector = rawEgressFirewallRule.To.NodeSelector
-		efr.to.nodeAddrs = sets.NewString()
+		efr.to.nodeAddrs = sets.New[string]()
 		// validate node selector
 		_, err := metav1.LabelSelectorAsSelector(rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {

@@ -146,7 +146,7 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) *DefaultNetworkController {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, err error) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil)
@@ -154,14 +154,20 @@ func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) *DefaultNetw
 
 func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory) *DefaultNetworkController {
+	addressSetFactory addressset.AddressSetFactory) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient)
 	}
-	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
-	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
+	svcController, svcFactory, err := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
+	}
+	egressSvcController, err := newEgressServiceController(cnci.client, cnci.nbClient, addressSetFactory, svcFactory,
 		defaultStopChan, DefaultNetworkControllerName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create new egress service controller while creating new default network controller: %w", err)
+	}
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
@@ -204,7 +210,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	}
 
 	oc.initRetryFramework()
-	return oc
+	return oc, nil
 }
 
 func (oc *DefaultNetworkController) initRetryFramework() {
@@ -450,10 +456,13 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressQoS {
-		oc.initEgressQoSController(
+		err := oc.initEgressQoSController(
 			oc.watchFactory.EgressQoSInformer(),
 			oc.watchFactory.PodCoreInformer(),
 			oc.watchFactory.NodeCoreInformer())
+		if err != nil {
+			return err
+		}
 		oc.wg.Add(1)
 		go func() {
 			defer oc.wg.Done()
@@ -487,7 +496,10 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			unidlingController.Run(oc.stopChan)
 		}()
 
-		unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
+		_, err = unidling.NewUnidledAtController(oc.kube, oc.watchFactory.ServiceInformer())
+		if err != nil {
+			return err
+		}
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap
