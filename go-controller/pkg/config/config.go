@@ -109,6 +109,7 @@ var (
 		OVNConfigNamespace:   "ovn-kubernetes",
 		HostNetworkNamespace: "",
 		PlatformType:         "",
+		HealthzBindAddress:   "0.0.0.0:10256",
 	}
 
 	// Metrics holds Prometheus metrics-related parameters.
@@ -982,6 +983,7 @@ var K8sFlags = []cli.Flag{
 		Name:        "healthz-bind-address",
 		Usage:       "The IP address and port for the node proxy healthz server to serve on (set to '0.0.0.0' or '::' for listening in all interfaces and IP families). Disabled by default.",
 		Destination: &cliConfig.Kubernetes.HealthzBindAddress,
+		Value:       Kubernetes.HealthzBindAddress,
 	},
 }
 

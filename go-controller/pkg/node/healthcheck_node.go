@@ -48,6 +48,7 @@ func newNodeProxyHealthzServer(nodeName, address string, eventRecorder record.Ev
 }
 
 func (phu *proxierHealthUpdater) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+	klog.Infof("############# healthcheck %s == %s", req.UserAgent(), req.Referer())
 	resp.Header().Set("Content-Type", "application/json")
 	resp.Header().Set("X-Content-Type-Options", "nosniff")
 	if phu.healthy {
