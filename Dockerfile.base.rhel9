@@ -13,7 +13,7 @@ RUN dnf install -y --nodocs \
 	dnf clean all
 
 ARG ovsver=3.0.0-28.el9fdp
-ARG ovnver=22.12.0-18.el9fdp
+ARG ovnver=22.12.0-25.el9fdp
 
 RUN INSTALL_PKGS="iptables" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
