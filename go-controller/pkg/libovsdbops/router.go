@@ -1007,7 +1007,7 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 			ModelPredicate:   func(lr *nbdb.LogicalRouter) bool { return natUUIDs.HasAny(lr.Nat...) },
 			OnModelMutations: []interface{}{&router.Nat},
 			ErrNotFound:      false,
-			BulkOp:           false,
+			BulkOp:           true,
 		},
 	}
 
