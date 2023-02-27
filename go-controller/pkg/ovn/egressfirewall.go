@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/retry"
@@ -27,6 +28,7 @@ const (
 	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
 	egressFirewallACLExtIdKey = "egressFirewall"
+	aclDeleteBatchSize        = 1000
 )
 
 type egressFirewall struct {
@@ -164,9 +166,11 @@ func (oc *Controller) syncEgressFirewallRetriable(egressFirewalls []interface{})
 
 	// delete acls from all switches, they reside on the port group now
 	if len(egressFirewallACLs) != 0 {
-		err = libovsdbops.RemoveACLsFromAllSwitches(oc.nbClient, egressFirewallACLs)
+		err = batching.Batch(aclDeleteBatchSize, egressFirewallACLs, func(batchACLs []nbdb.ACL) error {
+			return libovsdbops.RemoveACLsFromAllSwitches(oc.nbClient, batchACLs)
+		})
 		if err != nil {
-			return fmt.Errorf("failed to remove reject acl from all logical switches: %v", err)
+			return fmt.Errorf("failed to remove egress firewall acls from all logical switches: %v", err)
 		}
 	}
 
