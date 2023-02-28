@@ -308,6 +308,7 @@ func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRou
 		UUID: types.SwitchToRouterPrefix + node.Name + "-UUID",
 		Type: "router",
 		Options: map[string]string{
+			"arp_proxy":   "0a:58:a9:fe:01:01 169.254.1.1",
 			"router-port": types.RouterToSwitchPrefix + node.Name,
 		},
 		Addresses: []string{"router"},
