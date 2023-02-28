@@ -2171,7 +2171,7 @@ func (oc *Controller) addStandByEgressIPAssignment(podKey string, podStatus *pod
 // (routing pod traffic to the egress node) and NAT objects on the egress node
 // (SNAT-ing to the egress IP).
 func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
-	if config.Metrics.EnableEIPScaleMetrics {
+	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
 			if err != nil {
@@ -2199,7 +2199,7 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 // deletePodEgressIPAssignment deletes the OVN programmed egress IP
 // configuration mentioned for addPodEgressIPAssignment.
 func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, podIPs []*net.IPNet) (err error) {
-	if config.Metrics.EnableEIPScaleMetrics {
+	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
 			if err != nil {

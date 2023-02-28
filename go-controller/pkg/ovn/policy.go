@@ -6,9 +6,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -844,6 +846,13 @@ func (oc *Controller) denyPGDeletePorts(np *networkPolicy, portNamesToUUIDs map[
 
 // handleLocalPodSelectorAddFunc adds a new pod to an existing NetworkPolicy, should be retriable.
 func (oc *Controller) handleLocalPodSelectorAddFunc(np *networkPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolLocalPodEvent("add", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -888,6 +897,13 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(np *networkPolicy, objs ...i
 
 // handleLocalPodSelectorDelFunc handles delete event for local pod, should be retriable
 func (oc *Controller) handleLocalPodSelectorDelFunc(np *networkPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolLocalPodEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1206,7 +1222,13 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 // if addNetworkPolicy fails, create or delete operation can be retried
 func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	klog.Infof("Adding network policy %s", getPolicyKey(policy))
-
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolEvent("add", duration)
+		}()
+	}
 	// To not hold nsLock for the whole process on network policy creation, we do the following:
 	// 1. save required namespace information to use for netpol create
 	// 2. create network policy without ns Lock
@@ -1311,7 +1333,13 @@ func (oc *Controller) buildNetworkPolicyACLs(np *networkPolicy, aclLogging *ACLL
 func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) error {
 	npKey := getPolicyKey(policy)
 	klog.Infof("Deleting network policy %s", npKey)
-
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolEvent("delete", duration)
+		}()
+	}
 	// First lock and update namespace
 	nsInfo, nsUnlock := oc.getNamespaceLocked(policy.Namespace, false)
 	if nsInfo != nil {
@@ -1407,6 +1435,13 @@ func (oc *Controller) cleanupNetworkPolicy(np *networkPolicy) error {
 // selected as a peer by a NetworkPolicy's ingress/egress section to that
 // ingress/egress address set
 func (oc *Controller) handlePeerPodSelectorAddUpdate(np *networkPolicy, gp *gressPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerPodEvent("add", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1429,6 +1464,13 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *networkPolicy, gp *gres
 // matches a NetworkPolicy ingress/egress section's selectors from that
 // ingress/egress address set
 func (oc *Controller) handlePeerPodSelectorDelete(np *networkPolicy, gp *gressPolicy, podSelector labels.Selector, obj interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerPodEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1565,6 +1607,13 @@ func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
 
 func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressPolicy,
 	podSelector labels.Selector, obj interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceAndPodEvent("add", duration)
+		}()
+	}
 	namespace := obj.(*kapi.Namespace)
 	np.RLock()
 	locked := true
@@ -1614,6 +1663,13 @@ func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressP
 }
 
 func (oc *Controller) handlePeerNamespaceAndPodDel(np *networkPolicy, gp *gressPolicy, obj interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceAndPodEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	defer np.RUnlock()
 	if np.deleted {
@@ -1679,6 +1735,13 @@ func (oc *Controller) addPeerNamespaceAndPodHandler(namespaceSelector *metav1.La
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorAdd(np *networkPolicy, gp *gressPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceEvent("add", duration)
+		}()
+	}
 	np.RLock()
 	if np.deleted {
 		np.RUnlock()
@@ -1701,6 +1764,13 @@ func (oc *Controller) handlePeerNamespaceSelectorAdd(np *networkPolicy, gp *gres
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorDel(np *networkPolicy, gp *gressPolicy, objs ...interface{}) error {
+	if config.Metrics.EnableScaleMetrics {
+		start := time.Now()
+		defer func() {
+			duration := time.Since(start)
+			metrics.RecordNetpolPeerNamespaceEvent("delete", duration)
+		}()
+	}
 	np.RLock()
 	if np.deleted {
 		np.RUnlock()
