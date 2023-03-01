@@ -620,12 +620,12 @@ func getMulticastACLEgrMatch() string {
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
-// - a port group containing all logical ports associated with 'ns'
-// - one "from-lport" ACL allowing egress multicast traffic from the pods
-//   in 'ns'
-// - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
-//   This matches only traffic originated by pods in 'ns' (based on the
-//   namespace address set).
+//   - a port group containing all logical ports associated with 'ns'
+//   - one "from-lport" ACL allowing egress multicast traffic from the pods
+//     in 'ns'
+//   - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
+//     This matches only traffic originated by pods in 'ns' (based on the
+//     namespace address set).
 func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupName := hashedPortGroup(ns)
 
@@ -699,10 +699,11 @@ func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string, nsInf
 }
 
 // Creates a global default deny multicast policy:
-// - one ACL dropping egress multicast traffic from all pods: this is to
-//   protect OVN controller from processing IP multicast reports from nodes
-//   that are not allowed to receive multicast raffic.
-// - one ACL dropping ingress multicast traffic to all pods.
+//   - one ACL dropping egress multicast traffic from all pods: this is to
+//     protect OVN controller from processing IP multicast reports from nodes
+//     that are not allowed to receive multicast raffic.
+//   - one ACL dropping ingress multicast traffic to all pods.
+//
 // Caller must hold the namespace's namespaceInfo object lock.
 func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	match := getMulticastACLMatch()
@@ -1059,15 +1060,28 @@ func (oc *Controller) handleLocalPodSelector(
 				oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
+				pod := obj.(*kapi.Pod)
+				if util.PodCompleted(pod) {
+					klog.Infof("Skipping deletion of already managed completed pod %s/%s", pod.Namespace, pod.Name)
+					return
+				}
 				oc.handleLocalPodSelectorDelFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				pod := newObj.(*kapi.Pod)
-				if util.PodCompleted(pod) {
+				new := newObj.(*kapi.Pod)
+				old := oldObj.(*kapi.Pod)
+				if util.PodCompleted(new) {
+					if util.PodCompleted(old) {
+						klog.Infof("Ignoring update on completed pod %s/%s", old.Namespace, old.Name)
+						return
+					}
+
+					klog.Infof("Managing deletion of completed pod %s/%s", old.Namespace, old.Name)
 					oc.handleLocalPodSelectorDelFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, oldObj)
-				} else {
-					oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, newObj)
+					return
 				}
+
+				oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, newObj)
 			},
 		}, func(objs []interface{}) {
 			oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, objs...)
@@ -1609,15 +1623,29 @@ func (oc *Controller) handlePeerPodSelector(
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
+				pod := obj.(*kapi.Pod)
+				if util.PodCompleted(pod) {
+					klog.Infof("Skipping deletion of already managed completed pod %s/%s", pod.Namespace, pod.Name)
+					return
+				}
 				oc.handlePeerPodSelectorDelete(gp, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				pod := newObj.(*kapi.Pod)
-				if util.PodCompleted(pod) {
+
+				new := newObj.(*kapi.Pod)
+				old := oldObj.(*kapi.Pod)
+				if util.PodCompleted(new) {
+					if util.PodCompleted(old) {
+						klog.Infof("Ignoring update on completed pod %s/%s", old.Namespace, old.Name)
+						return
+					}
+
+					klog.Infof("Managing deletion of completed pod %s/%s", old.Namespace, old.Name)
 					oc.handlePeerPodSelectorDelete(gp, oldObj)
-				} else {
-					oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+					return
 				}
+
+				oc.handlePeerPodSelectorAddUpdate(gp, newObj)
 			},
 		}, func(objs []interface{}) {
 			oc.handlePeerPodSelectorAddUpdate(gp, objs...)
@@ -1654,15 +1682,29 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 							oc.handlePeerPodSelectorAddUpdate(gp, obj)
 						},
 						DeleteFunc: func(obj interface{}) {
+							pod := obj.(*kapi.Pod)
+							if util.PodCompleted(pod) {
+								klog.Infof("Skipping deletion of already managed completed pod %s/%s", pod.Namespace, pod.Name)
+								return
+							}
 							oc.handlePeerPodSelectorDelete(gp, obj)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
-							pod := oldObj.(*kapi.Pod)
-							if util.PodCompleted(pod) {
+							new := newObj.(*kapi.Pod)
+							old := oldObj.(*kapi.Pod)
+							if util.PodCompleted(new) {
+								if util.PodCompleted(old) {
+									klog.Infof("Ignoring update on completed pod %s/%s", old.Namespace, old.Name)
+									return
+
+								}
+
+								klog.Infof("Managing deletion of completed pod %s/%s", old.Namespace, old.Name)
 								oc.handlePeerPodSelectorDelete(gp, oldObj)
-							} else {
-								oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+								return
 							}
+
+							oc.handlePeerPodSelectorAddUpdate(gp, newObj)
 						},
 					}, func(objs []interface{}) {
 						oc.handlePeerPodSelectorAddUpdate(gp, objs...)
