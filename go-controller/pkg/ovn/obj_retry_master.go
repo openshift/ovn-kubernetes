@@ -719,7 +719,7 @@ func (h *masterEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 
 	case factory.PeerPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
+		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -727,7 +727,7 @@ func (h *masterEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
+		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
