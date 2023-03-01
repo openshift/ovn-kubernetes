@@ -251,32 +251,23 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
 	if util.PodCompleted(pod) {
 		if shouldRelease, err = oc.lsManager.ConditionalIPRelease(nodeName, podIfAddrs, func() (bool, error) {
-			pods, err := oc.watchFactory.GetAllPods()
-			if err != nil {
-				return false, fmt.Errorf("unable to get pods to determine if completed pod IP is in use by another pod. "+
-					"Will not release pod %s/%s IP: %#v from allocator", pod.Namespace, pod.Name, podIfAddrs)
+			var needleIPs []net.IP
+			for _, podIPNet := range podIfAddrs {
+				needleIPs = append(needleIPs, podIPNet.IP)
 			}
-			// iterate through all pods, ignore pods on other nodes
-			for _, p := range pods {
-				if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) || p.Spec.NodeName != nodeName {
-					continue
-				}
-				// check if the pod addresses match in the OVN annotation
-				pAddrs, err := util.GetAllPodIPs(p)
-				if err != nil {
-					continue
-				}
 
-				for _, pAddr := range pAddrs {
-					for _, podAddr := range podIfAddrs {
-						if pAddr.Equal(podAddr.IP) {
-							klog.Infof("Will not release IP address: %s for pod %s/%s. Detected another pod"+
-								" using this IP: %s/%s", pAddr.String(), pod.Namespace, pod.Name, p.Namespace, p.Name)
-							return false, nil
-						}
-					}
-				}
+			collidingPod, err := oc.findPodWithIPAddresses(needleIPs)
+			if err != nil {
+				return false, fmt.Errorf("unable to determine if completed pod IP is in use by another pod. "+
+					"Will not release pod %s/%s IP: %#v from allocator. %v", pod.Namespace, pod.Name, podIfAddrs, err)
 			}
+
+			if collidingPod != nil {
+				klog.Infof("Will not release IP address: %s for %s. Detected another pod"+
+					" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), podDesc, collidingPod.Namespace, collidingPod.Name)
+				return false, nil
+			}
+
 			klog.Infof("Releasing IPs for Completed pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
 				util.JoinIPNetIPs(podIfAddrs, " "))
 			return true, nil
@@ -336,6 +327,35 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	}
 
 	return nil
+}
+
+func (bnc *Controller) findPodWithIPAddresses(needleIPs []net.IP) (*kapi.Pod, error) {
+	allPods, err := bnc.watchFactory.GetAllPods()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get pods: %w", err)
+	}
+
+	// iterate through all pods
+	for _, p := range allPods {
+		if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) {
+			continue
+		}
+		// check if the pod addresses match in the OVN annotation
+		haystackPodAddrs, err := util.GetAllPodIPs(p)
+		if err != nil {
+			continue
+		}
+
+		for _, haystackPodAddr := range haystackPodAddrs {
+			for _, needleIP := range needleIPs {
+				if haystackPodAddr.Equal(needleIP) {
+					return p, nil
+				}
+			}
+		}
+	}
+
+	return nil, nil
 }
 
 func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSwitch, error) {
