@@ -65,7 +65,9 @@ type EgressFirewallPort struct {
 	Port int32 `json:"port"`
 }
 
-// EgressFirewallDestination is the endpoint that traffic is either allowed or denied to
+// +kubebuilder:validation:MinProperties:=1
+// +kubebuilder:validation:MaxProperties:=1
+// EgressFirewallDestination is the target that traffic is either allowed or denied to
 type EgressFirewallDestination struct {
 	// cidrSelector is the CIDR range to allow/deny traffic to. If this is set, dnsName must be unset.
 	CIDRSelector string `json:"cidrSelector,omitempty"`
