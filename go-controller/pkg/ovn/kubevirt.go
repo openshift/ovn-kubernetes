@@ -125,8 +125,9 @@ func (oc *DefaultNetworkController) enroutePodAddressesToNode(pod *kapi.Pod) err
 
 func (oc *DefaultNetworkController) enrouteVirtualMachine(pod *kapi.Pod) error {
 	targetNode := pod.Labels[kubevirt.NodeNameLabel]
-	// There is no live migration or live migration has finished
-	if targetNode == "" || targetNode == pod.Spec.NodeName {
+	targetStartTimestamp := pod.Labels[kubevirt.MigrationTargetStartTimestamp]
+	// No live migration or target node was reached || qemu is already ready
+	if targetNode == pod.Spec.NodeName || targetStartTimestamp != "" {
 		if err := oc.enroutePodAddressesToNode(pod); err != nil {
 			return fmt.Errorf("failed enroutePodAddressesToNode for  %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
