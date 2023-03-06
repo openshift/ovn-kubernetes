@@ -119,7 +119,8 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) *De
 	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
-		nc.healthzServer = newNodeProxyHealthzServer(nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder)
+		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
+		nc.healthzServer = newNodeProxyHealthzServer(nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder, nc.client)
 	}
 
 	nc.initRetryFrameworkForNode()
