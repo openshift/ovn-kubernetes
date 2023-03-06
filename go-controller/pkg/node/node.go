@@ -67,7 +67,8 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 	}
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
-		n.healthzServer = newNodeProxyHealthzServer(n.name, config.Kubernetes.HealthzBindAddress, n.recorder)
+		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
+		n.healthzServer = newNodeProxyHealthzServer(n.name, config.Kubernetes.HealthzBindAddress, n.recorder, n.client)
 	}
 
 	n.initRetryFrameworkForNode()
