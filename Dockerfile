@@ -29,6 +29,8 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+COPY ovn23.03-23.03.0-generic_lb_est.5.el8fdp.x86_64.rpm  ovn23.03-central-23.03.0-generic_lb_est.5.el8fdp.x86_64.rpm  ovn23.03-host-23.03.0-generic_lb_est.5.el8fdp.x86_64.rpm  ovn23.03-vtep-23.03.0-generic_lb_est.5.el8fdp.x86_64.rpm /root/
+
 # more-pkgs file is updated in Dockerfile.base
 # more-pkgs file contains the following ovs/ovn packages to be installed in this Dockerfile
 # - openvswitch-devel
@@ -44,6 +46,7 @@ RUN INSTALL_PKGS=" \
 	" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
 	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
+        rpm -Uhv --nodeps --force /root/*.rpm && \
 	dnf clean all && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
