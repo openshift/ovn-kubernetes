@@ -1077,7 +1077,7 @@ func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
 type egressIPCacheEntry struct {
 	egressPods       map[string]sets.String
 	gatewayRouterIPs sets.String
-	egressIPs        sets.String
+	egressIPs        map[string]string
 }
 
 func (oc *Controller) syncEgressIPs(namespaces []interface{}) {
@@ -1271,8 +1271,9 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 			klog.Infof("syncStaleSNATRules will delete %s due to logical ip: %v", egressIPName, item)
 			return true
 		}
-		if !cacheEntry.egressIPs.Has(item.ExternalIP) {
-			klog.Infof("syncStaleSNATRules will delete %s due to external ip: %v", egressIPName, item)
+		if node, ok := cacheEntry.egressIPs[item.ExternalIP]; !ok ||
+			item.LogicalPort == nil || *item.LogicalPort != types.K8sPrefix+node {
+			klog.Infof("syncStaleSNATRules will delete %s due to external ip or stale logical port: %v", egressIPName, item)
 			return true
 		}
 		return false
@@ -1306,6 +1307,22 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 	if len(errors) > 0 {
 		return fmt.Errorf("failed deleting stale NAT: %v", utilerrors.NewAggregate(errors))
 	}
+	// The routers length 0 check is needed because some of ovnk master restart unit tests have
+	// router object referring to SNAT's UUID string instead of actual UUID (though it may not
+	// happen in real scenario). Hence this check is needed to delete those stale SNATs as well.
+	if len(routers) == 0 {
+		natIds := sets.String{}
+		for _, nat := range nats {
+			natIds.Insert(nat.UUID)
+		}
+		predicate := func(item *nbdb.NAT) bool {
+			return natIds.Has(item.UUID)
+		}
+		ops, err = libovsdbops.DeleteNATsWithPredicateOps(oc.nbClient, ops, predicate)
+		if err != nil {
+			return fmt.Errorf("unable to delete stale SNATs err: %v", err)
+		}
+	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
@@ -1329,7 +1346,7 @@ func (oc *Controller) generateCacheForEgressIP() (map[string]egressIPCacheEntry,
 		egressIPCache[egressIP.Name] = egressIPCacheEntry{
 			egressPods:       make(map[string]sets.String),
 			gatewayRouterIPs: sets.NewString(),
-			egressIPs:        sets.NewString(),
+			egressIPs:        map[string]string{},
 		}
 		for _, status := range egressIP.Status.Items {
 			isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
@@ -1339,7 +1356,7 @@ func (oc *Controller) generateCacheForEgressIP() (map[string]egressIPCacheEntry,
 				continue
 			}
 			egressIPCache[egressIP.Name].gatewayRouterIPs.Insert(gatewayRouterIP.String())
-			egressIPCache[egressIP.Name].egressIPs.Insert(status.EgressIP)
+			egressIPCache[egressIP.Name].egressIPs[status.EgressIP] = status.Node
 		}
 		namespaces, err := oc.watchFactory.GetNamespacesBySelector(egressIP.Spec.NamespaceSelector)
 		if err != nil {
@@ -2181,41 +2198,10 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 				gatewayRouterIP, name, types.OVNClusterRouter, err)
 		}
 	}
-	nat := nbdb.NAT{}
-	natResult := []nbdb.NAT{}
-	natLogicalRouter := nbdb.LogicalRouter{}
-
-	opsModel := []libovsdbops.OperationModel{
-		{
-			Model: &nat,
-			ModelPredicate: func(nat *nbdb.NAT) bool {
-				return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
-			},
-			ExistingResult: &natResult,
-			DoAfter: func() {
-				natLogicalRouter.Nat = libovsdbops.ExtractUUIDsFromModels(&natResult)
-			},
-			BulkOp: true,
-		},
-		{
-			Model: &natLogicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				// Find the router that has the removed nat
-				for _, lrNat := range lr.Nat {
-					for _, delNat := range natLogicalRouter.Nat {
-						if lrNat == delNat {
-							return true
-						}
-					}
-				}
-				return false
-			},
-			OnModelMutations: []interface{}{
-				&natLogicalRouter.Nat,
-			},
-		},
+	natPred := func(nat *nbdb.NAT) bool {
+		return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
 	}
-	ops, err = e.modelClient.DeleteOps(ops, opsModel...)
+	ops, err = libovsdbops.DeleteNATsWithPredicateOps(e.nbClient, ops, natPred)
 	if err != nil {
 		return fmt.Errorf("unable to remove logical router policies of egress IP status setup, err: %v", err)
 	}
