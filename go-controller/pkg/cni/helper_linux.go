@@ -156,6 +156,10 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
+	if ifInfo.SkipIPConfig {
+		return nil
+	}
+
 	// set the IP address
 	for _, ip := range ifInfo.IPs {
 		addr := &netlink.Addr{IPNet: ip}
