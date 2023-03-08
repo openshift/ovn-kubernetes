@@ -109,6 +109,10 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return err
 	}
 
+	if err := oc.kubevirtCleanUp(pod); err != nil {
+		return err
+	}
+
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
 	if pInfo == nil {
 		return nil
@@ -256,6 +260,11 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+
+	if err := oc.ensureDHCPOptionsForVM(pod, lsp); err != nil {
+		return err
+	}
+
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
 		metrics.RecordPodCreated(pod, oc.NetInfo)
