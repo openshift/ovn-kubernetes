@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -108,6 +109,10 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 
 	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, ovntypes.DefaultNetworkName)
 	if err != nil {
+		return err
+	}
+
+	if err := oc.kubevirtCleanUp(pod); err != nil {
 		return err
 	}
 
@@ -258,6 +263,13 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+
+	if kubevirt.IsPodLiveMigratable(pod) {
+		if err := oc.ensureDHCPOptionsForVM(pod, lsp); err != nil {
+			return err
+		}
+	}
+
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
 		metrics.RecordPodCreated(pod, oc.NetInfo)

@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
@@ -69,4 +70,44 @@ func FindNetworkInfo(client *factory.WatchFactory, pod *corev1.Pod) (NetworkInfo
 		return networkInfo, fmt.Errorf("missing original switch name label for vm pod %s/%s", pod.Namespace, pod.Name)
 	}
 	return networkInfo, nil
+}
+
+// IsMigratedSourcePodStale return true if there are other pods related to
+// to it and any of them has newer creation timestamp.
+func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
+	vmPods, err := FindVMRelatedPods(client, pod)
+	if err != nil {
+		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking live migration left overs: %v", pod.Namespace, pod.Name, err)
+	}
+
+	for _, vmPod := range vmPods {
+		if vmPod.CreationTimestamp.After(pod.CreationTimestamp.Time) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// ExternalIDContainsVM return true if the nbdb ExternalIDs has namespace
+// and name entries matching the VM
+func ExternalIDsContainsVM(externalIDs map[string]string, vm *ktypes.NamespacedName) bool {
+	if vm == nil {
+		return false
+	}
+	externalIDsVM := ExtractVMFromExternalIDs(externalIDs)
+	if externalIDsVM == nil {
+		return false
+	}
+	return *vm == *externalIDsVM
+}
+
+// ExtractVMNameFromPod retunes namespace and name of vm backed up but the pod
+// for regular pods return nil
+func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
+	vmName, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
+	if !ok {
+		return nil
+	}
+	return &ktypes.NamespacedName{Namespace: pod.Namespace, Name: vmName}
 }

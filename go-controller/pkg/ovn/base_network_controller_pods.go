@@ -232,8 +232,17 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 	}
 
 	shouldRelease := true
-	// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
-	if util.PodCompleted(pod) {
+	isMigratedSourcePodStale, err := kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, pod)
+	if err != nil {
+		return nil, fmt.Errorf("unable to determine if ip should be released at kubevirt scenario: %v", err)
+	}
+
+	// There is a VM still running we should not deallocate the IP
+	if isMigratedSourcePodStale {
+		shouldRelease = false
+
+		// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
+	} else if util.PodCompleted(pod) {
 		if shouldRelease, err = bnc.lsManager.ConditionalIPRelease(switchName, podIfAddrs, func() (bool, error) {
 
 			// Ignore pods on other switches
@@ -649,16 +658,23 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		// IP/MAC from the annotation.
 		lsp.DynamicAddresses = nil
 
-		if bnc.doesNetworkRequireIPAM() {
-			// ensure we have reserved the IPs in the annotation
-			if err = bnc.lsManager.AllocateIPs(switchNames.Original, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-				return nil, nil, nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
-					podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
-			} else {
-				needsIP = false
+		// At interconnect the logical switch manager only knows stuff about
+		// the current switch if we ask for original switch after
+		// live migration this fails, that's why we skip it here.
+		if switchNames.Original != switchNames.Current {
+			needsIP = false
+		} else {
+			if bnc.doesNetworkRequireIPAM() {
+				// ensure we have reserved the IPs in the annotation
+				if err = bnc.lsManager.AllocateIPs(switchNames.Original, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+					return nil, nil, nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
+						podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
+				} else {
+					needsIP = false
+				}
+			} else if len(podIfAddrs) > 0 {
+				return nil, nil, nil, false, fmt.Errorf("IPAMless network with IPs present in the annotations; rejecting to handle this request")
 			}
-		} else if len(podIfAddrs) > 0 {
-			return nil, nil, nil, false, fmt.Errorf("IPAMless network with IPs present in the annotations; rejecting to handle this request")
 		}
 	}
 
