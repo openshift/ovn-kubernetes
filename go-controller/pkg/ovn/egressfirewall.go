@@ -16,6 +16,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -161,8 +162,15 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	// delete acls from all switches, they reside on the port group now
 	if len(egressFirewallACLs) != 0 {
 		err = batching.Batch[*nbdb.ACL](aclDeleteBatchSize, egressFirewallACLs, func(batchACLs []*nbdb.ACL) error {
-			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, func(item *nbdb.LogicalSwitch) bool { return true },
-				batchACLs...)
+			// optimize the predicate to exclude switches that don't reference deleting acls.
+			aclsToDelete := sets.String{}
+			for _, acl := range batchACLs {
+				aclsToDelete.Insert(acl.UUID)
+			}
+			swWithACLsPred := func(sw *nbdb.LogicalSwitch) bool {
+				return aclsToDelete.HasAny(sw.ACLs...)
+			}
+			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, swWithACLsPred, batchACLs...)
 		})
 		if err != nil {
 			return fmt.Errorf("failed to remove egress firewall acls from node logical switches: %v", err)
