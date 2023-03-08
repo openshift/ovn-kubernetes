@@ -117,6 +117,10 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		return nil, err
 	}
 
+	// Skip default network IP config if pod is annotated with it
+	_, hasSkipIPConfigAnnotation := podAnnotation[SkipIPConfigAnnotation]
+	skipIPConfig := netName == types.DefaultNetworkName && hasSkipIPConfigAnnotation
+
 	podInterfaceInfo := &PodInterfaceInfo{
 		PodAnnotation:        *podNADAnnotation,
 		MTU:                  mtu,
@@ -124,6 +128,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		Ingress:              ingress,
 		Egress:               egress,
 		IsDPUHostMode:        config.OvnKubeNode.Mode == types.NodeModeDPUHost,
+		SkipIPConfig:         skipIPConfig,
 		PodUID:               podUID,
 		NetdevName:           netdevname,
 		NetName:              netName,

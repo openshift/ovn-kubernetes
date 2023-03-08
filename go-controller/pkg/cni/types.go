@@ -23,6 +23,8 @@ const ServerRunDir string = "/var/run/ovn-kubernetes/cni/"
 const serverSocketName string = "ovn-cni-server.sock"
 const serverSocketPath string = ServerRunDir + "/" + serverSocketName
 
+const SkipIPConfigAnnotation = "k8s.ovn.org/skip-ip-configuration-on-cni"
+
 // KubeAPIAuth contains information necessary to create a Kube API client
 type KubeAPIAuth struct {
 	// Kubeconfig is the path to a kubeconfig
@@ -47,6 +49,7 @@ type PodInterfaceInfo struct {
 	Ingress              int64  `json:"ingress"`
 	Egress               int64  `json:"egress"`
 	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
+	SkipIPConfig         bool   `json:"skip-ip-config"`
 	PodUID               string `json:"pod-uid"`
 	NetdevName           string `json:"vf-netdev-name"`
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
