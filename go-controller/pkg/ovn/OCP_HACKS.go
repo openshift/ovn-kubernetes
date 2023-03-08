@@ -1,6 +1,9 @@
 package ovn
 
 import (
+	"fmt"
+	"net"
+
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -68,4 +71,24 @@ func hasHybridAnnotation(obj v1.ObjectMeta) bool {
 		return true
 	}
 	return false
+}
+
+// getNodeHybridOverlayIfAddr gets the hybrid overlay address from the HybridOverlayDRIP annotation given a nodes name
+func (oc *Controller) getNodeHybridOverlayIfAddr(nodeName string) (net.IP, error) {
+	node, err := oc.watchFactory.GetNode(nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("cannot find node %s: %v", nodeName, err)
+	}
+
+	hybridOverlayDRIP, ok := node.Annotations[hotypes.HybridOverlayDRIP]
+	if !ok {
+		return nil, fmt.Errorf("hybrid overlay not initialized on node %s", nodeName)
+	}
+
+	hybridOverlayNodeIFAddr := net.ParseIP(hybridOverlayDRIP)
+	if hybridOverlayNodeIFAddr == nil {
+		return nil, fmt.Errorf("hybrid overlay distributed router ip for node %s is invalid annotation is %s", nodeName, hybridOverlayDRIP)
+	}
+
+	return hybridOverlayNodeIFAddr, nil
 }

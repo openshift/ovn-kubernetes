@@ -82,12 +82,16 @@ func (oc *Controller) syncPods(pods []interface{}) error {
 		if annotations != nil && !hasHybridAnnotation(pod.ObjectMeta) {
 			// END OCP HACK
 			newRoutes := []util.PodRoute{}
-			for _, subnet := range oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) {
-				hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP
-				for _, route := range annotations.Routes {
-					if !route.NextHop.Equal(hybridOverlayIFAddr) {
-						newRoutes = append(newRoutes, route)
-					}
+			// OCP HACK
+			// the hybrid overlay distributed router IP address is no longer always on the .3 address
+			hybridOverlayIFAddr, err := oc.getNodeHybridOverlayIfAddr(pod.Spec.NodeName)
+			if err != nil {
+				return err
+			}
+			// END OCP HACK
+			for _, route := range annotations.Routes {
+				if !route.NextHop.Equal(hybridOverlayIFAddr) {
+					newRoutes = append(newRoutes, route)
 				}
 			}
 			// checking the length because cannot compare the slices directly and if routes are removed
@@ -437,7 +441,13 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 				}
 			}
 			if hybridOverlayExternalGW != nil {
-				gatewayIP = util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
+				// OCP HACK
+				// the hybrid overlay distributed router IP address is no longer always on the .3 address
+				gatewayIP, err = oc.getNodeHybridOverlayIfAddr(pod.Spec.NodeName)
+				if err != nil {
+					return err
+				}
+				// END OCP HACK
 			}
 		} else {
 			gatewayIP = gatewayIPnet.IP
