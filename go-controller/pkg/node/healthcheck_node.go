@@ -29,6 +29,7 @@ type proxierHealthUpdater struct {
 	c           clock.Clock
 	healthy     bool
 	lastUpdated time.Time
+	lastCalled  time.Time
 	kubeClient  kubernetes.Interface
 }
 
@@ -70,34 +71,42 @@ func (phu *proxierHealthUpdater) isOvnkNodePodTerminating() bool {
 	return pod.DeletionTimestamp != nil
 }
 
-// isOvnkNodePodHealthy runs isOvnkNodePodTerminating at most every 500 ms and returns true
+// isHealthy runs isOvnkNodePodTerminating at most every 500 ms and returns true
 // if the ovnkube node pod is not set for deletion.
-func (phu *proxierHealthUpdater) isOvnkNodePodHealthy(now time.Time) bool {
+func (phu *proxierHealthUpdater) IsHealthy() bool {
+	now := phu.c.Now()
+	phu.lastCalled = now
 	if phu.lastUpdated != (time.Time{}) && now.Sub(phu.lastUpdated) < updateInterval {
+		klog.Infof("[rira] last updated < 500ms, isHealthy=%v", phu.healthy)
 		return phu.healthy
 	}
-	isTerminating := phu.isOvnkNodePodTerminating()
+	phu.healthy = !phu.isOvnkNodePodTerminating()
 	phu.lastUpdated = now
-	phu.healthy = !isTerminating
+	if phu.healthy {
+		klog.Infof("[rira] last updated > 500ms, isHealthy=true")
+	} else {
+		klog.Warningf("[rira] last updated > 500ms, isHealthy=false")
+	}
 	return phu.healthy
 }
 
 func (phu *proxierHealthUpdater) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json")
 	resp.Header().Set("X-Content-Type-Options", "nosniff")
-	now := phu.c.Now()
-	if phu.isOvnkNodePodHealthy(now) {
+
+	if phu.IsHealthy() {
 		resp.WriteHeader(http.StatusOK)
 	} else {
 		resp.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	fmt.Fprintf(resp, `{"lastUpdated": %q,"currentTime": %q}`, phu.lastUpdated, now)
+	fmt.Fprintf(resp, `{"lastUpdated": %q,"currentTime": %q}`, phu.lastUpdated, phu.lastCalled)
 }
 
 // serveNodeProxyHealthz initializes and runs the healthz server. It will always
 // report healthy while the node process is running.
 func (phu *proxierHealthUpdater) Start(stopChan chan struct{}, wg *sync.WaitGroup) {
+	klog.Infof("[rira] starting node healthz server")
 	serveMux := http.NewServeMux()
 	serveMux.Handle("/healthz", phu)
 	server := &http.Server{
@@ -134,6 +143,5 @@ func (phu *proxierHealthUpdater) Start(stopChan chan struct{}, wg *sync.WaitGrou
 			time.Sleep(5 * time.Second)
 		}
 	}()
-
 	startedWg.Wait()
 }

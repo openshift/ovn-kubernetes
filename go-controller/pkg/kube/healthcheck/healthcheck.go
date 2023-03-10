@@ -69,9 +69,17 @@ type HTTPServer interface {
 	Serve(listener net.Listener) error
 }
 
+// NodeHealthzServer interface allows us to call the IsHealthy function
+// to verify node health.
+type NodeHealthzServer interface {
+	IsHealthy() bool
+}
+
 // NewServer allocates a new healthcheck server manager.  If either
 // of the injected arguments are nil, defaults will be used.
-func NewServer(hostname string, recorder record.EventRecorder, listener Listener, httpServerFactory HTTPServerFactory) Server {
+func NewServer(hostname string, recorder record.EventRecorder, listener Listener,
+	httpServerFactory HTTPServerFactory, nodeHealthzServer NodeHealthzServer) Server {
+
 	if listener == nil {
 		listener = stdNetListener{}
 	}
@@ -79,11 +87,12 @@ func NewServer(hostname string, recorder record.EventRecorder, listener Listener
 		httpServerFactory = stdHTTPServerFactory{}
 	}
 	return &server{
-		hostname:    hostname,
-		recorder:    recorder,
-		listener:    listener,
-		httpFactory: httpServerFactory,
-		services:    map[types.NamespacedName]*hcInstance{},
+		hostname:          hostname,
+		recorder:          recorder,
+		listener:          listener,
+		httpFactory:       httpServerFactory,
+		services:          map[types.NamespacedName]*hcInstance{},
+		nodeHealthzServer: nodeHealthzServer,
 	}
 }
 
@@ -116,6 +125,8 @@ type server struct {
 
 	lock     sync.RWMutex
 	services map[types.NamespacedName]*hcInstance
+
+	nodeHealthzServer NodeHealthzServer
 }
 
 func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) error {
@@ -203,9 +214,12 @@ func (h hcHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	h.hcs.lock.RUnlock()
 
 	resp.Header().Set("Content-Type", "application/json")
-	if count == 0 {
+	// health check fails if there no local endpoints or the node (ovnk node) is not healthy
+	if count == 0 || (h.hcs.nodeHealthzServer != nil && !h.hcs.nodeHealthzServer.IsHealthy()) {
+		klog.Warningf("[rira] service %s/%s unavailable", h.name.Namespace, h.name.Name)
 		resp.WriteHeader(http.StatusServiceUnavailable)
 	} else {
+		klog.Infof("[rira] service %s/%s ok", h.name.Namespace, h.name.Name)
 		resp.WriteHeader(http.StatusOK)
 	}
 	fmt.Fprintf(resp, `{ "service": { "namespace": %q, "name": %q }, "localEndpoints": %d }`,
