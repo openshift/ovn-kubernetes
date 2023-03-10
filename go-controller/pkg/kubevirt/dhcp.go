@@ -100,6 +100,7 @@ func composeDHCPConfig(controllerName, namespace, vmName string, dhcpOptions *nb
 			libovsdbops.NamespaceIndex:      namespace,
 		})
 	dhcpOptions.ExternalIDs = dhcpvOptionsDbObjectID.GetExternalIDs()
+	dhcpOptions.ExternalIDs[OvnZoneExternalIDKey] = OvnLocalZone
 	return &libovsdbops.DHCPConfig{
 		Options: dhcpOptions,
 	}

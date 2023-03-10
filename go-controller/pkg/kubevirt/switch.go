@@ -2,6 +2,8 @@ package kubevirt
 
 import (
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (
@@ -23,5 +25,9 @@ const (
 // generated MAC address and a link local ipv4 and ipv6, it's the same
 // for all the logical switches.
 func ComposeARPProxyLSPOption() string {
-	return strings.Join([]string{ARPProxyMAC, ARPProxyIPv4, ARPProxyIPv6}, " ")
+	arpProxy := []string{ARPProxyMAC, ARPProxyIPv4, ARPProxyIPv6}
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		arpProxy = append(arpProxy, clusterSubnet.CIDR.String())
+	}
+	return strings.Join(arpProxy, " ")
 }

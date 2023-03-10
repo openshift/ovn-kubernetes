@@ -25,6 +25,7 @@ func (bnc *BaseNetworkController) ensureNetworkInfoForVM(pod *corev1.Pod) error 
 			return err
 		}
 
+		// Informer cache should not be mutated, so get a copy of the object
 		cpod := pod.DeepCopy()
 		_, ok := cpod.Labels[kubevirt.OriginalSwitchNameLabel]
 		if !ok {

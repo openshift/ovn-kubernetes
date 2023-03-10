@@ -6,6 +6,12 @@ import (
 
 const (
 	OriginalSwitchNameLabel = types.OvnK8sPrefix + "/original-switch-name"
+	OvnZoneExternalIDKey    = types.OvnK8sPrefix + "/zone"
+	OvnRemoteZone           = "remote"
+	OvnLocalZone            = "local"
+	// AllVMs external id vm value means that this OVN NB resource is owned
+	// by kubevirt and shared between all VMs
+	AllVMs = "*"
 )
 
 // NetworkInfo is the network information common to all the pods belonging
