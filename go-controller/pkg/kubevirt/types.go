@@ -4,6 +4,8 @@ const (
 	AllowPodBridgeNetworkLiveMigrationAnnotation = "kubevirt.io/allow-pod-bridge-network-live-migration"
 	OriginalSwitchNameLabel                      = "k8s.ovn.org/original-switch-name"
 	VMLabel                                      = "kubevirt.io/vm"
+	MigrationTargetStartTimestampAnnotation      = "kubevirt.io/migration-target-start-timestamp"
+	NodeNameLabel                                = "kubevirt.io/nodeName"
 )
 
 // NetworkInfo is the network information common to all the pods involve

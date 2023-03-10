@@ -21,13 +21,9 @@ func AllowPodBridgeNetworkLiveMigration(annotations map[string]string) bool {
 func FindVMRelatedPods(client *factory.WatchFactory, pod *corev1.Pod) ([]*corev1.Pod, error) {
 	vmName, ok := pod.Labels[VMLabel]
 	if !ok {
-		return []*corev1.Pod{}, nil
+		return nil, nil
 	}
-	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{VMLabel: vmName}})
-	if err != nil {
-		return []*corev1.Pod{}, err
-	}
-	return vmPods, nil
+	return client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{VMLabel: vmName}})
 }
 
 // FindNetworkInfo will return the original switch name and the OVN pod

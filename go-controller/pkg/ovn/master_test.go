@@ -936,6 +936,13 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
 			DnatSnatIP:           "169.254.0.1",
 		}
+		_, clusterIPNet, err := net.ParseCIDR(clusterCIDR)
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+		config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{
+			CIDR:             clusterIPNet,
+			HostSubnetLength: 24,
+		}}
 
 		expectedClusterLBGroup = newLoadBalancerGroup()
 		expectedNodeSwitch = node1.logicalSwitch(expectedClusterLBGroup.UUID)
@@ -976,7 +983,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			EgressFirewallClient: egressFirewallFakeClient,
 			EgressQoSClient:      egressQoSFakeClient,
 		}
-		var err error
 
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, testNode.Name)
