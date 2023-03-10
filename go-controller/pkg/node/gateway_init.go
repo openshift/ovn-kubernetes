@@ -266,7 +266,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	var portClaimWatcher *portClaimWatcher
 
 	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
-		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory, nc.nodeHealthzServer)
 		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
 		if err != nil {
 			return err
@@ -431,7 +431,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 			return err
 		}
 		gw.nodePortWatcherIptables = newNodePortWatcherIptables()
-		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory, nc.nodeHealthzServer)
 		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
 			return err

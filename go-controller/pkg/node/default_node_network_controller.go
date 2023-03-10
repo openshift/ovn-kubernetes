@@ -91,7 +91,7 @@ type DefaultNodeNetworkController struct {
 	gateway Gateway
 
 	// Node healthcheck server for cloud load balancers
-	healthzServer *proxierHealthUpdater
+	nodeHealthzServer *proxierHealthUpdater
 
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
@@ -120,7 +120,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) *De
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
-		nc.healthzServer = newNodeProxyHealthzServer(nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder, nc.client)
+		nc.nodeHealthzServer = newNodeProxyHealthzServer(nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder, nc.client)
 	}
 
 	nc.initRetryFrameworkForNode()
@@ -670,8 +670,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if nc.healthzServer != nil {
-		nc.healthzServer.Start(nc.stopChan, nc.wg)
+	if nc.nodeHealthzServer != nil {
+		nc.nodeHealthzServer.Start(nc.stopChan, nc.wg)
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

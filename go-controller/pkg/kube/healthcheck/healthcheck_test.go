@@ -116,7 +116,7 @@ func TestServer(t *testing.T) {
 	listener := newFakeListener()
 	httpFactory := newFakeHTTPServerFactory()
 
-	hcsi := NewServer("hostname", nil, listener, httpFactory)
+	hcsi := NewServer("hostname", nil, listener, httpFactory, nil)
 	hcs := hcsi.(*server)
 	if len(hcs.services) != 0 {
 		t.Errorf("expected 0 services, got %d", len(hcs.services))
