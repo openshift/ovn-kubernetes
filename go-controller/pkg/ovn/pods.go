@@ -27,10 +27,17 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	//
 	// TBD: Before this succeeds, add Pod handler should not continue to allocate IPs for the new Pods.
 	expectedLogicalPorts := make(map[string]bool)
+	vms := make(map[ktypes.NamespacedName]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
+		}
+		if kubevirt.IsPodLiveMigratable(pod) {
+			vm := kubevirt.ExtractVMNameFromPod(pod)
+			if vm != nil {
+				vms[*vm] = oc.isPodScheduledinLocalZone(pod)
+			}
 		}
 
 		if !oc.isPodScheduledinLocalZone(pod) {
@@ -47,6 +54,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		}
 		if expectedLogicalPortName != "" {
 			expectedLogicalPorts[expectedLogicalPortName] = true
+
 		}
 
 		// delete the outdated hybrid overlay subnet route if it exists
@@ -93,6 +101,10 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		}
 	}
 
+	if err := oc.syncVirtualMachines(vms); err != nil {
+		return fmt.Errorf("failed syncing running virtual machines: %v", err)
+	}
+
 	return oc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
 }
 
@@ -111,11 +123,6 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 	if err != nil {
 		return err
 	}
-
-	if err := oc.kubevirtCleanUp(pod); err != nil {
-		return err
-	}
-
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
 	if pInfo == nil {
 		return nil

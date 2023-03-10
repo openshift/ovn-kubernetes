@@ -26,11 +26,7 @@ func FindVMRelatedPods(client *factory.WatchFactory, pod *corev1.Pod) ([]*corev1
 	if !ok {
 		return nil, nil
 	}
-	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmName}})
-	if err != nil {
-		return nil, err
-	}
-	return vmPods, nil
+	return client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmName}})
 }
 
 // FindNetworkInfo will return the original switch name and the OVN pod
@@ -89,7 +85,7 @@ func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bo
 	return false, nil
 }
 
-// ExternalIDContainsVM return true if the nbdb ExternalIDs has namespace
+// ExternalIDsContainsVM return true if the nbdb ExternalIDs has namespace
 // and name entries matching the VM
 func ExternalIDsContainsVM(externalIDs map[string]string, vm *ktypes.NamespacedName) bool {
 	if vm == nil {

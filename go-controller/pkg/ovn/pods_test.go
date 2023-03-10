@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -19,6 +20,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilnet "k8s.io/utils/net"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -79,8 +81,12 @@ func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[
 
 func newPod(namespace, name, node, podIP string) *v1.Pod {
 	podIPs := []v1.PodIP{}
-	if podIP != "" {
-		podIPs = append(podIPs, v1.PodIP{IP: podIP})
+	ips := strings.Split(podIP, " ")
+	if len(ips) > 0 {
+		podIP = ips[0]
+		for _, ip := range ips {
+			podIPs = append(podIPs, v1.PodIP{IP: ip})
+		}
 	}
 	return &v1.Pod{
 		ObjectMeta: newPodMeta(namespace, name, nil),
@@ -156,14 +162,14 @@ type portInfo struct {
 	portName string
 }
 
-func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) (to testPod) {
+func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) (to testPod) {
 	portName := util.GetLogicalPortName(namespace, podName)
 	to = testPod{
 		portUUID:          portName + "-UUID",
 		nodeSubnet:        nodeSubnet,
 		nodeMgtIP:         nodeMgtIP,
 		nodeGWIP:          nodeGWIP,
-		podIP:             podIP,
+		podIP:             podIPs,
 		podMAC:            podMAC,
 		portName:          portName,
 		nodeName:          nodeName,
@@ -171,12 +177,58 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 		namespace:         namespace,
 		secondaryPodInfos: map[string]*secondaryPodInfo{},
 	}
-	return
+
+	var routeSources []*net.IPNet
+	for _, podIP := range strings.Split(podIPs, " ") {
+		isIPv6 := ovntest.MustParseIP(podIP).To4() == nil
+
+		for _, subnet := range config.Default.ClusterSubnets {
+			if utilnet.IsIPv6CIDR(subnet.CIDR) == isIPv6 {
+				routeSources = append(routeSources, subnet.CIDR)
+			}
+		}
+		for _, sc := range config.Kubernetes.ServiceCIDRs {
+			if utilnet.IsIPv6CIDR(sc) == isIPv6 {
+				routeSources = append(routeSources, sc)
+			}
+		}
+		joinNet := config.Gateway.V4JoinSubnet
+		if isIPv6 {
+			joinNet = config.Gateway.V6JoinSubnet
+		}
+		routeSources = append(routeSources, ovntest.MustParseIPNet(joinNet))
+	}
+
+	gwIPs := strings.Split(nodeGWIP, " ")
+	var gwIPv4, gwIPv6 *net.IP
+	for _, gwIP := range gwIPs {
+		gwNetIP := ovntest.MustParseIP(gwIP)
+		isIPv6 := gwNetIP.To4() == nil
+		if isIPv6 {
+			gwIPv6 = &gwNetIP
+		} else {
+			gwIPv4 = &gwNetIP
+		}
+	}
+	for _, rs := range routeSources {
+		isIPv6 := ovntest.MustParseIPNet(rs.String()).IP.To4() == nil
+		gwIP := gwIPv4
+		if isIPv6 {
+			gwIP = gwIPv6
+		}
+		to.routes = append(to.routes, util.PodRoute{rs, *gwIP})
+	}
+
+	return to
 }
 
 func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN, uuid string) {
 	gomega.Expect(p.nodeName).NotTo(gomega.Equal(""))
-	err := fakeOvn.controller.lsManager.AddSwitch(p.nodeName, uuid, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
+	subnets := []*net.IPNet{}
+	for _, subnet := range strings.Split(p.nodeSubnet, " ") {
+		subnets = append(subnets, ovntest.MustParseIPNet(subnet))
+	}
+	err := fakeOvn.controller.lsManager.AddSwitch(p.nodeName, uuid, subnets)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -190,14 +242,25 @@ func (p testPod) getAnnotationsJson() string {
 			podRoutes += podRoutes + routeString + ","
 		}
 	}
-
-	podRoutesJSON := ""
-	if len(podRoutes) > 0 {
-		podRoutesJSON = `, "routes":[` + podRoutes + `]`
+	addresses := []string{}
+	for _, podIP := range strings.Split(p.podIP, " ") {
+		if utilnet.IsIPv4String(podIP) {
+			podIP += "/24"
+		} else if utilnet.IsIPv6String(podIP) {
+			podIP += "/64"
+		}
+		addresses = append(addresses, `"`+podIP+`"`)
 	}
-	return `{"default": {"ip_addresses":["` + p.podIP + `/24"], "mac_address":"` + p.podMAC + `",
-		"gateway_ips": ["` + p.nodeGWIP + `"], "ip_address":"` + p.podIP + `/24", "gateway_ip": "` + p.nodeGWIP + `"` + podRoutesJSON + `}}`
-
+	nodeGWIPs := strings.Split(p.nodeGWIP, " ")
+	return fmt.Sprintf(`{
+  "default": {
+    "ip_addresses": [%s],
+    "mac_address": "%s",
+    "gateway_ips": ["%s"],
+    "ip_address": %s,
+    "gateway_ip": "%s"%s
+  }
+}`, strings.Join(addresses, ", "), p.podMAC, strings.Join(nodeGWIPs, `", "`), addresses[0], nodeGWIPs[0], routesJSON)
 }
 
 func setPodAnnotations(podObj *v1.Pod, testPod testPod) {

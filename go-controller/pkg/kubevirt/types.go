@@ -6,6 +6,9 @@ import (
 
 const (
 	OriginalSwitchNameLabel = types.OvnK8sPrefix + "/original-switch-name"
+	OvnZoneExternalIDKey    = types.OvnK8sPrefix + "/zone"
+	OvnRemoteZone           = "remote"
+	OvnLocalZone            = "local"
 )
 
 // NetworkInfo is the network information common to all the pods belonging
