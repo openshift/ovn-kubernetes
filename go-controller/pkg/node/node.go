@@ -69,7 +69,7 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 	healthzBindAddress := config.Kubernetes.HealthzBindAddress
 	if len(healthzBindAddress) != 0 {
 		healthzBindAddress = "0.0.0.0:10256"
-		klog.Infof("no HealthzBindAddress found, setting to %s", healthzBindAddress)
+		klog.Infof("No HealthzBindAddress found, setting to %s", healthzBindAddress)
 	}
 	klog.Infof("Enable node proxy healthz server on %s", healthzBindAddress)
 	n.healthzServer = newNodeProxyHealthzServer(n.name, healthzBindAddress, n.recorder, n.client)
@@ -738,7 +738,7 @@ func (n *OvnNode) reconcileConntrackUponEndpointSliceEvents(oldEndpointSlice, ne
 				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
 				// upon an update event, remove conntrack entries for IP addresses that are no longer
 				// in the endpointslice, skip otherwise
-				if newEndpointSlice != nil && doesEndpointSliceContainValidEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
+				if newEndpointSlice != nil && doesEndpointSliceContainEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
 					continue
 				}
 				// upon update and delete events, flush conntrack only for UDP
@@ -887,26 +887,6 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
 		mtu, interfaceName, requiredMTU)
 	return nil
-}
-
-// doesEndpointSliceContainValidEndpoint returns true if the endpointslice
-// contains an endpoint with the given IP/Port/Protocol and this endpoint is considered valid
-func doesEndpointSliceContainValidEndpoint(epSlice *discovery.EndpointSlice,
-	epIP string, epPort int32, protocol kapi.Protocol, service *kapi.Service) bool {
-	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
-	for _, port := range epSlice.Ports {
-		for _, endpoint := range epSlice.Endpoints {
-			if !util.IsEndpointValid(endpoint, includeTerminating) {
-				continue
-			}
-			for _, ip := range endpoint.Addresses {
-				if utilnet.ParseIPSloppy(ip).String() == epIP && *port.Port == epPort && *port.Protocol == protocol {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func configureSvcRouteViaBridge(bridge string) error {
