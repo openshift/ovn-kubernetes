@@ -525,6 +525,7 @@ func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
 func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
+	var localEndpoints sets.String
 	var hasLocalHostNetworkEp bool
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return nil
@@ -534,15 +535,19 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
 	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return fmt.Errorf("error retrieving all endpoint slices for service %s/%s during service add: %w",
+				service.Namespace, service.Name, err)
+		}
 		klog.V(5).Infof("No endpointslice found for service %s in namespace %s during service Add",
 			service.Name, service.Namespace)
 		// No endpoint object exists yet so default to false
 		hasLocalHostNetworkEp = false
 	} else {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
+		localEndpoints = npw.GetLocalEndpointAddresses(epSlices, service)
+		hasLocalHostNetworkEp = util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 	}
-
 	// If something didn't already do it add correct Service rules
 	if exists := npw.addOrSetServiceInfo(name, service, hasLocalHostNetworkEp); !exists {
 		klog.V(5).Infof("Service Add %s event in namespace %s came before endpoint event setting svcConfig",
@@ -685,12 +690,18 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 
 		epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
 		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				return fmt.Errorf("error retrieving all endpoint slices for service %s/%s during SyncServices: %w",
+					service.Namespace, service.Name, err)
+			}
 			klog.V(5).Infof("No endpointslice found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
+		localEndpoints := npw.GetLocalEndpointAddresses(epSlices, service)
+		hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
+
 		// Delete OF rules for service if they exist
 		if err = npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp); err != nil {
 			errors = append(errors, err)
@@ -719,7 +730,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 				for _, ep := range epSlice.Endpoints {
 					for _, ip := range ep.Addresses {
 						ipStr := utilnet.ParseIPSloppy(ip).String()
-						if !isHostEndpoint(ipStr) {
+						if !util.IsHostEndpoint(ipStr) {
 							epsToInsert.Insert(ipStr)
 						}
 					}
@@ -758,9 +769,13 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	svcName := epSlice.Labels[discovery.LabelServiceName]
 	svc, err = npw.watchFactory.GetService(epSlice.Namespace, svcName)
 	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return fmt.Errorf("error retrieving service %s/%s during endpointslice add: %w",
+				epSlice.Namespace, svcName, err)
+		}
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
-		klog.V(5).Infof("No service found for endpointslice %s in namespace %s during add", epSlice.Name, epSlice.Namespace)
+		klog.V(5).Infof("No service found for endpointslice %s in namespace %s during endpointslice add", epSlice.Name, epSlice.Namespace)
 		return nil
 	}
 
@@ -770,13 +785,21 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 
 	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{epSlice}, nodeIPs, svc)
+	epSlices, err := npw.watchFactory.GetEndpointSlices(svc.Namespace, svc.Name)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return fmt.Errorf("error retrieving endpointslices for service %s/%s during endpointslice add: %w",
+				svc.Namespace, svc.Name, err)
+		}
+		klog.V(5).Infof("No endpointslices found for service %s/%s during endpointslice add", svc.Name, svc.Namespace)
+	}
+	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
+	hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 
-	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice
-	// event is received, only alter flows if we need to, i.e if cache wasn't
-	// set or if it was and hasLocalHostNetworkEp state changed, to prevent flow churn
-	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
-
+	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice event is
+	// received, only alter flows if we need to, i.e if cache wasn't set or if it was and
+	// hasLocalHostNetworkEp or localEndpoints state (for LB svc where NPs=0) changed, to prevent flow churn
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
 		return fmt.Errorf("cannot add %s/%s to nodePortWatcher: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -816,7 +839,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
 		return fmt.Errorf("cannot delete %s/%s from nodePortWatcher: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -837,48 +860,42 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	return nil
 }
 
-func getEndpointAddresses(endpointSlice *discovery.EndpointSlice, service *kapi.Service) []string {
-	endpointsAddress := make([]string, 0)
-	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
-	for _, endpoint := range endpointSlice.Endpoints {
-		if util.IsEndpointValid(endpoint, includeTerminating) {
-			for _, ip := range endpoint.Addresses {
-				endpointsAddress = append(endpointsAddress, utilnet.ParseIPSloppy(ip).String())
-			}
-		}
-	}
-	return endpointsAddress
+// GetLocalEndpointAddresses returns a list of eligible endpoints that are local to the node
+func (npw *nodePortWatcher) GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.String {
+	return util.GetLocalEndpointAddresses(endpointSlices, service, npw.nodeIPManager.nodeName)
 }
 
 func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
 	var err error
 	var errors []error
+	var serviceInfo *serviceConfig
+	var exists bool
 
-	namespacedName, err := serviceNamespacedNameFromEndpointSlice(newEpSlice)
+	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(newEpSlice)
 	if err != nil {
 		return fmt.Errorf("cannot update %s/%s in nodePortWatcher: %v", newEpSlice.Namespace, newEpSlice.Name, err)
 	}
 	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
 	if err != nil && !kerrors.IsNotFound(err) {
-		return fmt.Errorf("error while retrieving service for endpointslice %s/%s during update: %v",
-			oldEpSlice.Namespace, oldEpSlice.Name, err)
+		return fmt.Errorf("error retrieving service %s/%s for endpointslice %s during endpointslice update: %v",
+			namespacedName.Namespace, namespacedName.Name, newEpSlice.Name, err)
 	}
 
-	oldEpAddr := getEndpointAddresses(oldEpSlice, svc)
-	newEpAddr := getEndpointAddresses(newEpSlice, svc)
-	if reflect.DeepEqual(oldEpAddr, newEpAddr) {
+	oldEndpointAddresses := util.GetEndpointAddresses([]*discovery.EndpointSlice{oldEpSlice}, svc)
+	newEndpointAddresses := util.GetEndpointAddresses([]*discovery.EndpointSlice{newEpSlice}, svc)
+	if reflect.DeepEqual(oldEndpointAddresses, newEndpointAddresses) {
 		return nil
 	}
 
 	klog.V(5).Infof("Updating endpointslice %s in namespace %s", oldEpSlice.Name, oldEpSlice.Namespace)
-	if _, exists := npw.getServiceInfo(namespacedName); !exists {
+	if serviceInfo, exists = npw.getServiceInfo(namespacedName); !exists {
 		// When a service is updated from externalName to nodeport type, it won't be
 		// in nodePortWatcher cache (npw): in this case, have the new nodeport IPtable rules
 		// installed.
 		if err = npw.AddEndpointSlice(newEpSlice); err != nil {
 			errors = append(errors, err)
 		}
-	} else if len(newEpAddr) == 0 {
+	} else if len(newEndpointAddresses) == 0 {
 		// With no endpoint addresses in new endpointslice, delete old endpoint rules
 		// and add normal ones back
 		if err = npw.DeleteEndpointSlice(oldEpSlice); err != nil {
@@ -888,9 +905,23 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	// Update rules if hasHostNetworkEndpoints status changed
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{oldEpSlice}, nodeIPs, svc)
-	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{newEpSlice}, nodeIPs, svc)
-	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew {
+	epSlices, err := npw.watchFactory.GetEndpointSlices(newEpSlice.Namespace, newEpSlice.Labels[discovery.LabelServiceName])
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during endpointslice update on %s: %w",
+				namespacedName.Namespace, namespacedName.Name, newEpSlice.Name, err)
+		}
+		klog.V(5).Infof("No endpointslices found for service %s/%s during endpointslice update on %s: %v",
+			namespacedName.Namespace, namespacedName.Name, newEpSlice.Name, err)
+	}
+
+	localEndpointsFromOldEndpointSlice := npw.GetLocalEndpointAddresses([]*discovery.EndpointSlice{oldEpSlice}, svc)
+	newLocalEndpoints := npw.GetLocalEndpointAddresses(epSlices, svc)
+	hasLocalHostNetworkEpOld := util.HasLocalHostNetworkEndpoints(localEndpointsFromOldEndpointSlice, nodeIPs)
+	hasLocalHostNetworkEpNew := util.HasLocalHostNetworkEndpoints(newLocalEndpoints, nodeIPs)
+
+	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew ||
+		serviceInfo != nil && serviceInfo.hasLocalHostNetworkEp != hasLocalHostNetworkEpNew {
 		if err = npw.DeleteEndpointSlice(oldEpSlice); err != nil {
 			errors = append(errors, err)
 		}
@@ -904,15 +935,9 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	npw.egressServiceInfoLock.Lock()
 	_, found := npw.egressServiceInfo[namespacedName]
 	npw.egressServiceInfoLock.Unlock()
-	if found && !npw.dpuMode {
-		svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to get service %s/%s while updating endpoint slice %s/%s",
-				namespacedName.Namespace, namespacedName.Name, oldEpSlice.Namespace, oldEpSlice.Name))
-		} else {
-			if err = updateEgressSVCIptRules(svc, npw); err != nil {
-				errors = append(errors, err)
-			}
+	if found && !npw.dpuMode && svc != nil {
+		if err = updateEgressSVCIptRules(svc, npw); err != nil {
+			errors = append(errors, err)
 		}
 	}
 	return apierrors.NewAggregate(errors)
