@@ -2,14 +2,17 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -363,8 +366,8 @@ type LbEndpoints struct {
 	Port  int32
 }
 
-// GetLbEndpoints returns the IPv4 and IPv6 addresses of valid endpoints as slices inside a struct
-func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, includeTerminating bool) LbEndpoints {
+// GetLbEndpoints returns the IPv4 and IPv6 addresses of eligible endpoints as slices inside a struct
+func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, service *v1.Service) LbEndpoints {
 	v4ips := sets.NewString()
 	v6ips := sets.NewString()
 
@@ -395,12 +398,7 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 			}
 
 			out.Port = *port.Port
-			for _, endpoint := range slice.Endpoints {
-				// Skip endpoint if it's not valid
-				if !IsEndpointValid(endpoint, includeTerminating) {
-					klog.V(4).Infof("Slice endpoint not valid")
-					continue
-				}
+			ForEachEligibleEndpoint(slice, service, nil, func(endpoint discovery.Endpoint) {
 				for _, ip := range endpoint.Addresses {
 					klog.V(4).Infof("Adding slice %s endpoint: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
 					ipStr := utilnet.ParseIPSloppy(ip).String()
@@ -413,7 +411,7 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 						klog.V(5).Infof("Skipping FQDN slice %s/%s", slice.Namespace, slice.Name)
 					}
 				}
-			}
+			})
 		}
 	}
 
@@ -449,4 +447,146 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 		types.LoadBalancerOwnerExternalID: nsn.String(),
 		types.LoadBalancerKindExternalID:  gk.String(),
 	}
+}
+
+// IsEndpointReady takes as input an endpoint from an endpoint slice and returns true if the endpoint is
+// to be considered ready. Considering as ready an endpoint with Conditions.Ready==nil
+// as per doc: "In most cases consumers should interpret this unknown state as ready"
+// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L129-L131
+func IsEndpointReady(endpoint discovery.Endpoint) bool {
+	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
+}
+
+// IsEndpointServing takes as input an endpoint from an endpoint slice and returns true if the endpoint is
+// to be considered serving. Falling back to IsEndpointReady when Serving field is nil, as per doc:
+// "If nil, consumers should defer to the ready condition.
+// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L138-L139
+func IsEndpointServing(endpoint discovery.Endpoint) bool {
+	if endpoint.Conditions.Serving != nil {
+		return *endpoint.Conditions.Serving
+	} else {
+		return IsEndpointReady(endpoint)
+	}
+}
+
+// IsEndpointEligible takes as input an endpoint from an endpoint slice and a boolean that indicates whether to include
+// all terminating endpoints, as per the PublishNotReadyAddresses feature in kubernetes service spec. It always returns true
+// if includeTerminating is true and falls back to IsEndpointServing otherwise.
+func IsEndpointEligible(endpoint discovery.Endpoint, includeTerminating bool) bool {
+	return includeTerminating || IsEndpointServing(endpoint)
+}
+
+// NoHostSubnet() compares the no-hostsubnet-nodes flag with node labels to see if the node is managing its
+// own network.
+func NoHostSubnet(node *v1.Node) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
+	}
+
+	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	return nodeSelector.Matches(labels.Set(node.Labels))
+}
+
+// ForEachEligibleEndpoint iterates through each eligible endpoint in the given endpointslice and apply the input function fn to it.
+// An endpoint is eligible if it is serving or if its corresponding service has Spec.PublishNotReadyAddresses set.
+// PublishNotReadyAddresses tells endpoint consumers to disregard any indications of ready/not-ready and is generally used
+// together with headless services so that DNS records of all endpoints (ready or not) are always published.
+// When checking for a condition on the endpoints, returnWhenTrue should point to the boolean that fn sets, so that the iteration
+// ends as soon as the boolean is set to true.
+func ForEachEligibleEndpoint(endpointSlice *discovery.EndpointSlice, service *kapi.Service, returnWhenTrue *bool, fn func(discovery.Endpoint)) {
+	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
+	for _, endpoint := range endpointSlice.Endpoints {
+		if IsEndpointEligible(endpoint, includeTerminating) {
+			fn(endpoint)
+			if returnWhenTrue != nil && *returnWhenTrue {
+				// shortcircuit the whole iteration if given bool is true
+				return
+			}
+		}
+	}
+}
+
+// GetEndpointAddresses returns a list of IP addresses of all eligible endpoints in the given endpoint slices.
+func GetEndpointAddressesWithCondition(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, fn func(discovery.Endpoint) bool) sets.String {
+	endpointsAddress := sets.NewString()
+	for _, endpointSlice := range endpointSlices {
+		ForEachEligibleEndpoint(endpointSlice, service, nil, func(endpoint discovery.Endpoint) {
+			includeEndpoint := fn == nil || fn(endpoint)
+			if !includeEndpoint {
+				return
+			}
+			for _, ip := range endpoint.Addresses {
+				endpointsAddress.Insert(utilnet.ParseIPSloppy(ip).String())
+			}
+		})
+	}
+	return endpointsAddress
+}
+
+// GetEndpointAddresses returns a list of IP addresses of all eligible endpoints in the given endpoint slice.
+func GetEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.String {
+	return GetEndpointAddressesWithCondition(endpointSlices, service, nil)
+}
+
+// GetLocalEndpointAddresses returns a list of endpoints that are local to the specified node
+func GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, nodeName string) sets.String {
+	return GetEndpointAddressesWithCondition(endpointSlices, service, func(endpoint discovery.Endpoint) bool {
+		return endpoint.NodeName != nil && *endpoint.NodeName == nodeName
+	})
+}
+
+// HasLocalHostNetworkEndpoints returns true if any of the nodeAddresses appear in given the set of
+// localEndpointAddresses. This is useful to check whether any of the provided local endpoints are host-networked.
+func HasLocalHostNetworkEndpoints(localEndpointAddresses sets.String, nodeAddresses []net.IP) bool {
+	if len(localEndpointAddresses) == 0 || len(nodeAddresses) == 0 {
+		return false
+	}
+	nodeAddressesSet := sets.NewString()
+	for _, ip := range nodeAddresses {
+		nodeAddressesSet.Insert(ip.String())
+	}
+	return len(localEndpointAddresses.Intersection(nodeAddressesSet)) != 0
+}
+
+// DoesEndpointSliceContainEndpoint returns true if the endpointslice
+// contains an endpoint with the given IP/Port/Protocol and this endpoint is considered eligible
+func DoesEndpointSliceContainEndpoint(endpointSlice *discovery.EndpointSlice,
+	epIP string, epPort int32, protocol kapi.Protocol, service *kapi.Service) bool {
+	var res bool
+	for _, port := range endpointSlice.Ports {
+		ForEachEligibleEndpoint(endpointSlice, service, &res, func(endpoint discovery.Endpoint) {
+			for _, ip := range endpoint.Addresses {
+				if utilnet.ParseIPSloppy(ip).String() == epIP && *port.Port == epPort && *port.Protocol == protocol {
+					res = true
+					return
+				}
+			}
+		})
+	}
+	return res
+}
+
+// ServiceNamespacedNameFromEndpointSlice returns the namespaced name of the service
+// that corresponds to the given endpointSlice
+func ServiceNamespacedNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice) (k8stypes.NamespacedName, error) {
+	var serviceNamespacedName k8stypes.NamespacedName
+	svcName := endpointSlice.Labels[discovery.LabelServiceName]
+	if svcName == "" {
+		// should not happen, since the informer already filters out endpoint slices with an empty service label
+		return serviceNamespacedName,
+			fmt.Errorf("endpointslice %s/%s: empty value for label %s",
+				endpointSlice.Namespace, endpointSlice.Name, discovery.LabelServiceName)
+	}
+	return k8stypes.NamespacedName{Namespace: endpointSlice.Namespace, Name: svcName}, nil
+}
+
+// isHostEndpoint determines if the given endpoint ip belongs to a host networked pod
+func IsHostEndpoint(endpointIPstr string) bool {
+	endpointIP := net.ParseIP(endpointIPstr)
+	for _, clusterNet := range config.Default.ClusterSubnets {
+		if clusterNet.CIDR.Contains(endpointIP) {
+			return false
+		}
+	}
+	return true
 }
