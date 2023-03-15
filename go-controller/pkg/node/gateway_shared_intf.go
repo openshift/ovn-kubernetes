@@ -570,7 +570,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 		hasLocalHostNetworkEp = false
 	} else {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
 	}
 	localEndpoints := npw.GetLocalEndpointAddresses(epSlices, service)
 	// If something didn't already do it add correct Service rules
@@ -719,7 +719,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			continue
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
 		localEndPoints := npw.GetLocalEndpointAddresses(epSlices, service)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndPoints)
 		// Delete OF rules for service if they exist
@@ -804,7 +804,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 
 	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{epSlice}, nodeIPs)
+	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{epSlice}, nodeIPs, svc)
 
 	epSlices, err := npw.watchFactory.GetEndpointSlices(svc.Namespace, svc.Name)
 	if err != nil {
@@ -887,33 +887,9 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	return nil
 }
 
-// GetLocalEndpointAddresses returns a list of endpoints that are local to the node
+// GetLocalEndpointAddresses returns a list of eligible endpoints that are local to the node
 func (npw *nodePortWatcher) GetLocalEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.String {
-	localEndpoints := sets.NewString()
-	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
-	for _, endpointSlice := range endpointSlices {
-		for _, endpoint := range endpointSlice.Endpoints {
-			if util.IsEndpointValid(endpoint, includeTerminating) &&
-				endpoint.NodeName != nil &&
-				*endpoint.NodeName == npw.nodeIPManager.nodeName {
-				localEndpoints.Insert(endpoint.Addresses...)
-			}
-		}
-	}
-	return localEndpoints
-}
-
-func getEndpointAddresses(endpointSlice *discovery.EndpointSlice, service *kapi.Service) []string {
-	endpointsAddress := make([]string, 0)
-	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
-	for _, endpoint := range endpointSlice.Endpoints {
-		if util.IsEndpointValid(endpoint, includeTerminating) {
-			for _, ip := range endpoint.Addresses {
-				endpointsAddress = append(endpointsAddress, utilnet.ParseIPSloppy(ip).String())
-			}
-		}
-	}
-	return endpointsAddress
+	return getLocalEndpointAddresses(endpointSlices, service, npw.nodeIPManager.nodeName)
 }
 
 func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
@@ -960,8 +936,8 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	// Update rules and service cache if hasHostNetworkEndpoints status changed or localEndpoints changed
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{oldEpSlice}, nodeIPs)
-	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{newEpSlice}, nodeIPs)
+	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{oldEpSlice}, nodeIPs, svc)
+	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{newEpSlice}, nodeIPs, svc)
 	epSlices, err := npw.watchFactory.GetEndpointSlices(newEpSlice.Namespace, newEpSlice.Labels[discovery.LabelServiceName])
 	if err != nil {
 		klog.V(5).Infof("Could not fetch endpointslices for service %s during endpointSliceDelete", namespacedName)

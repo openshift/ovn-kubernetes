@@ -373,10 +373,10 @@ func IsEndpointServing(endpoint discovery.Endpoint) bool {
 	}
 }
 
-// IsEndpointValid takes as input an endpoint from an endpoint slice and a boolean that indicates whether to include
+// IsEndpointEligible takes as input an endpoint from an endpoint slice and a boolean that indicates whether to include
 // all terminating endpoints, as per the PublishNotReadyAddresses feature in kubernetes service spec. It always returns true
 // if includeTerminating is true and falls back to IsEndpointServing otherwise.
-func IsEndpointValid(endpoint discovery.Endpoint, includeTerminating bool) bool {
+func IsEndpointEligible(endpoint discovery.Endpoint, includeTerminating bool) bool {
 	return includeTerminating || IsEndpointServing(endpoint)
 }
 

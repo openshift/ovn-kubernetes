@@ -363,7 +363,7 @@ type LbEndpoints struct {
 	Port  int32
 }
 
-// GetLbEndpoints returns the IPv4 and IPv6 addresses of valid endpoints as slices inside a struct
+// GetLbEndpoints returns the IPv4 and IPv6 addresses of eligible endpoints as slices inside a struct
 func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, includeTerminating bool) LbEndpoints {
 	v4ips := sets.NewString()
 	v6ips := sets.NewString()
@@ -396,9 +396,9 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 
 			out.Port = *port.Port
 			for _, endpoint := range slice.Endpoints {
-				// Skip endpoint if it's not valid
-				if !IsEndpointValid(endpoint, includeTerminating) {
-					klog.V(4).Infof("Slice endpoint not valid")
+				// Skip endpoint if it's not eligible
+				if !IsEndpointEligible(endpoint, includeTerminating) {
+					klog.V(4).Infof("Slice endpoint not eligible")
 					continue
 				}
 				for _, ip := range endpoint.Addresses {
