@@ -2227,6 +2227,7 @@ var _ = Describe("Node Operations", func() {
 
 				ep1 := discovery.Endpoint{
 					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
+					NodeName:  &fakeNodeName,
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2518,6 +2519,7 @@ var _ = Describe("Node Operations", func() {
 				)
 				ep1 := discovery.Endpoint{
 					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
+					NodeName:  &fakeNodeName,
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2692,6 +2694,7 @@ var _ = Describe("Node Operations", func() {
 				// host-networked endpoint, should not have an SNAT rule created
 				ep2 := discovery.Endpoint{
 					Addresses: []string{"192.168.18.15"},
+					NodeName:  &fakeNodeName,
 				}
 				// endpointSlice.Endpoints is ovn-networked so this will
 				// come under !hasLocalHostNetEp case
