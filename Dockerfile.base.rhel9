@@ -15,7 +15,7 @@ RUN dnf install -y --nodocs \
 ARG ovsver=3.1.0-2.el9fdp
 ARG ovnver=23.03.0-4.el9fdp
 
-COPY ovn22.12-22.12.0-18.el9fdp.x86_64.rpm ovn22.12-central-22.12.0-18.el9fdp.x86_64.rpm ovn22.12-host-22.12.0-18.el9fdp.x86_64.rpm ovn22.12-vtep-22.12.0-18.el9fdp.x86_64.rpm /root/
+COPY ovn23.03-23.03.0-disabled_ct_flush.7.el9fdp.x86_64.rpm ovn23.03-central-23.03.0-disabled_ct_flush.7.el9fdp.x86_64.rpm ovn23.03-host-23.03.0-disabled_ct_flush.7.el9fdp.x86_64.rpm ovn23.03-vtep-23.03.0-disabled_ct_flush.7.el9fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS="iptables" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
