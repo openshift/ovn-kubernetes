@@ -47,7 +47,7 @@ type OvnNode struct {
 	gateway      Gateway
 
 	// Node healthcheck server for cloud load balancers
-	healthzServer *proxierHealthUpdater
+	nodeHealthzServer *proxierHealthUpdater
 
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
@@ -66,13 +66,14 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		recorder:     eventRecorder,
 	}
 
+	// TODO: here I force a default value, remove this
 	healthzBindAddress := config.Kubernetes.HealthzBindAddress
 	if len(healthzBindAddress) != 0 {
 		healthzBindAddress = "0.0.0.0:10256"
 		klog.Infof("No HealthzBindAddress found, setting to %s", healthzBindAddress)
 	}
 	klog.Infof("Enable node proxy healthz server on %s", healthzBindAddress)
-	n.healthzServer = newNodeProxyHealthzServer(n.name, healthzBindAddress, n.recorder, n.client)
+	n.nodeHealthzServer = newNodeProxyHealthzServer(n.name, healthzBindAddress, n.recorder, n.client)
 
 	n.initRetryFrameworkForNode()
 
@@ -650,8 +651,8 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}
 
-	if n.healthzServer != nil {
-		n.healthzServer.Start(n.stopChan, wg)
+	if n.nodeHealthzServer != nil {
+		n.nodeHealthzServer.Start(n.stopChan, wg)
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
