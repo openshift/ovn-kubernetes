@@ -113,17 +113,23 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) *DefaultNodeNetworkController {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*DefaultNodeNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
-		nc.healthzServer = newNodeProxyHealthzServer(nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder)
+		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
+		var err error
+		nc.healthzServer, err = newNodeProxyHealthzServer(
+			nc.name, config.Kubernetes.HealthzBindAddress, nc.recorder, nc.watchFactory)
+		if err != nil {
+			return nil, fmt.Errorf("could not create node proxy healthz server: %w", err)
+		}
 	}
 
 	nc.initRetryFrameworkForNode()
-	return nc
+	return nc, nil
 }
 
 func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
@@ -420,12 +426,12 @@ func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
+	klog.Infof("Starting the default node network controller")
+
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
 	var cniServer *cni.Server
-
-	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -689,7 +695,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	klog.Infof("OVN Kube Node initialized and ready.")
+	klog.Infof("Default node network controller initialized and ready.")
 	return nil
 }
 
