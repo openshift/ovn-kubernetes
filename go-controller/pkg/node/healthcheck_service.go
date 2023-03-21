@@ -15,7 +15,7 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilnet "k8s.io/utils/net"
+	"k8s.io/klog/v2"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for
@@ -30,10 +30,11 @@ type loadBalancerHealthChecker struct {
 	watchFactory factory.NodeWatchFactory
 }
 
-func newLoadBalancerHealthChecker(nodeName string, watchFactory factory.NodeWatchFactory) *loadBalancerHealthChecker {
+func newLoadBalancerHealthChecker(nodeName string, watchFactory factory.NodeWatchFactory, nodeHealthzServer *proxierHealthUpdater) *loadBalancerHealthChecker {
+	klog.Infof("[rira] new service health checker")
 	return &loadBalancerHealthChecker{
 		nodeName:     nodeName,
-		server:       healthcheck.NewServer(nodeName, nil, nil, nil),
+		server:       healthcheck.NewServer(nodeName, nil, nil, nil, nodeHealthzServer),
 		services:     make(map[ktypes.NamespacedName]uint16),
 		endpoints:    make(map[ktypes.NamespacedName]int),
 		watchFactory: watchFactory,
