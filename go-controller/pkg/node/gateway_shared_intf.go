@@ -540,7 +540,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 		hasLocalHostNetworkEp = false
 	} else {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
 	}
 
 	// If something didn't already do it add correct Service rules
@@ -689,7 +689,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			continue
 		}
 		nodeIPs := npw.nodeIPManager.ListAddresses()
-		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
+		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs, service)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
 		// Delete OF rules for service if they exist
 		if err = npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp); err != nil {
@@ -770,7 +770,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 
 	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{epSlice}, nodeIPs)
+	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{epSlice}, nodeIPs, svc)
 
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice
 	// event is received, only alter flows if we need to, i.e if cache wasn't
@@ -888,8 +888,8 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	// Update rules if hasHostNetworkEndpoints status changed
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{oldEpSlice}, nodeIPs)
-	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{newEpSlice}, nodeIPs)
+	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{oldEpSlice}, nodeIPs, svc)
+	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints([]*discovery.EndpointSlice{newEpSlice}, nodeIPs, svc)
 	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew {
 		if err = npw.DeleteEndpointSlice(oldEpSlice); err != nil {
 			errors = append(errors, err)
