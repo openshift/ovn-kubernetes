@@ -620,9 +620,9 @@ func (h *masterEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryC
 		if !oldHadEgressLabel && !newHasEgressLabel {
 			return nil
 		}
+		h.oc.setNodeEgressAssignable(oldNode.Name, newHasEgressLabel)
 		if oldHadEgressLabel && !newHasEgressLabel {
 			klog.Infof("Node: %s has been un-labeled, deleting it from egress assignment", newNode.Name)
-			h.oc.setNodeEgressAssignable(oldNode.Name, false)
 			return h.oc.deleteEgressNode(oldNode.Name)
 		}
 		isOldReady := h.oc.isEgressNodeReady(oldNode)
@@ -631,7 +631,6 @@ func (h *masterEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryC
 		h.oc.setNodeEgressReady(newNode.Name, isNewReady)
 		if !oldHadEgressLabel && newHasEgressLabel {
 			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
-			h.oc.setNodeEgressAssignable(newNode.Name, true)
 			if isNewReady && isNewReachable {
 				h.oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 				if err := h.oc.addEgressNode(newNode.Name); err != nil {
