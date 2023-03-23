@@ -103,6 +103,19 @@ func (ncm *nodeNetworkControllerManager) getOVNIfUpCheckMode() error {
 	return nil
 }
 
+// initDefaultNodeNetworkController creates the controller for default network
+func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
+	if err != nil {
+		return err
+	}
+	// Make sure we only set defaultNodeNetworkController in case of no error,
+	// otherwise we would initialize the interface with a nil implementation
+	// which is not the same as nil interface.
+	ncm.defaultNodeNetworkController = defaultNodeNetworkController
+	return nil
+}
+
 // Start the node network controller manager
 func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) {
 	klog.Infof("Starting the node network controller manager, Mode: %s", config.OvnKubeNode.Mode)
@@ -138,14 +151,13 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		}, time.Minute, ncm.stopChan)
 	}
 
-	ncm.defaultNodeNetworkController, err = node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
+	err = ncm.initDefaultNodeNetworkController()
 	if err != nil {
-		return fmt.Errorf("failed to create default network controller: %v", err)
+		return fmt.Errorf("failed to init default node network controller: %v", err)
 	}
-
 	err = ncm.defaultNodeNetworkController.Start(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to start default network controller: %v", err)
+		return fmt.Errorf("failed to start default node network controller: %v", err)
 	}
 
 	// nadController is nil if multi-network is disabled
