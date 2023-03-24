@@ -116,7 +116,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(
 			peer.PodSelector, peer.NamespaceSelector, networkPolicy.Namespace, getPolicyKeyWithKind(networkPolicy))
 		// error should happen on handler add
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring("is not a valid label selector operator"))
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("is not a valid pod selector operator"))
 		// address set will not be created
 		peerASIDs := getPodSelectorAddrSetDbIDs(peerASKey, DefaultNetworkControllerName)
 		fakeOvn.asf.EventuallyExpectNoAddressSet(peerASIDs)

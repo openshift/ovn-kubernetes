@@ -305,7 +305,7 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	if err != nil {
 		return fmt.Errorf("cannot find NetworkPolicy ACLs: %v", err)
 	}
-	stalePGs := sets.Set[string]{}
+	stalePGs := sets.String{}
 	if len(netpolACLs) > 0 {
 		for _, netpolACL := range netpolACLs {
 			if netpolACL.ExternalIDs[policyACLExtIdKey] != "" {
@@ -331,8 +331,7 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 		}
 	}
 	if len(stalePGs) > 0 {
-		sets.List[string](stalePGs)
-		err = libovsdbops.DeletePortGroups(oc.nbClient, sets.List[string](stalePGs)...)
+		err = libovsdbops.DeletePortGroups(oc.nbClient, stalePGs.List()...)
 		if err != nil {
 			return fmt.Errorf("error removing stale port groups %v: %v", stalePGs, err)
 		}
