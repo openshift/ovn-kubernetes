@@ -887,7 +887,7 @@ func getOfprotoIPFamilyArgs(protocol string, ip net.IP) (string, string, string)
 func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName, ovnNamespace string) error {
 	dependencies := map[string]string{
 		"ovs":       "if type -p ovn-detrace >/dev/null 2>&1; then echo 'true' ; fi",
-		"pyOpenSSL": "if rpm -qa | egrep -q python3-pyOpenSSL; then echo 'true'; fi",
+		"pyOpenSSL": "if python -c 'import ssl; print(ssl.OPENSSL_VERSION)'; then echo 'true'; fi",
 	}
 	for dependency, dependencyCmd := range dependencies {
 		depVerifyOut, depVerifyErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", dependencyCmd, "")
@@ -895,9 +895,16 @@ func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restco
 			return fmt.Errorf("dependency verification error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s",
 				podName, "ovnkube-node", err, depVerifyOut, depVerifyErr)
 		}
-		trueFalse := strings.TrimSuffix(depVerifyOut, "\n")
-		klog.V(10).Infof("Dependency check '%s' in pod '%s', container '%s' yielded '%s'", dependencyCmd, podName, "ovnkube-node", trueFalse)
-		if trueFalse != "true" {
+		var dependencyExists bool
+		parts := strings.Split(depVerifyOut, "\n")
+		for _, part := range parts {
+			if part == "true" {
+				dependencyExists = true
+				break
+			}
+		}
+		klog.V(10).Infof("Dependency check '%s' in pod '%s', container '%s' yielded '%t'", dependencyCmd, podName, "ovnkube-node", dependencyExists)
+		if !dependencyExists {
 			installCmd := "pip3 install " + dependency
 			depInstallOut, depInstallErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", installCmd, "")
 			if err != nil {
