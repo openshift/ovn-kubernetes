@@ -82,6 +82,8 @@ type DefaultNetworkController struct {
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
+	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
+
 	// Cluster wide Load_Balancer_Group UUID.
 	loadBalancerGroupUUID string
 
@@ -178,6 +180,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		exGWCacheMutex:         sync.RWMutex{},
 		networkPolicies:        syncmap.NewSyncMap[*networkPolicy](),
 		sharedNetpolPortGroups: syncmap.NewSyncMap[*defaultDenyPortGroups](),
+		podSelectorAddressSets: syncmap.NewSyncMap[*PodSelectorAddressSet](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -231,8 +234,8 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 // In order to create a retry framework for most resource types, newRetryFrameworkMaster is
 // to be preferred, as it calls newRetryFrameworkWithParameters with all optional parameters unset.
 // newRetryFrameworkWithParameters is instead called directly by the watchers that are
-// dynamically created when a network policy is added: PeerNamespaceAndPodSelectorType,
-// PeerPodForNamespaceAndPodSelectorType, PeerNamespaceSelectorType, PeerPodSelectorType.
+// dynamically created when a network policy is added: AddressSetNamespaceAndPodSelectorType,
+// PeerNamespaceSelectorType, AddressSetPodSelectorType.
 func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
@@ -268,6 +271,13 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	err := syncer.SyncAddressSets()
 	if err != nil {
 		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+	}
+
+	// sync shared resources
+	// pod selector address sets
+	err = oc.cleanupPodSelectorAddressSets()
+	if err != nil {
+		return fmt.Errorf("cleaning up stale pod selector address sets failed: %w", err)
 	}
 
 	if err = oc.Init(); err != nil {
@@ -348,35 +358,39 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	// Sync external gateway routes. External gateway may be set in namespaces
 	// or via pods. So execute an individual sync method at startup
-	oc.cleanExGwECMPRoutes()
+	WithSyncDurationMetricNoError("external gateway routes", oc.cleanExGwECMPRoutes)
 
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
-	if err := oc.WatchNamespaces(); err != nil {
+	if err := WithSyncDurationMetric("namespace", oc.WatchNamespaces); err != nil {
 		return err
 	}
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
-	if err := oc.WatchNodes(); err != nil {
+	if err := WithSyncDurationMetric("node", oc.WatchNodes); err != nil {
 		return err
 	}
 
+	startSvc := time.Now()
 	// Start service watch factory and sync services
 	oc.svcFactory.Start(oc.stopChan)
 
 	// Services should be started after nodes to prevent LB churn
-	if err := oc.StartServiceController(oc.wg, true); err != nil {
+	err := oc.StartServiceController(oc.wg, true)
+	endSvc := time.Since(startSvc)
+	metrics.MetricMasterSyncDuration.WithLabelValues("service").Set(endSvc.Seconds())
+	if err != nil {
 		return err
 	}
 
-	if err := oc.WatchPods(); err != nil {
+	if err := WithSyncDurationMetric("pod", oc.WatchPods); err != nil {
 		return err
 	}
 
 	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
-	if err := oc.WatchNetworkPolicy(); err != nil {
+	if err := WithSyncDurationMetric("network policy", oc.WatchNetworkPolicy); err != nil {
 		return err
 	}
 
@@ -391,20 +405,20 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		// risk performing a bunch of modifications on the EgressIP objects when
 		// we restart and then have these handlers act on stale data when they
 		// sync.
-		if err := oc.WatchEgressIPNamespaces(); err != nil {
+		if err := WithSyncDurationMetric("egress ip namespace", oc.WatchEgressIPNamespaces); err != nil {
 			return err
 		}
-		if err := oc.WatchEgressIPPods(); err != nil {
+		if err := WithSyncDurationMetric("egress ip pod", oc.WatchEgressIPPods); err != nil {
 			return err
 		}
-		if err := oc.WatchEgressNodes(); err != nil {
+		if err := WithSyncDurationMetric("egress node", oc.WatchEgressNodes); err != nil {
 			return err
 		}
-		if err := oc.WatchEgressIP(); err != nil {
+		if err := WithSyncDurationMetric("egress ip", oc.WatchEgressIP); err != nil {
 			return err
 		}
 		if util.PlatformTypeIsEgressIPCloudProvider() {
-			if err := oc.WatchCloudPrivateIPConfig(); err != nil {
+			if err := WithSyncDurationMetric("could private ip config", oc.WatchCloudPrivateIPConfig); err != nil {
 				return err
 			}
 		}
@@ -423,7 +437,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			return err
 		}
 		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
-		err = oc.WatchEgressFirewall()
+		err = WithSyncDurationMetric("egress firewall", oc.WatchEgressFirewall)
 		if err != nil {
 			return err
 		}
@@ -451,7 +465,9 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		oc.egressSvcController.Run(1)
 	}()
 
-	klog.Infof("Completing all the Watchers took %v", time.Since(start))
+	end := time.Since(start)
+	klog.Infof("Completing all the Watchers took %v", end)
+	metrics.MetricMasterSyncDuration.WithLabelValues("all watchers").Set(end.Seconds())
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		klog.Infof("Starting unidling controllers")
@@ -479,6 +495,24 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func WithSyncDurationMetric(resourceName string, f func() error) error {
+	start := time.Now()
+	defer func() {
+		end := time.Since(start)
+		metrics.MetricMasterSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
+	}()
+	return f()
+}
+
+func WithSyncDurationMetricNoError(resourceName string, f func()) {
+	start := time.Now()
+	defer func() {
+		end := time.Since(start)
+		metrics.MetricMasterSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
+	}()
+	f()
 }
 
 type defaultNetworkControllerEventHandler struct {
@@ -645,18 +679,13 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			return err
 		}
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodAddUpdate(peerAS, obj)
 
-	case factory.PeerNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerNamespaceAndPodAdd(extraParameters.np, extraParameters.gp,
-			extraParameters.podSelector, obj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
+	case factory.AddressSetNamespaceAndPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handleNamespaceAddUpdate(peerAS, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -780,13 +809,9 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 
 		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodAddUpdate(peerAS, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -932,17 +957,13 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return h.oc.deleteNodeEvent(node)
 
-	case factory.PeerPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
+	case factory.AddressSetPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handlePodDelete(peerAS, obj)
 
-	case factory.PeerNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerNamespaceAndPodDel(extraParameters.np, extraParameters.gp, obj)
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
+	case factory.AddressSetNamespaceAndPodSelectorType:
+		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
+		return h.oc.handleNamespaceDel(peerAS, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -1027,9 +1048,8 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = h.oc.syncNodes
 
 		case factory.LocalPodSelectorType,
-			factory.PeerNamespaceAndPodSelectorType,
-			factory.PeerPodSelectorType,
-			factory.PeerPodForNamespaceAndPodSelectorType,
+			factory.AddressSetNamespaceAndPodSelectorType,
+			factory.AddressSetPodSelectorType,
 			factory.PeerNamespaceSelectorType:
 			syncFunc = nil
 
