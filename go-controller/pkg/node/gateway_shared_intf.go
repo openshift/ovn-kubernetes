@@ -19,6 +19,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -774,7 +775,8 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice
 	// event is received, only alter flows if we need to, i.e if cache wasn't
 	// set or if it was and hasLocalHostNetworkEp state changed, to prevent flow churn
-	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
+
 	if err != nil {
 		return fmt.Errorf("cannot add %s/%s to nodePortWatcher: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -814,7 +816,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	namespacedName, err := namespacedNameFromEPSlice(epSlice)
+	namespacedName, err := serviceNamespacedNameFromEndpointSlice(epSlice)
 	if err != nil {
 		return fmt.Errorf("cannot delete %s/%s from nodePortWatcher: %v", epSlice.Namespace, epSlice.Name, err)
 	}
@@ -835,10 +837,11 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	return nil
 }
 
-func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
+func getEndpointAddresses(endpointSlice *discovery.EndpointSlice, service *kapi.Service) []string {
 	endpointsAddress := make([]string, 0)
+	includeTerminating := service != nil && service.Spec.PublishNotReadyAddresses
 	for _, endpoint := range endpointSlice.Endpoints {
-		if isEndpointReady(endpoint) {
+		if util.IsEndpointValid(endpoint, includeTerminating) {
 			for _, ip := range endpoint.Addresses {
 				endpointsAddress = append(endpointsAddress, utilnet.ParseIPSloppy(ip).String())
 			}
@@ -851,18 +854,23 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	var err error
 	var errors []error
 
-	oldEpAddr := getEndpointAddresses(oldEpSlice)
-	newEpAddr := getEndpointAddresses(newEpSlice)
+	namespacedName, err := serviceNamespacedNameFromEndpointSlice(newEpSlice)
+	if err != nil {
+		return fmt.Errorf("cannot update %s/%s in nodePortWatcher: %v", newEpSlice.Namespace, newEpSlice.Name, err)
+	}
+	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
+	if err != nil && !kerrors.IsNotFound(err) {
+		return fmt.Errorf("error while retrieving service for endpointslice %s/%s during update: %v",
+			oldEpSlice.Namespace, oldEpSlice.Name, err)
+	}
+
+	oldEpAddr := getEndpointAddresses(oldEpSlice, svc)
+	newEpAddr := getEndpointAddresses(newEpSlice, svc)
 	if reflect.DeepEqual(oldEpAddr, newEpAddr) {
 		return nil
 	}
 
 	klog.V(5).Infof("Updating endpointslice %s in namespace %s", oldEpSlice.Name, oldEpSlice.Namespace)
-
-	namespacedName, err := namespacedNameFromEPSlice(newEpSlice)
-	if err != nil {
-		return fmt.Errorf("cannot update %s/%s in nodePortWatcher: %v", newEpSlice.Namespace, newEpSlice.Name, err)
-	}
 	if _, exists := npw.getServiceInfo(namespacedName); !exists {
 		// When a service is updated from externalName to nodeport type, it won't be
 		// in nodePortWatcher cache (npw): in this case, have the new nodeport IPtable rules
