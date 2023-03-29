@@ -142,8 +142,6 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 	}
 
 	tlbs := make([]*templateLoadBalancer, 0, len(LBs))
-	existinglbs := make([]*templateLoadBalancer, 0, len(LBs))
-	newlbs := make([]*templateLoadBalancer, 0, len(LBs))
 	addLBsToSwitch := map[string][]*templateLoadBalancer{}
 	removeLBsFromSwitch := map[string][]*templateLoadBalancer{}
 	addLBsToRouter := map[string][]*templateLoadBalancer{}
