@@ -464,9 +464,9 @@ func (h *masterEventHandler) AddResource(obj interface{}, fromRetryLoop bool) er
 			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
 			metrics.IncrementEgressFirewallCount()
 		}
-		if err = h.oc.updateEgressFirewallStatusWithRetry(egressFirewall); err != nil {
+		if statusErr := h.oc.updateEgressFirewallStatusWithRetry(egressFirewall); statusErr != nil {
 			klog.Errorf("Failed to update egress firewall status %s, error: %v",
-				getEgressFirewallNamespacedName(egressFirewall), err)
+				getEgressFirewallNamespacedName(egressFirewall), statusErr)
 		}
 		return err
 
