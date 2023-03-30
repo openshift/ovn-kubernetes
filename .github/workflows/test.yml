@@ -188,7 +188,7 @@ jobs:
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
+          docker build --build-arg GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} -t ovn-daemonset-f:pr -f Dockerfile.fedora .
           mkdir _output
           docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
         popd
@@ -377,6 +377,8 @@ jobs:
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "separate-cluster-manager": "true"}
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "separate-cluster-manager": "false"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "false"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "false"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "false"}
           - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "true"}
           - {"target": "node-ip-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "separate-cluster-manager": "false"}
     needs: [ build-pr ]
@@ -393,6 +395,8 @@ jobs:
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' }}"
+      KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
+      KIND_LOCAL_REGISTRY: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_SEPARATE_CLUSTER_MANAGER: "${{ matrix.separate-cluster-manager == 'true' }}"
     steps:
 
@@ -448,6 +452,8 @@ jobs:
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-migration" ]; then
           make -C test control-plane WHAT="Node IP address migration"
+        elif [ "${{ matrix.target }}" == "kv-live-migration" ]; then
+          make -C test control-plane WHAT="Kubevirt Virtual Machines"
         else
           make -C test ${{ matrix.target }}
         fi
