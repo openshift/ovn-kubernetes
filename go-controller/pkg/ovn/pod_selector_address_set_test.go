@@ -3,6 +3,9 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
+	"time"
+
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
@@ -12,8 +15,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"net"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -116,7 +117,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(
 			peer.PodSelector, peer.NamespaceSelector, networkPolicy.Namespace, getPolicyKeyWithKind(networkPolicy))
 		// error should happen on handler add
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring("is not a valid pod selector operator"))
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("is not a valid label selector operator"))
 		// address set will not be created
 		peerASIDs := getPodSelectorAddrSetDbIDs(peerASKey, DefaultNetworkControllerName)
 		fakeOvn.asf.EventuallyExpectNoAddressSet(peerASIDs)
