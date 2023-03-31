@@ -21,7 +21,7 @@ RUN cd go-controller; CGO_ENABLED=0 make windows
 # - creating directories required by ovn-kubernetes
 # - git commit number
 # - ovnkube.sh script
-FROM registry.ci.openshift.org/ocp/4.14:ovn-kubernetes-base-rhel-9
+FROM registry.ci.openshift.org/ocp/4.14:ovn-kubernetes-base
 
 USER root
 
