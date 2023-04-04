@@ -12,9 +12,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -26,6 +28,7 @@ const (
 	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
 	egressFirewallACLExtIdKey    = "egressFirewall"
 	egressFirewallACLPriorityKey = "priority"
+	aclDeleteBatchSize           = 1000
 )
 
 type egressFirewall struct {
@@ -158,10 +161,19 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 
 	// delete acls from all switches, they reside on the port group now
 	if len(egressFirewallACLs) != 0 {
-		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, func(item *nbdb.LogicalSwitch) bool { return true },
-			egressFirewallACLs...)
+		err = batching.Batch[*nbdb.ACL](aclDeleteBatchSize, egressFirewallACLs, func(batchACLs []*nbdb.ACL) error {
+			// optimize the predicate to exclude switches that don't reference deleting acls.
+			aclsToDelete := sets.String{}
+			for _, acl := range batchACLs {
+				aclsToDelete.Insert(acl.UUID)
+			}
+			swWithACLsPred := func(sw *nbdb.LogicalSwitch) bool {
+				return aclsToDelete.HasAny(sw.ACLs...)
+			}
+			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, swWithACLsPred, batchACLs...)
+		})
 		if err != nil {
-			return fmt.Errorf("failed to remove reject acl from node logical switches: %v", err)
+			return fmt.Errorf("failed to remove egress firewall acls from node logical switches: %v", err)
 		}
 	}
 
