@@ -915,7 +915,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -923,7 +923,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, extraParameters.podSelector, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
