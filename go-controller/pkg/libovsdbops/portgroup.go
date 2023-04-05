@@ -5,9 +5,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // findPortGroup looks up the port group in the cache and sets the UUID
@@ -311,6 +310,36 @@ func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	ops = append(ops, op...)
 
 	return ops, nil
+}
+
+func DeleteACLsFromAllPortGroups(nbClient libovsdbclient.Client, acls ...nbdb.ACL) error {
+	if len(acls) == 0 {
+		return nil
+	}
+
+	pg := nbdb.PortGroup{
+		ACLs: make([]string, 0, len(acls)),
+	}
+	for _, acl := range acls {
+		pg.ACLs = append(pg.ACLs, acl.UUID)
+	}
+
+	opModel := OperationModel{
+		Model:            &pg,
+		ModelPredicate:   func(group *nbdb.PortGroup) bool { return true },
+		OnModelMutations: []interface{}{&pg.ACLs},
+		ErrNotFound:      false,
+		BulkOp:           true,
+	}
+
+	m := NewModelClient(nbClient)
+	ops, err := m.DeleteOps(nil, opModel)
+	if err != nil {
+		return err
+	}
+
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }
 
 func deletePortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, name string) ([]libovsdb.Operation, error) {

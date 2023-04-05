@@ -10,6 +10,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	"k8s.io/klog/v2"
 )
 
 // getACLName returns the ACL name if it has one otherwise returns
@@ -69,12 +71,15 @@ func findACL(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
 		return fmt.Errorf("can't find ACL by equivalence %+v: %v", *acl, err)
 	}
 
-	if len(acls) > 1 {
-		return fmt.Errorf("unexpectedly found multiple equivalent ACLs: %+v", acls)
-	}
-
 	if len(acls) == 0 {
 		return libovsdbclient.ErrNotFound
+	}
+
+	if len(acls) > 1 {
+		err = deleteDuplicateACLs(nbClient, acls)
+		if err != nil {
+			return fmt.Errorf("unexpectedly found multiple equivalent ACLs, failed to delete: %w", err)
+		}
 	}
 
 	acl.UUID = acls[0].UUID
@@ -249,6 +254,11 @@ func DeleteACLs(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
 		opModels = append(opModels, OperationModel{
 			Model:          &acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return IsEquivalentACL(item, &acl) },
+			// don't error on equivalent acls
+			// DeleteACLs will always be a noop, because deleted ACLs should be de-referenced in another transaction,
+			// and then they are already garbage-collected, or deleting ACL without dereferencing will return error.
+			// DeleteACLs has only effect for unit tests.
+			BulkOp: true,
 		})
 	}
 
@@ -269,4 +279,19 @@ func UpdateACLLogging(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
 
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
+}
+
+func deleteDuplicateACLs(nbClient libovsdbclient.Client, duplicateACLs []nbdb.ACL) error {
+	if len(duplicateACLs) > 1 {
+		klog.Warningf("Found multiple acls equivalent to %+v, cleanup", duplicateACLs[0])
+		err := DeleteACLsFromAllPortGroups(nbClient, duplicateACLs[1:]...)
+		if err != nil {
+			return fmt.Errorf("failed to delete duplicate acls: delete from port groups failed: %w", err)
+		}
+		err = RemoveACLsFromAllSwitches(nbClient, duplicateACLs[1:])
+		if err != nil {
+			return fmt.Errorf("failed to delete duplicate acls: delete from switches failed: %w", err)
+		}
+	}
+	return nil
 }
