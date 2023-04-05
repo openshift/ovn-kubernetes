@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -10,6 +11,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	"k8s.io/klog/v2"
 )
 
 // GetACLName returns the ACL name if it has one otherwise returns
@@ -118,7 +121,9 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	}
 
 	modelClient := newModelClient(nbClient)
-	return modelClient.CreateOrUpdateOps(ops, opModels...)
+	ops, err := modelClient.CreateOrUpdateOps(ops, opModels...)
+	deleteDuplicateACLsIfFound(nbClient, err, acls)
+	return ops, err
 }
 
 // CreateOrUpdateACLs creates or updates the provided ACLs
@@ -150,5 +155,52 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 	}
 
 	modelClient := newModelClient(nbClient)
-	return modelClient.CreateOrUpdateOps(ops, opModels...)
+	ops, err := modelClient.CreateOrUpdateOps(ops, opModels...)
+	deleteDuplicateACLsIfFound(nbClient, err, acls)
+	return ops, err
+}
+
+func deleteDuplicateACLsIfFound(nbClient libovsdbclient.Client, err error, acls []*nbdb.ACL) {
+	if !errors.Is(err, errMultipleResults) {
+		return
+	}
+	opModels := make([]operationModel, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		acl.UUID = ""
+		found := []*nbdb.ACL{}
+		opModel := operationModel{
+			Model:          acl,
+			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
+			ExistingResult: &found,
+			ErrNotFound:    false,
+			BulkOp:         true,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := newModelClient(nbClient)
+	err = modelClient.Lookup(opModels...)
+	if err != nil {
+		klog.Errorf("Failed to delete duplicate acls: lookup failed: %w", err)
+		return
+	}
+	for _, opModel := range opModels {
+		duplicateACLs := *opModel.ExistingResult.(*[]*nbdb.ACL)
+		if len(duplicateACLs) > 1 {
+			klog.Warningf("Found multiple acls equivalent to %+v, cleanup", duplicateACLs[0])
+			err = DeleteACLsFromAllPortGroups(nbClient, duplicateACLs[:len(duplicateACLs)-1]...)
+			if err != nil {
+				klog.Errorf("Failed to delete duplicate acls: delete from port groups failed: %w", err)
+				return
+			}
+			err = RemoveACLsFromLogicalSwitchesWithPredicate(nbClient, func(logicalSwitch *nbdb.LogicalSwitch) bool { return true },
+				duplicateACLs[:len(duplicateACLs)-1]...)
+			if err != nil {
+				klog.Errorf("Failed to delete duplicate acls: delete from switches failed: %w", err)
+				return
+			}
+		}
+	}
 }
