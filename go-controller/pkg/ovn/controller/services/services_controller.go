@@ -277,6 +277,10 @@ func (c *Controller) syncService(key string) error {
 				namespace, name, err)
 		}
 
+		c.alreadyAppliedLock.Lock()
+		delete(c.alreadyApplied, key)
+		c.alreadyAppliedLock.Unlock()
+
 		c.repair.serviceSynced(key)
 		return nil
 	}
