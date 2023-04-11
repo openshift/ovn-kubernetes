@@ -14,11 +14,13 @@ RUN dnf install -y --nodocs \
 
 ARG ovsver=3.1.0-10.el9fdp
 ARG ovnver=23.03.0-7.el9fdp
+COPY ovn23.03-23.03.0-17.el9fdp.x86_64.rpm ovn23.03-host-23.03.0-17.el9fdp.x86_64.rpm ovn23.03-central-23.03.0-17.el9fdp.x86_64.rpm ovn23.03-vtep-23.03.0-17.el9fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS="iptables" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
 	dnf install -y --nodocs "openvswitch3.1 = $ovsver" "python3-openvswitch3.1 = $ovsver" && \
 	dnf install -y --nodocs "ovn23.03 = $ovnver" "ovn23.03-central = $ovnver" "ovn23.03-host = $ovnver" && \
+	rpm -Uhv --nodeps --force /root/*.rpm && \
 	dnf clean all && rm -rf /var/cache/*
 
 RUN sed 's/%/"/g' <<<"%openvswitch3.1-devel = $ovsver% %openvswitch3.1-ipsec = $ovsver% %ovn23.03-vtep = $ovnver%" > /more-pkgs
