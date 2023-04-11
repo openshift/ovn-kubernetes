@@ -1020,7 +1020,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		return nil, err
 	}
 
-	// delete stale chassis in SBDB if any
+	// delete stale chassis in SBDB if anyasdfffffffffffffffffffffffffffff
 	oc.deleteStaleNodeChassis(node)
 
 	// Ensure that the node's logical network has been created. Note that if the
