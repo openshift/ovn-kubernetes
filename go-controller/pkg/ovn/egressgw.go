@@ -601,9 +601,9 @@ func deletePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podI
 		return err
 	}
 	err = libovsdbops.DeleteNATsFromRouter(nbClient, gr, nats...)
-	if err != nil {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s, "+
-			"error: %v", gr, err)
+			"error: %w", gr, err)
 	}
 	return nil
 }
