@@ -22,6 +22,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
@@ -620,12 +621,12 @@ func getMulticastACLEgrMatch() string {
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
-// - a port group containing all logical ports associated with 'ns'
-// - one "from-lport" ACL allowing egress multicast traffic from the pods
-//   in 'ns'
-// - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
-//   This matches only traffic originated by pods in 'ns' (based on the
-//   namespace address set).
+//   - a port group containing all logical ports associated with 'ns'
+//   - one "from-lport" ACL allowing egress multicast traffic from the pods
+//     in 'ns'
+//   - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
+//     This matches only traffic originated by pods in 'ns' (based on the
+//     namespace address set).
 func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupName := hashedPortGroup(ns)
 
@@ -699,10 +700,11 @@ func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string, nsInf
 }
 
 // Creates a global default deny multicast policy:
-// - one ACL dropping egress multicast traffic from all pods: this is to
-//   protect OVN controller from processing IP multicast reports from nodes
-//   that are not allowed to receive multicast raffic.
-// - one ACL dropping ingress multicast traffic to all pods.
+//   - one ACL dropping egress multicast traffic from all pods: this is to
+//     protect OVN controller from processing IP multicast reports from nodes
+//     that are not allowed to receive multicast raffic.
+//   - one ACL dropping ingress multicast traffic to all pods.
+//
 // Caller must hold the namespace's namespaceInfo object lock.
 func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	match := getMulticastACLMatch()
@@ -1530,11 +1532,37 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
 // matches a NetworkPolicy ingress/egress section's selectors from that
 // ingress/egress address set
-func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface{}) {
+func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, podSelector labels.Selector, obj interface{}) {
 	pod := obj.(*kapi.Pod)
 	if pod.Spec.NodeName == "" {
 		return
 	}
+
+	if util.PodCompleted(pod) {
+		var collidingPod *kapi.Pod
+		ips, err := util.GetAllPodIPs(pod)
+
+		if err != nil {
+			klog.Errorf("Can't get pod IPs %s/%s: %w", pod.Namespace, pod.Name, err)
+			ips = []net.IP{}
+		}
+
+		collidingPod, err = oc.findPodWithIPAddresses(ips)
+		if err != nil {
+			klog.Errorf("Lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
+		}
+
+		if collidingPod != nil {
+
+			// If the IP is used by another Pod that is targeted by the same network policy, don't remove the IP from the Address_Set
+			if podSelector.Matches(labels.Set(collidingPod.Labels)) {
+				klog.Infof("Not deleting Pod %s/%s IPs [%s] as they are used by %s/%s", pod.Namespace, pod.Name,
+					util.JoinIPs(ips, " "), collidingPod.Namespace, collidingPod.Name)
+				return
+			}
+		}
+	}
+
 	if err := gp.deletePeerPod(pod); err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -1609,12 +1637,12 @@ func (oc *Controller) handlePeerPodSelector(
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
-				oc.handlePeerPodSelectorDelete(gp, obj)
+				oc.handlePeerPodSelectorDelete(gp, sel, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				pod := newObj.(*kapi.Pod)
 				if util.PodCompleted(pod) {
-					oc.handlePeerPodSelectorDelete(gp, oldObj)
+					oc.handlePeerPodSelectorDelete(gp, sel, oldObj)
 				} else {
 					oc.handlePeerPodSelectorAddUpdate(gp, newObj)
 				}
@@ -1654,12 +1682,12 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 							oc.handlePeerPodSelectorAddUpdate(gp, obj)
 						},
 						DeleteFunc: func(obj interface{}) {
-							oc.handlePeerPodSelectorDelete(gp, obj)
+							oc.handlePeerPodSelectorDelete(gp, podSel, obj)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
 							pod := oldObj.(*kapi.Pod)
 							if util.PodCompleted(pod) {
-								oc.handlePeerPodSelectorDelete(gp, oldObj)
+								oc.handlePeerPodSelectorDelete(gp, podSel, oldObj)
 							} else {
 								oc.handlePeerPodSelectorAddUpdate(gp, newObj)
 							}
@@ -1682,7 +1710,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				pods, _ := oc.watchFactory.GetPods(namespace.Name)
 
 				for _, pod := range pods {
-					oc.handlePeerPodSelectorDelete(gp, pod)
+					oc.handlePeerPodSelectorDelete(gp, podSel, pod)
 				}
 				if handler, ok := np.namespacedPodHandlers.Load(namespace.Name); ok {
 					oc.watchFactory.RemovePodHandler(handler.(*factory.Handler))
