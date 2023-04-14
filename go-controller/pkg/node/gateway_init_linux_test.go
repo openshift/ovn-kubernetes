@@ -684,7 +684,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		"--nodeport",
 		"--mtu=" + mtu,
 		"--ovnkube-node-mode=" + types.NodeModeDPU,
-		"--ovnkube-node-mgmt-port-netdev=pf0vf0",
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
