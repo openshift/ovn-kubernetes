@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -90,6 +91,7 @@ func (oc *Controller) syncPods(pods []interface{}) error {
 					}
 				}
 			}
+
 			// checking the length because cannot compare the slices directly and if routes are removed
 			// the length will be different
 			if len(annotations.Routes) != len(newRoutes) {
@@ -457,7 +459,17 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 				}
 			}
 			if hybridOverlayExternalGW != nil {
-				gatewayIP = util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
+				node, err := oc.watchFactory.GetNode(pod.Spec.NodeName)
+				if err != nil {
+					return fmt.Errorf("cannot create pod %s/%s ICNIv1 route: %v", pod.Namespace, pod.Name, err)
+				}
+				nodeHybridOverlayDRIP := net.ParseIP(node.Annotations[hotypes.HybridOverlayDRIP])
+				if nodeHybridOverlayDRIP == nil {
+					return fmt.Errorf("cannot validate pod %s/%s ICNIv1 route, the node's (%s) hybrid overlay address is not an IP: %s",
+						pod.Namespace, pod.Name, node.Name, node.Annotations[hotypes.HybridOverlayDRIP])
+
+				}
+				gatewayIP = nodeHybridOverlayDRIP
 			}
 		} else {
 			gatewayIP = gatewayIPnet.IP
