@@ -45,6 +45,9 @@ RUN INSTALL_PKGS=" \
 	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
 	dnf clean all && rm -rf /var/cache/*
 
+COPY glibc-common-debuginfo-2.34-60.el9.x86_64.rpm glibc-debuginfo-2.34-60.el9.x86_64.rpm libbpf-1.1.0-1.el9.x86_64.rpm openvswitch3.1-debuginfo-3.1.0-14.el9fdp.x86_64.rpm /root/
+RUN  rpm -ihv --nodeps --force /root/*.rpm && dnf -y install perf
+
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/
