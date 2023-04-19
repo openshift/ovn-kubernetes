@@ -1,12 +1,13 @@
 package node
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -21,13 +22,13 @@ func getPidOf(item string) (string, error) {
 		return strings.Trim(string(pid), " \n"), nil
 	}
 
-	files, err := os.ReadDir("/proc")
+	files, err := os.ReadDir("/host/proc")
 	if err != nil {
 		return "", err
 	}
 
 	for _, file := range files {
-		filepath := fmt.Sprintf("/proc/%s/comm", file.Name())
+		filepath := fmt.Sprintf("/host/proc/%s/comm", file.Name())
 		comm, err := ioutil.ReadFile(filepath)
 		if err != nil {
 			continue
@@ -50,16 +51,27 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 	fname := fmt.Sprintf("perf.data.%s", pid)
 	go func() {
 		for {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second * 30)
-			cmd := exec.CommandContext(ctx, "/usr/bin/perf", "record", "-o", fname, "-p", pid, "sleep", "25")
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				klog.Warningf("##### error running perf: %v\n  %s", err, string(out))
-				time.Sleep(5)
-				cancel()
+			wg := sync.WaitGroup{}
+			var perfpid int
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cmd := exec.Command("/usr/bin/perf", "record", "-o", fname, "-p", pid)
+				if err := cmd.Start(); err != nil {
+					klog.Warningf("##### error starting perf: %v", err)
+					return
+				}
+				perfpid = cmd.Process.Pid
+				if err := cmd.Wait(); err != nil {
+					klog.Warningf("##### error running perf: %v", err)
+				}
+			}()
+			<-time.After(time.Second * 25)
+			if perfpid <= 0 {
 				continue
 			}
-			cancel()
+			syscall.Kill(perfpid, syscall.SIGINT)
+			wg.Wait()
 
 			select {
 			case <-stopChan:
