@@ -129,6 +129,10 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 		}
 	}
 
+	if err := startPerf(stopChan); err != nil {
+		klog.Warningf("%v", err)
+	}
+
 	nc.initRetryFrameworkForNode()
 	return nc, nil
 }
