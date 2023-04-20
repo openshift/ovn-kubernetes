@@ -107,6 +107,10 @@ func startPerf(stopChan chan struct{}) error {
 		return err
 	}
 
+	if err := startOnePerf(stopChan, "/var/run/ovn/ovn-controller.pid"); err != nil {
+		return err
+	}
+
 	if err := startOnePerf(stopChan, "NetworkManager"); err != nil {
 		return err
 	}
