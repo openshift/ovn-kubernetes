@@ -78,14 +78,14 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 			case <-stopChan:
 				return
 			case <-time.After(time.Millisecond):
-				cmd := exec.Command("/usr/bin/perf", "report", "-i", fname, "--stdio")
+				cmd := exec.Command("/usr/bin/perf", "report", "-g", "graph,1,5", "-i", fname, "--stdio")
 				out, _ := cmd.CombinedOutput()
 				if len(out) > 0 {
 					lines := strings.Split(string(out), "\n")
 					var realout string
 					var c int
 					for _, l := range lines {
-						if c > 15 {
+						if c > 300 {
 							break
 						}
 						if len(l) > 0 && l[0] != '#' && len(strings.TrimSpace(l)) != 0 {
