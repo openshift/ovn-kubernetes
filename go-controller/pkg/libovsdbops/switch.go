@@ -12,6 +12,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // LOGICAL_SWITCH OPs
@@ -315,9 +317,20 @@ func RemoveACLsFromJoinSwitch(nbClient libovsdbclient.Client, acls []nbdb.ACL) e
 
 // RemoveACLFromSwitches removes the ACL uuid entry from Logical Switch acl's list.
 func RemoveACLsFromAllSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
+	// optimize the predicate to exclude switches that don't reference deleting acls.
+	aclsToDelete := sets.String{}
+	for _, acl := range acls {
+		aclsToDelete.Insert(acl.UUID)
+	}
+	swWithACLsPred := func(sw *nbdb.LogicalSwitch) bool {
+		return aclsToDelete.HasAny(sw.ACLs...)
+	}
 	// Find all switches
-	switches, err := findSwitches(nbClient)
+	switches, err := findSwitchesByPredicate(nbClient, swWithACLsPred)
 	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
 

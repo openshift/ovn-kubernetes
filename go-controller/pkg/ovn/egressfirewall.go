@@ -6,16 +6,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pkg/errors"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -27,6 +27,7 @@ const (
 	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
 	egressFirewallACLExtIdKey = "egressFirewall"
+	aclDeleteBatchSize        = 1000
 )
 
 type egressFirewall struct {
@@ -164,9 +165,11 @@ func (oc *Controller) syncEgressFirewallRetriable(egressFirewalls []interface{})
 
 	// delete acls from all switches, they reside on the port group now
 	if len(egressFirewallACLs) != 0 {
-		err = libovsdbops.RemoveACLsFromAllSwitches(oc.nbClient, egressFirewallACLs)
+		err = batching.Batch(aclDeleteBatchSize, egressFirewallACLs, func(batchACLs []nbdb.ACL) error {
+			return libovsdbops.RemoveACLsFromAllSwitches(oc.nbClient, batchACLs)
+		})
 		if err != nil {
-			return fmt.Errorf("failed to remove reject acl from all logical switches: %v", err)
+			return fmt.Errorf("failed to remove egress firewall acls from all logical switches: %v", err)
 		}
 	}
 
@@ -214,7 +217,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 			egressFirewall.Name, egressFirewall.Namespace)
 	}
 
-	var addErrors error
+	var errorList []error
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		// process Rules into egressFirewallRules for egressFirewall struct
 		if i > types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority {
@@ -224,15 +227,15 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		}
 		efr, err := newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create EgressFirewall Rule to destination %s for namespace %s - %v",
-				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err)
+			errorList = append(errorList, fmt.Errorf("cannot create EgressFirewall Rule to destination %s for namespace %s: %w",
+				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
 			continue
 
 		}
 		ef.egressRules = append(ef.egressRules, efr)
 	}
-	if addErrors != nil {
-		return addErrors
+	if len(errorList) > 0 {
+		return errors.NewAggregate(errorList)
 	}
 
 	// EgressFirewall needs to make sure that the address_set for the namespace exists independently of the namespace object
