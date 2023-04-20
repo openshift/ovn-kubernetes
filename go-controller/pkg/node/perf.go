@@ -56,7 +56,7 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				cmd := exec.Command("/usr/bin/perf", "record", "-o", fname, "-p", pid)
+				cmd := exec.Command("/usr/bin/perf", "record", "-g", "-o", fname, "-p", pid)
 				if err := cmd.Start(); err != nil {
 					klog.Warningf("##### error starting perf: %v", err)
 					return
