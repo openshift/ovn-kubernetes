@@ -618,6 +618,7 @@ func (pr *PodRequest) deletePodConntrack() {
 		return
 	}
 
+	klog.Warningf("##### [%s/%s] clearing pod conntrack for IPs %v", pr.PodNamespace, pr.PodName, result.IPs)
 	for _, ip := range result.IPs {
 		// Skip known non-sandbox interfaces
 		if ip.Interface != nil {

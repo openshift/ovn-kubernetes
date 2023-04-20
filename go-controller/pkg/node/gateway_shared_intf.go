@@ -628,6 +628,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 
 // deleteConntrackForServiceVIP deletes the conntrack entries for the provided svcVIP:svcPort by comparing them to ConntrackOrigDstIP:ConntrackOrigDstPort
 func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []kapi.ServicePort, ns, name string) error {
+	klog.Warningf("##### [%s/%s] clearing service conntrack for VIPS %v", ns, name, svcVIPs)
 	for _, svcVIP := range svcVIPs {
 		for _, svcPort := range svcPorts {
 			err := util.DeleteConntrack(svcVIP, svcPort.Port, svcPort.Protocol, netlink.ConntrackOrigDstIP, nil)
@@ -644,12 +645,14 @@ func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []kapi.ServicePort,
 func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) error {
 	// remove conntrack entries for LB VIPs and External IPs
 	externalIPs := util.GetExternalAndLBIPs(service)
+	klog.Warningf("##### [%s/%s] clearing service conntrack for externalIPs %v", service.Namespace, service.Name, externalIPs)
 	if err := deleteConntrackForServiceVIP(externalIPs, service.Spec.Ports, service.Namespace, service.Name); err != nil {
 		return err
 	}
 	if util.ServiceTypeHasNodePort(service) {
 		// remove conntrack entries for NodePorts
 		nodeIPs := npw.nodeIPManager.ListAddresses()
+		klog.Warningf("##### [%s/%s] clearing service conntrack for node IPs %v", service.Namespace, service.Name, nodeIPs)
 		for _, nodeIP := range nodeIPs {
 			for _, svcPort := range service.Spec.Ports {
 				err := util.DeleteConntrack(nodeIP.String(), svcPort.NodePort, svcPort.Protocol, netlink.ConntrackOrigDstIP, nil)
@@ -662,6 +665,7 @@ func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) err
 	}
 	// remove conntrack entries for ClusterIPs
 	clusterIPs := util.GetClusterIPs(service)
+	klog.Warningf("##### [%s/%s] clearing service conntrack for clusterIPs %v", service.Namespace, service.Name, clusterIPs)
 	if err := deleteConntrackForServiceVIP(clusterIPs, service.Spec.Ports, service.Namespace, service.Name); err != nil {
 		return err
 	}

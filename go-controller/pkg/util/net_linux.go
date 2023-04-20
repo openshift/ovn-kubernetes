@@ -457,6 +457,7 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 		}
 	}
 
+	klog.Warningf("#####         clearing conntrack for %s:%d %s", ip, port, protocol)
 	if ipAddress.To4() != nil {
 		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err

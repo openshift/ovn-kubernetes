@@ -846,6 +846,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 		return fmt.Errorf("error while retrieving service for endpointslice %s/%s when reconciling conntrack: %v",
 			newEndpointSlice.Namespace, newEndpointSlice.Name, err)
 	}
+	klog.Warningf("##### [%s/%s] clearing endpointslice conntrack", namespacedName.Namespace, namespacedName.Name)
 	for _, oldPort := range oldEndpointSlice.Ports {
 		if *oldPort.Protocol != kapi.ProtocolUDP { // flush conntrack only for UDP
 			continue
@@ -959,6 +960,7 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 		if err != nil {
 			errors = append(errors, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}
+		klog.Warningf("##### [%s/%s] clearing exgw pod conntrack for %v", pod.Namespace, pod.Name, podIPs)
 		for _, podIP := range podIPs { // flush conntrack only for UDP
 			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
 			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
