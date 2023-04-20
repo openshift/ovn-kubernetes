@@ -1,8 +1,6 @@
 package node
 
 import (
-	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,43 +11,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func getPidOf(item string) (string, error) {
-	if item[0] == '/' {
-		pid, err := ioutil.ReadFile(item)
-		if err != nil {
-			return "", err
-		}
-		return strings.Trim(string(pid), " \n"), nil
-	}
-
-	files, err := os.ReadDir("/host/proc")
-	if err != nil {
-		return "", err
-	}
-
-	for _, file := range files {
-		filepath := fmt.Sprintf("/host/proc/%s/comm", file.Name())
-		comm, err := ioutil.ReadFile(filepath)
-		if err != nil {
-			continue
-		}
-
-		klog.Infof("### %s == %q", filepath, string(comm))
-		if string(comm) == item {
-			return file.Name(), nil
-		}
-	}
-
-	return "", fmt.Errorf("not found")
-}
-
 func startOnePerf(stopChan chan struct{}, pidfile string) error {
-	pid, err := getPidOf(pidfile)
-	if err != nil {
-		return fmt.Errorf("Failed to get pid for %s: %v", pidfile, err)
-	}
-
-	fname := fmt.Sprintf("perf.data.%s", pid)
+	fname := "perf.data"
 	go func() {
 		for {
 			wg := sync.WaitGroup{}
@@ -57,7 +20,7 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				cmd := exec.Command("/usr/bin/perf", "record", "-g", "-o", fname, "-p", pid)
+				cmd := exec.Command("/usr/bin/perf", "record", "-g", "-o", fname)
 				if err := cmd.Start(); err != nil {
 					klog.Warningf("##### error starting perf: %v", err)
 					return
