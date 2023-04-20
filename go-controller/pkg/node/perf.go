@@ -35,7 +35,7 @@ func getPidOf(item string) (string, error) {
 		}
 
 		klog.Infof("### %s == %q", filepath, string(comm))
-		if string(comm) == item {
+		if strings.TrimSpace(string(comm)) == item {
 			return file.Name(), nil
 		}
 	}
