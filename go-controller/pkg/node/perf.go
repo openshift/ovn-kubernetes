@@ -34,7 +34,6 @@ func getPidOf(item string) (string, error) {
 			continue
 		}
 
-		klog.Infof("### %s == %q", filepath, string(comm))
 		if strings.TrimSpace(string(comm)) == item {
 			return file.Name(), nil
 		}
@@ -44,13 +43,30 @@ func getPidOf(item string) (string, error) {
 }
 
 func startOnePerf(stopChan chan struct{}, pidfile string) error {
-	pid, err := getPidOf(pidfile)
-	if err != nil {
-		return fmt.Errorf("Failed to get pid for %s: %v", pidfile, err)
-	}
-
-	fname := fmt.Sprintf("perf.data.%s", pid)
 	go func() {
+		pid, err := getPidOf(pidfile)
+		if err != nil {
+			klog.Warningf("Failed to get pid for %s: %v", pidfile, err)
+		}
+
+		if pid == "" {
+			for {
+				select {
+				case <-stopChan:
+					return
+				case <-time.After(time.Second * 5):
+					pid, err = getPidOf(pidfile)
+					if err != nil {
+						klog.Warningf("Failed to get pid for %s: %v", pidfile, err)
+					}
+				}
+				if pid != "" {
+					break
+				}
+			}
+		}
+
+		fname := fmt.Sprintf("perf.data.%s", pid)
 		for {
 			wg := sync.WaitGroup{}
 			var perfpid int
