@@ -48,7 +48,7 @@ RUN INSTALL_PKGS=" \
 COPY glibc-common-debuginfo-2.34-60.el9.x86_64.rpm libnl3-debuginfo-3.5.0-10.el9.x86_64.rpm glibc-debuginfo-2.34-60.el9.x86_64.rpm libbpf-1.1.0-1.el9.x86_64.rpm openvswitch3.1-debuginfo-3.1.0-14.el9fdp.x86_64.rpm /root/
 RUN  rpm -ihv --nodeps --force /root/*.rpm && dnf -y install perf
 COPY ovn23.03-debuginfo-23.03.0-7.el9fdp.x86_64.rpm ovn23.03-host-23.03.0-7.el9fdp.x86_64.rpm /root/
-RUN  rpm -Uhv --nodeps --force /root/*.rpm
+RUN  rpm -Uhv --nodeps --force /root/ovn*.rpm
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/

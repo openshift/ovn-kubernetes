@@ -42,38 +42,56 @@ func getPidOf(item string) (string, error) {
 	return "", fmt.Errorf("not found")
 }
 
-func startOnePerf(stopChan chan struct{}, pidfile string) error {
-	go func() {
-		pid, err := getPidOf(pidfile)
-		if err != nil {
-			klog.Warningf("Failed to get pid for %s: %v", pidfile, err)
-		}
+func reallyGetPidOf(item string, stopChan chan struct{}) string {
+	pid, err := getPidOf(item)
+	if pid != "" {
+		return pid
+	}
 
-		if pid == "" {
-			for {
-				select {
-				case <-stopChan:
-					return
-				case <-time.After(time.Second * 5):
-					pid, err = getPidOf(pidfile)
-					if err != nil {
-						klog.Warningf("Failed to get pid for %s: %v", pidfile, err)
-					}
-				}
-				if pid != "" {
-					break
-				}
+	for {
+		select {
+		case <-stopChan:
+			return ""
+		case <-time.After(time.Second * 5):
+			pid, err = getPidOf(item)
+			if err != nil {
+				klog.Warningf("Failed to get pid for %s: %v", item, err)
 			}
 		}
+		if pid != "" {
+			return pid
+		}
+	}
+	return ""
+}
 
-		fname := fmt.Sprintf("perf.data.%s", pid)
+func startOnePerf(stopChan chan struct{}, pidfile string) error {
+	go func() {
+		var pid string
+
+		fname := "perf.data"
+		numLines := 30
+		if pidfile != "" {
+			pid = reallyGetPidOf(pidfile, stopChan)
+			if pid == "" {
+				// stopchan closed
+				return
+			}
+			fname = fmt.Sprintf("perf.data.%s", pid)
+			numLines = 300
+		}
+
 		for {
 			wg := sync.WaitGroup{}
 			var perfpid int
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				cmd := exec.Command("/usr/bin/perf", "record", "-g", "-o", fname, "-p", pid)
+				args := []string{"record", "-o", fname}
+				if pid != "" {
+					args = append(args, "-g", "-p", pid)
+				}
+				cmd := exec.Command("/usr/bin/perf", args...)
 				if err := cmd.Start(); err != nil {
 					klog.Warningf("##### error starting perf: %v", err)
 					return
@@ -94,14 +112,18 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 			case <-stopChan:
 				return
 			case <-time.After(time.Millisecond):
-				cmd := exec.Command("/usr/bin/perf", "report", "-g", "graph,1,5", "-i", fname, "--stdio")
+				args := []string{"report", "-i", fname, "--stdio"}
+				if pid != "" {
+					args = append(args, "-g", "graph,1,5")
+				}
+				cmd := exec.Command("/usr/bin/perf", args...)
 				out, _ := cmd.CombinedOutput()
 				if len(out) > 0 {
 					lines := strings.Split(string(out), "\n")
 					var realout string
 					var c int
 					for _, l := range lines {
-						if c > 300 {
+						if c > numLines {
 							break
 						}
 						if len(l) > 0 && l[0] != '#' && len(strings.TrimSpace(l)) != 0 {
@@ -129,6 +151,10 @@ func startPerf(stopChan chan struct{}) error {
 	}
 
 	if err := startOnePerf(stopChan, "NetworkManager"); err != nil {
+		return err
+	}
+
+	if err := startOnePerf(stopChan, ""); err != nil {
 		return err
 	}
 
