@@ -20,9 +20,19 @@ var (
 	minRsrc           = resource.MustParse("1k")
 	maxRsrc           = resource.MustParse("1P")
 	BandwidthNotFound = &notFoundError{}
+
+	ovsSemaphore = make(chan int, 3)
 )
 
 type direction int
+
+func acquireSemaphore() {
+	ovsSemaphore <- 1
+}
+
+func releaseSemaphore() {
+	<-ovsSemaphore
+}
 
 func (d direction) String() string {
 	if d == Egress {
@@ -156,6 +166,8 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, useOVS
 }
 
 func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
+	acquireSemaphore()
+	defer releaseSemaphore()
 	// assume success case, return an empty Result
 	response := &Response{}
 	response.Result = &current.Result{}
@@ -276,6 +288,8 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, useOVSExternalI
 // instance of the pod in the apiserver, see checkCancelSandbox for more info.
 // If kube api is not available from the CNI, pass nil to skip this check.
 func (pr *PodRequest) getCNIResult(getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+	acquireSemaphore()
+	defer releaseSemaphore()
 	interfacesArray, err := pr.ConfigureInterface(getter, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
