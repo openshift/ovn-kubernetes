@@ -604,7 +604,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	if err := clearPodBandwidth(pr.SandboxID); err != nil {
 		klog.Warningf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
 	}
-	pr.deletePodConntrack()
+//	pr.deletePodConntrack()
 	return nil
 }
 
