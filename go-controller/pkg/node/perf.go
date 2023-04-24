@@ -70,7 +70,7 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 		var pid string
 
 		fname := "perf.data"
-		numLines := 30
+		numLines := 300
 		if pidfile != "" {
 			pid = reallyGetPidOf(pidfile, stopChan)
 			if pid == "" {
@@ -87,7 +87,7 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				args := []string{"record", "-o", fname}
+				args := []string{"record", "-o", fname, "-g"}
 				if pid != "" {
 					args = append(args, "-g", "-p", pid)
 				}
@@ -113,7 +113,7 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 				return
 			case <-time.After(time.Millisecond):
 				args := []string{"report", "-i", fname, "--stdio"}
-				if pid != "" {
+				if pid != "dddddddddd" {
 					args = append(args, "-g", "graph,1,5")
 				}
 				cmd := exec.Command("/usr/bin/perf", args...)
@@ -142,16 +142,18 @@ func startOnePerf(stopChan chan struct{}, pidfile string) error {
 }
 
 func startPerf(stopChan chan struct{}) error {
-	if err := startOnePerf(stopChan, "/var/run/openvswitch/ovs-vswitchd.pid"); err != nil {
-		return err
-	}
+	if false {
+		if err := startOnePerf(stopChan, "/var/run/openvswitch/ovs-vswitchd.pid"); err != nil {
+			return err
+		}
 
-	if err := startOnePerf(stopChan, "/var/run/ovn/ovn-controller.pid"); err != nil {
-		return err
-	}
+		if err := startOnePerf(stopChan, "/var/run/ovn/ovn-controller.pid"); err != nil {
+			return err
+		}
 
-	if err := startOnePerf(stopChan, "NetworkManager"); err != nil {
-		return err
+		if err := startOnePerf(stopChan, "NetworkManager"); err != nil {
+			return err
+		}
 	}
 
 	if err := startOnePerf(stopChan, ""); err != nil {
