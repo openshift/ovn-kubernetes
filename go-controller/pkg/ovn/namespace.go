@@ -356,6 +356,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				klog.Errorf("Failed to get all the pods (%v)", err)
 			}
 			for _, pod := range existingPods {
+				if util.PodCompleted(pod) {
+					continue
+				}
 				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 				if err != nil {
 					klog.Error(err.Error())

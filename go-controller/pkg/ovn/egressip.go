@@ -874,6 +874,12 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 	if err != nil {
 		return nil
 	}
+	// If pod is already in succeeded or failed state, return it without proceeding further.
+	if util.PodCompleted(pod) {
+		klog.Infof("Pod %s is already in completed state, skipping egress ip assignment", podKey)
+		return nil
+	}
+	klog.Infof("Pod %s is not in completed state, proceeding with egress ip assignment", podKey)
 	// Since the logical switch port cache removes entries only 60 seconds
 	// after deletion, its possible that when pod is recreated with the same name
 	// within the 60seconds timer, stale info gets used to create SNATs and reroutes
@@ -1980,7 +1986,8 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 // external GW setup in those cases.
 func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, status egressipv1.EgressIPStatusItem) error {
 	if config.Gateway.DisableSNATMultipleGWs {
-		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node {
+		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node &&
+			!util.PodCompleted(pod) {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			// NOTE: This needs to be done only if the pod was on the same node as egressNode
 			extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)

@@ -729,7 +729,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return err
 		}
-	} else if config.Gateway.DisableSNATMultipleGWs {
+	} else if config.Gateway.DisableSNATMultipleGWs && !util.PodCompleted(pod) {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
