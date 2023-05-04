@@ -36,10 +36,12 @@ func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error)
 		if err != nil {
 			return "", gatewayIPs, err
 		}
-		// validate that both IP Families use the same interface for the gateway
+
+		// if there is an interface specified for both IP families
+		// validate they use the same one
 		if intfName == "" {
 			intfName = intfIPv6Name
-		} else if intfName != intfIPv6Name {
+		} else if (len(intfName) > 0 && len(intfIPv6Name) > 0) && intfName != intfIPv6Name {
 			return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfIPv6Name)
 		}
 		gatewayIPs = append(gatewayIPs, gw)
@@ -58,7 +60,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 	gwIfIdx := 0
 	// gw interface provided
 	if len(gwIface) > 0 {
-		link, err := netlink.LinkByName(gwIface)
+		link, err := util.GetNetLinkOps().LinkByName(gwIface)
 		if err != nil {
 			return "", nil, fmt.Errorf("error looking up gw interface: %q, error: %w", gwIface, err)
 		}
@@ -69,7 +71,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 		klog.Infof("Provided gateway interface %q, found as index: %d", gwIface, gwIfIdx)
 	}
 
-	routeList, err := netlink.RouteListFiltered(family, filter, mask)
+	routeList, err := util.GetNetLinkOps().RouteListFiltered(family, filter, mask)
 	if err != nil {
 		return "", nil, errors.Wrapf(err, "failed to get routing table in node")
 	}
@@ -78,7 +80,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 	for _, r := range routes {
 		// no multipath
 		if len(r.MultiPath) == 0 {
-			intfLink, err := netlink.LinkByIndex(r.LinkIndex)
+			intfLink, err := util.GetNetLinkOps().LinkByIndex(r.LinkIndex)
 			if err != nil {
 				klog.Warningf("Failed to get interface link for route %v : %v", r, err)
 				continue
@@ -104,7 +106,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 		// TODO: revisit for full multipath support
 		// xref: https://github.com/vishvananda/netlink/blob/6ffafa9fc19b848776f4fd608c4ad09509aaacb4/route.go#L137-L145
 		for _, nh := range r.MultiPath {
-			intfLink, err := netlink.LinkByIndex(nh.LinkIndex)
+			intfLink, err := util.GetNetLinkOps().LinkByIndex(nh.LinkIndex)
 			if err != nil {
 				klog.Warningf("Failed to get interface link for route %v : %v", nh, err)
 				continue
