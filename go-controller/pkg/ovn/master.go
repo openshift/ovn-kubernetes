@@ -1251,9 +1251,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
 			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
-			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
-			oc.recordNodeErrorEvent(node, err)
-			return err
+			return fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
 		}
 		oc.addNodeFailed.Delete(node.Name)
 	}
@@ -1347,12 +1345,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		}
 	}
 
-	err = kerrors.NewAggregate(errs)
-	if err != nil {
-		oc.recordNodeErrorEvent(node, err)
-	}
-
-	return err
+	return kerrors.NewAggregate(errs)
 }
 
 func (oc *Controller) recordNodeErrorEvent(node *kapi.Node, nodeErr error) {

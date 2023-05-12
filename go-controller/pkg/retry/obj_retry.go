@@ -225,6 +225,9 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			klog.Warningf("Dropping retry entry for %s %s: exceeded number of failed attempts",
 				r.ResourceHandler.ObjType, objKey)
 			r.DeleteRetryObj(key)
+			if entry.newObj != nil {
+				r.ResourceHandler.RecordErrorEvent(entry.newObj, fmt.Errorf("failed to reconcile and retried %d times for object: %v", MaxFailedAttempts, entry.newObj))
+			}
 			return
 		}
 		forceRetry := false
