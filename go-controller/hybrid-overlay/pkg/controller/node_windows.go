@@ -38,6 +38,7 @@ type NodeController struct {
 func newNodeController(kube kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
+	podLister listers.PodLister,
 ) (nodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {

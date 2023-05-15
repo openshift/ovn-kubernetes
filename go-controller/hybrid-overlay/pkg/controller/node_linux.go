@@ -42,7 +42,10 @@ type flowCacheEntry struct {
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
 	nodeName string
-	// an atomic uint32 for testing purposes 0 = uninitialized and 1 = initialized
+	// an atomic uint32 to check the initialization status
+	// 0 = not initialized
+	// 1 = drIP and drMAC are set but the initial pods are not wired for hybrid overlay
+	// 2 = drIP and drMAC are set and the intiial pods are wired for hybrid overlay
 	initialized uint32
 	drMAC       net.HardwareAddr
 	drIP        net.IP
@@ -55,6 +58,7 @@ type NodeController struct {
 	flowChan chan struct{}
 
 	nodeLister listers.NodeLister
+	podLister  listers.PodLister
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -66,6 +70,7 @@ func newNodeController(
 	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
+	podLister listers.PodLister,
 ) (nodeController, error) {
 
 	node := &NodeController{
@@ -75,7 +80,9 @@ func newNodeController(
 		flowMutex:  sync.Mutex{},
 		flowChan:   make(chan struct{}, 1),
 		nodeLister: nodeLister,
+		podLister:  podLister,
 	}
+	atomic.StoreUint32(&node.initialized, 0)
 	return node, nil
 }
 
@@ -268,6 +275,20 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 	} else {
 		klog.Infof("Add hybridOverlay Node %s", node.Name)
 		err = n.hybridOverlayNodeUpdate(node)
+	}
+	if atomic.LoadUint32(&n.initialized) == 1 {
+		pods, err := n.podLister.List(labels.Everything())
+		if err != nil {
+			return fmt.Errorf("cannot fully initialize node %s for hybrid overlay, cannot list pods: %v", n.nodeName, err)
+		}
+
+		for _, pod := range pods {
+			err := n.AddPod(pod)
+			if err != nil {
+				klog.Errorf("Cannot wire pod %s for hybrid overlay, %v", pod.Name, err)
+			}
+		}
+		atomic.StoreUint32(&n.initialized, 2)
 	}
 	return err
 }
@@ -476,7 +497,7 @@ func (n *NodeController) handleHybridOverlayMACIPChange(node *kapi.Node) error {
 
 // EnsureHybridOverlayBridge sets up the hybrid overlay bridge
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
-	if atomic.LoadUint32(&n.initialized) == 1 {
+	if atomic.LoadUint32(&n.initialized) >= 1 {
 		if node.Annotations[hotypes.HybridOverlayDRIP] != n.drIP.String() ||
 			node.Annotations[hotypes.HybridOverlayDRMAC] != n.drMAC.String() {
 			if err := n.handleHybridOverlayMACIPChange(node); err != nil {
