@@ -39,13 +39,12 @@ type nodeNetworkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 }
 
-// NewNetworkController create secondary node network controllers for the given NetInfo and NetConfInfo
-func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	topoType := netConfInfo.TopologyType()
+// NewNetworkController create secondary node network controllers for the given NetInfo
+func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, netConfInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -187,7 +186,7 @@ func (ncm *nodeNetworkControllerManager) Stop() {
 // derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
 // not scheduled to the node.
 func (ncm *nodeNetworkControllerManager) checkForStaleOVSRepresentorInterfaces() {
-	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
+	// Get all representor interfaces. these are OVS interfaces that have their external_ids:sandbox and vf-netdev-name set.
 	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"", "external_ids:vf-netdev-name!=\"\"")
 	if err != nil {

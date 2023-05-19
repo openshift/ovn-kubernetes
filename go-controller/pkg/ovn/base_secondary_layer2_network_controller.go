@@ -7,8 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	iputils "github.com/containernetworking/plugins/pkg/ip"
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -50,18 +54,42 @@ func (h *secondaryLayer2NetworkControllerEventHandler) GetResourceFromInformerCa
 
 // RecordAddEvent records the add event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordUpdateEvent records the udpate event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording update event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordDeleteEvent records the delete event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording delete event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordSuccessEvent records the success event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().End("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordErrorEvent records the error event on this given object.
@@ -107,6 +135,12 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 		case factory.PodType:
 			syncFunc = h.oc.syncPodsForSecondaryNetwork
 
+		case factory.NamespaceType:
+			syncFunc = h.oc.syncNamespaces
+
+		case factory.MultiNetworkPolicyType:
+			syncFunc = h.oc.syncMultiNetworkPolicies
+
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -131,6 +165,14 @@ type BaseSecondaryLayer2NetworkController struct {
 
 func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
+
+	// For secondary networks, we don't have to watch namespace events if
+	// multi-network policy support is not enabled. We don't support
+	// multi-network policy for IPAM-less secondary networks either.
+	if util.IsMultiNetworkPoliciesSupportEnabled() && oc.doesNetworkRequireIPAM() {
+		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
+	}
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
@@ -163,8 +205,14 @@ func (oc *BaseSecondaryLayer2NetworkController) Stop() {
 	close(oc.stopChan)
 	oc.wg.Wait()
 
+	if oc.policyHandler != nil {
+		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
+	}
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
+	}
+	if oc.namespaceHandler != nil {
+		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
 }
 
@@ -182,6 +230,11 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, netName)
+	if err != nil {
+		return err
+	}
+
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting switches of network %s: %v", netName, err)
@@ -194,7 +247,18 @@ func (oc *BaseSecondaryLayer2NetworkController) Run() error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
 	start := time.Now()
 
+	// WatchNamespaces() should be started first because it has no other
+	// dependencies, and WatchNodes() depends on it
+	if err := oc.WatchNamespaces(); err != nil {
+		return err
+	}
+
 	if err := oc.WatchPods(); err != nil {
+		return err
+	}
+
+	// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
+	if err := oc.WatchMultiNetworkPolicy(); err != nil {
 		return err
 	}
 
@@ -208,7 +272,7 @@ func (oc *BaseSecondaryLayer2NetworkController) Run() error {
 	return nil
 }
 
-func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchName string, clusterSubnets []*net.IPNet,
+func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchName string, clusterSubnets []config.CIDRNetworkEntry,
 	excludeSubnets []*net.IPNet) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
@@ -219,7 +283,8 @@ func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchNa
 	logicalSwitch.ExternalIDs[types.TopologyVersionExternalID] = strconv.Itoa(oc.topologyVersion)
 
 	hostSubnets := make([]*net.IPNet, 0, len(clusterSubnets))
-	for _, subnet := range clusterSubnets {
+	for _, clusterSubnet := range clusterSubnets {
+		subnet := clusterSubnet.CIDR
 		hostSubnets = append(hostSubnets, subnet)
 		if utilnet.IsIPv6CIDR(subnet) {
 			logicalSwitch.OtherConfig = map[string]string{"ipv6_prefix": subnet.IP.String()}
@@ -239,7 +304,7 @@ func (oc *BaseSecondaryLayer2NetworkController) InitializeLogicalSwitch(switchNa
 
 	// FIXME: allocate IP ranges when https://github.com/ovn-org/ovn-kubernetes/issues/3369 is fixed
 	for _, excludeSubnet := range excludeSubnets {
-		for excludeIP := excludeSubnet.IP; excludeSubnet.Contains(excludeIP); excludeIP = util.NextIP(excludeIP) {
+		for excludeIP := excludeSubnet.IP; excludeSubnet.Contains(excludeIP); excludeIP = iputils.NextIP(excludeIP) {
 			var ipMask net.IPMask
 			if excludeIP.To4() != nil {
 				ipMask = net.CIDRMask(32, 32)

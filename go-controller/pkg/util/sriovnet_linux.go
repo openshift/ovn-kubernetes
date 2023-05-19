@@ -7,19 +7,22 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/Mellanox/sriovnet"
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
+	"github.com/k8snetworkplumbingwg/sriovnet"
 )
 
 type SriovnetOps interface {
 	GetNetDevicesFromPci(pciAddress string) ([]string, error)
+	GetNetDevicesFromAux(auxDev string) ([]string, error)
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
+	GetPfIndexByVfPciAddress(vfPciAddress string) (int, error)
 	GetSfIndexByAuxDev(auxDev string) (int, error)
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
 	GetSfRepresentor(uplink string, sfIndex int) (string, error)
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
+	GetPfPciFromAux(auxDev string) (string, error)
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
@@ -44,6 +47,10 @@ func (defaultSriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, err
 	return sriovnet.GetNetDevicesFromPci(pciAddress)
 }
 
+func (defaultSriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
+	return sriovnet.GetNetDevicesFromAux(auxDev)
+}
+
 func (defaultSriovnetOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
 	return sriovnet.GetUplinkRepresentor(vfPciAddress)
 }
@@ -54,6 +61,10 @@ func (defaultSriovnetOps) GetUplinkRepresentorFromAux(auxDev string) (string, er
 
 func (defaultSriovnetOps) GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
 	return sriovnet.GetVfIndexByPciAddress(vfPciAddress)
+}
+
+func (defaultSriovnetOps) GetPfIndexByVfPciAddress(vfPciAddress string) (int, error) {
+	return sriovnet.GetPfIndexByVfPciAddress(vfPciAddress)
 }
 
 func (defaultSriovnetOps) GetSfIndexByAuxDev(auxDev string) (int, error) {
@@ -70,6 +81,10 @@ func (defaultSriovnetOps) GetSfRepresentor(uplink string, sfIndex int) (string, 
 
 func (defaultSriovnetOps) GetPfPciFromVfPci(vfPciAddress string) (string, error) {
 	return sriovnet.GetPfPciFromVfPci(vfPciAddress)
+}
+
+func (defaultSriovnetOps) GetPfPciFromAux(auxDev string) (string, error) {
+	return sriovnet.GetPfPciFromAux(auxDev)
 }
 
 func (defaultSriovnetOps) GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
@@ -134,6 +149,8 @@ func GetNetdevNameFromDeviceId(deviceId string) (string, error) {
 		}
 
 		netdevices, err = GetSriovnetOps().GetNetDevicesFromPci(deviceId)
+	} else { // Auxiliary network device
+		netdevices, err = GetSriovnetOps().GetNetDevicesFromAux(deviceId)
 	}
 	if err != nil {
 		return "", err

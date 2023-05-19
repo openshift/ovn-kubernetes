@@ -137,8 +137,8 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		Copp:        &oc.defaultCOPPUUID,
 	}
 
-	if oc.loadBalancerGroupUUID != "" {
-		logicalRouter.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
+	if oc.clusterLoadBalancerGroupUUID != "" && oc.routerLoadBalancerGroupUUID != "" {
+		logicalRouter.LoadBalancerGroup = []string{oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID}
 	}
 
 	// If l3gatewayAnnotation.IPAddresses changed, we need to update the perPodSNATs,
@@ -594,7 +594,7 @@ func (oc *DefaultNetworkController) addPolicyBasedRoutes(nodeName, mgmtPortIP st
 // N+2 is fully made.
 func (oc *DefaultNetworkController) syncPolicyBasedRoutes(nodeName string, matches sets.Set[string], priority, nexthop string) error {
 	// create a map to track matches found
-	matchTracker := sets.NewString(matches.UnsortedList()...)
+	matchTracker := sets.New(sets.List(matches)...)
 
 	if priority == types.NodeSubnetPolicyPriority {
 		policies, err := oc.findPolicyBasedRoutes(priority)

@@ -20,6 +20,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -54,8 +55,15 @@ type CommonNetworkControllerInfo struct {
 	// has SCTP support
 	SCTPSupport bool
 
-	// Supports multicast?
+	// has multicast support; set to false for secondary networks.
+	// TBD: Changes need to be made to support multicast for secondary networks
 	multicastSupport bool
+
+	// Supports OVN Template Load Balancers?
+	svcTemplateSupport bool
+
+	// Northbound database zone name to which this Controller is connected to - aka local zone
+	zone string
 }
 
 // BaseNetworkController structure holds per-network fields and network specific configuration
@@ -66,19 +74,24 @@ type BaseNetworkController struct {
 	// controllerName should be used to identify objects owned by given controller in the db
 	controllerName string
 
-	// per controller NAD/netconf name information
+	// network information
 	util.NetInfo
-	util.NetConfInfo
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
 	// retry framework for nodes
 	retryNodes *ovnretry.RetryFramework
+	// retry framework for namespaces
+	retryNamespaces *ovnretry.RetryFramework
+	// retry framework for network policies
+	retryNetworkPolicies *ovnretry.RetryFramework
 
 	// pod events factory handler
 	podHandler *factory.Handler
 	// node events factory handler
 	nodeHandler *factory.Handler
+	// namespace events factory Handler
+	namespaceHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
@@ -100,38 +113,62 @@ type BaseNetworkController struct {
 	// and will eventually updated to latest version once topology upgrade is done.
 	topologyVersion int
 
+	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
+	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
+	// network policy is only deleted from this map after successful cleanup.
+	// Allowed order of locking is namespace Lock -> oc.networkPolicies key Lock -> networkPolicy.Lock
+	// Don't take namespace Lock while holding networkPolicy key lock to avoid deadlock.
+	networkPolicies *syncmap.SyncMap[*networkPolicy]
+
+	// map of existing shared port groups for network policies
+	// port group exists in the db if and only if port group key is present in this map
+	// key is namespace
+	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
+	// make sure to keep this order to avoid deadlocks
+	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
+
+	podSelectorAddressSets *syncmap.SyncMap[*PodSelectorAddressSet]
+
 	// stopChan per controller
 	stopChan chan struct{}
-
 	// waitGroup per-Controller
 	wg *sync.WaitGroup
+
+	// List of nodes which belong to the local zone (stored as a sync map)
+	// If the map is nil, it means the controller is not tracking the node events
+	// and all the nodes are considered as local zone nodes.
+	localZoneNodes *sync.Map
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
 // configuration for secondary network controller
 type BaseSecondaryNetworkController struct {
 	BaseNetworkController
+	// multi-network policy events factory handler
+	policyHandler *factory.Handler
 }
 
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
-	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport bool) (*CommonNetworkControllerInfo, error) {
+	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport bool) (*CommonNetworkControllerInfo, error) {
+	zone, err := util.GetNBZone(nbClient)
+	if err != nil {
+		return nil, fmt.Errorf("error getting NB zone name : err - %w", err)
+	}
 	return &CommonNetworkControllerInfo{
-		client:           client,
-		kube:             kube,
-		watchFactory:     wf,
-		recorder:         recorder,
-		nbClient:         nbClient,
-		sbClient:         sbClient,
-		podRecorder:      podRecorder,
-		SCTPSupport:      SCTPSupport,
-		multicastSupport: multicastSupport,
+		client:             client,
+		kube:               kube,
+		watchFactory:       wf,
+		recorder:           recorder,
+		nbClient:           nbClient,
+		sbClient:           sbClient,
+		podRecorder:        podRecorder,
+		SCTPSupport:        SCTPSupport,
+		multicastSupport:   multicastSupport,
+		svcTemplateSupport: svcTemplateSupport,
+		zone:               zone,
 	}, nil
-}
-
-func (bnc *BaseNetworkController) GetNetworkScopedName(name string) string {
-	return fmt.Sprintf("%s%s", bnc.GetPrefix(), name)
 }
 
 func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
@@ -252,7 +289,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 }
 
 func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostSubnets []*net.IPNet,
-	loadBalancerGroupUUID string) error {
+	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
 	switchName := bnc.GetNetworkScopedName(nodeName)
@@ -297,8 +334,8 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		}
 	}
 
-	if loadBalancerGroupUUID != "" {
-		logicalSwitch.LoadBalancerGroup = []string{loadBalancerGroupUUID}
+	if clusterLoadBalancerGroupUUID != "" && switchLoadBalancerGroupUUID != "" {
+		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
 	// If supported, enable IGMP/MLD snooping and querier on the node.
@@ -341,9 +378,8 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		return err
 	}
 
-	// multicast is only supported in default network for now
 	if bnc.multicastSupport {
-		err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, types.ClusterRtrPortGroupName, logicalSwitchPort.UUID)
+		err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase), logicalSwitchPort.UUID)
 		if err != nil {
 			klog.Errorf(err.Error())
 			return err
@@ -659,4 +695,68 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return !((bnc.TopologyType() == types.Layer2Topology || bnc.TopologyType() == types.LocalnetTopology) && len(bnc.Subnets()) == 0)
+}
+
+func (bnc *BaseNetworkController) buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
+	externalIds := map[string]string{"name": name}
+	if bnc.IsSecondary() {
+		externalIds[types.NetworkExternalID] = bnc.GetNetworkName()
+	}
+	return libovsdbops.BuildPortGroup(hashName, ports, acls, externalIds)
+}
+
+func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
+	if !bnc.IsSecondary() {
+		return []string{types.DefaultNetworkName}
+	}
+	on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnc.NetInfo)
+	// skip pods that are not on this network
+	if err != nil || !on {
+		if err != nil {
+			// if we are not able to determine if this pod is on this network continue processing the
+			// remaining pods anyway, hopefully the pod will be handled in a future pod update event.
+			klog.Warningf("Failed to determine if pod %s/%s is on network %s: %v",
+				pod.Namespace, pod.Name, bnc.GetNetworkName(), err)
+		}
+		return []string{}
+	}
+	nadNames := make([]string, 0, len(networkMap))
+	for nadName := range networkMap {
+		nadNames = append(nadNames, nadName)
+	}
+	return nadNames
+}
+
+// getClusterPortGroupName gets network scoped port group hash name; base is either
+// ClusterPortGroupNameBase or ClusterRtrPortGroupNameBase.
+func (bnc *BaseNetworkController) getClusterPortGroupName(base string) string {
+	if bnc.IsSecondary() {
+		return hashedPortGroup(bnc.GetNetworkName()) + "_" + base
+	}
+	return base
+}
+
+// GetLocalZoneNodes returns the list of local zone nodes
+// A node is considered a local zone node if the zone name
+// set in the node's annotation matches with the zone name
+// set in the OVN Northbound database (to which this controller is connected to).
+func (bnc *BaseNetworkController) GetLocalZoneNodes() ([]*kapi.Node, error) {
+	nodes, err := bnc.watchFactory.GetNodes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes: %v", err)
+	}
+
+	var zoneNodes []*kapi.Node
+	for _, n := range nodes {
+		if bnc.isLocalZoneNode(n) {
+			zoneNodes = append(zoneNodes, n)
+		}
+	}
+
+	return zoneNodes, nil
+}
+
+// isLocalZoneNode returns true if the node is part of the local zone.
+func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
+	return util.GetNodeZone(node) == bnc.zone
 }

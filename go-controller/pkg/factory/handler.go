@@ -10,10 +10,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
+	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1"
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
+	egressservicelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 
 	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
@@ -510,6 +512,10 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return egressqoslister.NewEgressQoSLister(sharedInformer.GetIndexer()), nil
 	case NetworkAttachmentDefinitionType:
 		return networkattachmentdefinitionlister.NewNetworkAttachmentDefinitionLister(sharedInformer.GetIndexer()), nil
+	case MultiNetworkPolicyType:
+		return multinetworkpolicylister.NewMultiNetworkPolicyLister(sharedInformer.GetIndexer()), nil
+	case EgressServiceType:
+		return egressservicelister.NewEgressServiceLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

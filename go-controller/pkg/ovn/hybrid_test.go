@@ -22,7 +22,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -30,6 +29,7 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -128,14 +128,14 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 
 }
 
-func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
+func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, switchLBUUID, routerLBUUID, expectedNodeSwitchUUID, node1Name string) {
 	var err error
 	clusterController.SCTPSupport = true
-	clusterController.loadBalancerGroupUUID = clusterLBUUID
+	clusterController.clusterLoadBalancerGroupUUID = clusterLBUUID
+	clusterController.switchLoadBalancerGroupUUID = switchLBUUID
+	clusterController.routerLoadBalancerGroupUUID = routerLBUUID
 	clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitchUUID, []string{node1Name})
-
 }
 
 var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
@@ -295,7 +295,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				NodeMgmtPortMAC: "0a:58:64:40:00:03",
 				DnatSnatIP:      "169.254.0.1",
 			}
-			testNode := node1.k8sNode()
+			testNode := node1.k8sNode("2")
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -303,11 +303,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
+			egressServiceFakeClient := &egressservicefake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 				EgressQoSClient:      egressQoSFakeClient,
+				EgressServiceClient:  egressServiceFakeClient,
 			}
 
 			vlanID := 1024
@@ -338,7 +340,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -346,7 +350,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -369,6 +373,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -385,9 +391,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
-
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -579,7 +583,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 
-			testNode := node1.k8sNode()
+			testNode := node1.k8sNode("2")
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -587,11 +591,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
+			egressServiceFakeClient := &egressservicefake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 				EgressQoSClient:      egressQoSFakeClient,
+				EgressServiceClient:  egressServiceFakeClient,
 			}
 
 			vlanID := 1024
@@ -623,7 +629,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -631,7 +639,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -702,9 +710,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -778,7 +785,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
 				DnatSnatIP:           "169.254.0.1",
 			}
-			testNode := node1.k8sNode()
+			testNode := node1.k8sNode("2")
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
@@ -798,11 +805,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
+			egressServiceFakeClient := &egressservicefake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 				EgressQoSClient:      egressQoSFakeClient,
+				EgressServiceClient:  egressServiceFakeClient,
 			}
 
 			vlanID := 1024
@@ -833,7 +842,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -841,7 +852,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -864,6 +875,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -880,9 +893,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
-
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -1067,7 +1078,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				NodeMgmtPortMAC: "0a:58:64:40:00:03",
 				DnatSnatIP:      "169.254.0.1",
 			}
-			testNode := node1.k8sNode()
+			testNode := node1.k8sNode("2")
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -1075,11 +1086,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
+			egressServiceFakeClient := &egressservicefake.Clientset{}
 			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 				EgressQoSClient:      egressQoSFakeClient,
+				EgressServiceClient:  egressServiceFakeClient,
 			}
 
 			vlanID := 1024
@@ -1110,7 +1123,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -1118,7 +1133,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1141,6 +1156,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -1157,9 +1174,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
-
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
@@ -1282,8 +1297,12 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				NodeMgmtPortMAC: "0a:58:64:40:00:03",
 				DnatSnatIP:      "169.254.0.1",
 			}
-			testNode := node1.k8sNode()
-			testNode.Annotations = map[string]string{hotypes.HybridOverlayDRIP: nodeHOIP, hotypes.HybridOverlayDRMAC: nodeHOMAC}
+			testNode := node1.k8sNode("2")
+			testNode.Annotations = map[string]string{
+				hotypes.HybridOverlayDRIP:                    nodeHOIP,
+				hotypes.HybridOverlayDRMAC:                   nodeHOMAC,
+				"k8s.ovn.org/ovn-node-id":                    "2",
+				"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\": \"100.64.0.2/16\"}"}
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -1322,7 +1341,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -1330,7 +1351,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1353,6 +1374,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
+					expectedSwitchLBGroup,
+					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -1369,9 +1392,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
-
-			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			gomega.Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})

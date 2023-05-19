@@ -22,7 +22,7 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-OVN_VERSION ?= v22.03.0
+OVN_SCHEMA_VERSION ?= v23.03.0
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
 else
@@ -56,7 +56,10 @@ else
 	RACE=1 hack/test-go.sh
 endif
 
-codegen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+	hack/update-modelgen.sh
+
+codegen:
 	hack/update-codegen.sh
 
 install:
@@ -88,7 +91,7 @@ else
 endif
 
 pkg/nbdb/ovn-nb.ovsschema:
-	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-nb.ovsschema -o $@
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-nb.ovsschema -o $@
 
 pkg/sbdb/ovn-sb.ovsschema:
-	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-sb.ovsschema -o $@
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-sb.ovsschema -o $@

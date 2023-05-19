@@ -1,15 +1,10 @@
-# github.com/Mellanox/sriovnet v1.1.0
-## explicit; go 1.13
-github.com/Mellanox/sriovnet
-github.com/Mellanox/sriovnet/pkg/utils/filesystem
-github.com/Mellanox/sriovnet/pkg/utils/netlinkops
 # github.com/Microsoft/go-winio v0.5.2
 ## explicit; go 1.13
 github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/pkg/guid
 github.com/Microsoft/go-winio/pkg/security
 github.com/Microsoft/go-winio/vhd
-# github.com/Microsoft/hcsshim v0.8.20 => github.com/Microsoft/hcsshim v0.8.20
+# github.com/Microsoft/hcsshim v0.9.6 => github.com/Microsoft/hcsshim v0.8.20
 ## explicit; go 1.13
 github.com/Microsoft/hcsshim/computestorage
 github.com/Microsoft/hcsshim/hcn
@@ -28,7 +23,7 @@ github.com/Microsoft/hcsshim/internal/runhcs
 github.com/Microsoft/hcsshim/internal/timeout
 github.com/Microsoft/hcsshim/internal/vmcompute
 github.com/Microsoft/hcsshim/osversion
-# github.com/alexflint/go-filemutex v1.1.0
+# github.com/alexflint/go-filemutex v1.2.0
 ## explicit; go 1.13
 github.com/alexflint/go-filemutex
 # github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
@@ -58,7 +53,7 @@ github.com/cespare/xxhash/v2
 # github.com/containerd/cgroups v1.0.1
 ## explicit; go 1.13
 github.com/containerd/cgroups/stats/v1
-# github.com/containernetworking/cni v1.0.1
+# github.com/containernetworking/cni v1.1.2
 ## explicit; go 1.14
 github.com/containernetworking/cni/libcni
 github.com/containernetworking/cni/pkg/invoke
@@ -71,7 +66,7 @@ github.com/containernetworking/cni/pkg/types/create
 github.com/containernetworking/cni/pkg/types/internal
 github.com/containernetworking/cni/pkg/utils
 github.com/containernetworking/cni/pkg/version
-# github.com/containernetworking/plugins v1.1.1
+# github.com/containernetworking/plugins v1.2.0
 ## explicit; go 1.17
 github.com/containernetworking/plugins/pkg/ip
 github.com/containernetworking/plugins/pkg/ns
@@ -141,6 +136,7 @@ github.com/google/gnostic/openapiv3
 # github.com/google/go-cmp v0.5.9
 ## explicit; go 1.13
 github.com/google/go-cmp/cmp
+github.com/google/go-cmp/cmp/cmpopts
 github.com/google/go-cmp/cmp/internal/diff
 github.com/google/go-cmp/cmp/internal/flags
 github.com/google/go-cmp/cmp/internal/function
@@ -149,7 +145,7 @@ github.com/google/go-cmp/cmp/internal/value
 ## explicit; go 1.12
 github.com/google/gofuzz
 github.com/google/gofuzz/bytesource
-# github.com/google/uuid v1.2.0
+# github.com/google/uuid v1.3.0
 ## explicit
 github.com/google/uuid
 # github.com/gorilla/mux v1.8.0
@@ -175,7 +171,21 @@ github.com/juju/errors
 # github.com/k8snetworkplumbingwg/govdpa v0.1.4
 ## explicit; go 1.17
 github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa
-# github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.3.0
+# github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170
+## explicit; go 1.13
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1/fake
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions/internalinterfaces
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions/k8s.cni.cncf.io
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1beta1
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1
+# github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 ## explicit; go 1.17
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1
@@ -188,6 +198,11 @@ github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils
+# github.com/k8snetworkplumbingwg/sriovnet v1.2.1-0.20230427090635-4929697df2dc
+## explicit; go 1.18
+github.com/k8snetworkplumbingwg/sriovnet
+github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem
+github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/netlinkops
 # github.com/mailru/easyjson v0.7.6
 ## explicit; go 1.12
 github.com/mailru/easyjson/buffer
@@ -248,7 +263,7 @@ github.com/onsi/ginkgo/reporters/stenographer
 github.com/onsi/ginkgo/reporters/stenographer/support/go-colorable
 github.com/onsi/ginkgo/reporters/stenographer/support/go-isatty
 github.com/onsi/ginkgo/types
-# github.com/onsi/gomega v1.23.0
+# github.com/onsi/gomega v1.24.2
 ## explicit; go 1.18
 github.com/onsi/gomega
 github.com/onsi/gomega/format
@@ -316,15 +331,16 @@ github.com/prometheus/procfs/internal/util
 # github.com/russross/blackfriday/v2 v2.1.0
 ## explicit
 github.com/russross/blackfriday/v2
-# github.com/safchain/ethtool v0.0.0-20210803160452-9aa261dae9b1
-## explicit
+# github.com/safchain/ethtool v0.3.0
+## explicit; go 1.16
 github.com/safchain/ethtool
 # github.com/sirupsen/logrus v1.9.0
 ## explicit; go 1.13
 github.com/sirupsen/logrus
-# github.com/spf13/afero v1.6.0
-## explicit; go 1.13
+# github.com/spf13/afero v1.9.5
+## explicit; go 1.16
 github.com/spf13/afero
+github.com/spf13/afero/internal/common
 github.com/spf13/afero/mem
 # github.com/spf13/pflag v1.0.5
 ## explicit; go 1.12
@@ -339,12 +355,12 @@ github.com/stretchr/testify/mock
 # github.com/urfave/cli/v2 v2.2.0
 ## explicit; go 1.11
 github.com/urfave/cli/v2
-# github.com/vishvananda/netlink v1.2.1-beta.2.0.20230206183746-70ca0345eede => github.com/jcaamano/netlink v1.1.1-0.20220831114501-3a761ed61db6
+# github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01 => github.com/jcaamano/netlink v1.1.1-0.20220831114501-3a761ed61db6
 ## explicit; go 1.12
 github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
-# github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f
-## explicit; go 1.12
+# github.com/vishvananda/netns v0.0.4
+## explicit; go 1.17
 github.com/vishvananda/netns
 # go.opencensus.io v0.23.0
 ## explicit; go 1.13
@@ -383,7 +399,7 @@ golang.org/x/oauth2/internal
 # golang.org/x/sync v0.1.0
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.5.0
+# golang.org/x/sys v0.7.0
 ## explicit; go 1.17
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
@@ -394,7 +410,7 @@ golang.org/x/sys/windows/svc
 # golang.org/x/term v0.5.0
 ## explicit; go 1.17
 golang.org/x/term
-# golang.org/x/text v0.7.0
+# golang.org/x/text v0.9.0
 ## explicit; go 1.17
 golang.org/x/text/encoding
 golang.org/x/text/encoding/charmap

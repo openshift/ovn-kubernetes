@@ -21,9 +21,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -114,6 +112,33 @@ func GetNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 	return v4Addr, v6Addr
 }
 
+// GetNodeAddresses returns all of the node's IPv4 and/or IPv6 annotated
+// addresses as requested. Note that nodes not annotated will be ignored.
+func GetNodeAddresses(ipv4, ipv6 bool, nodes ...*v1.Node) (ipsv4 []net.IP, ipsv6 []net.IP, err error) {
+	allips := sets.Set[string]{}
+	for _, node := range nodes {
+		ips, err := ParseNodeHostAddresses(node)
+		if IsAnnotationNotSetError(err) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		allips = allips.Insert(ips.UnsortedList()...)
+	}
+
+	for _, ip := range allips.UnsortedList() {
+		ip := utilnet.ParseIPSloppy(ip)
+		if ipv4 && utilnet.IsIPv4(ip) {
+			ipsv4 = append(ipsv4, ip)
+		} else if ipv6 && utilnet.IsIPv6(ip) {
+			ipsv6 = append(ipsv6, ip)
+		}
+	}
+
+	return
+}
+
 // GetNodeChassisID returns the machine's OVN chassis ID
 func GetNodeChassisID() (string, error) {
 	chassisID, stderr, err := RunOVSVsctl("--if-exists", "get",
@@ -155,6 +180,25 @@ func IsAnnotationNotSetError(err error) bool {
 	return ok
 }
 
+type annotationAlreadySetError struct {
+	msg string
+}
+
+func (aase annotationAlreadySetError) Error() string {
+	return aase.msg
+}
+
+// newAnnotationAlreadySetError returns an error for an annotation that is not set
+func newAnnotationAlreadySetError(format string, args ...interface{}) error {
+	return annotationAlreadySetError{msg: fmt.Sprintf(format, args...)}
+}
+
+// IsAnnotationAlreadySetError returns true if the error indicates that an annotation is already set
+func IsAnnotationAlreadySetError(err error) bool {
+	_, ok := err.(annotationAlreadySetError)
+	return ok
+}
+
 // HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.
 func HashForOVN(s string) string {
 	h := fnv.New64a()
@@ -168,9 +212,10 @@ func HashForOVN(s string) string {
 }
 
 // UpdateIPsSlice will search for values of oldIPs in the slice "s" and update it with newIPs values of same IP family
-func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
+func UpdateIPsSlice(s, oldIPs, newIPs []string) ([]string, bool) {
 	n := make([]string, len(s))
 	copy(n, s)
+	updated := false
 	for i, entry := range s {
 		for _, oldIP := range oldIPs {
 			if entry == oldIP {
@@ -178,11 +223,13 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 					if utilnet.IsIPv6(net.ParseIP(oldIP)) {
 						if utilnet.IsIPv6(net.ParseIP(newIP)) {
 							n[i] = newIP
+							updated = true
 							break
 						}
 					} else {
 						if !utilnet.IsIPv6(net.ParseIP(newIP)) {
 							n[i] = newIP
+							updated = true
 							break
 						}
 					}
@@ -191,7 +238,7 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 			}
 		}
 	}
-	return n
+	return n, updated
 }
 
 // FilterIPsSlice will filter a list of IPs by a list of CIDRs. By default,
@@ -353,40 +400,19 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	return nil
 }
 
-// IsEndpointReady takes as input an endpoint from an endpoint slice and returns true if the endpoint is
-// to be considered ready. Considering as ready an endpoint with Conditions.Ready==nil
-// as per doc: "In most cases consumers should interpret this unknown state as ready"
-// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L129-L131
-func IsEndpointReady(endpoint discovery.Endpoint) bool {
-	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
-}
-
-// IsEndpointServing takes as input an endpoint from an endpoint slice and returns true if the endpoint is
-// to be considered serving. Falling back to IsEndpointReady when Serving field is nil, as per doc:
-// "If nil, consumers should defer to the ready condition.
-// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L138-L139
-func IsEndpointServing(endpoint discovery.Endpoint) bool {
-	if endpoint.Conditions.Serving != nil {
-		return *endpoint.Conditions.Serving
-	} else {
-		return IsEndpointReady(endpoint)
-	}
-}
-
-// IsEndpointValid takes as input an endpoint from an endpoint slice and a boolean that indicates whether to include
-// all terminating endpoints, as per the PublishNotReadyAddresses feature in kubernetes service spec. It always returns true
-// if includeTerminating is true and falls back to IsEndpointServing otherwise.
-func IsEndpointValid(endpoint discovery.Endpoint, includeTerminating bool) bool {
-	return includeTerminating || IsEndpointServing(endpoint)
-}
-
-// NoHostSubnet() compares the no-hostsubnet-nodes flag with node labels to see if the node is managing its
-// own network.
-func NoHostSubnet(node *v1.Node) bool {
-	if config.Kubernetes.NoHostSubnetNodes == nil {
-		return false
+// GetNBZone returns the zone name configured in the OVN Northbound database.
+// If the zone name is not configured, it returns the default zone name - "global"
+// It retuns error if there is no NBGlobal row.
+func GetNBZone(nbClient libovsdbclient.Client) (string, error) {
+	nbGlobal := &nbdb.NBGlobal{}
+	nbGlobal, err := libovsdbops.GetNBGlobal(nbClient, nbGlobal)
+	if err != nil {
+		return "", fmt.Errorf("error in getting the NBGlobal row  from Northbound db : err - %w", err)
 	}
 
-	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
-	return nodeSelector.Matches(labels.Set(node.Labels))
+	if nbGlobal.Name == "" {
+		return types.OvnDefaultZone, nil
+	}
+
+	return nbGlobal.Name, nil
 }

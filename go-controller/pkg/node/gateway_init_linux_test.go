@@ -8,10 +8,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 
-	"github.com/Mellanox/sriovnet"
+	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
@@ -65,6 +68,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		)
 
 		fexec := ovntest.NewLooseCompareFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
+			Err: fmt.Errorf(""),
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -244,7 +251,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-
+		rm := newRouteManager(wg, true, 10*time.Second)
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			rm.run(stop)
+			return nil
+		})
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
@@ -252,11 +265,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
-				&fakeMgmtPortConfig, wf)
+				&fakeMgmtPortConfig, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
-
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
@@ -287,13 +299,19 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				LinkIndex: l.Attrs().Index,
 				Src:       ifAddrs[0].IP,
 			}
-			route, err := util.LinkRouteGetFilteredRoute(
-				expRoute,
-				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(route).ToNot(BeNil())
-
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -340,7 +358,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 				"OVN-KUBE-ETP":           []string{},
 				"OVN-KUBE-ITP":           []string{},
-				"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+				"OVN-KUBE-EGRESS-SVC":    []string{},
 			},
 			"filter": {},
 			"mangle": {
@@ -412,6 +430,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br " + brphys,
 			Err: fmt.Errorf(""),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 port-to-br " + brphys,
+			Err:    fmt.Errorf(""),
+			Output: brphys,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 br-exists " + brphys,
@@ -599,14 +622,21 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		ifAddrs := ovntest.MustParseIPNets(hostCIDR)
 		ifAddrs[0].IP = ovntest.MustParseIP(dpuIP)
 
+		rm := newRouteManager(wg, true, 10*time.Second)
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			rm.run(stop)
+			return nil
+		})
+
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
-
+				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -654,7 +684,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		"--nodeport",
 		"--mtu=" + mtu,
 		"--ovnkube-node-mode=" + types.NodeModeDPU,
-		"--ovnkube-node-mgmt-port-netdev=pf0vf0",
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
@@ -702,6 +731,13 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 
 		cnnci := NewCommonNodeNetworkControllerInfo(nil, wf, nil, nodeName, false)
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
+		// must run route manager manually which is usually started with nc.Start()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			nc.routeManager.run(stop)
+			return nil
+		})
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
@@ -718,12 +754,19 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 				LinkIndex: link.Attrs().Index,
 				Gw:        ovntest.MustParseIP(gwIP),
 			}
-			route, err := util.LinkRouteGetFilteredRoute(
-				expRoute,
-				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_GW,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(route).ToNot(BeNil())
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_GW,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 
 			// check that the masquerade route was added
 			expRoute = &netlink.Route{
@@ -731,13 +774,19 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 				LinkIndex: link.Attrs().Index,
 				Src:       ovntest.MustParseIP(hostIP),
 			}
-			route, err = util.LinkRouteGetFilteredRoute(
-				expRoute,
-				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(route).ToNot(BeNil())
-
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_GW,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -784,6 +833,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		)
 
 		fexec := ovntest.NewLooseCompareFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
+			Err: fmt.Errorf(""),
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -998,7 +1051,13 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-
+		rm := newRouteManager(wg, true, 10*time.Second)
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			rm.run(stop)
+			return nil
+		})
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
@@ -1006,7 +1065,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
-				nodeAnnotator, &fakeMgmtPortConfig, k, wf)
+				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -1041,13 +1100,19 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				LinkIndex: l.Attrs().Index,
 				Src:       ifAddrs[0].IP,
 			}
-			route, err := util.LinkRouteGetFilteredRoute(
-				expRoute,
-				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(route).ToNot(BeNil())
-
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -1078,7 +1143,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 				"OVN-KUBE-ETP":           []string{},
 				"OVN-KUBE-ITP":           []string{},
-				"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+				"OVN-KUBE-EGRESS-SVC":    []string{},
 			},
 			"filter": {
 				"FORWARD": []string{
@@ -1152,6 +1217,7 @@ var _ = Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 
 		var err error
+		runtime.LockOSThread()
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -1159,6 +1225,7 @@ var _ = Describe("Gateway Init Operations", func() {
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
+		runtime.UnlockOSThread()
 	})
 
 	Context("Setting up the gateway bridge", func() {
@@ -1487,8 +1554,16 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 			netlinkMock.On("RouteAdd", expectedRoute).Return(nil)
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
+			wg := &sync.WaitGroup{}
+			rm := newRouteManager(wg, true, 10*time.Second)
+			stopCh := make(chan struct{})
+			wg.Add(1)
+			go rm.run(stopCh)
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -1523,87 +1598,33 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
+			wg := &sync.WaitGroup{}
+			rm := newRouteManager(wg, true, 10*time.Second)
+			stopCh := make(chan struct{})
+			go rm.run(stopCh)
+			wg.Add(1)
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
 
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).ToNot(HaveOccurred())
-		})
-
-		It("Fails if link route list fails", func() {
-			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
-			Expect(err).ToNot(HaveOccurred())
-			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
-			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-
-			lnk := &linkMock.Link{}
-			lnkAttr := &netlink.LinkAttrs{
-				Name:  "ens1f0",
-				Index: 5,
-			}
-			lnk.On("Attrs").Return(lnkAttr)
-
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
-			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("failed to list routes"))
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("Fails if link route add fails", func() {
-			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
-			Expect(err).ToNot(HaveOccurred())
-			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
-			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-
-			lnk := &linkMock.Link{}
-			lnkAttr := &netlink.LinkAttrs{
-				Name:  "ens1f0",
-				Index: 5,
-			}
-
-			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
-			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-			netlinkMock.On("RouteAdd", mock.Anything).Return(fmt.Errorf("failed to replace route"))
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("Fails if link route replace fails", func() {
-			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
-			Expect(err).ToNot(HaveOccurred())
-			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
-			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-
-			lnk := &linkMock.Link{}
-			lnkAttr := &netlink.LinkAttrs{
-				Name:  "ens1f0",
-				Index: 5,
-			}
-			previousRoute := &netlink.Route{
-				Dst:       ipnet,
-				LinkIndex: 5,
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        gwIPs[0],
-				MTU:       config.Default.MTU - 100,
-			}
-
-			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
-			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
-			netlinkMock.On("RouteReplace", mock.Anything).Return(fmt.Errorf("failed to replace route"))
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
-			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if link set up fails", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-			err := configureSvcRouteViaInterface("ens1f0", gwIPs)
+			wg := &sync.WaitGroup{}
+			rm := newRouteManager(wg, true, 10*time.Second)
+			stopCh := make(chan struct{})
+			go rm.run(stopCh)
+			wg.Add(1)
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+			err := configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -1615,9 +1636,117 @@ var _ = Describe("Gateway unit tests", func() {
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
+			wg := &sync.WaitGroup{}
+			rm := newRouteManager(wg, true, 10*time.Second)
+			stopCh := make(chan struct{})
+			go rm.run(stopCh)
+			wg.Add(1)
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("getGatewayNextHops", func() {
+
+		It("Finds correct gateway interface and nexthops without configuration", func() {
+			_, ipnet, err := net.ParseCIDR("0.0.0.0/0")
+			Expect(err).ToNot(HaveOccurred())
+			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
+			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+			lnk := &linkMock.Link{}
+			lnkAttr := &netlink.LinkAttrs{
+				Name:  "ens1f0",
+				Index: 5,
+			}
+			defaultRoute := &netlink.Route{
+				Dst:       ipnet,
+				LinkIndex: 5,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIPs[0],
+				MTU:       config.Default.MTU,
+			}
+			lnk.On("Attrs").Return(lnkAttr)
+			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(lnkAttr.Name))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		It("Finds correct gateway interface and nexthops with single stack configuration", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err: fmt.Errorf(""),
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			gwIPs := []net.IP{net.ParseIP(nextHopCfg)}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		It("Finds correct gateway interface and nexthops with dual stack configuration", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11,fc00:f853:ccd:e793::1"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err: fmt.Errorf(""),
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			nextHops := strings.Split(nextHopCfg, ",")
+			gwIPs := []net.IP{net.ParseIP(nextHops[0]), net.ParseIP(nextHops[1])}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+			config.IPv4Mode = true
+			config.IPv6Mode = true
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops).To(Equal(gwIPs))
+		})
+
+		ovntest.OnSupportedPlatformsIt("Finds correct gateway interface and nexthops when gateway bridge is created", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err:    fmt.Errorf(""),
+				Output: "br" + ifName,
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			gwIPs := []net.IP{net.ParseIP(nextHopCfg)}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
 		})
 	})
 })
