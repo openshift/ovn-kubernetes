@@ -15,12 +15,15 @@ RUN dnf install -y --nodocs \
 ARG ovsver=3.1.0-10.el9fdp
 ARG ovnver=23.03.0-7.el9fdp
 
+COPY ovn23.06-23.06.0-tstnorthdip131.el9fdp.x86_64.rpm ovn23.06-central-23.06.0-tstnorthdip131.el9fdp.x86_64.rpm ovn23.06-host-23.06.0-tstnorthdip131.el9fdp.x86_64.rpm /root/
+
 RUN INSTALL_PKGS="iptables" && \
 	ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
 	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
 	dnf install -y --nodocs "openvswitch$ovsver_short = $ovsver" "python3-openvswitch$ovsver_short = $ovsver" && \
 	dnf install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
+	rpm -Uhv --nodeps --force /root/*.rpm && \
 	dnf clean all && rm -rf /var/cache/*
 
 RUN ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
