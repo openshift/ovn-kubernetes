@@ -86,7 +86,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		externalIDs                              = func(namespace, vmName string) map[string]string {
 			return map[string]string{
 				"namespace":      namespace,
-				"kubevirt.io/vm": vmName,
+				kubevirt.VMLabel: vmName,
 			}
 		}
 

@@ -1,11 +1,15 @@
 package kubevirt
 
+import (
+	kvv1 "kubevirt.io/api/core/v1"
+)
+
 const (
-	AllowPodBridgeNetworkLiveMigrationAnnotation = "kubevirt.io/allow-pod-bridge-network-live-migration"
+	AllowPodBridgeNetworkLiveMigrationAnnotation = kvv1.AllowPodBridgeNetworkLiveMigrationAnnotation
 	OriginalSwitchNameLabel                      = "k8s.ovn.org/original-switch-name"
-	VMLabel                                      = "kubevirt.io/vm"
-	MigrationTargetStartTimestampAnnotation      = "kubevirt.io/migration-target-start-timestamp"
-	NodeNameLabel                                = "kubevirt.io/nodeName"
+	VMLabel                                      = kvv1.VirtualMachineNameLabel
+	MigrationTargetStartTimestampAnnotation      = kvv1.MigrationTargetReadyTimestamp
+	NodeNameLabel                                = kvv1.NodeNameLabel
 )
 
 // NetworkInfo is the network information common to all the pods involve
