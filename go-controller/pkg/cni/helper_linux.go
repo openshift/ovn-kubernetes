@@ -156,7 +156,7 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
-	if ifInfo.SkipIPConfig {
+	if ifInfo.NetName == types.DefaultNetworkName && ifInfo.SkipIPConfig != nil && *ifInfo.SkipIPConfig {
 		return nil
 	}
 

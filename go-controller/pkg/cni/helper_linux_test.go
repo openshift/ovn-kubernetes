@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
+	"k8s.io/utils/pointer"
 )
 
 func TestRenameLink(t *testing.T) {
@@ -320,7 +321,7 @@ func TestSetupNetwork(t *testing.T) {
 			desc:    "test skip ip config",
 			inpLink: mockLink,
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				SkipIPConfig: true,
+				NetName: "default",
 				PodAnnotation: util.PodAnnotation{
 					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
@@ -331,6 +332,7 @@ func TestSetupNetwork(t *testing.T) {
 							NextHop: net.ParseIP("192.168.1.1"),
 						},
 					},
+					SkipIPConfig: pointer.Bool(true),
 				},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{

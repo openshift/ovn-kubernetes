@@ -319,6 +319,7 @@ passwd:
 						ObjectMeta: metav1.ObjectMeta{
 							Annotations: map[string]string{
 								"kubevirt.io/allow-pod-bridge-network-live-migration": "",
+								"k8s.ovn.org/pod-networks":                            `{"default": {"skip_ip_config": true}}`,
 							},
 							Labels: map[string]string{
 								kvv1.VirtualMachineNameLabel: "worker1",
