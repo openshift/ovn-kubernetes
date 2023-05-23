@@ -613,8 +613,8 @@ github.com/openshift/api v0.0.0-20230213202419-42edf4f1d905 h1:f+W57UXpRIJeZIh9l
 github.com/openshift/api v0.0.0-20230213202419-42edf4f1d905/go.mod h1:ctXNyWanKEjGj8sss1KjjHQ3ENKFm33FFnS5BKaIPh4=
 github.com/openshift/client-go v0.0.0-20230120202327-72f107311084 h1:66uaqNwA+qYyQDwsMWUfjjau8ezmg1dzCqub13KZOcE=
 github.com/openshift/client-go v0.0.0-20230120202327-72f107311084/go.mod h1:M3h9m001PWac3eAudGG3isUud6yBjr5XpzLYLLTlHKo=
-github.com/ovn-org/libovsdb v0.6.1-0.20230203213244-a6a173993830 h1:eV+OMJFLtayfrYTCEBIsxvuMV0HK6KPWCqIUdaxoIwQ=
-github.com/ovn-org/libovsdb v0.6.1-0.20230203213244-a6a173993830/go.mod h1:S/+Hux9//oB7yLaPsUKnXTzZc6S1C4a9HP0UifXfKz0=
+github.com/ovn-org/libovsdb v0.6.1-0.20230630120302-2fcc81cc781d h1:055psueWay1BZA1iUxvh2liRIOpwK+G0moFiB+SQpT8=
+github.com/ovn-org/libovsdb v0.6.1-0.20230630120302-2fcc81cc781d/go.mod h1:6dt3gtS8wj89D+MotriocA/t5Vd8LfpzR5/ruKW2ses=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/pelletier/go-toml v1.8.1/go.mod h1:T2/BmBdy8dvIRq1a/8aqjN41wvWlN4lrapLU/GW4pbc=
 github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
