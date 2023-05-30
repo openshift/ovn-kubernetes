@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
 
@@ -54,7 +55,6 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		vm                     *kvv1.VirtualMachine
 		podWorker1, podWorker2 *corev1.Pod
 		namespace              string
-		tcpProbeConns          []net.Conn
 		localRegistryPort      = "5000"
 		tcprobePort            = int32(9900)
 		isDualStack            = false
@@ -73,34 +73,35 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 	})
 
 	var (
-		dialTCPRobe = func(addrs []string) error {
+		dialTCPRobe = func(addrs []string) ([]net.Conn, error) {
+			tcpProbeConns := []net.Conn{}
 			for _, addr := range addrs {
 				tcpProbeConn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 				if err != nil {
-					return fmt.Errorf("Unable to dial to server: %v", err)
+					return nil, fmt.Errorf("Unable to dial to server: %v", err)
 				}
 				tcpProbeConns = append(tcpProbeConns, tcpProbeConn)
 			}
-			return nil
+			return tcpProbeConns, nil
 		}
 
-		sendPings = func(count int) error {
+		sendPing = func(tcpProbeConns []net.Conn, timeout time.Duration) error {
 			for _, tcpProbeConn := range tcpProbeConns {
-				for i := 0; i < count; i++ {
-					_, err := fmt.Fprintf(tcpProbeConn, "ping\n")
-					if err != nil {
-						return fmt.Errorf("Unable to send msg: %v", err)
-					}
-					msg, err := bufio.NewReader(tcpProbeConn).ReadString('\n')
-					if err != nil {
-						return fmt.Errorf("Unable to read from server: %v", err)
-					}
-					msg = strings.TrimSuffix(msg, "\n")
-					if msg != "pong" {
-						return fmt.Errorf("Received unexpected server message: %s", msg)
-					}
-					time.Sleep(time.Second)
+				_, err := fmt.Fprintf(tcpProbeConn, "ping\n")
+				if err != nil {
+					return fmt.Errorf("Unable to send msg: %v", err)
 				}
+
+				tcpProbeConn.SetReadDeadline(time.Now().Add(timeout))
+				msg, err := bufio.NewReader(tcpProbeConn).ReadString('\n')
+				if err != nil {
+					return fmt.Errorf("Unable to read from server: %v", err)
+				}
+				msg = strings.TrimSuffix(msg, "\n")
+				if msg != "pong" {
+					return fmt.Errorf("Received unexpected server message: %s", msg)
+				}
+				time.Sleep(time.Second)
 			}
 			return nil
 		}
@@ -165,28 +166,44 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			}
 		}
 
-		checkConnectivity = func() {
+		checkConnectivityShould = func(matchResult types.GomegaMatcher, tcpProbeConns []net.Conn) {
 			vmi, err := kvcli.VirtualMachineInstance(namespace).Get(context.TODO(), vm.Name, &metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
+			polling := time.Second
+			timeout := time.Minute
 
 			By("Check opened tcp connection")
-			Eventually(func() error { return sendPings(5) }).
-				WithPolling(5 * time.Second).
-				WithTimeout(10 * time.Minute).
+			Eventually(func() error { return sendPing(tcpProbeConns, polling) }).
+				WithPolling(polling).
+				WithTimeout(timeout).
 				WithOffset(1).
-				Should(Succeed())
+				Should(matchResult)
 
 			By("Check e/w tcp traffic")
 			for _, pod := range []*corev1.Pod{podWorker1, podWorker2} {
 				for _, podIP := range pod.Status.PodIPs {
-					output, err := kubevirt.RunCommand(kvcli, vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP.IP, "8000")), time.Minute)
-					Expect(err).WithOffset(1).ToNot(HaveOccurred(), pod.Name+": "+output)
+					output := ""
+					Eventually(func() error {
+						output, err = kubevirt.RunCommand(kvcli, vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP.IP, "8000")), polling)
+						return err
+					}).
+						WithOffset(1).
+						WithPolling(polling).
+						WithTimeout(timeout).
+						Should(matchResult, func() string { return pod.Name + ": " + output })
 				}
 			}
 
 			By("Check n/s tcp traffic")
-			output, err := kubevirt.RunCommand(kvcli, vmi, "curl -kL https://www.ovn.org", time.Minute)
-			Expect(err).WithOffset(1).ToNot(HaveOccurred(), output)
+			output := ""
+			Eventually(func() error {
+				output, err = kubevirt.RunCommand(kvcli, vmi, "curl -kL https://www.ovn.org", polling)
+				return err
+			}).
+				WithOffset(1).
+				WithPolling(polling).
+				WithTimeout(timeout).
+				Should(matchResult, func() string { return output })
 		}
 
 		composeAgnhostPod = func(name, namespace, nodeName string, command ...string) *v1.Pod {
@@ -395,21 +412,15 @@ passwd:
 			}, nil
 		}
 	)
-	AfterEach(func() {
-		kv, err := kvcli.KubeVirt("kubevirt").Get("kubevirt", &metav1.GetOptions{})
-		Expect(err).ToNot(HaveOccurred())
-		kv.Spec.Configuration.MigrationConfiguration = &kvv1.MigrationConfiguration{}
-		kv, err = kvcli.KubeVirt("kubevirt").Update(kv)
-		Expect(err).ToNot(HaveOccurred())
-	})
 
 	DescribeTable("when live migrated", func(migrationMode kvv1.MigrationMode) {
-		if migrationMode == kvv1.MigrationPostCopy && os.Getenv("GITHUB_ACTIONS") == "true" {
-			Skip("Post copy live migration not working at github actions")
-		}
+		//if migrationMode == kvv1.MigrationPostCopy && os.Getenv("GITHUB_ACTIONS") == "true" {
+		//	Skip("Post copy live migration not working at github actions")
+		//}
 		var (
 			err error
 		)
+
 		namespace = fr.Namespace.Name
 
 		kvcli, err = newKubevirtClient()
@@ -499,25 +510,36 @@ passwd:
 		endpoints, err := serviceEndpoints(svc)
 		Expect(err).ToNot(HaveOccurred())
 
-		By("Test a deny all network policy blocks ingress and egress traffic")
-		policy, err := createDenyAllPolicy()
-		Expect(err).ToNot(HaveOccurred())
-		time.Sleep(2 * time.Second) // It takes some to take effect
-		Expect(dialTCPRobe(endpoints)).ToNot(Succeed())
-		for _, pod := range []*corev1.Pod{podWorker1, podWorker2} {
-			output, err := kubevirt.RunCommand(kvcli, vmi, fmt.Sprintf("curl http://%s:%s", pod.Status.PodIP, "8000"), 5*time.Second)
-			Expect(err).To(HaveOccurred(), pod.Name+": "+output)
-		}
-		Expect(fr.ClientSet.NetworkingV1().NetworkPolicies(namespace).Delete(context.TODO(), policy.Name, metav1.DeleteOptions{})).To(Succeed())
-
 		By("Wait for tcprobe readiness and connect to it")
 		time.Sleep(10 * time.Second)
-		Eventually(func() error { return dialTCPRobe(endpoints) }).
+		var tcpProbeConns []net.Conn
+		Eventually(func() error {
+			tcpProbeConns, err = dialTCPRobe(endpoints)
+			return err
+		}).
 			WithPolling(1 * time.Second).
 			WithTimeout(5 * time.Second).
 			Should(Succeed())
+		defer func() {
+			for _, tcpProbeConn := range tcpProbeConns {
+				tcpProbeConn.Close()
+			}
+		}()
 
-		checkConnectivity()
+		By("Check connectivity")
+		checkConnectivityShould(Succeed(), tcpProbeConns)
+
+		By("Create deny all network policy")
+		policy, err := createDenyAllPolicy()
+		Expect(err).ToNot(HaveOccurred())
+
+		By("Check connectivity block after create deny all network policy")
+		checkConnectivityShould(Not(Succeed()), tcpProbeConns)
+
+		Expect(fr.ClientSet.NetworkingV1().NetworkPolicies(namespace).Delete(context.TODO(), policy.Name, metav1.DeleteOptions{})).To(Succeed())
+
+		By("Check connectivity is fine after deleting network policy")
+		checkConnectivityShould(Succeed(), tcpProbeConns)
 
 		if migrationMode == kvv1.MigrationPostCopy {
 			By("Allow post-copy live migration and limit bandwidth to force it")
@@ -531,19 +553,27 @@ passwd:
 			}
 			kv, err = kvcli.KubeVirt("kubevirt").Update(kv)
 			Expect(err).ToNot(HaveOccurred())
+			defer func() {
+				kv, err := kvcli.KubeVirt("kubevirt").Get("kubevirt", &metav1.GetOptions{})
+				Expect(err).ToNot(HaveOccurred())
+				kv.Spec.Configuration.MigrationConfiguration = &kvv1.MigrationConfiguration{}
+				kv, err = kvcli.KubeVirt("kubevirt").Update(kv)
+				Expect(err).ToNot(HaveOccurred())
+			}()
+
 		}
 
 		By("Live migrate virtual machine")
 		liveMigrateVirtualMachine(migrationMode)
 
 		By("Check connectivity after live migration")
-		checkConnectivity()
+		checkConnectivityShould(Succeed(), tcpProbeConns)
 
 		By("Live migrate virtual machine again to return it to original node")
 		liveMigrateVirtualMachine(migrationMode)
 
 		By("Check connectivity after live migration to original node")
-		checkConnectivity()
+		checkConnectivityShould(Succeed(), tcpProbeConns)
 
 	},
 		Entry("with pre-copy should keep connectivity", kvv1.MigrationPreCopy),
