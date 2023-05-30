@@ -11,7 +11,10 @@ export GO111MODULE=on
 #     placed in a predictable place.
 function setup_env() {
     init_source="$( dirname "${BASH_SOURCE}" )/.."
+    echo $init_source
+    echo "SURYA1"
     OVN_KUBE_ROOT="$( absolute_path "${init_source}" )"
+    echo $OVN_KUBE_ROOT
     OVN_KUBE_GO_PACKAGE="github.com/ovn-org/ovn-kubernetes/go-controller"
     OVN_KUBE_OUTPUT=${OVN_KUBE_ROOT}/${OUT_DIR}
 

@@ -5,11 +5,23 @@ source "$(dirname "${BASH_SOURCE}")/init.sh"
 
 # Check for `go` binary and set ${GOPATH}.
 setup_env
-
+echo "SURYA"
+pwd
+echo "$PWD"
+echo "SURYA"
+echo "${OVN_KUBE_ROOT}"
+#OVN_KUBE_ROOT=
 cd "${OVN_KUBE_ROOT}"
-
+echo "SURYA6"
+echo "$LS"
+#go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs
+echo "SURYA7"
+echo $PKGS
+PKGS=${PKGS//"/batching"/ }
+echo $PKGS
 PKGS=$(go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
-
+echo $PKGS
+echo "SURYA5"
 if [[ "$1" == "focus" && "$2" != "" ]]; then
     ginkgo_focus="-ginkgo.focus="$(echo ${2} | sed 's/ /\\s/g')""
 fi
@@ -66,6 +78,8 @@ root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node")
 
 i=0
 for pkg in ${PKGS}; do
+    echo "SURYA6"
+    echo $pkg
     testrun "${i}" "${pkg}"
     i=$((i+1))
 done
