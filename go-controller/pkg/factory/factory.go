@@ -755,6 +755,11 @@ func (wf *WatchFactory) GetCloudPrivateIPConfig(name string) (*ocpcloudnetworkap
 	return cloudPrivateIPConfigLister.Get(name)
 }
 
+func (wf *WatchFactory) GetCloudPrivateIPConfigs() ([]*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	cloudPrivateIPConfigLister := wf.informers[CloudPrivateIPConfigType].lister.(ocpcloudnetworklister.CloudPrivateIPConfigLister)
+	return cloudPrivateIPConfigLister.List(labels.Everything())
+}
+
 func (wf *WatchFactory) GetEgressIP(name string) (*egressipapi.EgressIP, error) {
 	egressIPLister := wf.informers[EgressIPType].lister.(egressiplister.EgressIPLister)
 	return egressIPLister.Get(name)

@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/onsi/gomega"
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	cloudservicefake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -69,6 +71,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressFirewallObjects := []runtime.Object{}
 	egressQoSObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
+	cloudObjects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
 			egressIPObjects = append(egressIPObjects, object)
@@ -76,6 +79,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			egressFirewallObjects = append(egressFirewallObjects, object)
 		} else if _, isEgressQoSObject := object.(*egressqos.EgressQoSList); isEgressQoSObject {
 			egressQoSObjects = append(egressQoSObjects, object)
+		} else if _, isCloudPrivateIPConfig := object.(*ocpcloudnetworkapi.CloudPrivateIPConfig); isCloudPrivateIPConfig {
+			cloudObjects = append(cloudObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -85,6 +90,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 		EgressQoSClient:      egressqosfake.NewSimpleClientset(egressQoSObjects...),
+		CloudNetworkClient:   cloudservicefake.NewSimpleClientset(cloudObjects...),
 	}
 	o.init()
 }

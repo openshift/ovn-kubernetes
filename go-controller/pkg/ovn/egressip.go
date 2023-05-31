@@ -1306,8 +1306,11 @@ func (oc *Controller) syncEgressIPs(namespaces []interface{}) error {
 	//   ovnkube-master was down
 	// This function is called when handlers for EgressIPNamespaceType are started
 	// since namespaces is the first object that egressIP feature starts watching
-
-	egressIPCache, err := oc.generateCacheForEgressIP()
+	cloudPrivateIPsConfigMap, err := oc.getCloudPrivateIPConfigMap()
+	if err != nil {
+		return fmt.Errorf("syncEgressIPs unable to get cloud private ip config: %w", err)
+	}
+	egressIPCache, err := oc.generateCacheForEgressIP(cloudPrivateIPsConfigMap)
 	if err != nil {
 		return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
 	}
@@ -1319,6 +1322,10 @@ func (oc *Controller) syncEgressIPs(namespaces []interface{}) error {
 	}
 	if err = oc.syncPodAssignmentCache(egressIPCache); err != nil {
 		return fmt.Errorf("syncEgressIPs unable to sync internal pod assignment cache: %v", err)
+	}
+	klog.Infof("syncEgressIPsStatus update egress ip status in case of stale ip")
+	if err = oc.syncEgressIPsStatus(cloudPrivateIPsConfigMap); err != nil {
+		return fmt.Errorf("syncEgressIPs unable to sync egressip status: %w", err)
 	}
 	return nil
 }
@@ -1516,12 +1523,46 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 	return nil
 }
 
+func (oc *Controller) syncEgressIPsStatus(cloudPrivateIPsConfigMap map[string]string) error {
+	if !util.PlatformTypeIsEgressIPCloudProvider() {
+		return nil
+	}
+	egressIPs, err := oc.watchFactory.GetEgressIPs()
+	if err != nil {
+		return err
+	}
+	for _, egressIP := range egressIPs {
+		updatedStatus := []egressipv1.EgressIPStatusItem{}
+		ipNotFound := false
+		for _, status := range egressIP.Status.Items {
+			cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(status.EgressIP)
+			if nodeName, exists := cloudPrivateIPsConfigMap[cloudPrivateIPConfigName]; exists && status.Node == nodeName {
+				updatedStatus = append(updatedStatus, status)
+			} else {
+				// Set ipNotFound flag to true because egress ip entry not found or not set with correct node name in
+				// cloud private ip config object.
+				ipNotFound = true
+			}
+		}
+		if ipNotFound {
+			klog.Infof("syncEgressIPsStatus will update %s due to stale ip: %v", egressIP.Name, updatedStatus)
+			// There could be one or more stale entry found in egress ip object, remove it by patching egressip
+			// object with updated status.
+			err = oc.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // generateCacheForEgressIP builds a cache of egressIP name -> podIPs for fast
 // access when syncing egress IPs. The Egress IP setup will return a lot of
 // atomic items with the same general information repeated across most (egressIP
 // name, logical IP defined for that name), hence use a cache to avoid round
 // trips to the API server per item.
-func (oc *Controller) generateCacheForEgressIP() (map[string]egressIPCacheEntry, error) {
+func (oc *Controller) generateCacheForEgressIP(cloudPrivateIPsConfigMap map[string]string) (map[string]egressIPCacheEntry, error) {
 	egressIPCache := make(map[string]egressIPCacheEntry)
 	egressIPs, err := oc.watchFactory.GetEgressIPs()
 	if err != nil {
@@ -1534,6 +1575,14 @@ func (oc *Controller) generateCacheForEgressIP() (map[string]egressIPCacheEntry,
 			egressIPs:        map[string]string{},
 		}
 		for _, status := range egressIP.Status.Items {
+			if util.PlatformTypeIsEgressIPCloudProvider() {
+				cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(status.EgressIP)
+				if nodeName, exists := cloudPrivateIPsConfigMap[cloudPrivateIPConfigName]; !exists || status.Node != nodeName {
+					// Skip considering this egress ip as it's not present in cloud private ip config
+					// or has an incorrect node name.
+					continue
+				}
+			}
 			isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 			gatewayRouterIP, err := oc.eIPC.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
 			if err != nil {
@@ -1577,6 +1626,21 @@ func (oc *Controller) generateCacheForEgressIP() (map[string]egressIPCacheEntry,
 	}
 
 	return egressIPCache, nil
+}
+
+func (oc *Controller) getCloudPrivateIPConfigMap() (map[string]string, error) {
+	cloudPrivateIPConfigMap := make(map[string]string)
+	if !util.PlatformTypeIsEgressIPCloudProvider() {
+		return cloudPrivateIPConfigMap, nil
+	}
+	cloudPrivateIPConfigs, err := oc.watchFactory.GetCloudPrivateIPConfigs()
+	if err != nil {
+		return nil, err
+	}
+	for _, cloudPrivateIPConfig := range cloudPrivateIPConfigs {
+		cloudPrivateIPConfigMap[cloudPrivateIPConfig.Name] = cloudPrivateIPConfig.Status.Node
+	}
+	return cloudPrivateIPConfigMap, nil
 }
 
 // isAnyClusterNodeIP verifies that the IP is not any node IP.
