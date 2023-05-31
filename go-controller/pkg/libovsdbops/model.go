@@ -62,8 +62,6 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *nbdb.QoS:
 		return t.UUID
-	case *nbdb.ChassisTemplateVar:
-		return t.UUID
 	default:
 		panic(fmt.Sprintf("getUUID: unknown model %T", t))
 	}
@@ -118,8 +116,6 @@ func setUUID(model model.Model, uuid string) {
 	case *sbdb.SBGlobal:
 		t.UUID = uuid
 	case *nbdb.QoS:
-		t.UUID = uuid
-	case *nbdb.ChassisTemplateVar:
 		t.UUID = uuid
 	default:
 		panic(fmt.Sprintf("setUUID: unknown model %T", t))
@@ -240,11 +236,6 @@ func copyIndexes(model model.Model) model.Model {
 		return &nbdb.QoS{
 			UUID: t.UUID,
 		}
-	case *nbdb.ChassisTemplateVar:
-		return &nbdb.ChassisTemplateVar{
-			UUID:    t.UUID,
-			Chassis: t.Chassis,
-		}
 	default:
 		panic(fmt.Sprintf("copyIndexes: unknown model %T", t))
 	}
@@ -298,8 +289,6 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*sbdb.MACBinding{}
 	case *nbdb.QoS:
 		return &[]nbdb.QoS{}
-	case *nbdb.ChassisTemplateVar:
-		return &[]*nbdb.ChassisTemplateVar{}
 	default:
 		panic(fmt.Sprintf("getModelList: unknown model %T", t))
 	}

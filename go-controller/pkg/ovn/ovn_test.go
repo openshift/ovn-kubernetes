@@ -123,9 +123,7 @@ func (o *FakeOVN) init() {
 		o.fakeRecorder, o.wg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = true
-	o.controller.clusterLoadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
-	o.controller.switchLoadBalancerGroupUUID = types.ClusterSwitchLBGroupName + "-UUID"
-	o.controller.routerLoadBalancerGroupUUID = types.ClusterRouterLBGroupName + "-UUID"
+	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }
 
 func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
@@ -167,9 +165,8 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		libovsdbOvnNBClient,
 		libovsdbOvnSBClient,
 		&podRecorder,
-		false, // sctp support
-		false, // multicast support
-		true,  // templates support
+		false,
+		false,
 	)
 	if err != nil {
 		return nil, err

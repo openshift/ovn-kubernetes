@@ -98,12 +98,12 @@ func (n tNode) gatewayConfig(gatewayMode config.GatewayMode, vlanID uint) *util.
 	}
 }
 
-func (n tNode) logicalSwitch(loadBalancerGroupUUIDs []string) *nbdb.LogicalSwitch {
+func (n tNode) logicalSwitch(loadBalancerGroupUUID string) *nbdb.LogicalSwitch {
 	return &nbdb.LogicalSwitch{
 		UUID:              n.Name + "-UUID",
 		Name:              n.Name,
 		OtherConfig:       map[string]string{"subnet": n.NodeSubnet},
-		LoadBalancerGroup: loadBalancerGroupUUIDs,
+		LoadBalancerGroup: []string{loadBalancerGroupUUID},
 	}
 }
 
@@ -885,8 +885,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		recorder       *record.FakeRecorder
 
 		expectedClusterLBGroup         *nbdb.LoadBalancerGroup
-		expectedSwitchLBGroup          *nbdb.LoadBalancerGroup
-		expectedRouterLBGroup          *nbdb.LoadBalancerGroup
 		expectedNodeSwitch             *nbdb.LogicalSwitch
 		expectedOVNClusterRouter       *nbdb.LogicalRouter
 		expectedClusterRouterPortGroup *nbdb.PortGroup
@@ -937,10 +935,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			DnatSnatIP:           "169.254.0.1",
 		}
 
-		expectedClusterLBGroup = newLoadBalancerGroup(types.ClusterLBGroupName)
-		expectedSwitchLBGroup = newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
-		expectedRouterLBGroup = newLoadBalancerGroup(types.ClusterRouterLBGroupName)
-		expectedNodeSwitch = node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+		expectedClusterLBGroup = newLoadBalancerGroup()
+		expectedNodeSwitch = node1.logicalSwitch(expectedClusterLBGroup.UUID)
 		expectedOVNClusterRouter = newOVNClusterRouter()
 		expectedClusterRouterPortGroup = newRouterPortGroup()
 		expectedClusterPortGroup = newClusterPortGroup()
@@ -959,8 +955,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				newRouterPortGroup(),
 				newClusterPortGroup(),
 				expectedClusterLBGroup,
-				expectedSwitchLBGroup,
-				expectedRouterLBGroup,
 			},
 			SBData: []libovsdbtest.TestData{
 				datapath,
@@ -1008,9 +1002,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		recorder = record.NewFakeRecorder(10)
 		oc, _ = NewOvnController(fakeClient, f, stopChan, nil, nbClient, sbClient, recorder, wg)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		oc.clusterLoadBalancerGroupUUID = expectedClusterLBGroup.UUID
-		oc.switchLoadBalancerGroupUUID = expectedSwitchLBGroup.UUID
-		oc.routerLoadBalancerGroupUUID = expectedRouterLBGroup.UUID
+		oc.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(oc).NotTo(gomega.BeNil())
 		oc.defaultCOPPUUID, err = EnsureDefaultCOPP(nbClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1567,9 +1559,10 @@ func newOVNClusterRouter() *nbdb.LogicalRouter {
 	}
 }
 
-func newLoadBalancerGroup(name string) *nbdb.LoadBalancerGroup {
+func newLoadBalancerGroup() *nbdb.LoadBalancerGroup {
 	return &nbdb.LoadBalancerGroup{
-		Name: name, UUID: name + "-UUID",
+		Name: types.ClusterLBGroupName,
+		UUID: types.ClusterLBGroupName + "-UUID",
 	}
 }
 

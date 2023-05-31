@@ -128,12 +128,10 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 
 }
 
-func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, switchLBUUID, routerLBUUID, expectedNodeSwitchUUID, node1Name string) {
+func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
 	var err error
 	clusterController.SCTPSupport = true
-	clusterController.clusterLoadBalancerGroupUUID = clusterLBUUID
-	clusterController.switchLoadBalancerGroupUUID = switchLBUUID
-	clusterController.routerLoadBalancerGroupUUID = routerLBUUID
+	clusterController.loadBalancerGroupUUID = clusterLBUUID
 	clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitchUUID, []string{node1Name})
@@ -340,9 +338,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
-			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
+			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -350,7 +346,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -373,8 +369,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -391,7 +385,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
@@ -629,9 +623,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
-			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
+			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -639,7 +631,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -710,7 +702,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
@@ -841,9 +833,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
-			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
+			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -851,7 +841,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -874,8 +864,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -892,7 +880,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient.GetMasterClientset(), f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
@@ -1122,9 +1110,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
-			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
+			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -1132,7 +1118,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1155,8 +1141,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -1173,7 +1157,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
@@ -1338,9 +1322,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := newLoadBalancerGroup(types.ClusterLBGroupName)
-			expectedSwitchLBGroup := newLoadBalancerGroup(types.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(types.ClusterRouterLBGroupName)
+			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
 				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
@@ -1348,7 +1330,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
 			}
 			expectedOVNClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 
@@ -1371,8 +1353,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					clusterRouterDatapath,
@@ -1389,7 +1369,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterController, err := NewOvnController(fakeClient, f, stopChan, nil, libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID, expectedRouterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 

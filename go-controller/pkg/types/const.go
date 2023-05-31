@@ -160,9 +160,7 @@ const (
 	OVSDBTimeout     = 10 * time.Second
 	OVSDBWaitTimeout = 0
 
-	ClusterLBGroupName       = "clusterLBGroup"
-	ClusterSwitchLBGroupName = "clusterSwitchLBGroup"
-	ClusterRouterLBGroupName = "clusterRouterLBGroup"
+	ClusterLBGroupName = "clusterLBGroup"
 
 	// key for network name external-id
 	NetworkExternalID = OvnK8sPrefix + "/" + "network"

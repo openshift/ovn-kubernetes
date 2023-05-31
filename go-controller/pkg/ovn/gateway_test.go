@@ -260,7 +260,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		Ports:             []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
 		StaticRoutes:      grStaticRoutes,
 		Nat:               natUUIDs,
-		LoadBalancerGroup: []string{types.ClusterLBGroupName + "-UUID", types.ClusterRouterLBGroupName + "-UUID"},
+		LoadBalancerGroup: []string{types.ClusterLBGroupName + "-UUID"},
 		Copp:              &copp.UUID,
 	})
 
@@ -321,14 +321,6 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		&nbdb.LoadBalancerGroup{
 			Name: types.ClusterLBGroupName,
 			UUID: types.ClusterLBGroupName + "-UUID",
-		},
-		&nbdb.LoadBalancerGroup{
-			Name: types.ClusterSwitchLBGroupName,
-			UUID: types.ClusterSwitchLBGroupName + "-UUID",
-		},
-		&nbdb.LoadBalancerGroup{
-			Name: types.ClusterRouterLBGroupName,
-			UUID: types.ClusterRouterLBGroupName + "-UUID",
 		})
 	return testData
 }
@@ -373,14 +365,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -397,8 +381,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -462,14 +444,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -486,8 +460,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -545,14 +517,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -567,8 +531,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -638,14 +600,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -660,8 +614,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -720,14 +672,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -742,8 +686,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -802,14 +744,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -824,8 +758,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -885,14 +817,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -907,8 +831,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -998,14 +920,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -1024,8 +938,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -1106,14 +1018,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Name: types.ClusterLBGroupName,
 				UUID: types.ClusterLBGroupName + "-UUID",
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -1131,8 +1035,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -1203,14 +1105,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -1226,8 +1120,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,

@@ -215,11 +215,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			hostNetworkNamespace := "test-host-network-ns"
 			config.Kubernetes.HostNetworkNamespace = hostNetworkNamespace
 
-			expectedClusterLBGroup := newLoadBalancerGroup(ovntypes.ClusterLBGroupName)
-			expectedSwitchLBGroup := newLoadBalancerGroup(ovntypes.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(ovntypes.ClusterRouterLBGroupName)
+			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
 			gr := ovntypes.GWRouterPrefix + node1.Name
@@ -236,8 +234,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 						expectedClusterRouterPortGroup,
 						expectedClusterPortGroup,
 						expectedClusterLBGroup,
-						expectedSwitchLBGroup,
-						expectedRouterLBGroup,
 					},
 					SBData: []libovsdbtest.TestData{
 						datapath,
