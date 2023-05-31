@@ -308,6 +308,7 @@ func pokeEndpoint(namespace, clientContainer, protocol, targetHost string, targe
 	if err != nil {
 		framework.Logf("FAILED Command was %s", curlCommand)
 		framework.Logf("FAILED Response was %v", res)
+		return ""
 	}
 	framework.ExpectNoError(err)
 
@@ -1059,4 +1060,9 @@ func randStr(n int) string {
 		b[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+func isInterconnectEnabled() bool {
+	val, present := os.LookupEnv("OVN_INTERCONNECT_ENABLE")
+	return present && val == "true"
 }

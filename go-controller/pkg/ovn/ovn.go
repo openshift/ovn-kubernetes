@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
 	"reflect"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -26,20 +24,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 )
 
-const (
-	egressFirewallDNSDefaultDuration  = 30 * time.Minute
-	egressIPReachabilityCheckInterval = 5 * time.Second
-)
+const egressFirewallDNSDefaultDuration = 30 * time.Minute
 
 // ACL logging severity levels
 type ACLLoggingLevels struct {
@@ -112,6 +107,16 @@ func (oc *DefaultNetworkController) recordPodEvent(reason string, addErr error, 
 	}
 }
 
+func (oc *DefaultNetworkController) recordNodeEvent(reason string, addErr error, node *kapi.Node) {
+	nodeRef, err := ref.GetReference(scheme.Scheme, node)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to node %s to post an event: '%v'", node.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for node %s", kapi.EventTypeWarning, node.Name)
+		oc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, reason, addErr.Error())
+	}
+}
+
 func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[util.RoutingNamespaceAnnotation] != newPod.Annotations[util.RoutingNamespaceAnnotation] ||
 		oldPod.Annotations[util.RoutingNetworkAnnotation] != newPod.Annotations[util.RoutingNetworkAnnotation] ||
@@ -129,6 +134,17 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 	if !util.PodScheduled(pod) {
 		return nil
 	}
+
+	if oc.isPodScheduledinLocalZone(pod) {
+		return oc.ensureLocalZonePod(oldPod, pod, addPort)
+	}
+
+	return oc.ensureRemoteZonePod(oldPod, pod, addPort)
+}
+
+// ensureLocalZonePod tries to set up a local zone pod. It returns nil on success and error on failure; failure
+// indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -166,9 +182,60 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 	return nil
 }
 
+// ensureRemoteZonePod tries to set up remote zone pod bits required to interconnect it.
+//   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
+//
+// It returns nil on success and error on failure; failur indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
+	if len(pod.Status.PodIPs) < 1 {
+		return nil
+	}
+	podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+	if err != nil {
+		return fmt.Errorf("failed to get pod ips for the pod  %s/%s : %w", pod.Namespace, pod.Name, err)
+	}
+
+	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
+		if err := oc.addRemotePodToNamespace(pod.Namespace, podIfAddrs); err != nil {
+			return fmt.Errorf("failed to add remote pod %s/%s to namespace: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+
+	//FIXME: Update comments & reduce code duplication.
+	// check if this remote pod is serving as an external GW.
+	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+		// Delete the routes in the namespace associated with this remote oldPod if its acting as an external GW
+		if err := oc.deletePodExternalGW(oldPod); err != nil {
+			return fmt.Errorf("deletePodExternalGW failed for remote pod %s/%s: %w", oldPod.Namespace, oldPod.Name, err)
+		}
+	}
+
+	// either pod is host-networked or its an update for a normal pod (addPort=false case)
+	if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+		// check if this remote pod is serving as an external GW. If so add the routes in the namespace
+		// associated with this remote pod
+		if err := oc.addPodExternalGW(pod); err != nil {
+			return fmt.Errorf("addPodExternalGW failed for remote pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+	}
+	return nil
+}
+
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
+	if oc.isPodScheduledinLocalZone(pod) {
+		return oc.removeLocalZonePod(pod, portInfo)
+	}
+
+	return oc.removeRemoteZonePod(pod)
+}
+
+// removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
+// failure indicates the pod tear down should be retried later.
+func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *lpInfo) error {
+	oc.logicalPortCache.remove(pod, ovntypes.DefaultNetworkName)
+
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -190,11 +257,24 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 	return nil
 }
 
-// WatchNetworkPolicy starts the watching of the network policy resource and calls
-// back the appropriate handler logic
-func (oc *DefaultNetworkController) WatchNetworkPolicy() error {
-	_, err := oc.retryNetworkPolicies.WatchResource()
-	return err
+// removeRemoteZonePod tries to tear down a remote zone pod bits. It returns nil on success and error on failure;
+// failure indicates the pod tear down should be retried later.
+// It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
+// its routes.
+func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
+	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
+		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
+	}
+
+	if util.PodWantsHostNetwork(pod) {
+		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
+		if err := oc.deletePodExternalGW(pod); err != nil {
+			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+				getPodNamespacedName(pod), err)
+		}
+	}
+
+	return nil
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
@@ -218,13 +298,6 @@ func (oc *DefaultNetworkController) WatchEgressFwNodes() error {
 	return err
 }
 
-// WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
-// resource and calls back the appropriate handler logic.
-func (oc *DefaultNetworkController) WatchCloudPrivateIPConfig() error {
-	_, err := oc.retryCloudPrivateIPConfig.WatchResource()
-	return err
-}
-
 // WatchEgressIP starts the watching of egressip resource and calls back the
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
@@ -240,13 +313,6 @@ func (oc *DefaultNetworkController) WatchEgressIPNamespaces() error {
 
 func (oc *DefaultNetworkController) WatchEgressIPPods() error {
 	_, err := oc.retryEgressIPPods.WatchResource()
-	return err
-}
-
-// WatchNamespaces starts the watching of namespace resource and calls
-// back the appropriate handler logic
-func (oc *DefaultNetworkController) WatchNamespaces() error {
-	_, err := oc.retryNamespaces.WatchResource()
 	return err
 }
 
@@ -268,9 +334,6 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 		if err := oc.gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
-		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
-			return err
-		}
 	} else if hostSubnets != nil {
 		var hostAddrs sets.Set[string]
 		if config.Gateway.Mode == config.GatewayModeShared {
@@ -284,64 +347,6 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 		}
 	}
 	return nil
-}
-
-// aclLoggingUpdateNsInfo parses the provided annotation values and sets nsInfo.aclLogging.Deny and
-// nsInfo.aclLogging.Allow. If errors are encountered parsing the annotation, disable logging completely. If either
-// value contains invalid input, disable logging for the respective key. This is needed to ensure idempotency.
-// More details:
-// *) If the provided annotation cannot be unmarshaled: Disable both Deny and Allow logging. Return an error.
-// *) Valid values for "allow" and "deny" are  "alert", "warning", "notice", "info", "debug", "".
-// *) Invalid values will return an error, and logging will be disabled for the respective key.
-// *) In the following special cases, nsInfo.aclLogging.Deny and nsInfo.aclLogging.Allow. will both be reset to ""
-//
-//	without logging an error, meaning that logging will be switched off:
-//	i) oc.aclLoggingEnabled == false
-//	ii) annotation == ""
-//	iii) annotation == "{}"
-//
-// *) If one of "allow" or "deny" can be parsed and has a valid value, but the other key is not present in the
-//
-//	annotation, then assume that this key should be disabled by setting its nsInfo value to "".
-func (oc *DefaultNetworkController) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
-	var aclLevels ACLLoggingLevels
-	var errors []error
-
-	// If logging is disabled or if the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
-	if oc.aclLoggingEnabled && annotation != "" && annotation != "{}" {
-		err := json.Unmarshal([]byte(annotation), &aclLevels)
-		if err != nil {
-			// Disable Allow and Deny logging to ensure idempotency.
-			nsInfo.aclLogging.Allow = ""
-			nsInfo.aclLogging.Deny = ""
-			return fmt.Errorf("could not unmarshal namespace ACL annotation '%s', disabling logging, err: %q",
-				annotation, err)
-		}
-	}
-
-	// Valid log levels are the various preestablished levels or the empty string.
-	validLogLevels := sets.NewString(nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
-		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug, "")
-
-	// Set Deny logging.
-	if validLogLevels.Has(aclLevels.Deny) {
-		nsInfo.aclLogging.Deny = aclLevels.Deny
-	} else {
-		errors = append(errors, fmt.Errorf("disabling deny logging due to invalid deny annotation. "+
-			"%q is not a valid log severity", aclLevels.Deny))
-		nsInfo.aclLogging.Deny = ""
-	}
-
-	// Set Allow logging.
-	if validLogLevels.Has(aclLevels.Allow) {
-		nsInfo.aclLogging.Allow = aclLevels.Allow
-	} else {
-		errors = append(errors, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
-			"%q is not a valid log severity", aclLevels.Allow))
-		nsInfo.aclLogging.Allow = ""
-	}
-
-	return apierrors.NewAggregate(errors)
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
@@ -451,20 +456,18 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 	return nil
 }
 
-func newEgressServiceController(client clientset.Interface, nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	svcFactory informers.SharedInformerFactory, stopCh <-chan struct{}, controllerName string) (*egresssvc.Controller, error) {
-
+func (oc *DefaultNetworkController) InitEgressServiceController() (*egresssvc.Controller, error) {
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
 	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string) error { return nil }
-	createNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, *kapi.Node, string) error { return nil }
-	deleteNodeNoReroutePolicies := func(addressset.AddressSetFactory, string, net.IP, net.IP, string) error { return nil }
+	ensureNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, listers.NodeLister) error {
+		return nil
+	}
 	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
-		createNodeNoReroutePolicies = CreateDefaultNoRerouteNodePolicies
-		deleteNodeNoReroutePolicies = DeleteDefaultNoRerouteNodePolicies
+		ensureNodeNoReroutePolicies = ensureDefaultNoRerouteNodePolicies
 		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
 	}
 
@@ -481,16 +484,16 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 		}
 
 		if hcPort == 0 {
-			return isReachableLegacy(nodeName, mgmtIPs, timeout)
+			return egresssvc.IsReachableLegacy(nodeName, mgmtIPs, timeout)
 		}
 
-		return isReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
+		return egresssvc.IsReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
 	}
 
-	return egresssvc.NewController(controllerName, client, nbClient, addressSetFactory,
-		initClusterEgressPolicies, createNodeNoReroutePolicies,
-		deleteNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies, isReachable,
-		stopCh, svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1().EndpointSlices(),
-		svcFactory.Core().V1().Nodes())
+	return egresssvc.NewController(DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
+		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies, oc.kube.UpdateEgressServiceStatus,
+		isReachable,
+		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.svcFactory.Core().V1().Services(),
+		oc.svcFactory.Discovery().V1().EndpointSlices(),
+		oc.svcFactory.Core().V1().Nodes())
 }

@@ -98,8 +98,8 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *util.PodAnnotation, checkExtIDs bool, podUID,
-	vfNetdevname, nadName string, netName string, mtu int) (*PodInterfaceInfo, error) {
+func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *util.PodAnnotation, podUID,
+	netdevname, nadName, netName string, mtu int) (*PodInterfaceInfo, error) {
 	var err error
 	// get pod's annotation of the given NAD if it is not available
 	if podNADAnnotation == nil {
@@ -123,10 +123,9 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		RoutableMTU:          config.Default.RoutableMTU, // TBD, configurable for secondary network?
 		Ingress:              ingress,
 		Egress:               egress,
-		CheckExtIDs:          checkExtIDs,
 		IsDPUHostMode:        config.OvnKubeNode.Mode == types.NodeModeDPUHost,
 		PodUID:               podUID,
-		VfNetdevName:         vfNetdevname,
+		NetdevName:           netdevname,
 		NetName:              netName,
 		NADName:              nadName,
 		EnableUDPAggregation: config.Default.EnableUDPAggregation,
@@ -134,7 +133,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 	return podInterfaceInfo, nil
 }
 
-//START taken from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/types/pod_update.go
+// START taken from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/types/pod_update.go
 const (
 	ConfigSourceAnnotationKey = "kubernetes.io/config.source"
 	// ApiserverSource identifies updates from Kubernetes API Server.

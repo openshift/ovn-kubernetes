@@ -56,6 +56,10 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *sbdb.IGMPGroup:
 		return t.UUID
+	case *sbdb.Encap:
+		return t.UUID
+	case *sbdb.PortBinding:
+		return t.UUID
 	case *sbdb.MACBinding:
 		return t.UUID
 	case *sbdb.SBGlobal:
@@ -113,6 +117,10 @@ func setUUID(model model.Model, uuid string) {
 		t.UUID = uuid
 	case *sbdb.IGMPGroup:
 		t.UUID = uuid
+	case *sbdb.Encap:
+		t.UUID = uuid
+	case *sbdb.PortBinding:
+		t.UUID = uuid
 	case *sbdb.MACBinding:
 		t.UUID = uuid
 	case *sbdb.SBGlobal:
@@ -131,6 +139,9 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.ACL:
 		return &nbdb.ACL{
 			UUID: t.UUID,
+			ExternalIDs: map[string]string{
+				types.PrimaryIDKey: t.ExternalIDs[types.PrimaryIDKey],
+			},
 		}
 	case *nbdb.AddressSet:
 		return &nbdb.AddressSet{
@@ -167,6 +178,7 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.LogicalRouter:
 		return &nbdb.LogicalRouter{
 			UUID: t.UUID,
+			Name: t.Name,
 		}
 	case *nbdb.LogicalRouterPolicy:
 		return &nbdb.LogicalRouterPolicy{
@@ -184,6 +196,7 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.LogicalSwitch:
 		return &nbdb.LogicalSwitch{
 			UUID: t.UUID,
+			Name: t.Name,
 		}
 	case *nbdb.LogicalSwitchPort:
 		return &nbdb.LogicalSwitchPort{
@@ -225,6 +238,19 @@ func copyIndexes(model model.Model) model.Model {
 	case *sbdb.IGMPGroup:
 		return &sbdb.IGMPGroup{
 			UUID: t.UUID,
+		}
+	case *sbdb.Encap:
+		return &sbdb.Encap{
+			UUID: t.UUID,
+			Type: t.Type,
+			IP:   t.IP,
+		}
+	case *sbdb.PortBinding:
+		return &sbdb.PortBinding{
+			UUID:        t.UUID,
+			LogicalPort: t.LogicalPort,
+			Datapath:    t.Datapath,
+			TunnelKey:   t.TunnelKey,
 		}
 	case *sbdb.MACBinding:
 		return &sbdb.MACBinding{
@@ -294,6 +320,10 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*sbdb.ChassisPrivate{}
 	case *sbdb.IGMPGroup:
 		return &[]*sbdb.IGMPGroup{}
+	case *sbdb.Encap:
+		return &[]*sbdb.Encap{}
+	case *sbdb.PortBinding:
+		return &[]*sbdb.PortBinding{}
 	case *sbdb.MACBinding:
 		return &[]*sbdb.MACBinding{}
 	case *nbdb.QoS:

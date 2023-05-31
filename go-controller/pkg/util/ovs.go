@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
@@ -604,17 +605,38 @@ func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 // RunOvsVswitchdAppCtl runs an 'ovs-appctl -t /var/run/openvsiwthc/ovs-vswitchd.pid.ctl command'
 func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
-	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovs-vswitchd.pid")
+	pid, err := GetOvsVSwitchdPID()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
+		return "", "", err
 	}
+
 	cmdArgs = []string{
 		"-t",
-		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", strings.TrimSpace(string(pid))),
+		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", pid),
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// GetOvsVSwitchdPID retrieves the Process IDentifier for ovs-vswitchd daemon.
+func GetOvsVSwitchdPID() (string, error) {
+	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovs-vswitchd.pid")
+	if err != nil {
+		return "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
+	}
+
+	return strings.TrimSpace(string(pid)), nil
+}
+
+// GetOvsDBServerPID retrieves the Process IDentifier for ovs-vswitchd daemon.
+func GetOvsDBServerPID() (string, error) {
+	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovsdb-server.pid")
+	if err != nil {
+		return "", fmt.Errorf("failed to get ovsdb-server pid : %v", err)
+	}
+
+	return strings.TrimSpace(string(pid)), nil
 }
 
 // RunIP runs a command via the iproute2 "ip" utility
@@ -924,4 +946,35 @@ func GetOvsDbProperties(db string) (*OvsDbProperties, error) {
 	} else {
 		return nil, fmt.Errorf("failed to parse ovn db type Northbound/Southbound from the path %s", db)
 	}
+}
+
+// GetExternalIDValByKey returns the value of the specified key in a space separated string (each in the form of k=v)
+func GetExternalIDValByKey(keyValString, key string) string {
+	keyVals := strings.Fields(keyValString)
+	for _, keyVal := range keyVals {
+		if strings.HasPrefix(keyVal, key+"=") {
+			return strings.TrimPrefix(keyVal, key+"=")
+		}
+	}
+	return ""
+}
+
+// GetOVSPortPodInfo gets OVS interface associated pod information (sandbox/NAD),
+// returns false if the OVS interface does not exists
+func GetOVSPortPodInfo(hostIfName string) (bool, string, string, error) {
+	stdout, stderr, err := RunOVSVsctl("--no-heading", "--format=csv", "--data=bare",
+		"--columns=external_ids", "find", "Interface", "name="+hostIfName)
+	if err != nil {
+		return false, "", "", fmt.Errorf("failed to get OVS interface %s, stderr %v: %v", hostIfName, stderr, err)
+	}
+	if stdout == "" {
+		return false, "", "", nil
+	}
+	sandbox := GetExternalIDValByKey(stdout, "sandbox")
+	nadName := GetExternalIDValByKey(stdout, types.NADExternalID)
+	// if network_name does not exists, it is default network
+	if nadName == "" {
+		nadName = types.DefaultNetworkName
+	}
+	return true, sandbox, nadName, nil
 }

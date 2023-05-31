@@ -16,7 +16,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/apimachinery/pkg/util/wait"
-	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
@@ -24,13 +23,12 @@ import (
 
 // nodeNetworkControllerManager structure is the object manages all controllers for all networks for ovnkube-node
 type nodeNetworkControllerManager struct {
-	name           string
-	client         clientset.Interface
-	Kube           kube.Interface
-	watchFactory   factory.NodeWatchFactory
-	stopChan       chan struct{}
-	recorder       record.EventRecorder
-	isOvnUpEnabled bool
+	name          string
+	ovnNodeClient *util.OVNNodeClientset
+	Kube          kube.Interface
+	watchFactory  factory.NodeWatchFactory
+	stopChan      chan struct{}
+	recorder      record.EventRecorder
 
 	defaultNodeNetworkController nad.BaseNetworkController
 
@@ -39,13 +37,12 @@ type nodeNetworkControllerManager struct {
 	nadController *nad.NetAttachDefinitionController
 }
 
-// NewNetworkController create secondary node network controllers for the given NetInfo and NetConfInfo
-func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo,
-	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
-	topoType := netConfInfo.TopologyType()
+// NewNetworkController create secondary node network controllers for the given NetInfo
+func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
+	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo, netConfInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -57,19 +54,19 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers [
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.client, ncm.watchFactory, ncm.recorder, ncm.name, ncm.isOvnUpEnabled)
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name)
 }
 
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
 	eventRecorder record.EventRecorder) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
-		name:         name,
-		client:       ovnClient.KubeClient,
-		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
-		watchFactory: wf,
-		stopChan:     make(chan struct{}),
-		recorder:     eventRecorder,
+		name:          name,
+		ovnNodeClient: &util.OVNNodeClientset{KubeClient: ovnClient.KubeClient, AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient},
+		Kube:          &kube.Kube{KClient: ovnClient.KubeClient},
+		watchFactory:  wf,
+		stopChan:      make(chan struct{}),
+		recorder:      eventRecorder,
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
@@ -81,26 +78,6 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 		return nil, err
 	}
 	return ncm, nil
-}
-
-// getOVNIfUpCheckMode check if OVN PortBinding.up can be used
-func (ncm *nodeNetworkControllerManager) getOVNIfUpCheckMode() error {
-	// this support is only used when configure Pod's OVS interface, it is not needed in DPU host mode
-	if config.OvnKubeNode.DisableOVNIfaceIdVer || config.OvnKubeNode.Mode == ovntypes.NodeModeDPUHost {
-		klog.Infof("'iface-id-ver' is manually disabled, ovn-installed feature can't be used")
-		ncm.isOvnUpEnabled = false
-		return nil
-	}
-
-	isOvnUpEnabled, err := util.GetOVNIfUpCheckMode()
-	if err != nil {
-		return err
-	}
-	ncm.isOvnUpEnabled = isOvnUpEnabled
-	if isOvnUpEnabled {
-		klog.Infof("Detected support for port binding with external IDs")
-	}
-	return nil
 }
 
 // initDefaultNodeNetworkController creates the controller for default network
@@ -119,10 +96,6 @@ func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() erro
 // Start the node network controller manager
 func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) {
 	klog.Infof("Starting the node network controller manager, Mode: %s", config.OvnKubeNode.Mode)
-
-	if err = ncm.getOVNIfUpCheckMode(); err != nil {
-		return err
-	}
 
 	// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
 	// Must happen before calling any OVS exec from pkg/cni to prevent races.
@@ -187,7 +160,7 @@ func (ncm *nodeNetworkControllerManager) Stop() {
 // derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
 // not scheduled to the node.
 func (ncm *nodeNetworkControllerManager) checkForStaleOVSRepresentorInterfaces() {
-	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
+	// Get all representor interfaces. these are OVS interfaces that have their external_ids:sandbox and vf-netdev-name set.
 	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"", "external_ids:vf-netdev-name!=\"\"")
 	if err != nil {

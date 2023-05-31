@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +26,7 @@ import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -263,8 +266,8 @@ func createGenericPod(f *framework.Framework, podName, nodeSelector, namespace s
 }
 
 // Create a pod on the specified node using the agnostic host image
-func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string) (*v1.Pod, error) {
-	return createPod(f, podName, nodeSelector, namespace, command, labels)
+func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string, options ...func(*v1.Pod)) (*v1.Pod, error) {
+	return createPod(f, podName, nodeSelector, namespace, command, labels, options...)
 }
 
 func createServiceForPodsWithLabel(f *framework.Framework, namespace string, servicePort int32, targetPort string, serviceType string, labels map[string]string) (string, error) {
@@ -325,6 +328,11 @@ func deleteClusterExternalContainer(containerName string) {
 	if err != nil {
 		framework.Failf("failed to delete external test container, err: %v", err)
 	}
+	gomega.Eventually(func() string {
+		output, err := runCommand(containerRuntime, "ps", "-f", fmt.Sprintf("name=%s", containerName), "-q")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		return output
+	}, 5).Should(gomega.HaveLen(0))
 }
 
 func updateNamespace(f *framework.Framework, namespace *v1.Namespace) {
@@ -338,7 +346,7 @@ func getNamespace(f *framework.Framework, name string) *v1.Namespace {
 }
 
 func updatePod(f *framework.Framework, pod *v1.Pod) {
-	_, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Update(context.Background(), pod, metav1.UpdateOptions{})
+	_, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Update(context.Background(), pod, metav1.UpdateOptions{})
 	framework.ExpectNoError(err, fmt.Sprintf("unable to update pod: %s, err: %v", pod.Name, err))
 }
 func getPod(f *framework.Framework, podName string) *v1.Pod {
@@ -485,12 +493,61 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	return nil
 }
 
+// restartOVNKubeNodePodsInParallel restarts multiple ovnkube-node pods in parallel. See `restartOVNKubeNodePod`
+func restartOVNKubeNodePodsInParallel(clientset kubernetes.Interface, namespace string, nodeNames ...string) error {
+	framework.Logf("restarting ovnkube-node for %v", nodeNames)
+
+	restartFuncs := make([]func() error, 0, len(nodeNames))
+	for _, n := range nodeNames {
+		nodeName := n
+		restartFuncs = append(restartFuncs, func() error {
+			return restartOVNKubeNodePod(clientset, ovnNamespace, nodeName)
+		})
+	}
+
+	return utilerrors.AggregateGoroutines(restartFuncs...)
+}
+
+// getOVNKubePodLogsFiltered retrieves logs from ovnkube-node pods and filters logs lines according to filteringRegexp
+func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeName, filteringRegexp string) (string, error) {
+	ovnKubeNodePods, err := clientset.CoreV1().Pods(ovnNamespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: "name=ovnkube-node",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node pods: %w", err)
+	}
+
+	logs, err := e2epod.GetPodLogs(clientset, ovnNamespace, ovnKubeNodePods.Items[0].Name, "ovnkube-node")
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while getting ovnkube-node [%s/%s] logs: %w",
+			ovnNamespace, ovnKubeNodePods.Items[0].Name, err)
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(logs))
+	filteredLogs := ""
+	re := regexp.MustCompile(filteringRegexp)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if re.MatchString(line) {
+			filteredLogs += line + "\n"
+		}
+	}
+
+	err = scanner.Err()
+	if err != nil {
+		return "", fmt.Errorf("getOVNKubePodLogsFiltered: error while scanning ovnkube-node logs: %w", err)
+	}
+
+	return filteredLogs, nil
+}
+
 func findOvnKubeMasterNode() (string, error) {
 
-	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master",
+	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master-global",
 		"-o", "jsonpath='{.spec.holderIdentity}'")
 
-	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master)"+
+	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master-global)"+
 		"from %s %v", ovnNs, err))
 
 	framework.Logf(fmt.Sprintf("master instance of ovnkube-master is running on node %s", ovnkubeMasterNode))
@@ -511,12 +568,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		// Since this is not really a test of kubernetes in any way, we
 		// leave it as a pre-test assertion, rather than a Ginko test.
 		ginkgo.By("Executing a successful http request from the external internet")
-		resp, err := http.Get("http://google.com")
+		_, err := http.Get("http://google.com")
 		if err != nil {
 			framework.Failf("Unable to connect/talk to the internet: %v", err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			framework.Failf("Unexpected error code, expected 200, got, %v (%v)", resp.StatusCode, resp)
 		}
 
 		masterPods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
@@ -1836,7 +1890,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 								break
 							}
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, nodesHostnames, responses))
 					}
 				}
 			}
@@ -1988,7 +2043,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 										break
 									}
 								}
-								framework.ExpectEqual(valid, true, "Validation failed for node", nodeName, responses, port)
+								framework.ExpectEqual(valid, true,
+									fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", nodeName, nodesHostnames, responses))
 							}
 						}
 					}
@@ -2058,7 +2114,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							}
 
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}
@@ -2118,7 +2175,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 
@@ -2143,12 +2200,13 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
 	})
-	ginkgo.Context("Validating ExternalIP ingress traffic to manually added node IPs", func() {
+
+	ginkgo.Context("Validating ingress traffic to manually added node IPs", func() {
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
 			nodesHostnames = sets.NewString()
@@ -2188,14 +2246,18 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			// addresses.
 			createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P"}, []string{"netexec", "--http-port=80"})
 
+			// If `kindexgw` exists, connect client container to it
+			runCommand(containerRuntime, "network", "connect", "kindexgw", clientContainerName)
+
 			ginkgo.By("Adding ip addresses to each node")
 			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
 			var newIP string
+			newNodeAddresses = make([]string, 0)
 			for i, node := range nodes.Items {
 				if utilnet.IsIPv6String(e2enode.GetAddresses(&node, v1.NodeInternalIP)[0]) {
 					newIP = "fc00:f853:ccd:e794::" + strconv.Itoa(i)
 				} else {
-					newIP = "172.18.1." + strconv.Itoa(i)
+					newIP = "172.18.1." + strconv.Itoa(i+1)
 				}
 				// manually add the a secondary IP to each node
 				_, err := runCommand(containerRuntime, "exec", node.Name, "ip", "addr", "add", newIP, "dev", "breth0")
@@ -2218,6 +2280,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 		})
+
 		// This test validates ingress traffic to externalservices after a new node Ip is added.
 		// It creates a service on both udp and tcp and assigns the new node IPs as
 		// external Addresses. Then, creates a backend pod on each node.
@@ -2259,7 +2322,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							break
 						}
 					}
-					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
@@ -2397,7 +2460,8 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							}
 
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+						framework.ExpectEqual(valid, true,
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}

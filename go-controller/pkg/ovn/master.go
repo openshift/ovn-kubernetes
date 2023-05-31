@@ -23,7 +23,6 @@ import (
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -120,7 +119,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
 	pg := &nbdb.PortGroup{
-		Name: types.ClusterPortGroupName,
+		Name: types.ClusterPortGroupNameBase,
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && err != libovsdbclient.ErrNotFound {
@@ -129,7 +128,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	if pg == nil {
 		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
 		// Create a cluster-wide port group that all logical switch ports are part of
-		pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
+		pg := oc.buildPortGroup(types.ClusterPortGroupNameBase, types.ClusterPortGroupNameBase, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -138,7 +137,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 
 	pg = &nbdb.PortGroup{
-		Name: types.ClusterRtrPortGroupName,
+		Name: types.ClusterRtrPortGroupNameBase,
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && err != libovsdbclient.ErrNotFound {
@@ -149,7 +148,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		// Create a cluster-wide port group with all node-to-cluster router
 		// logical switch ports. Currently the only user is multicast but it might
 		// be used for other features in the future.
-		pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
+		pg = oc.buildPortGroup(types.ClusterRtrPortGroupNameBase, types.ClusterRtrPortGroupNameBase, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -173,6 +172,10 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
+	} else {
+		if err = oc.disableMulticast(); err != nil {
+			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
+		}
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
@@ -185,27 +188,13 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
-	// Initialize the OVNJoinSwitch switch IP manager
-	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames)
-	if err != nil {
-		return err
-	}
-
-	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
-	// allocate the first IPs in the join switch subnets
-	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
-	if err != nil {
-		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
-	}
-
 	// Connect the distributed router to OVNJoinSwitch.
 	drSwitchPort := types.JoinSwitchToGWRouterPrefix + types.OVNClusterRouter
 	drRouterPort := types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter
 
-	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIfAddrs[0].IP)
+	gwLRPMAC := util.IPAddrToHWAddr(oc.ovnClusterLRPToJoinIfAddrs[0].IP)
 	gwLRPNetworks := []string{}
-	for _, gwLRPIfAddr := range gwLRPIfAddrs {
+	for _, gwLRPIfAddr := range oc.ovnClusterLRPToJoinIfAddrs {
 		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
 	}
 	logicalRouterPort := nbdb.LogicalRouterPort{
@@ -258,7 +247,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.nbClient); err != nil {
+		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 			return err
 		}
 
@@ -293,7 +282,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupName, logicalSwitchPort.UUID)
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupNameBase, logicalSwitchPort.UUID)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err
@@ -316,16 +305,14 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	gwLRPIPs, err = oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+	gwLRPIPs, err = util.ParseNodeGatewayRouterLRPAddrs(node)
 	if err != nil {
-		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
+		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
 	}
-
-	drLRPIPs, _ := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
 
-	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs,
+	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, oc.ovnClusterLRPToJoinIfAddrs,
 		enableGatewayMTU)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -337,7 +324,7 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		if err != nil {
 			return err
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs.UnsortedList())
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), sets.List(hostAddrs))
 		if err != nil && err != util.NoIPError {
 			return err
 		}
@@ -352,16 +339,17 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	var hostNetworkPolicyIPs []net.IP
 
-	switchName := node.Name
 	for _, hostSubnet := range hostSubnets {
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
 	}
 
 	// also add the join switch IPs for this node - needed in shared gateway mode
-	lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(switchName)
+	// Note: join switch IPs for each node are generated by cluster manager and
+	// stored in the node annotation
+	lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
 	if err != nil {
-		return fmt.Errorf("failed to get join switch port IP address for switch %s: %v", switchName, err)
+		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
 	}
 
 	for _, lrpIP := range lrpIPs {
@@ -411,29 +399,6 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 	if haveV4 != config.IPv4Mode || haveV6 != config.IPv6Mode {
 		return nil, fmt.Errorf("failed to get expected host subnets for node %s; expected v4 %v have %v, expected v6 %v have %v",
 			node.Name, config.IPv4Mode, haveV4, config.IPv6Mode, haveV6)
-	}
-
-	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
-	}
-	var v4Addr, v6Addr *net.IPNet
-	for _, ip := range gwLRPIPs {
-		if ip.IP.To4() != nil {
-			v4Addr = ip
-		} else if ip.IP.To16() != nil {
-			v6Addr = ip
-		}
-	}
-	updatedNodeAnnotation, err := util.CreateNodeGatewayRouterLRPAddrAnnotation(nil, v4Addr, v6Addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
-			node.Name, gwLRPIPs)
-	}
-
-	err = oc.UpdateNodeAnnotationWithRetry(node.Name, updatedNodeAnnotation)
-	if err != nil {
-		return nil, err
 	}
 
 	// delete stale chassis in SBDB if any
@@ -501,17 +466,14 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) erro
 	return nil
 }
 
-func (oc *DefaultNetworkController) deleteNode(nodeName string) error {
+// cleanupNodeResources deletes the node resources from the OVN Northbound database
+func (oc *DefaultNetworkController) cleanupNodeResources(nodeName string) error {
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
 
 	if err := oc.gatewayCleanup(nodeName); err != nil {
 		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
-	}
-
-	if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
-		return fmt.Errorf("failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
 	}
 
 	chassisTemplateVars := make([]*nbdb.ChassisTemplateVar, 0)
@@ -589,12 +551,17 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 		return
 	}
 
-	nodes := make([]*kapi.Node, 0, len(kNodes.Items))
+	localZoneKNodes := make([]*kapi.Node, 0, len(kNodes.Items))
+	remoteZoneKNodes := make([]*kapi.Node, 0, len(kNodes.Items))
 	for i := range kNodes.Items {
-		nodes = append(nodes, &kNodes.Items[i])
+		if oc.isLocalZoneNode(&kNodes.Items[i]) {
+			localZoneKNodes = append(localZoneKNodes, &kNodes.Items[i])
+		} else {
+			remoteZoneKNodes = append(remoteZoneKNodes, &kNodes.Items[i])
+		}
 	}
 
-	if err := oc.syncChassis(nodes); err != nil {
+	if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
 		klog.Errorf("Failed to sync chassis: error: %v", err)
 	}
 }
@@ -605,7 +572,8 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 // do not want to delete.
 func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	foundNodes := sets.New[string]()
-	nodes := make([]*kapi.Node, 0, len(kNodes))
+	localZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
+	remoteZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
 	for _, tmp := range kNodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {
@@ -615,13 +583,14 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
 			continue
 		}
-		foundNodes.Insert(node.Name)
-		nodes = append(nodes, node)
 
-		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		if _, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name); err != nil {
-			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
-			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+		// Add the node to the foundNodes only if it belongs to the local zone.
+		if oc.isLocalZoneNode(node) {
+			foundNodes.Insert(node.Name)
+			oc.localZoneNodes.Store(node.Name, true)
+			localZoneKNodes = append(localZoneKNodes, node)
+		} else {
+			remoteZoneKNodes = append(remoteZoneKNodes, node)
 		}
 	}
 
@@ -635,21 +604,32 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	}
 	for _, nodeSwitch := range nodeSwitches {
 		if !foundNodes.Has(nodeSwitch.Name) {
-			if err := oc.deleteNode(nodeSwitch.Name); err != nil {
-				return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
+			if err := oc.cleanupNodeResources(nodeSwitch.Name); err != nil {
+				return fmt.Errorf("failed to cleanup node resources:%s, err:%v", nodeSwitch.Name, err)
 			}
 		}
 	}
 
-	if err := oc.syncChassis(nodes); err != nil {
+	if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
 		return fmt.Errorf("failed to sync chassis: error: %v", err)
 	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneChassisHandler.SyncNodes(kNodes); err != nil {
+			return fmt.Errorf("zoneChassisHandler failed to sync nodes: error: %w", err)
+		}
+
+		if err := oc.zoneICHandler.SyncNodes(kNodes); err != nil {
+			return fmt.Errorf("zoneICHandler failed to sync nodes: error: %w", err)
+		}
+	}
+
 	return nil
 }
 
 // Cleanup stale chassis and chassis template variables with no
 // corresponding nodes.
-func (oc *DefaultNetworkController) syncChassis(nodes []*kapi.Node) error {
+func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes []*kapi.Node) error {
 	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get chassis list: error: %v", err)
@@ -661,9 +641,13 @@ func (oc *DefaultNetworkController) syncChassis(nodes []*kapi.Node) error {
 		return fmt.Errorf("failed to get chassis private list: %v", err)
 	}
 
-	templateVarList, err := libovsdbops.ListTemplateVar(oc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get template var list: error: %v", err)
+	templateVarList := []*nbdb.ChassisTemplateVar{}
+
+	if oc.svcTemplateSupport {
+		templateVarList, err = libovsdbops.ListTemplateVar(oc.nbClient)
+		if err != nil {
+			return fmt.Errorf("failed to get template var list: error: %w", err)
+		}
 	}
 
 	chassisHostNameMap := map[string]*sbdb.Chassis{}
@@ -691,11 +675,20 @@ func (oc *DefaultNetworkController) syncChassis(nodes []*kapi.Node) error {
 
 	// Delete existing nodes from the chassis map.
 	// Also delete existing templateVars from the template map.
-	for _, node := range nodes {
+	for _, node := range localZoneNodes {
 		if chassis, ok := chassisHostNameMap[node.Name]; ok {
 			delete(chassisNameMap, chassis.Name)
 			delete(chassisHostNameMap, chassis.Hostname)
 			delete(templateChassisMap, chassis.Name)
+		}
+	}
+
+	// Delete existing remote zone nodes from the chassis map, but not from the templateVars
+	// as we need to cleanup chassisTemplateVars for the remote zone nodes
+	for _, node := range remoteZoneNodes {
+		if chassis, ok := chassisHostNameMap[node.Name]; ok {
+			delete(chassisNameMap, chassis.Name)
+			delete(chassisHostNameMap, chassis.Hostname)
 		}
 	}
 
@@ -728,12 +721,15 @@ type nodeSyncs struct {
 	syncMgmtPort          bool
 	syncGw                bool
 	syncHo                bool
+	syncZoneIC            bool
 }
 
-func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
+
+	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(node.Name)
@@ -759,9 +755,10 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
 			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
-			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
-			oc.recordNodeErrorEvent(node, err)
-			return err
+			if nSyncs.syncZoneIC {
+				oc.syncZoneICFailed.Store(node.Name, true)
+			}
+			return fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
 		}
 		oc.addNodeFailed.Delete(node.Name)
 	}
@@ -839,9 +836,58 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 		}
 	}
 
-	err = kerrors.NewAggregate(errs)
-	if err != nil {
-		oc.recordNodeErrorEvent(node, err)
+	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+		// Call zone chassis handler's AddLocalZoneNode function to mark
+		// this node's chassis record in Southbound db as a local zone chassis.
+		// This is required when a node moves from a remote zone to local zone
+		if err := oc.zoneChassisHandler.AddLocalZoneNode(node); err != nil {
+			errs = append(errs, err)
+			oc.syncZoneICFailed.Store(node.Name, true)
+		} else {
+			// Call zone IC handler's AddLocalZoneNode function to create
+			// interconnect resources in the OVN Northbound db for this local zone node.
+			if err := oc.zoneICHandler.AddLocalZoneNode(node); err != nil {
+				errs = append(errs, err)
+				oc.syncZoneICFailed.Store(node.Name, true)
+			} else {
+				oc.syncZoneICFailed.Delete(node.Name)
+			}
+		}
+	}
+	return kerrors.NewAggregate(errs)
+}
+
+func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
+	// Check if the remote node is present in the local zone nodes.  If its present
+	// it means it moved from this controller zone to other remote zone. Cleanup the node
+	// from the local zone cache.
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		klog.Infof("Node %q moved from the local zone %s to a remote zone %s. Cleaning the node resources", node.Name, oc.zone, util.GetNodeZone(node))
+		if err := oc.cleanupNodeResources(node.Name); err != nil {
+			return fmt.Errorf("error cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
+		}
+	}
+
+	var err error
+	if syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+		// Call zone chassis handler's AddRemoteZoneNode function to creates
+		// the remote chassis for the remote zone node node in the SB DB or mark
+		// the entry as remote if it was local chassis earlier
+		if err = oc.zoneChassisHandler.AddRemoteZoneNode(node); err != nil {
+			err = fmt.Errorf("adding or updating remote node %s failed, err - %w", node.Name, err)
+			oc.syncZoneICFailed.Store(node.Name, true)
+		} else {
+			// Call zone IC handler's AddRemoteZoneNode function to create
+			// interconnect resources in the OVN Northbound db for this remote zone node.
+			if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
+				err = fmt.Errorf("adding or updating remote node %s failed, err - %w", node.Name, err)
+				oc.syncZoneICFailed.Store(node.Name, true)
+			} else {
+				oc.syncZoneICFailed.Delete(node.Name)
+			}
+		}
 	}
 	return err
 }
@@ -863,8 +909,21 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 			return err
 		}
 	}
-	if err := oc.deleteNode(node.Name); err != nil {
+
+	if err := oc.cleanupNodeResources(node.Name); err != nil {
 		return err
+	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
+			return err
+		}
+		if !oc.isLocalZoneNode(node) {
+			if err := oc.zoneChassisHandler.DeleteRemoteZoneNode(node); err != nil {
+				return err
+			}
+		}
+		oc.syncZoneICFailed.Delete(node.Name)
 	}
 
 	oc.lsManager.DeleteSwitch(node.Name)
@@ -872,35 +931,35 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
+	oc.localZoneNodes.Delete(node.Name)
+
 	return nil
 }
 
-func (oc *DefaultNetworkController) createACLLoggingMeter() error {
-	band := &nbdb.MeterBand{
-		Action: types.MeterAction,
-		Rate:   config.Logging.ACLLoggingRateLimit,
+// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
+// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
+// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
+// always be the first IP from these subnets.
+func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
+	joinSubnetsConfig := []string{}
+	if config.IPv4Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V4JoinSubnet)
 	}
-	ops, err := libovsdbops.CreateMeterBandOps(oc.nbClient, nil, band)
-	if err != nil {
-		return fmt.Errorf("can't create meter band %v: %v", band, err)
+	if config.IPv6Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V6JoinSubnet)
 	}
-
-	meterFairness := true
-	meter := &nbdb.Meter{
-		Name: types.OvnACLLoggingMeter,
-		Fair: &meterFairness,
-		Unit: types.PacketsPerSecond,
-	}
-	ops, err = libovsdbops.CreateOrUpdateMeterOps(oc.nbClient, ops, meter, []*nbdb.MeterBand{band},
-		&meter.Bands, &meter.Fair, &meter.Unit)
-	if err != nil {
-		return fmt.Errorf("can't create meter %v: %v", meter, err)
-	}
-
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("can't transact ACL logging meter: %v", err)
+	for _, joinSubnetString := range joinSubnetsConfig {
+		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
+		}
+		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
+		ipnet := &net.IPNet{
+			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
+			Mask: joinSubnet.Mask,
+		}
+		gwLRPIPs = append(gwLRPIPs, ipnet)
 	}
 
-	return nil
+	return gwLRPIPs, nil
 }

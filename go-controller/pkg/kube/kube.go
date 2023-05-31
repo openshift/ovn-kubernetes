@@ -6,10 +6,12 @@ import (
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
+	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -33,6 +35,7 @@ type InterfaceOVN interface {
 	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
+	UpdateEgressServiceStatus(namespace, name, host string) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -70,6 +73,8 @@ type KubeOVN struct {
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
+	EgressServiceClient  egressserviceclientset.Interface
+	APBRouteClient       adminpolicybasedrouteclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -386,4 +391,16 @@ func (k *KubeOVN) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetwo
 
 func (k *KubeOVN) DeleteCloudPrivateIPConfig(name string) error {
 	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(context.TODO(), name, metav1.DeleteOptions{})
+}
+
+func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error {
+	es, err := k.EgressServiceClient.K8sV1().EgressServices(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	es.Status.Host = host
+
+	_, err = k.EgressServiceClient.K8sV1().EgressServices(es.Namespace).UpdateStatus(context.TODO(), es, metav1.UpdateOptions{})
+	return err
 }

@@ -2,15 +2,16 @@ package ovn
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -69,6 +70,14 @@ func getNsAddrSetHashNames(ns string) (string, string) {
 	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
 }
 
+func buildNamespaceAddressSets(namespace string, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
+	v4set, v6set := addressset.GetDbObjsForAS(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
+
+	v4set.UUID = fmt.Sprintf("%s-ipv4-addrSet", namespace)
+	v6set.UUID = fmt.Sprintf("%s-ipv6-addrSet", namespace)
+	return v4set, v6set
+}
+
 var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	const (
 		namespaceName         = "namespace1"
@@ -86,7 +95,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		err := config.PrepareTestConfig()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fakeOvn = NewFakeOVN()
+		fakeOvn = NewFakeOVN(true)
 		wg = &sync.WaitGroup{}
 	})
 
@@ -147,6 +156,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				&v1.NamespaceList{
 					Items: []v1.Namespace{
 						namespaceT,
+					},
+				},
+				&v1.NodeList{
+					Items: []v1.Node{
+						*newNode("node1", "192.168.126.202/24"),
 					},
 				},
 				&v1.PodList{
@@ -210,7 +224,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				DnatSnatIP:           "169.254.0.1",
 			}
 			// create a test node and annotate it with host subnet
-			testNode := node1.k8sNode()
+			testNode := node1.k8sNode("2")
 
 			hostNetworkNamespace := "test-host-network-ns"
 			config.Kubernetes.HostNetworkNamespace = hostNetworkNamespace
@@ -287,15 +301,15 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			expectedDatabaseState := []libovsdb.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
-			_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(node1.Name)
+			// Addressset of the host-network namespace was initialized but the node logical switch management port address may or may not
+			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset
+			// can only be deterministic when WatchNamespaces() handles this host network namespace.
+
+			gwLRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(&testNode)
 			gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 			err = fakeOvn.controller.WatchNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(hostNetworkNamespace)
 
 			err = fakeOvn.controller.WatchNodes()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
