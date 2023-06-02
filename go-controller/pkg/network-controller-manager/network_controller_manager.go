@@ -177,7 +177,7 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	return nil
 }
 
-// NewNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
+// NewNetworkControllerManager creates a new ovnkube controller manager to manage all the controller for all networks
 func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder, wg *sync.WaitGroup) (*networkControllerManager, error) {
@@ -296,9 +296,9 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 	return nil
 }
 
-// Start the network controller manager
+// Start the ovnkube controller
 func (cm *networkControllerManager) Start(ctx context.Context) error {
-	klog.Info("Starting the network controller manager")
+	klog.Info("Starting the ovnkube controller")
 
 	// Make sure that the NCM zone matches with the Northbound db zone.
 	// Wait for 300s before giving up
