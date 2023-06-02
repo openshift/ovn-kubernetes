@@ -422,7 +422,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	if runMode.ovnkubeController {
 		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+		masterWatchFactory, err = factory.NewNCMWatchFactory(ovnClientset.GetNetworkControllerManagerClientset())
 		if err != nil {
 			return err
 		}
@@ -432,6 +432,10 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.clusterManager {
 		var clusterManagerWatchFactory *factory.WatchFactory
 		if runMode.ovnkubeController {
+			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+			if err != nil {
+				return err
+			}
 			clusterManagerWatchFactory = masterWatchFactory
 		} else {
 			clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
@@ -485,15 +489,23 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.node {
 		var nodeWatchFactory factory.NodeWatchFactory
 
-		if masterWatchFactory == nil {
+		if runMode.ovnkubeController && runMode.clusterManager {
+			// masterWatchFactory would be initialized as NewMasterWatchFactory already, let's use that
+			nodeWatchFactory = masterWatchFactory
+		} else if runMode.ovnkubeController {
+			// masterWatchFactory would be initialized as NewNCMWatchFactory, let's change that
+			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+			if err != nil {
+				return err
+			}
+			nodeWatchFactory = masterWatchFactory
+		} else {
 			var err error
 			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
 			if err != nil {
 				return err
 			}
 			defer nodeWatchFactory.Shutdown()
-		} else {
-			nodeWatchFactory = masterWatchFactory
 		}
 
 		if config.Kubernetes.Token == "" {
