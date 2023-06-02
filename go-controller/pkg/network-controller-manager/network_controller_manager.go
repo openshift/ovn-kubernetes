@@ -177,7 +177,7 @@ func (cm *networkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	return nil
 }
 
-// NewNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
+// NewNetworkControllerManager creates a new OVNKube controller manager to manage all the controller for all networks
 func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder, wg *sync.WaitGroup) (*networkControllerManager, error) {

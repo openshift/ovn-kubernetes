@@ -652,15 +652,15 @@ var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
 		Name:  "init-master",
-		Usage: "initialize master (both cluster-manager and network-controller-manager), requires the hostname as argument",
+		Usage: "initialize master (both cluster-manager and ovnkube-controller), requires the hostname as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-cluster-manager",
-		Usage: "initialize cluster manager (but not network-controller-manager), requires the hostname as argument",
+		Usage: "initialize cluster manager (but not ovnkube-controller), requires the hostname as argument",
 	},
 	&cli.StringFlag{
-		Name:  "init-network-controller-manager",
-		Usage: "initialize network-controller-manager (but not cluster-manager), requires the hostname as argument",
+		Name:  "init-ovnkube-controller",
+		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the hostname as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-node",

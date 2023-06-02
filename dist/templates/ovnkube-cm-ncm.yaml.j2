@@ -1,6 +1,6 @@
 # ovnkube-master
 # daemonset version 3
-# starts master daemons (ovnkube-cluster-manager, ovnkube-network-controller-manager and ovn-northd) each in a separate container
+# starts master daemons (ovnkube-cluster-manager, ovnkube-controller and ovn-northd) each in a separate container
 # it is run on the master(s)
 kind: Deployment
 apiVersion: apps/v1
@@ -122,12 +122,12 @@ spec:
           periodSeconds: 60
       # end of container
 
-      # network controller manager
-      - name: ovnkube-network-controller-manager
+      # ovnkube-controller
+      - name: ovnkube-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "ovn-network-controller-manager"]
+        command: ["/root/ovnkube.sh", "ovnkube-controller"]
 
         securityContext:
           runAsUser: 0
