@@ -32,7 +32,7 @@ type serviceController struct {
 	*Controller
 	serviceStore       cache.Store
 	endpointSliceStore cache.Store
-	libovsdbCleanup    *libovsdbtest.Cleanup
+	libovsdbCleanup    *libovsdbtest.Context
 }
 
 func newController() (*serviceController, error) {

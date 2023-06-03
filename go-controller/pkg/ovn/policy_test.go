@@ -2289,7 +2289,7 @@ func asMatch(hashedAddressSets []string) string {
 var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 	var (
 		asFactory *addressset.FakeAddressSetFactory
-		nbCleanup *libovsdbtest.Cleanup
+		nbCleanup     *libovsdbtest.Context
 	)
 
 	const (
