@@ -87,6 +87,16 @@ if [ "${WHAT}" != "${IP_MIGRATION_TESTS}" ]; then
   SKIPPED_TESTS+="Node IP address migration"
 fi
 
+# Only run Node IP address migration tests if they are explicitly requested
+KV_LIVE_MIGRATION_TESTS="Kubevirt Virtual Machines"
+if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
+fi
+
+>>>>>>> 479074c36 (test, e2e: test kubevirt live migration)
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
