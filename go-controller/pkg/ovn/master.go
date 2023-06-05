@@ -32,6 +32,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	"github.com/pkg/errors"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -936,9 +937,12 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	// Remove switch to lb associations from the LBCache before removing the switch
 	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
 	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
+		if !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return fmt.Errorf("failed to get load_balancer cache for node %s: %w", nodeName, err)
+		}
+	} else {
+		lbCache.RemoveSwitch(nodeName)
 	}
-	lbCache.RemoveSwitch(nodeName)
 
 	// Remove the logical switch associated with the node
 	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, nodeName)
@@ -952,7 +956,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	}
 	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logiccalRouter, &logicalRouterPort)
 	if err != nil {
-		return fmt.Errorf("failed to delete router port %s: %v", logicalRouterPort.Name, err)
+		return fmt.Errorf("failed to delete router port %s: %w", logicalRouterPort.Name, err)
 	}
 
 	return nil
@@ -966,7 +970,7 @@ func (oc *Controller) deleteNode(nodeName string) error {
 	}
 
 	if err := oc.gatewayCleanup(nodeName); err != nil {
-		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
+		return fmt.Errorf("failed to clean up node %s gateway: (%w)", nodeName, err)
 	}
 
 	if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
@@ -1106,11 +1110,46 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
+
+	staleNodes := sets.NewString()
 	for _, nodeSwitch := range nodeSwitches {
 		if !foundNodes.Has(nodeSwitch.Name) {
-			if err := oc.deleteNode(nodeSwitch.Name); err != nil {
-				return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
-			}
+			staleNodes.Insert(nodeSwitch.Name)
+		}
+	}
+
+	// Find stale external logical swiches, based on well known prefix and node name
+	lookupExtSwFunction := func(item *nbdb.LogicalSwitch) bool {
+		nodeName := strings.TrimPrefix(item.Name, types.ExternalSwitchPrefix)
+		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
+			staleNodes.Insert(nodeName)
+			return true
+		}
+		return false
+	}
+	_, err = libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, lookupExtSwFunction)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		klog.Warning("Failed trying to find stale external logical switches")
+	}
+
+	// Find stale gateway routers, based on well known prefix and node name
+	lookupGwRouterFunction := func(item *nbdb.LogicalRouter) bool {
+		nodeName := strings.TrimPrefix(item.Name, types.GWRouterPrefix)
+		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
+			staleNodes.Insert(nodeName)
+			return true
+		}
+		return false
+	}
+	_, err = libovsdbops.FindLogicalRoutersWithPredicate(oc.nbClient, lookupGwRouterFunction)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		klog.Warning("Failed trying to find stale gateway routers")
+	}
+
+	// Cleanup stale nodes (including gateway routers and external logical switches)
+	for _, staleNode := range staleNodes.UnsortedList() {
+		if err := oc.deleteNode(staleNode); err != nil {
+			return fmt.Errorf("failed to delete node:%s, err:%w", staleNode, err)
 		}
 	}
 
