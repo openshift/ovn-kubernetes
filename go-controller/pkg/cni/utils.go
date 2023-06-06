@@ -59,7 +59,7 @@ func (c *ClientSet) getPod(namespace, name string) (*kapi.Pod, error) {
 	return pod, err
 }
 
-// GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
+// GetPodWithAnnotations obtains the pod UID and annotation from the cache or apiserver
 func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 	namespace, name, nadName string, annotCond podAnnotWaitCond) (*kapi.Pod, map[string]string, *util.PodAnnotation, error) {
 	var notFoundCount uint
