@@ -27,6 +27,8 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+COPY *.rpm /root/
+
 # more-pkgs file is updated in Dockerfile.base
 # more-pkgs file contains the following ovs/ovn packages to be installed in this Dockerfile
 # - openvswitch-devel
@@ -43,7 +45,7 @@ RUN INSTALL_PKGS=" \
 	" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
 	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
-	dnf clean all && rm -rf /var/cache/*
+	dnf clean all && rm -rf /root/*.rpm && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
