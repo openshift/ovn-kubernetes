@@ -847,6 +847,7 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	if err != nil {
 		oc.recordNodeErrorEvent(node, err)
 	}
+
 	return err
 }
 
