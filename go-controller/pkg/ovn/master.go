@@ -1351,6 +1351,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	if err != nil {
 		oc.recordNodeErrorEvent(node, err)
 	}
+
 	return err
 }
 
