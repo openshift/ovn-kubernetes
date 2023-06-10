@@ -49,6 +49,17 @@ type Controller struct {
 	eventRecorder record.EventRecorder
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
+	// pass in the isPodScheduledinLocalZone util from bnc - used only to determine
+	// what zones the pods are in.
+	// isPodScheduledinLocalZone returns whether the provided pod is in a zone local to the zone controller
+	// So if pod is not scheduled yet it is considered remote. Also if we can't fetch node from kapi and determing the zone,
+	// we consider it remote - this is ok for this controller as this variable is only used to
+	// determine if we need to add pod's port to port group or not - future updates should
+	// take care of reconciling the state of the cluster
+	// TODO(tssurya): Revisit this in future uniformly across the code base if needed.
+	isPodScheduledinLocalZone func(*v1.Pod) bool
+	// store's the name of the zone that this controller belongs to
+	zone string
 
 	// anp name is key -> cloned value of ANP kapi is value
 	anpCache map[string]*adminNetworkPolicyState
@@ -90,16 +101,20 @@ func NewController(
 	namespaceInformer corev1informers.NamespaceInformer,
 	podInformer corev1informers.PodInformer,
 	addressSetFactory addressset.AddressSetFactory,
+	isPodScheduledinLocalZone func(*v1.Pod) bool,
+	zone string,
 	recorder record.EventRecorder) (*Controller, error) {
 
 	c := &Controller{
-		controllerName:    controllerName,
-		nbClient:          nbClient,
-		anpClientSet:      anpClient,
-		addressSetFactory: addressSetFactory,
-		anpCache:          make(map[string]*adminNetworkPolicyState),
-		anpPriorityMap:    make(map[int32]string),
-		banpCache:         &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
+		controllerName:            controllerName,
+		nbClient:                  nbClient,
+		anpClientSet:              anpClient,
+		addressSetFactory:         addressSetFactory,
+		isPodScheduledinLocalZone: isPodScheduledinLocalZone,
+		zone:                      zone,
+		anpCache:                  make(map[string]*adminNetworkPolicyState),
+		anpPriorityMap:            make(map[int32]string),
+		banpCache:                 &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
 	}
 
 	klog.Info("Setting up event handlers for Admin Network Policy")
@@ -431,7 +446,8 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 		return
 	}
 	// We only care about pod's label changes, pod's IP changes
-	// and pod going into completed state. Rest of the cases we may return
+	// pod going into completed state and pod getting scheduled and switching
+	// zones. Rest of the cases we may return
 	oldPodLabels := labels.Set(oldPod.Labels)
 	newPodLabels := labels.Set(newPod.Labels)
 	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, &util.DefaultNetInfo{})
@@ -440,19 +456,32 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 	newPodRunning := util.PodRunning(newPod)
 	oldPodCompleted := util.PodCompleted(oldPod)
 	newPodCompleted := util.PodCompleted(newPod)
+	// From logic perspective, the reason why we care about whether a pod is in local zone
+	// or not is to see if we want to add the LSP of the pod to the PG for the ANPs. This needs
+	// to be done only if the pod is local to the zone.
+	// NOTE1: A pod can never migrate zones, its the node on which the pod lives that migrates zones
+	// NOTE2: In an ideal world a pod can never go from local->remote (only exception is upgrades from
+	// nonIC to IC and at that time we simply delete the LSP all together so there is nothing to add)
+	// NOTE3: This check is present here explicitly for the case where the pod get's scheduled. So
+	// when pod.Spec.nodeName is not present, it is considered remote and we don't do any setup for this
+	// pod. When it get's scheduled we move from remote->local if the nodeName is local to this zone. Hence
+	// we want to watch for that set of changes
+	oldPodLocal := c.isPodScheduledinLocalZone(oldPod)
+	newPodLocal := c.isPodScheduledinLocalZone(newPod)
 	if labels.Equals(oldPodLabels, newPodLabels) &&
 		// check for podIP changes (in case we allocate and deallocate) or for dualstack conversion
 		// it will also catch the pod update that will come when LSPAdd and IPAM allocation are done
 		len(oldPodIPs) == len(newPodIPs) &&
 		oldPodRunning == newPodRunning &&
-		oldPodCompleted == newPodCompleted {
+		oldPodCompleted == newPodCompleted &&
+		oldPodLocal == newPodLocal {
 		return
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
 		klog.V(4).Infof("Updating Pod in Admin Network Policy controller %s: "+
-			"podLabels %v, podIPs: %v, PodStatus: %v, PodCompleted?: %v", key, newPodLabels,
-			newPodIPs, newPodRunning, newPodCompleted)
+			"podLabels %v, podIPs: %v, PodStatus: %v, PodCompleted?: %v, PodLocal?: %v", key, newPodLabels,
+			newPodIPs, newPodRunning, newPodCompleted, newPodLocal)
 		c.anpPodQueue.Add(key)
 	}
 }
