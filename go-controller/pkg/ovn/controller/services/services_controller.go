@@ -99,13 +99,9 @@ func NewController(client clientset.Interface,
 	// repair controller
 	c.repair = newRepair(serviceInformer.Lister(), nbClient)
 
-	zone, err := util.GetNBZone(nbClient)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get the NB Zone : err - %w", err)
-	}
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
-	c.nodeTracker, err = newNodeTracker(nodeInformer, zone)
+	c.nodeTracker, err = newNodeTracker(nodeInformer)
 	if err != nil {
 		return nil, err
 	}
