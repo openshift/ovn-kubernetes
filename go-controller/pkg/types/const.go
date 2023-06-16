@@ -197,4 +197,9 @@ const (
 	// HandlerSyncTimeout is used when waiting for initial object handler sync.
 	// (i.e. all the ADD events should be processed for the existing objects by the event handler)
 	HandlerSyncTimeout = 20 * time.Second
+
+	// GRMACBindingAgeThreshold is the lifetime in seconds of each MAC binding
+	// entry for the gateway routers. After this time, the entry is removed and
+	// may be refreshed with a new ARP request.
+	GRMACBindingAgeThreshold = "300"
 )
