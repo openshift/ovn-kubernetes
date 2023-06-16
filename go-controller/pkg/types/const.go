@@ -202,4 +202,9 @@ const (
 	// InformerSyncTimeout is used to wait from the initial informer cache sync.
 	// It allows ~4 list() retries with the default reflector exponential backoff config
 	InformerSyncTimeout = 20 * time.Second
+
+	// GRMacBindingAgeThreshold is the lifetime in seconds of each MAC binding
+	// entry for the gateway routers. After this time, the entry is removed and
+	// may be refreshed with a new ARP request.
+	GRMacBindingAgeThreshold = "300"
 )
