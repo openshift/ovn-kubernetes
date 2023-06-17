@@ -38,7 +38,8 @@ type PodSelectorAddressSet struct {
 	backRefs map[string]bool
 
 	// handler is either pod or namespace handler
-	handler *factory.Handler
+	nsHandler  *factory.Handler
+	podHandler *factory.Handler
 
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
@@ -173,7 +174,7 @@ func (psas *PodSelectorAddressSet) init(oc *DefaultNetworkController) error {
 	}
 
 	var err error
-	if psas.handler == nil {
+	if psas.nsHandler == nil && psas.podHandler == nil {
 		if psas.namespace != "" {
 			// static namespace
 			if psas.podSelector.Empty() {
@@ -212,9 +213,13 @@ func (psas *PodSelectorAddressSet) destroy(oc *DefaultNetworkController) error {
 			return fmt.Errorf("failed to delete handler resources: %w", err)
 		}
 	}
-	if psas.handler != nil {
-		oc.watchFactory.RemovePodHandler(psas.handler)
-		psas.handler = nil
+	if psas.podHandler != nil {
+		oc.watchFactory.RemovePodHandler(psas.podHandler)
+		psas.podHandler = nil
+	}
+	if psas.nsHandler != nil {
+		oc.watchFactory.RemoveNamespaceHandler(psas.nsHandler)
+		psas.nsHandler = nil
 	}
 	psas.needsCleanup = false
 	return nil
@@ -239,7 +244,7 @@ func (oc *DefaultNetworkController) addPodSelectorHandler(psAddrSet *PodSelector
 		klog.Errorf("Failed WatchResource for addPodSelectorHandler: %v", err)
 		return err
 	}
-	psAddrSet.handler = podHandler
+	psAddrSet.podHandler = podHandler
 	return nil
 }
 
@@ -261,7 +266,7 @@ func (oc *DefaultNetworkController) addNamespacedPodSelectorHandler(psAddrSet *P
 		return err
 	}
 
-	psAddrSet.handler = namespaceHandler
+	psAddrSet.nsHandler = namespaceHandler
 	return nil
 }
 
