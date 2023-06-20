@@ -215,10 +215,12 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef := cloneEgressFirewall(egressFirewall)
 	ef.Lock()
 	defer ef.Unlock()
-	// there should not be an item already in egressFirewall map for the given Namespace
+	// egressFirewall may already exist, if previous add failed, cleanup
 	if _, loaded := oc.egressFirewalls.Load(egressFirewall.Namespace); loaded {
-		return fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewall",
-			egressFirewall.Name, egressFirewall.Namespace)
+		err := oc.deleteEgressFirewall(egressFirewall)
+		if err != nil {
+			return fmt.Errorf("failed to cleanup existing egress firewall %s on add: %v", egressFirewall.Namespace, err)
+		}
 	}
 
 	var errorList []error
@@ -251,10 +253,12 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	}
 	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
 	aclLoggingLevels := oc.GetNamespaceACLLogging(ef.namespace)
+	// store egress firewall before calling addEgressFirewallRules, since it doesn't have a cleanup, and oc.egressFirewalls
+	// object will be used on retry to cleanup
+	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)
 	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority, aclLoggingLevels); err != nil {
 		return err
 	}
-	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)
 	return nil
 }
 
@@ -263,8 +267,7 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 	deleteDNS := false
 	obj, loaded := oc.egressFirewalls.Load(egressFirewallObj.Namespace)
 	if !loaded {
-		return fmt.Errorf("there is no egressFirewall found in namespace %s",
-			egressFirewallObj.Namespace)
+		return nil
 	}
 
 	ef, ok := obj.(*egressFirewall)
