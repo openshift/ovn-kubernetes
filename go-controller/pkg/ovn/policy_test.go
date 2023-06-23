@@ -82,9 +82,7 @@ func getDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string,
 		types.OvnACLLoggingMeter,
 		denyLogSeverity,
 		shouldBeLogged,
-		map[string]string{
-			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
-		},
+		getDenyACLExternalIDs(lportEgressAfterLB, denyAction),
 		map[string]string{
 			"apply-after-lb": "true",
 		},
@@ -101,9 +99,7 @@ func getDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string,
 		types.OvnACLLoggingMeter,
 		"",
 		false,
-		map[string]string{
-			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
-		},
+		getDenyACLExternalIDs(lportEgressAfterLB, allowAction),
 		map[string]string{
 			"apply-after-lb": "true",
 		},
@@ -121,9 +117,7 @@ func getDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string,
 		types.OvnACLLoggingMeter,
 		denyLogSeverity,
 		shouldBeLogged,
-		map[string]string{
-			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress),
-		},
+		getDenyACLExternalIDs(lportIngress, denyAction),
 		nil,
 	)
 	ingressDenyACL.UUID = aclName + "-ingressDenyACL-UUID"
@@ -138,9 +132,7 @@ func getDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string,
 		types.OvnACLLoggingMeter,
 		"",
 		false,
-		map[string]string{
-			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress),
-		},
+		getDenyACLExternalIDs(lportIngress, allowAction),
 		nil,
 	)
 	ingressAllowACL.UUID = aclName + "-ingressAllowACL-UUID"
@@ -193,6 +185,7 @@ func getStaleDefaultACL(acls []*nbdb.ACL) []*nbdb.ACL {
 	for _, acl := range acls {
 		acl.Options = nil
 		acl.Direction = nbdb.ACLDirectionToLport
+		delete(acl.ExternalIDs, defaultDenyPolicyActionACLExtIdKey)
 	}
 	return acls
 }
@@ -724,6 +717,44 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("reconciles an existing networkPolicy with long name updating stale ACLs", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk")
+				namespace2 := *newNamespace(namespaceName2)
+				networkPolicy := getMatchLabelsNetworkPolicy(netPolicyName1, namespace1.Name,
+					namespace2.Name, "", true, true)
+				// start with stale ACLs
+				// this function will cut off the namespace name to have no suffix
+				gressPolicyInitialData := getPolicyData(networkPolicy, nil, []string{namespace2.Name},
+					nil, "", true)
+				defaultDenyInitialData := getDefaultDenyData(networkPolicy, nil, "", true)
+				initialData := initialDB.NBData
+				initialData = append(initialData, gressPolicyInitialData...)
+				initialData = append(initialData, defaultDenyInitialData...)
+				startOvn(libovsdb.TestSetup{NBData: initialData}, []v1.Namespace{namespace1, namespace2},
+					[]knet.NetworkPolicy{*networkPolicy}, nil, nil)
+
+				fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)
+				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName2)
+
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
+					Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// make sure stale ACLs were updated
+				expectedData := getPolicyData(networkPolicy, nil, []string{namespace2.Name}, nil,
+					"", false)
+				defaultDenyExpectedData := getDefaultDenyData(networkPolicy, nil, "", false)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, initialDB.NBData...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
 	})
 
 	ginkgo.Context("during execution", func() {
@@ -991,7 +1022,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// ensure the default PGs and ACLs were removed via rollback from add failure
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{nodeName})...)
-				// note stale leftovers from previous upgrades won't be cleanedup
+				// note stale leftovers from previous upgrades won't be cleanedup, but will be updated
+				leftOverACLFromUpgrade1.ExternalIDs = getDenyACLExternalIDs(lportEgressAfterLB, allowAction)
+				leftOverACLFromUpgrade2.ExternalIDs = getDenyACLExternalIDs(lportEgressAfterLB, allowAction)
 				expectedData = append(expectedData, leftOverACLFromUpgrade1, leftOverACLFromUpgrade2)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
@@ -1136,6 +1169,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				newDefaultDenyIngressACLName := getDefaultDenyPolicyACLName("shortName", lportIngress)
 				leftOverACL3FromUpgrade.Name = &newDefaultDenyEgressACLName
 				leftOverACL4FromUpgrade.Name = &newDefaultDenyIngressACLName
+				leftOverACL3FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportEgressAfterLB, denyAction)
+				leftOverACL4FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportIngress, denyAction)
+
 				expectedData = append(expectedData, leftOverACL3FromUpgrade)
 				expectedData = append(expectedData, leftOverACL4FromUpgrade)
 				testOnlyIngressDenyPG.ACLs = nil // Sync Function should remove stale ACL from PGs
@@ -1152,6 +1188,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				leftOverACL2FromUpgrade.Name = &newDefaultDenyLeftoverIngressACLName
 				leftOverACL1FromUpgrade.Name = &newDefaultDenyLeftoverEgressACLName
 				leftOverACL1FromUpgrade.Options = egressOptions
+				leftOverACL1FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportEgressAfterLB, allowAction)
+				leftOverACL2FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportIngress, allowAction)
+
 				expectedData = append(expectedData, leftOverACL2FromUpgrade)
 				expectedData = append(expectedData, leftOverACL1FromUpgrade)
 				// end of db hack
@@ -1343,6 +1382,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				leftOverACL4FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName2 + "_egressDefa") // trims it according to RFC1123
 				leftOverACL5FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName2 + "_ingressDef") // trims it according to RFC1123
 				leftOverACL6FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName62 + "_")          // name stays the same here since its no-op
+				leftOverACL3FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportIngress, allowAction)
+				leftOverACL4FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportEgressAfterLB, denyAction)
+				leftOverACL5FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportIngress, denyAction)
+				leftOverACL6FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportIngress, denyAction)
+
 				expectedData = append(expectedData, leftOverACL3FromUpgrade)
 				expectedData = append(expectedData, leftOverACL4FromUpgrade)
 				expectedData = append(expectedData, leftOverACL5FromUpgrade)
@@ -1361,6 +1405,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				leftOverACL2FromUpgrade.Name = &longLeftOverIngressName
 				leftOverACL1FromUpgrade.Name = &longLeftOverEgressName
 				leftOverACL1FromUpgrade.Options = egressOptions
+				leftOverACL1FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportEgressAfterLB, allowAction)
+				leftOverACL2FromUpgrade.ExternalIDs = getDenyACLExternalIDs(lportIngress, allowAction)
+
 				expectedData = append(expectedData, leftOverACL2FromUpgrade)
 				expectedData = append(expectedData, leftOverACL1FromUpgrade)
 				// end of db hack
@@ -1377,11 +1424,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.networkPolicies.Delete(getPolicyKey(networkPolicy1))
 				fakeOvn.controller.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace) // reset cache so that we simulate the add that happens during upgrades
 				err = fakeOvn.controller.addNetworkPolicy(networkPolicy1)
-				// TODO: FIX ME
-				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create Network Policy " +
-					"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1: " +
-					"failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 				return nil
 			}

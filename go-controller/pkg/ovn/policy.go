@@ -28,9 +28,12 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+type netpolDefaultDenyACLAction string
+
 const (
 	// defaultDenyPolicyTypeACLExtIdKey external ID key for default deny policy type
-	defaultDenyPolicyTypeACLExtIdKey = "default-deny-policy-type"
+	defaultDenyPolicyTypeACLExtIdKey   = "default-deny-policy-type"
+	defaultDenyPolicyActionACLExtIdKey = "default-deny-policy-action"
 	// l4MatchACLExtIdKey external ID key for L4 Match on 'gress policy ACLs
 	l4MatchACLExtIdKey = "l4Match"
 	// ipBlockCIDRACLExtIdKey external ID key for IP block CIDR on 'gress policy ACLs
@@ -54,7 +57,9 @@ const (
 	// staleArpAllowPolicyMatch "was" the old match used when creating default allow ARP ACLs for a namespace
 	// NOTE: This is succeed by arpAllowPolicyMatch to allow support for IPV6. This is currently only
 	// used when removing stale ACLs from the syncNetworkPolicy function and should NOT be used in any main logic.
-	staleArpAllowPolicyMatch = "arp"
+	staleArpAllowPolicyMatch                            = "arp"
+	denyAction               netpolDefaultDenyACLAction = "deny"
+	allowAction              netpolDefaultDenyACLAction = "allow"
 )
 
 // defaultDenyPortGroups is a shared object and should be used by only 1 thread at a time
@@ -288,6 +293,28 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 	return nil
 }
 
+func (oc *Controller) updateStaleDefaultDenyACLExternalIDs() error {
+	p := func(item *nbdb.ACL) bool {
+		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != "" && // default deny + multicast acls
+			(item.Priority == types.DefaultDenyPriority || item.Priority == types.DefaultAllowPriority) && // default deny acls only
+			item.ExternalIDs[defaultDenyPolicyActionACLExtIdKey] == "" // non-updated default deny acls only
+	}
+	staleACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("cannot find NetworkPolicy default deny ACLs: %v", err)
+	}
+	for _, acl := range staleACLs {
+		var aclAction netpolDefaultDenyACLAction
+		if acl.Priority == types.DefaultDenyPriority {
+			aclAction = denyAction
+		} else {
+			aclAction = allowAction
+		}
+		acl.ExternalIDs[defaultDenyPolicyActionACLExtIdKey] = string(aclAction)
+	}
+	return libovsdbops.CreateOrUpdateACLs(oc.nbClient, staleACLs...)
+}
+
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) error {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
@@ -420,6 +447,10 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) error {
 		return fmt.Errorf("cannot clean up ingress default deny ACL name: %v", err)
 	}
 
+	if err := oc.updateStaleDefaultDenyACLExternalIDs(); err != nil {
+		return fmt.Errorf("failed to update default deny ACL ExternalIDs: %w", err)
+	}
+
 	return nil
 }
 
@@ -468,8 +499,17 @@ func getDefaultDenyPolicyACLName(ns string, aclT aclType) string {
 	return joinACLName(ns, defaultDenySuffix)
 }
 
-func getDefaultDenyPolicyExternalIDs(aclT aclType) map[string]string {
-	return map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(aclTypeToPolicyType(aclT))}
+func getDenyACLExternalIDs(aclT aclType, aclAction netpolDefaultDenyACLAction) map[string]string {
+	return map[string]string{
+		defaultDenyPolicyTypeACLExtIdKey:   string(aclTypeToPolicyType(aclT)),
+		defaultDenyPolicyActionACLExtIdKey: string(aclAction),
+	}
+}
+
+func getDirectionPolicyACLExternalIDs(aclT aclType) map[string]string {
+	return map[string]string{
+		defaultDenyPolicyTypeACLExtIdKey: string(aclTypeToPolicyType(aclT)),
+	}
 }
 
 func getARPAllowACLName(ns string) string {
@@ -484,9 +524,9 @@ func buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels, aclT aclT
 	denyMatch := getACLMatch(pg, "", aclT)
 	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, aclT)
 	denyACL = BuildACL(getDefaultDenyPolicyACLName(namespace, aclT), types.DefaultDenyPriority, denyMatch,
-		nbdb.ACLActionDrop, aclLogging, aclT, getDefaultDenyPolicyExternalIDs(aclT))
+		nbdb.ACLActionDrop, aclLogging, aclT, getDenyACLExternalIDs(aclT, denyAction))
 	allowACL = BuildACL(getARPAllowACLName(namespace), types.DefaultAllowPriority, allowMatch,
-		nbdb.ACLActionAllow, nil, aclT, getDefaultDenyPolicyExternalIDs(aclT))
+		nbdb.ACLActionAllow, nil, aclT, getDenyACLExternalIDs(aclT, allowAction))
 	return
 }
 
