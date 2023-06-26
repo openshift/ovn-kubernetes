@@ -257,6 +257,14 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
 	extraParameters interface{}) *retry.RetryFramework {
+	return oc.newRetryFrameworkWithParametersAndStopChan(objectType, syncFunc, extraParameters, oc.stopChan)
+}
+
+func (oc *DefaultNetworkController) newRetryFrameworkWithParametersAndStopChan(
+	objectType reflect.Type,
+	syncFunc func([]interface{}) error,
+	extraParameters interface{},
+	stopChan <-chan struct{}) *retry.RetryFramework {
 	eventHandler := &defaultNetworkControllerEventHandler{
 		baseHandler:     baseNetworkControllerEventHandler{},
 		objType:         objectType,
@@ -272,7 +280,7 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 		EventHandler:           eventHandler,
 	}
 	r := retry.NewRetryFramework(
-		oc.stopChan,
+		stopChan,
 		oc.wg,
 		oc.watchFactory,
 		resourceHandler,

@@ -200,6 +200,8 @@ type networkPolicy struct {
 	// or this value will be set to true and handler can't proceed.
 	// Use networkPolicy.RLock to read this field and hold it for the whole event handling.
 	deleted bool
+
+	stopChan chan struct{}
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -1012,12 +1014,13 @@ func (oc *DefaultNetworkController) addLocalPodHandler(policy *knet.NetworkPolic
 		_ = oc.handleLocalPodSelectorAddFunc(np, objs...)
 		return nil
 	}
-	retryLocalPods := oc.newRetryFrameworkWithParameters(
+	retryLocalPods := oc.newRetryFrameworkWithParametersAndStopChan(
 		factory.LocalPodSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
-		})
+		},
+		np.stopChan)
 
 	podHandler, err := retryLocalPods.WatchResourceFiltered(policy.Namespace, sel)
 	if err != nil {
@@ -1198,6 +1201,10 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 		// since pod handlers take np.RLock
 		np.Unlock()
 		npLocked = false
+
+		if np.stopChan == nil {
+			np.stopChan = util.GetChildStopChan(oc.stopChan)
+		}
 
 		// 6. Start peer handlers to update all allow rules first
 		for _, handler := range policyHandlers {
@@ -1621,10 +1628,11 @@ func (oc *DefaultNetworkController) addPeerNamespaceHandler(
 		_ = oc.handlePeerNamespaceSelectorAdd(np, gress, objs...)
 		return nil
 	}
-	retryPeerNamespaces := oc.newRetryFrameworkWithParameters(
+	retryPeerNamespaces := oc.newRetryFrameworkWithParametersAndStopChan(
 		factory.PeerNamespaceSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
+		np.stopChan,
 	)
 
 	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", sel)
@@ -1638,6 +1646,10 @@ func (oc *DefaultNetworkController) addPeerNamespaceHandler(
 }
 
 func (oc *DefaultNetworkController) shutdownHandlers(np *networkPolicy) {
+	if np.stopChan != nil {
+		close(np.stopChan)
+		np.stopChan = nil
+	}
 	if np.localPodHandler != nil {
 		oc.watchFactory.RemovePodHandler(np.localPodHandler)
 		np.localPodHandler = nil
