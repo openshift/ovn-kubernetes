@@ -27,6 +27,7 @@ import (
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -257,12 +258,12 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-		rm := routemanager.NewRouteManager(true, 10*time.Second)
+		rm := routemanager.NewController()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
-			defer wg.Done()
 			defer GinkgoRecover()
-			rm.Run(stop)
+			rm.Run(stop, 10*time.Second)
+			wg.Done()
 			return nil
 		})
 		err = testNS.Do(func(ns.NetNS) error {
@@ -632,12 +633,12 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		ifAddrs := ovntest.MustParseIPNets(hostCIDR)
 		ifAddrs[0].IP = ovntest.MustParseIP(dpuIP)
 
-		rm := routemanager.NewRouteManager(true, 10*time.Second)
+		rm := routemanager.NewController()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
-			defer wg.Done()
 			defer GinkgoRecover()
-			rm.Run(stop)
+			rm.Run(stop, 10*time.Second)
+			wg.Done()
 			return nil
 		})
 
@@ -746,9 +747,9 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
-			defer wg.Done()
 			defer GinkgoRecover()
-			nc.routeManager.Run(stop)
+			nc.routeManager.Run(stop, 10*time.Second)
+			wg.Done()
 			return nil
 		})
 
@@ -1063,17 +1064,16 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-		rm := routemanager.NewRouteManager(true, 10*time.Second)
+		rm := routemanager.NewController()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
-			defer wg.Done()
 			defer GinkgoRecover()
-			rm.Run(stop)
+			rm.Run(stop, 10*time.Second)
+			wg.Done()
 			return nil
 		})
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
@@ -1555,25 +1555,19 @@ var _ = Describe("Gateway unit tests", func() {
 				Name:  "ens1f0",
 				Index: 5,
 			}
-			expectedRoute := &netlink.Route{
-				Dst:       ipnet,
-				LinkIndex: 5,
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        gwIPs[0],
-				MTU:       config.Default.MTU,
-			}
 			lnk.On("Attrs").Return(lnkAttr)
 			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-			netlinkMock.On("RouteAdd", expectedRoute).Return(nil)
+			netlinkMock.On("RouteAdd", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
-			rm := routemanager.NewRouteManager(true, 10*time.Second)
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
-				defer wg.Done()
-				rm.Run(stopCh)
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
 			}()
 			defer func() {
 				close(stopCh)
@@ -1615,13 +1609,15 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
 			wg := &sync.WaitGroup{}
-			rm := routemanager.NewRouteManager(true, 10*time.Second)
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
-				defer wg.Done()
-				rm.Run(stopCh)
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
 			}()
+
 			defer func() {
 				close(stopCh)
 				wg.Wait()
@@ -1635,12 +1631,13 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
 			wg := &sync.WaitGroup{}
-			rm := routemanager.NewRouteManager(true, 10*time.Second)
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
-				defer wg.Done()
-				rm.Run(stopCh)
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
 			}()
 			defer func() {
 				close(stopCh)
@@ -1659,12 +1656,13 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
-			rm := routemanager.NewRouteManager(true, 10*time.Second)
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
-				defer wg.Done()
-				rm.Run(stopCh)
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
 			}()
 			defer func() {
 				close(stopCh)
