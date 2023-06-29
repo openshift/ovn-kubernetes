@@ -1270,6 +1270,13 @@ func (oc *DefaultNetworkController) setupGressPolicy(np *networkPolicy, gp *gres
 		}
 		gp.addPeerAddressSets(ipv4as, ipv6as)
 	}
+	if podSel.Empty() && nsSel.Empty() && config.Kubernetes.HostNetworkNamespace != "" {
+		// all namespaces selector, add hostnetwork address set
+		_, err := gp.addNamespaceAddressSet(config.Kubernetes.HostNetworkNamespace, oc.addressSetFactory)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add namespace address set for gress policy: %w", err)
+		}
+	}
 	return nil, nil
 }
 
