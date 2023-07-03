@@ -614,6 +614,16 @@ func getOVNSBZone() (string, error) {
 	return dbZone, nil
 }
 
+// getOVNSBZoneSyncedOption returns the zone name stored in the Southbound db.
+func getOVNSBZoneSyncedOption() (string, error) {
+	dbZone, _, err := util.RunOVNSbctl("get", "SB_Global", ".", "options:synced-zone")
+	if err != nil {
+		return "", err
+	}
+
+	return dbZone, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
@@ -668,9 +678,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-			if err := auth.SetDBAuth(); err != nil {
-				return err
+		if !config.OVNKubernetesFeature.EnableInterconnect {
+			for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+				if err := auth.SetDBAuth(); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -759,6 +771,48 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
+
+	/** HACK BEGIN **/
+	// ovnkube-node has not set its annotations for `zone-name`
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		klog.Infof("SURYA: Interconnect is enabled")
+		var err1 error
+		var zone string
+		start := time.Now()
+		err = wait.PollUntilContextTimeout(context.Background(), 5*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+			zone, err1 = getOVNSBZoneSyncedOption()
+			if err1 != nil {
+				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+				return false, nil
+			}
+			return true, nil
+		})
+
+		if err != nil {
+			klog.Errorf("Timed out waiting for the synced-zone option for zone %s to appear, err : %v, %v", zone, err, err1)
+		}
+		// it has been 5 mins; now or never let's see this either ways
+		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+			if err := auth.SetDBAuth(); err != nil {
+				return err
+			}
+		}
+		klog.Infof("ovnkube-node finished setting DB Auth; took: %v", time.Since(start))
+		/*err = setupOVNNode(node)
+		if err != nil {
+			return err
+		}*/
+
+		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
+			return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
+		}
+
+		if err := nodeAnnotator.Run(); err != nil {
+			return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+		}
+		klog.Infof("ovnkube-node finished annotating node with remote-zone-migrated; took: %v", time.Since(start))
+	}
+	/** HACK END **/
 
 	// Wait for management port and gateway resources to be created by the master
 	klog.Infof("Waiting for gateway and management port readiness...")
