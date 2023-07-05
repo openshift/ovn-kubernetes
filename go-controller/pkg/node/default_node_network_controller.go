@@ -687,7 +687,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		if !config.OVNKubernetesFeature.EnableInterconnect {
+		if !config.OVNKubernetesFeature.EnableInterconnect || sbZone == types.OvnDefaultZone { // if its nonIC or if its phase1
 			for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 				if err := auth.SetDBAuth(); err != nil {
 					return err
@@ -782,22 +782,23 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	/** HACK BEGIN **/
-	// ovnkube-node has not set its annotations for `zone-name`
-	if config.OVNKubernetesFeature.EnableInterconnect {
+	// ovnkube-node has now set its annotations for `zone-name`
+	if config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone { // so this should be done only in phase2 not in phase1
 		klog.Infof("SURYA: Interconnect is enabled")
 		var err1 error
-		var zone string
 		start := time.Now()
 		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 			klog.Infof("NUMAN ... ")
 			nodes, err := nc.Kube.GetNodes()
 			if err != nil {
-				return false, fmt.Errorf("error retrieving node %s: %v", nc.name, err)
+				err1 = fmt.Errorf("error retrieving node %s: %v", nc.name, err)
+				return false, nil
 			}
 
 			for _, node := range nodes.Items {
 				if !checkOVNSBNodePortBinding(node.Name) {
-					return false, fmt.Errorf("transit switch port binding not found for the node %s", node.Name)
+					err1 = fmt.Errorf("transit switch port binding not found for the node %s", node.Name)
+					return false, nil
 				}
 			}
 
@@ -805,7 +806,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		})
 
 		if err != nil {
-			klog.Errorf("Timed out waiting for the synced-zone option for zone %s to appear, err : %v, %v", zone, err, err1)
+			klog.Errorf("Timed out waiting for the transit switch port binding to appear on all nodes even after 5 minutes, err : %v, %v", err, err1)
 			return err
 		}
 		// it has been 5 mins; now or never let's see this either ways
@@ -819,7 +820,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return err
 		}*/
-
 		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
 			return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
 		}
