@@ -624,6 +624,15 @@ func getOVNSBZoneSyncedOption() (string, error) {
 	return dbZone, nil
 }
 
+// getOVNSBZone returns the zone name stored in the Southbound db.
+// It returns the default zone name if "options:name" is not set in the SB_Global row
+func checkOVNSBNodePortBinding(node string) bool {
+	nodePB := "logical_port=tstor-" + node
+	stdout, stderr, err := util.RunOVNSbctl("--bare", "--columns", "_uuid", "find", "Port_Binding", nodePB)
+	klog.Infof("NUMAN : checkOVNSBNodePortBinding for node - %s : stdout - %s : stderr - %s", node, stdout, stderr)
+	return err == nil && stderr == "" && stdout != ""
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
@@ -779,17 +788,25 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		var err1 error
 		var zone string
 		start := time.Now()
-		err = wait.PollUntilContextTimeout(context.Background(), 5*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-			zone, err1 = getOVNSBZoneSyncedOption()
-			if err1 != nil {
-				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
-				return false, nil
+		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+			klog.Infof("NUMAN ... ")
+			nodes, err := nc.Kube.GetNodes()
+			if err != nil {
+				return false, fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 			}
+
+			for _, node := range nodes.Items {
+				if !checkOVNSBNodePortBinding(node.Name) {
+					return false, fmt.Errorf("transit switch port binding not found for the node %s", node.Name)
+				}
+			}
+
 			return true, nil
 		})
 
 		if err != nil {
 			klog.Errorf("Timed out waiting for the synced-zone option for zone %s to appear, err : %v, %v", zone, err, err1)
+			return err
 		}
 		// it has been 5 mins; now or never let's see this either ways
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
