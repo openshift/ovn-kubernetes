@@ -633,6 +633,15 @@ func checkOVNSBNodePortBinding(node string) bool {
 	return err == nil && stderr == "" && stdout != ""
 }
 
+func lbExists(namespace, name string) bool {
+	stdout, stderr, err := util.RunOVNSbctl("--bare", "--columns", "name", "find", "Load_Balancer")
+	stitchedServiceName := "Service_" + namespace + "/" + name
+	match := strings.Contains(stdout, stitchedServiceName)
+	klog.Infof("SURYA : lbExists for service - %s/%s/%s : match - %v : stdout - %s : stderr - %s : err %s",
+		namespace, name, stitchedServiceName, match, stdout, stderr, err)
+	return err == nil && stderr == "" && stdout != "" && match
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
@@ -802,7 +811,24 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				}
 			}
 
-			return true, nil
+			services, err := nc.watchFactory.GetServices()
+			if err != nil {
+				err1 = fmt.Errorf("error retrieving the services %v", err)
+				return false, nil
+			}
+			foundAll := true
+			for _, s := range services {
+				// don't process headless service
+				if !util.ServiceTypeHasClusterIP(s) || !util.IsClusterIPSet(s) {
+					continue
+				}
+				if !lbExists(s.Namespace, s.Name) {
+					foundAll = false
+					break
+				}
+			}
+			klog.Infof("SURYA %v", foundAll)
+			return foundAll, nil
 		})
 
 		if err != nil {

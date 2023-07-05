@@ -59,6 +59,7 @@ type NodeWatchFactory interface {
 	ListNodes(selector labels.Selector) ([]*kapi.Node, error)
 
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetServices() ([]*kapi.Service, error)
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 	GetEndpointSlice(namespace, name string) (*discovery.EndpointSlice, error)
 
