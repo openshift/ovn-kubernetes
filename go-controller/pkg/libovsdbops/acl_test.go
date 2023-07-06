@@ -93,20 +93,6 @@ func TestCleanupEquivalentACLs(t *testing.T) {
 			},
 		},
 		{
-			desc: "FindACLs",
-			f: func(nbClient libovsdbclient.Client) error {
-				_, err := FindACLs(nbClient, []*nbdb.ACL{searchACL})
-				return err
-			},
-		},
-		{
-			desc: "UpdateACLsOps",
-			f: func(nbClient libovsdbclient.Client) error {
-				_, err := UpdateACLsOps(nbClient, nil, searchACL)
-				return err
-			},
-		},
-		{
 			desc: "UpdateACLsLoggingOps",
 			f: func(nbClient libovsdbclient.Client) error {
 				_, err := UpdateACLsLoggingOps(nbClient, nil, searchACL)
