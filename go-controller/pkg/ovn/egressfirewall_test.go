@@ -1120,9 +1120,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 							},
 						},
 					})
-					startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
 
-					_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+					fakeOVN.startWithDBSetup(dbSetup,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespace1,
+							},
+						})
+					err := fakeOVN.controller.WatchNamespaces()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = fakeOVN.controller.WatchEgressFirewall()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
 						Create(context.TODO(), egressFirewall, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1163,7 +1173,16 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 							},
 						},
 					})
-					startOvn(dbSetup, []v1.Namespace{namespace1}, nil)
+					fakeOVN.startWithDBSetup(dbSetup,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespace1,
+							},
+						})
+					err := fakeOVN.controller.WatchNamespaces()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = fakeOVN.controller.WatchEgressFirewall()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// dns-based rule creation will fail, because addressset factory is nil
 					fakeOVN.controller.egressFirewallDNS = &EgressDNS{
@@ -1175,7 +1194,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						stopChan: make(chan struct{}),
 					}
 
-					_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
+					_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
 						Create(context.TODO(), egressFirewall, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1185,20 +1204,22 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					retry.CheckRetryObjectEventually(efKey, true, fakeOVN.controller.retryEgressFirewalls)
 
 					// check first acl was successfully created
-					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
-					dbIDs := fakeOVN.controller.getEgressFirewallACLDbIDs(egressFirewall.Namespace, 0)
 					acl := libovsdbops.BuildACL(
-						getACLName(dbIDs),
+						buildEgressFwAclName(namespace1.Name, t.EgressFirewallStartPriority),
 						nbdb.ACLDirectionToLport,
 						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
+						"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102",
 						nbdb.ACLActionDrop,
 						t.OvnACLLoggingMeter,
 						"",
 						false,
-						dbIDs.GetExternalIDs(),
+						map[string]string{
+							egressFirewallACLExtIdKey:    namespace1.Name,
+							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
+						},
 						nil,
 					)
+
 					acl.UUID = "acl-UUID"
 					clusterPortGroup.ACLs = []string{acl.UUID}
 					expectedDatabaseState := append(initialData, acl)
