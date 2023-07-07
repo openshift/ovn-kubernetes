@@ -33,6 +33,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 # - openvswitch-ipsec
 # - ovn-vtep
 RUN INSTALL_PKGS=" \
+        python3-pip \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
