@@ -633,11 +633,22 @@ func checkOVNSBNodePortBinding(node string) bool {
 	return err == nil && stderr == "" && stdout != ""
 }
 
+// getOVNSBZone returns the zone name stored in the Southbound db.
+// It returns the default zone name if "options:name" is not set in the SB_Global row
+func checkOVNSBNodeLRSR(nodeSubnet string) bool {
+	//match := fmt.Sprintf(`match='"reg7 == 0 && ip4.dst == %s"'`, nodeSubnet)
+	match := fmt.Sprintf("match=\"reg7 == 0 && ip4.dst == %s\"", nodeSubnet)
+	//match := "match='\"reg7 == 0 && ip4.dst == " + nodeSubnet + "\"'"
+	stdout, stderr, err := util.RunOVNSbctl("--bare", "--columns", "_uuid", "find", "logical_flow", match)
+	klog.Infof("SURYA : checkOVNSBNodeLRSR for node - %s : match %s : stdout - %s : stderr - %s : err %v", nodeSubnet, match, stdout, stderr, err)
+	return err == nil && stderr == "" && stdout != ""
+}
+
 func lbExists(namespace, name string) bool {
 	stdout, stderr, err := util.RunOVNSbctl("--bare", "--columns", "name", "find", "Load_Balancer")
 	stitchedServiceName := "Service_" + namespace + "/" + name
 	match := strings.Contains(stdout, stitchedServiceName)
-	klog.Infof("SURYA : lbExists for service - %s/%s/%s : match - %v : stdout - %s : stderr - %s : err %s",
+	klog.Infof("SURYA : lbExists for service - %s/%s/%s : match - %v : stdout - %s : stderr - %s : err %v",
 		namespace, name, stitchedServiceName, match, stdout, stderr, err)
 	return err == nil && stderr == "" && stdout != "" && match
 }
@@ -808,6 +819,19 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				if !checkOVNSBNodePortBinding(node.Name) {
 					err1 = fmt.Errorf("transit switch port binding not found for the node %s", node.Name)
 					return false, nil
+				}
+				if nc.name != node.Name {
+					nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
+					if err != nil {
+						err1 = fmt.Errorf("unable to fetch node-subnet annotation for node %s: err, %v", node.Name, err)
+						return false, nil
+					}
+					nodeSubnet := nodeSubnets[0].String() // hack consider dualstack in future
+					klog.Infof("SURYA: node %s, subnet %s", node.Name, nodeSubnet)
+					if !checkOVNSBNodeLRSR(nodeSubnet) {
+						err1 = fmt.Errorf("unable to find LRSR for node %s", node.Name)
+						return false, nil
+					}
 				}
 			}
 
