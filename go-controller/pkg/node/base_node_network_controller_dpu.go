@@ -10,12 +10,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -216,26 +216,18 @@ func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *
 	dpuConnStatus *util.DPUConnectionStatus, nadName string) error {
 	podDesc := fmt.Sprintf("pod %s/%s", origPod.Namespace, origPod.Name)
 	klog.Infof("Updating pod %s with connection status (%+v) for NAD %s", podDesc, dpuConnStatus, nadName)
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		pod, err := bnnc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
-		if err != nil {
-			return err
-		}
-		// Informer cache should not be mutated, so get a copy of the object
-		cpod := pod.DeepCopy()
-		cpod.Annotations, err = util.MarshalPodDPUConnStatus(cpod.Annotations, dpuConnStatus, nadName)
-		if err != nil {
-			if util.IsAnnotationAlreadySetError(err) {
-				return nil
-			}
-			return err
-		}
-		return bnnc.Kube.UpdatePod(cpod)
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update %s annotation for %s: %v", util.DPUConnetionStatusAnnot, podDesc, resultErr)
+	err := util.UpdatePodDPUConnStatusWithRetry(
+		bnnc.watchFactory.PodCoreInformer().Lister(),
+		bnnc.Kube,
+		origPod,
+		dpuConnStatus,
+		nadName,
+	)
+	if util.IsAnnotationAlreadySetError(err) {
+		return nil
 	}
-	return nil
+
+	return err
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
@@ -253,7 +245,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	// be part of healthcheck.
 	ifInfo.NetdevName = vfRepName
 	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
-	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, getter)
+	err = cni.ConfigureOVS(bnnc.vsClient, context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
@@ -294,16 +286,21 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Delete VF representor %s for %s", vfRepName, podDesc)
-	ifExists, sandbox, expectedNADName, err := util.GetOVSPortPodInfo(vfRepName)
+
+	found, err := libovsdbops.FindInterfaceByName(bnnc.vsClient, vfRepName)
 	if err != nil {
-		return fmt.Errorf(err.Error())
-	}
-	if !ifExists {
 		klog.Infof("VF representor %s for %s is not an OVS interface, nothing to do", vfRepName, podDesc)
 		return nil
 	}
+
+	sandbox := found.ExternalIDs["sandbox"]
 	if sandbox != dpuCD.SandboxId {
 		return fmt.Errorf("OVS port %s was added for sandbox (%s), expecting (%s)", vfRepName, sandbox, dpuCD.SandboxId)
+	}
+	expectedNADName := found.ExternalIDs[types.NADExternalID]
+	// if network_name does not exists, it is default network
+	if expectedNADName == "" {
+		expectedNADName = types.DefaultNetworkName
 	}
 	if expectedNADName != nadName {
 		return fmt.Errorf("OVS port %s was added for NAD (%s), expecting (%s)", vfRepName, expectedNADName, nadName)
@@ -320,8 +317,8 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *kapi.Pod, dpuCD *util.DPU
 
 	// remove from br-int
 	return wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
-		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
-		if err != nil {
+		if err := libovsdbops.DeletePort(bnnc.vsClient, "br-int", vfRepName); err != nil {
+			klog.Warningf("Failed to delete OVS port %q from br-int: %v", vfRepName, err)
 			return false, nil
 		}
 		klog.Infof("Port %s deleted from bridge br-int", vfRepName)
