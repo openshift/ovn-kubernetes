@@ -419,7 +419,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 
 	for _, podIfAddr := range podAnnotation.IPs {
 		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-		nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+		nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
 		if err != nil {
 			return err
 		}
@@ -741,7 +741,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		} else if ops, err = oc.addOrUpdatePodSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
+		} else if ops, err = addOrUpdatePodSNATOps(oc.nbClient, pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
 			return err
 		}
 	}
