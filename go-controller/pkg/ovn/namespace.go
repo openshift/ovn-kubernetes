@@ -400,6 +400,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
+				if !util.PodNeedsSNAT(pod) {
+					continue
+				}
 				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 				if err != nil {
 					errors = append(errors, err)

@@ -255,6 +255,18 @@ func PodWantsNetwork(pod *kapi.Pod) bool {
 	return !pod.Spec.HostNetwork
 }
 
+// PodNeedsSNAT returns true if the given pod is eligible to setup snat entry
+// in ovn for its egress traffic outside cluster, otherwise returns false.
+func PodNeedsSNAT(pod *kapi.Pod) bool {
+	return PodScheduled(pod) && !PodWantsHostNetwork(pod) && !PodCompleted(pod)
+}
+
+// PodWantsHostNetwork returns if the given pod is hostNetworked or not to determine if networking
+// needs to be setup
+func PodWantsHostNetwork(pod *kapi.Pod) bool {
+	return pod.Spec.HostNetwork
+}
+
 // PodCompleted checks if the pod is marked as completed (in a terminal state)
 func PodCompleted(pod *kapi.Pod) bool {
 	return pod.Status.Phase == kapi.PodSucceeded || pod.Status.Phase == kapi.PodFailed
