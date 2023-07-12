@@ -828,98 +828,98 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	var syncNodes, syncServices, syncPods bool
 	if config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) { // so this should be done only once in phase2 (not in phase1)
 		klog.Info("Upgrade Hack: Interconnect is enabled")
-		nc.wg.Add(1)
-		go func() {
-			defer nc.wg.Done()
-			var err1 error
-			start := time.Now()
-			err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-				// we loop through all the nodes in the cluster and ensure ovnkube-controller has finished creating the LRSR required for pod2pod overlay communication
-				if !syncNodes {
-					nodes, err := nc.Kube.GetNodes()
-					if err != nil {
-						err1 = fmt.Errorf("upgrade hack: error retrieving node %s: %v", nc.name, err)
-						return false, nil
-					}
-					for _, node := range nodes.Items {
-						if nc.name != node.Name {
-							nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
-							if err != nil {
-								err1 = fmt.Errorf("unable to fetch node-subnet annotation for node %s: err, %v", node.Name, err)
+		//nc.wg.Add(1)
+		//go func() {
+		//	defer nc.wg.Done()
+		var err1 error
+		start := time.Now()
+		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+			// we loop through all the nodes in the cluster and ensure ovnkube-controller has finished creating the LRSR required for pod2pod overlay communication
+			if !syncNodes {
+				nodes, err := nc.Kube.GetNodes()
+				if err != nil {
+					err1 = fmt.Errorf("upgrade hack: error retrieving node %s: %v", nc.name, err)
+					return false, nil
+				}
+				for _, node := range nodes.Items {
+					if nc.name != node.Name {
+						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
+						if err != nil {
+							err1 = fmt.Errorf("unable to fetch node-subnet annotation for node %s: err, %v", node.Name, err)
+							return false, nil
+						}
+						for _, nodeSubnet := range nodeSubnets {
+							klog.Infof("Upgrade Hack: node %s, subnet %s", node.Name, nodeSubnet)
+							if !checkOVNSBNodeLRSR(nodeSubnet.String()) {
+								err1 = fmt.Errorf("upgrade hack: unable to find LRSR for node %s", node.Name)
 								return false, nil
 							}
-							for _, nodeSubnet := range nodeSubnets {
-								klog.Infof("Upgrade Hack: node %s, subnet %s", node.Name, nodeSubnet)
-								if !checkOVNSBNodeLRSR(nodeSubnet.String()) {
-									err1 = fmt.Errorf("upgrade hack: unable to find LRSR for node %s", node.Name)
-									return false, nil
-								}
-							}
 						}
 					}
-					syncNodes = true
 				}
-				klog.Infof("Upgrade Hack: Syncing nodes took %v", time.Since(start))
-				// we loop through all existing services in the cluster and ensure ovnkube-controller has finished creating LoadBalancers required for services to work
-				if !syncServices {
-					services, err := nc.watchFactory.GetServices()
-					if err != nil {
-						err1 = fmt.Errorf("upgrade hack: error retrieving the services %v", err)
+				syncNodes = true
+			}
+			klog.Infof("Upgrade Hack: Syncing nodes took %v", time.Since(start))
+			// we loop through all existing services in the cluster and ensure ovnkube-controller has finished creating LoadBalancers required for services to work
+			if !syncServices {
+				services, err := nc.watchFactory.GetServices()
+				if err != nil {
+					err1 = fmt.Errorf("upgrade hack: error retrieving the services %v", err)
+					return false, nil
+				}
+				lbNames := fetchLBNames()
+				for _, s := range services {
+					// don't process headless service
+					if !util.ServiceTypeHasClusterIP(s) || !util.IsClusterIPSet(s) {
+						continue
+					}
+					if !lbExists(lbNames, s.Namespace, s.Name) {
 						return false, nil
 					}
-					lbNames := fetchLBNames()
-					for _, s := range services {
-						// don't process headless service
-						if !util.ServiceTypeHasClusterIP(s) || !util.IsClusterIPSet(s) {
-							continue
-						}
-						if !lbExists(lbNames, s.Namespace, s.Name) {
-							return false, nil
-						}
-					}
-					syncServices = true
 				}
-				klog.Infof("Upgrade Hack: Syncing services took %v", time.Since(start))
-				if !syncPods {
-					pods, err := nc.watchFactory.GetAllPods()
-					if err != nil {
-						err1 = fmt.Errorf("upgrade hack: error retrieving the services %v", err)
+				syncServices = true
+			}
+			klog.Infof("Upgrade Hack: Syncing services took %v", time.Since(start))
+			if !syncPods {
+				pods, err := nc.watchFactory.GetAllPods()
+				if err != nil {
+					err1 = fmt.Errorf("upgrade hack: error retrieving the services %v", err)
+					return false, nil
+				}
+				for _, p := range pods {
+					if !util.PodScheduled(p) || util.PodCompleted(p) || util.PodWantsHostNetwork(p) {
+						continue
+					}
+					if p.Spec.NodeName != nc.name {
+						// remote pod
+						continue
+					}
+					if !portExists(p.Namespace, p.Name) {
 						return false, nil
 					}
-					for _, p := range pods {
-						if !util.PodScheduled(p) || util.PodCompleted(p) || util.PodWantsHostNetwork(p) {
-							continue
-						}
-						if p.Spec.NodeName != nc.name {
-							// remote pod
-							continue
-						}
-						if !portExists(p.Namespace, p.Name) {
-							return false, nil
-						}
-					}
-					syncPods = true
 				}
-				klog.Infof("Upgrade Hack: Syncing pods took %v", time.Since(start))
-				return true, nil
-			})
-			if err != nil {
-				klog.Exitf("Upgrade hack: Timed out waiting for the remote ovnkube-controller to be ready even after 5 minutes, err : %v, %v", err, err1)
+				syncPods = true
 			}
-			if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
-				klog.Exitf("Upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
+			klog.Infof("Upgrade Hack: Syncing pods took %v", time.Since(start))
+			return true, nil
+		})
+		if err != nil {
+			klog.Exitf("Upgrade hack: Timed out waiting for the remote ovnkube-controller to be ready even after 5 minutes, err : %v, %v", err, err1)
+		}
+		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
+			klog.Exitf("Upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
+		}
+		if err := nodeAnnotator.Run(); err != nil {
+			klog.Exitf("Upgrade hack: failed to set node %s annotations: %w", nc.name, err)
+		}
+		klog.Infof("ovnkube-node %s finished annotating node with remote-zone-migrated; took: %v", nc.name, time.Since(start))
+		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+			if err := auth.SetDBAuth(); err != nil {
+				klog.Exitf("Upgrade hack: Unable to set the authentication towards OVN local dbs")
 			}
-			if err := nodeAnnotator.Run(); err != nil {
-				klog.Exitf("Upgrade hack: failed to set node %s annotations: %w", nc.name, err)
-			}
-			klog.Infof("ovnkube-node %s finished annotating node with remote-zone-migrated; took: %v", nc.name, time.Since(start))
-			for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-				if err := auth.SetDBAuth(); err != nil {
-					klog.Exitf("Upgrade hack: Unable to set the authentication towards OVN local dbs")
-				}
-			}
-			klog.Infof("Upgrade hack: ovnkube-node %s finished setting DB Auth; took: %v", nc.name, time.Since(start))
-		}()
+		}
+		klog.Infof("Upgrade hack: ovnkube-node %s finished setting DB Auth; took: %v", nc.name, time.Since(start))
+		//}()
 	}
 	/** HACK END **/
 
