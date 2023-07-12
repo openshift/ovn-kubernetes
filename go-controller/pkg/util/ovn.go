@@ -6,8 +6,11 @@ package util
 import (
 	"fmt"
 	"net"
+	"time"
 
 	ocpconfigapi "github.com/openshift/api/config/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
@@ -21,9 +24,20 @@ func CreateMACBinding(sbClient libovsdbclient.Client, logicalPort, datapathName 
 	p := func(item *sbdb.DatapathBinding) bool {
 		return item.ExternalIDs["name"] == datapathName
 	}
-	datapath, err := libovsdbops.GetDatapathBindingWithPredicate(sbClient, p)
+
+	// It could take some time for the datapath to propagate to SBDB, wait for some time
+	maxTimeout := 10 * time.Second
+	var datapath *sbdb.DatapathBinding
+	var err1 error
+	err := wait.PollImmediate(50*time.Millisecond, maxTimeout, func() (bool, error) {
+		if datapath, err1 = libovsdbops.GetDatapathBindingWithPredicate(sbClient, p); err1 != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+
 	if err != nil {
-		return fmt.Errorf("error getting datapath %s: %v", datapathName, err)
+		return fmt.Errorf("failed to find datpath: %s, after %s: %w, %v", datapathName, maxTimeout, err, err1)
 	}
 
 	// find Create mac_binding if needed
