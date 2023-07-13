@@ -37,6 +37,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
+					cancelableCtx:               util.NewCancelableContext(),
 				},
 			},
 		},

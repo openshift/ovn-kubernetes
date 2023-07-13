@@ -109,6 +109,11 @@ type BaseNetworkController struct {
 
 	// waitGroup per-Controller
 	wg *sync.WaitGroup
+
+	// some downstream components need to stop on their own or when the network
+	// controller is stopped
+	// use a chain of cancelable contexts for this
+	cancelableCtx util.CancelableContext
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific

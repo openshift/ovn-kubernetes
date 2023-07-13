@@ -190,6 +190,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			addressSetFactory:           addressSetFactory,
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
+			cancelableCtx:               util.NewCancelableContext(),
 		},
 		externalGWCache:        make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:         sync.RWMutex{},
@@ -317,6 +318,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
 	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 }
 

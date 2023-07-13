@@ -53,7 +53,7 @@ type PodSelectorAddressSet struct {
 	// handlerResources holds the data that is used and updated by the handlers.
 	handlerResources *PodSelectorAddrSetHandlerInfo
 
-	stopChan chan struct{}
+	cancelableContext *util.CancelableContext
 }
 
 // EnsurePodSelectorAddressSet returns address set for requested (podSelector, namespaceSelector, namespace).
@@ -161,8 +161,9 @@ func (oc *DefaultNetworkController) DeletePodSelectorAddressSet(addrSetKey, back
 
 func (psas *PodSelectorAddressSet) init(oc *DefaultNetworkController) error {
 	// create pod handler resources before starting the handlers
-	if psas.stopChan == nil {
-		psas.stopChan = util.GetChildStopChan(oc.stopChan)
+	if psas.cancelableContext == nil {
+		cancelableContext := util.NewCancelableContextChild(oc.cancelableCtx)
+		psas.cancelableContext = &cancelableContext
 	}
 	if psas.handlerResources == nil {
 		as, err := oc.addressSetFactory.NewAddressSet(psas.addrSetDbIDs, nil)
@@ -175,7 +176,7 @@ func (psas *PodSelectorAddressSet) init(oc *DefaultNetworkController) error {
 			podSelector:       psas.podSelector,
 			namespaceSelector: psas.namespaceSelector,
 			namespace:         psas.namespace,
-			stopChan:          psas.stopChan,
+			stopChan:          psas.cancelableContext.Done(),
 		}
 	}
 
@@ -212,9 +213,9 @@ func (psas *PodSelectorAddressSet) init(oc *DefaultNetworkController) error {
 
 func (psas *PodSelectorAddressSet) destroy(oc *DefaultNetworkController) error {
 	klog.Infof("Deleting shared address set for pod selector %s", psas.key)
-	if psas.stopChan != nil {
-		close(psas.stopChan)
-		psas.stopChan = nil
+	if psas.cancelableContext != nil {
+		psas.cancelableContext.Cancel()
+		psas.cancelableContext = nil
 	}
 
 	psas.needsCleanup = true
@@ -249,7 +250,7 @@ func (oc *DefaultNetworkController) addPodSelectorHandler(psAddrSet *PodSelector
 		factory.AddressSetPodSelectorType,
 		syncFunc,
 		podHandlerResources,
-		psAddrSet.stopChan)
+		psAddrSet.cancelableContext.Done())
 
 	podHandler, err := retryFramework.WatchResourceFiltered(namespace, podSelector)
 	if err != nil {
@@ -271,7 +272,7 @@ func (oc *DefaultNetworkController) addNamespacedPodSelectorHandler(psAddrSet *P
 		factory.AddressSetNamespaceAndPodSelectorType,
 		nil,
 		psAddrSet.handlerResources,
-		psAddrSet.stopChan,
+		psAddrSet.cancelableContext.Done(),
 	)
 	namespaceHandler, err := retryFramework.WatchResourceFiltered("", psAddrSet.namespaceSelector)
 	if err != nil {
@@ -312,7 +313,7 @@ type PodSelectorAddrSetHandlerInfo struct {
 	// namespace is used when namespaceSelector is nil to set static namespace
 	namespace string
 
-	stopChan chan struct{}
+	stopChan <-chan struct{}
 }
 
 // idempotent

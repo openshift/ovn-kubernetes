@@ -212,6 +212,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
+				cancelableCtx:               util.NewCancelableContext(),
 			},
 		},
 		addNodeFailed:               sync.Map{},
@@ -267,6 +268,7 @@ func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 func (oc *SecondaryLayer3NetworkController) Stop() {
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
 	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 
 	if oc.podHandler != nil {

@@ -161,6 +161,7 @@ func (oc *BaseSecondaryLayer2NetworkController) newRetryFramework(
 func (oc *BaseSecondaryLayer2NetworkController) Stop() {
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
 	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 
 	if oc.podHandler != nil {
