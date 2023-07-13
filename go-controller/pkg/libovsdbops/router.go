@@ -216,7 +216,7 @@ func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.Logic
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Ports},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 	opModels = append(opModels, opModel)
@@ -354,7 +354,7 @@ func DeleteLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.Client, o
 			Model:            router,
 			ModelPredicate:   func(lr *nbdb.LogicalRouter) bool { return lr.Name == router.Name },
 			OnModelMutations: []interface{}{&router.Policies},
-			ErrNotFound:      true,
+			ErrNotFound:      false,
 			BulkOp:           false,
 		},
 	}
@@ -700,7 +700,7 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 			Model:            router,
 			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 			OnModelMutations: []interface{}{&router.StaticRoutes},
-			ErrNotFound:      true,
+			ErrNotFound:      false,
 			BulkOp:           false,
 		},
 	}
@@ -974,16 +974,19 @@ func FindNATsWithPredicate(nbClient libovsdbclient.Client, predicate natPredicat
 // GetRouterNATs looks up NATs associated to the provided logical router from
 // the cache
 func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
-	router, err := GetLogicalRouter(nbClient, router)
+	r, err := GetLogicalRouter(nbClient, router)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get router: %s, error: %w", router.Name, err)
 	}
 
 	nats := []*nbdb.NAT{}
-	for _, uuid := range router.Nat {
+	for _, uuid := range r.Nat {
 		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
+		if err == libovsdbclient.ErrNotFound {
+			continue
+		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to lookup NAT entry with uuid: %s, error: %w", uuid, err)
 		}
 		nats = append(nats, nat)
 	}
@@ -1079,7 +1082,7 @@ func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, rou
 	opModel := operationModel{
 		Model:            router,
 		OnModelMutations: []interface{}{&router.Nat},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 	opModels = append(opModels, opModel)
@@ -1117,7 +1120,8 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 				router.Nat = extractUUIDsFromModels(&deleted)
 				natUUIDs.Insert(router.Nat...)
 			},
-			BulkOp: true,
+			BulkOp:      true,
+			ErrNotFound: false,
 		},
 		{
 			Model:            router,
