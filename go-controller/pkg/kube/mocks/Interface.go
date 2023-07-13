@@ -375,7 +375,7 @@ func (_m *Interface) UpdateNodeStatus(node *apicorev1.Node) error {
 }
 
 // UpdatePod provides a mock function with given fields: pod
-func (_m *Interface) UpdatePod(pod *apicorev1.Pod) error {
+func (_m *Interface) UpdatePodStatus(pod *apicorev1.Pod) error {
 	ret := _m.Called(pod)
 
 	var r0 error

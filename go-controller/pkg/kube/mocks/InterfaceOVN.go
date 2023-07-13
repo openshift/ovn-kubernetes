@@ -501,7 +501,7 @@ func (_m *InterfaceOVN) UpdateNodeStatus(node *apicorev1.Node) error {
 }
 
 // UpdatePod provides a mock function with given fields: pod
-func (_m *InterfaceOVN) UpdatePod(pod *apicorev1.Pod) error {
+func (_m *InterfaceOVN) UpdatePodStatus(pod *apicorev1.Pod) error {
 	ret := _m.Called(pod)
 
 	var r0 error
