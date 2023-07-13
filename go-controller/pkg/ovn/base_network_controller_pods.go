@@ -741,7 +741,7 @@ func (bnc *BaseNetworkController) updatePodAnnotationWithRetry(origPod *kapi.Pod
 		if err != nil {
 			return err
 		}
-		return bnc.kube.UpdatePod(cpod)
+		return bnc.kube.UpdatePodStatus(cpod)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update annotation on pod %s/%s: %v", origPod.Namespace, origPod.Name, resultErr)

@@ -335,9 +335,10 @@ var _ = Describe("Node DPU tests", func() {
 				cpod := pod.DeepCopy()
 				cpod.Annotations, err = util.MarshalPodDPUConnStatus(cpod.Annotations, &dcs, types.DefaultNetworkName)
 				Expect(err).ToNot(HaveOccurred())
-				kubeMock.On("UpdatePod", cpod).Return(nil)
+				kubeMock.On("UpdatePodStatus", cpod).Return(nil)
 
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+				kubeMock.On("UpdatePodStatus", cpod).Return(nil)
 
 				err = dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 				Expect(err).ToNot(HaveOccurred())
@@ -356,7 +357,7 @@ var _ = Describe("Node DPU tests", func() {
 				cpod := pod.DeepCopy()
 				cpod.Annotations, err = util.MarshalPodDPUConnStatus(cpod.Annotations, &dcs, types.DefaultNetworkName)
 				Expect(err).ToNot(HaveOccurred())
-				kubeMock.On("UpdatePod", cpod).Return(fmt.Errorf("failed to set pod annotations"))
+				kubeMock.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set pod annotations"))
 				// Mock netlink/ovs calls for cleanup
 				netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -364,6 +365,7 @@ var _ = Describe("Node DPU tests", func() {
 				})
 
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+				kubeMock.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set pod annotations"))
 
 				err = dnnc.addRepPort(&pod, vfRep, ifInfo, clientset)
 				Expect(err).To(HaveOccurred())

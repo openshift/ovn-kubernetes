@@ -303,7 +303,7 @@ func (ncc *networkClusterController) updateNodeSubnetAnnotationWithRetry(nodeNam
 					node.Name, util.JoinIPNets(hostSubnets, ","))
 			}
 		}
-		return ncc.kube.UpdateNode(cnode)
+		return ncc.kube.UpdateNodeStatus(cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)
