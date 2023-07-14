@@ -2,8 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"net"
 	"sort"
 	"strings"
@@ -15,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -24,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -355,7 +355,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *v1.Pod) error {
 	if err != nil {
 		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
 		// therefore just log the error and return.
-		klog.Infof("Failed to get pod IPs %s/%s to delete from pod selector address set: %w", pod.Namespace, pod.Name, err)
+		klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %v", pod.Namespace, pod.Name, err)
 		return nil
 	}
 	return handlerInfo.addressSet.DeleteIPs(ips)
@@ -439,7 +439,10 @@ func (oc *DefaultNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, pod
 	}
 	ips, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
 	if err != nil {
-		return "", fmt.Errorf("can't get pod IPs %s/%s: %w", pod.Namespace, pod.Name, err)
+		// if pod has no IP, nothing to do
+		klog.Warningf("Failed to get IPs of pod %s/%s during address_set pod selector removal: %v",
+			pod.Namespace, pod.Name, err)
+		return "", nil
 	}
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
 	collidingPod, err := oc.findPodWithIPAddresses(ips, pod.Spec.NodeName)
