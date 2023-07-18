@@ -366,9 +366,26 @@ func setupSriovInterface(vsClient client.Client, netns ns.NetNS, containerID,
 	return hostIface, contIface, nil
 }
 
+type ConfOVSTime struct {
+	deleteTime time.Duration
+	foundTime  time.Duration
+	clearQOSTime time.Duration
+	junkTime time.Duration
+	findBridgeTime time.Duration
+	createPortTime time.Duration
+	waitTime time.Duration
+}
+
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, getter PodInfoGetter) error {
+	_, err := ConfigureOVSWithTime(vsClient, ctx, namespace, podName, hostIfaceName, ifInfo, sandboxID, getter)
+	return err
+}
+
+// ConfigureOVS performs OVS configurations in order to set up Pod networking
+func ConfigureOVSWithTime(vsClient client.Client, ctx context.Context, namespace, podName, hostIfaceName string,
+	ifInfo *PodInterfaceInfo, sandboxID string, getter PodInfoGetter) (*ConfOVSTime, error) {
 
 	ifaceID := util.GetIfaceId(namespace, podName)
 	if ifInfo.NetName != types.DefaultNetworkName {
@@ -382,6 +399,8 @@ func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podNam
 
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v",
 		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
+
+	start := time.Now()
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -398,6 +417,8 @@ func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podNam
 	if err := libovsdbops.DeleteInterfacesWithPredicate(vsClient, p); err != nil {
 		klog.Warningf("Failed to delete stale OVS ports with iface-id %q from br-int: %v", ifaceID, err)
 	}
+	deleteTime := time.Since(start)
+	start = time.Now()
 
 	// if the specified interface was created for other Pod/NAD, return error
 	found, _ := libovsdbops.FindInterfacesWithPredicate(vsClient, func(iface *vswitchdb.Interface) bool {
@@ -406,7 +427,7 @@ func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podNam
 	})
 	for _, f := range found {
 		if f.ExternalIDs["iface-id"] != ifaceID {
-			return fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, f.ExternalIDs["iface-id"], ifaceID)
+			return nil, fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, f.ExternalIDs["iface-id"], ifaceID)
 		}
 		// if NADExternalID does not exists, it is default network
 		nadNameString, ok := f.ExternalIDs[types.NADExternalID]
@@ -414,13 +435,17 @@ func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podNam
 			nadNameString = types.DefaultNetworkName
 		}
 		if nadNameString != ifInfo.NADName {
-			return fmt.Errorf("OVS port %s was added for NAD (%s), expect (%s)", hostIfaceName, nadNameString, ifInfo.NADName)
+			return nil, fmt.Errorf("OVS port %s was added for NAD (%s), expect (%s)", hostIfaceName, nadNameString, ifInfo.NADName)
 		}
 	}
+	foundTime := time.Since(start)
+	start = time.Now()
 
 	if err := libovsdbops.ClearPortQoSBySandboxID(vsClient, sandboxID); err != nil {
-		return err
+		return nil, err
 	}
+	clearQOSTime := time.Since(start)
+	start = time.Now()
 
 	// Add the new sandbox's OVS port, tag the port as transient so stale
 	// pod ports are scrubbed on hard reboot
@@ -473,37 +498,58 @@ func ConfigureOVS(vsClient client.Client, ctx context.Context, namespace, podNam
 		// pod Ingress == OVS egress
 		qos, err := libovsdbops.CreateQoS(vsClient, sandboxID, ifInfo.Ingress)
 		if err != nil {
-			return fmt.Errorf("failed to create QoS: %v", err)
+			return nil, fmt.Errorf("failed to create QoS: %v", err)
 		}
 		qosUUID := qos.UUID
 		port.QOS = &qosUUID
 	}
+	junkTime := time.Since(start)
+	start = time.Now()
 
 	bridge, err := libovsdbops.FindBridgeByName(vsClient, "br-int")
 	if err != nil {
-		return fmt.Errorf("failed to find bridge br-int: %v", err)
+		return nil, fmt.Errorf("failed to find bridge br-int: %v", err)
 	}
+	findBridgeTime := time.Since(start)
+	start = time.Now()
 	if err := libovsdbops.CreateOrUpdatePortAndAddToBridge(vsClient, bridge.UUID, port, iface); err != nil {
-		return fmt.Errorf("failed to create interface and port and add to bridge: %v", err)
+		return nil, fmt.Errorf("failed to create interface and port and add to bridge: %v", err)
 	}
+	createPortTime := time.Since(start)
+	start = time.Now()
 
 	if err := waitForPodInterface(vsClient, ctx, ifInfo, hostIfaceName, ifaceID, getter,
 		namespace, podName, initialPodUID); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
 		klog.Warningf("[%s/%s %s] pod uid %s: %v", namespace, podName, sandboxID, initialPodUID, err)
-		return err
+		return nil, err
 	}
-	return nil
+	waitTime := time.Since(start)
+
+	return &ConfOVSTime{
+		deleteTime: deleteTime,
+		foundTime: foundTime,
+		clearQOSTime: clearQOSTime,
+		junkTime: junkTime,
+		findBridgeTime: findBridgeTime,
+		createPortTime: createPortTime,
+		waitTime: waitTime,
+	}, nil
 }
 
 // ConfigureInterface sets up the container interface
 func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+	start := time.Now()
+	overall := start
+
 	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
 	}
 	defer netns.Close()
+	getNSTime := time.Since(start)
+	start = time.Now()
 
 	var hostIface, contIface *current.Interface
 
@@ -522,7 +568,10 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	if err != nil {
 		return nil, err
 	}
+	setupIfaceTime := time.Since(start)
+	iptStart := time.Now()
 
+	var iptTime time.Duration
 	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
 	var wg sync.WaitGroup
 	var iptErr error
@@ -530,16 +579,20 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	go func() {
 		defer wg.Done()
 		iptErr = setupIPTablesBlocks(netns, ifInfo)
+		iptTime = time.Since(iptStart)
 	}()
 	// END OCP HACK
 
+	start = time.Now()
+	var ovsTime *ConfOVSTime
 	if !ifInfo.IsDPUHostMode {
-		err = ConfigureOVS(pr.vsClient, pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, getter)
+		ovsTime, err = ConfigureOVSWithTime(pr.vsClient, pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, getter)
 		if err != nil {
 			pr.deletePorts(pr.vsClient, hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
 		}
 	}
+	confOVSTime := time.Since(start)
 
 	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
 	wg.Wait()
@@ -548,6 +601,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	}
 	// END OCP HACK
 
+	start = time.Now()
 	// Only configure IPv6 specific stuff and wait for addresses to become usable
 	// if there are any IPv6 addresses to assign. v4 doesn't have the concept
 	// of tentative addresses so it doesn't need any of this.
@@ -583,6 +637,11 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 			klog.Warningf("Failed to settle addresses: %q", err)
 		}
 	}
+	v6Time := time.Since(start)
+
+	klog.Warningf("##### [%s/%s] trozet getNS: %v, setupIface: %v, ipt: %v, OVS: %v, oDelete: %v, oFound: %v, oClear: %v, oJunk: %v, oFindBr: %v, oCreate: %v, oWait: %v, v6: %v, TOTAL: %v",
+		pr.PodNamespace, pr.PodName, getNSTime, setupIfaceTime, iptTime, confOVSTime, ovsTime.deleteTime, ovsTime.foundTime, ovsTime.clearQOSTime, ovsTime.junkTime, ovsTime.findBridgeTime,
+		ovsTime.createPortTime, ovsTime.waitTime, v6Time, overall)
 
 	return []*current.Interface{hostIface, contIface}, nil
 }
