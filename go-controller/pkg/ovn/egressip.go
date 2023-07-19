@@ -1673,6 +1673,65 @@ func (oc *DefaultNetworkController) isAnyClusterNodeIP(ip net.IP) *egressNode {
 	return nil
 }
 
+// syncCloudPrivateIPConfigs This method takes care syncing stale data in the
+// egress ip status with cloud private ip config upon master reboot cases.
+// cloud private ip config entry would have been deleted when master was down
+// whereas egress ip status was not updated for the deleted entry in an error
+// scenario. Hence this method ensures egress ip status is upto date with
+// available cloud private ip config entry.
+func (oc *DefaultNetworkController) syncCloudPrivateIPConfigs(objs []interface{}) error {
+	if !util.PlatformTypeIsEgressIPCloudProvider() {
+		return nil
+	}
+	cloudPrivateIPConfigMap, err := oc.getCloudPrivateIPConfigMap(objs)
+	if err != nil {
+		return fmt.Errorf("syncCloudPrivateIPConfigs unable to get cloud private ip config: %w", err)
+	}
+	egressIPs, err := oc.watchFactory.GetEgressIPs()
+	if err != nil {
+		return fmt.Errorf("syncCloudPrivateIPConfigs unable to get Egress IPs: %w", err)
+	}
+	for _, egressIP := range egressIPs {
+		updatedStatus := []egressipv1.EgressIPStatusItem{}
+		cloudPrivateIPNotFoundOrInvalid := false
+		for _, status := range egressIP.Status.Items {
+			cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(status.EgressIP)
+			if nodeName, exists := cloudPrivateIPConfigMap[cloudPrivateIPConfigName]; exists && status.Node == nodeName {
+				updatedStatus = append(updatedStatus, status)
+			} else {
+				// Set cloudPrivateIPNotFoundOrInvalid flag to true because egress ip entry not found or not set with
+				// correct node name in cloud private ip config object.
+				cloudPrivateIPNotFoundOrInvalid = true
+			}
+		}
+		if cloudPrivateIPNotFoundOrInvalid {
+			// There could be one or more stale entry found in egress ip object, remove it by patching egressip
+			// object with updated status.
+			err = oc.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus)
+			if err != nil {
+				return fmt.Errorf("syncCloudPrivateIPConfigs unable to update EgressIP status: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// getCloudPrivateIPConfigMap returns cloud private ip config map cotaining ip address the key and
+// assigned node node name as the value. This method is intended to be invoked only in the case of
+// cloud environment.
+func (oc *DefaultNetworkController) getCloudPrivateIPConfigMap(objs []interface{}) (map[string]string, error) {
+	cloudPrivateIPConfigMap := make(map[string]string)
+	for _, obj := range objs {
+		cloudPrivateIPConfig, ok := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		if !ok {
+			klog.Errorf("Could not cast %T object to *ocpcloudnetworkapi.CloudPrivateIPConfig", obj)
+			continue
+		}
+		cloudPrivateIPConfigMap[cloudPrivateIPConfig.Name] = cloudPrivateIPConfig.Status.Node
+	}
+	return cloudPrivateIPConfigMap, nil
+}
+
 type EgressIPPatchStatus struct {
 	Op    string                    `json:"op"`
 	Path  string                    `json:"path"`

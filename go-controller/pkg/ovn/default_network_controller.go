@@ -1104,6 +1104,9 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 		case factory.EgressIPNamespaceType:
 			syncFunc = h.oc.syncEgressIPs
 
+		case factory.CloudPrivateIPConfigType:
+			syncFunc = h.oc.syncCloudPrivateIPConfigs
+
 		case factory.EgressNodeType:
 			syncFunc = h.oc.initClusterEgressPolicies
 
@@ -1111,8 +1114,7 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = nil
 
 		case factory.EgressIPPodType,
-			factory.EgressIPType,
-			factory.CloudPrivateIPConfigType:
+			factory.EgressIPType:
 			syncFunc = nil
 
 		case factory.NamespaceType:
