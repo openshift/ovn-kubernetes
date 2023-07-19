@@ -157,22 +157,28 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	var libovsdbExecuteTime time.Duration
+	var addLSPToNetTime time.Duration
+	var addToNSTime time.Duration
+	var gwTime, exGWTime, lspCacheTime, mcTime time.Duration
 	var lsp *nbdb.LogicalSwitchPort
 	var ops []ovsdb.Operation
 	var podAnnotation *util.PodAnnotation
 	var newlyCreatedPort bool
 	// Keep track of how long syncs take.
-	start := time.Now()
+	start2 := time.Now()
 	defer func() {
-		klog.Infof("##### [%s/%s] trozet addLogicalPort took %v, libovsdb time %v",
-			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime)
+		klog.Infof("##### [%s/%s] trozet addLogicalPort took %v, libovsdb: %v, addLSP: %v, addNS: %v, gw: %v, exGW: %v, lspCache: %v, mc: %v",
+			pod.Namespace, pod.Name, time.Since(start2), libovsdbExecuteTime, addLSPToNetTime, addToNSTime, gwTime, exGWTime, lspCacheTime, mcTime)
 	}()
 
+	start := time.Now()
 	nadName := ovntypes.DefaultNetworkName
 	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network)
 	if err != nil {
 		return err
 	}
+	addLSPToNetTime = time.Since(start)
+	start = time.Now()
 
 	// Ensure the namespace/nsInfo exists
 	routingExternalGWs, routingPodGWs, addOps, err := oc.addPodToNamespace(pod.Namespace, podAnnotation.IPs)
@@ -180,6 +186,8 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		return err
 	}
 	ops = append(ops, addOps...)
+	addToNSTime = time.Since(start)
+	start = time.Now()
 
 	// if we have any external or pod Gateways, add routes
 	gateways := make([]*gatewayInfo, 0, len(routingExternalGWs.gws)+len(routingPodGWs))
@@ -214,6 +222,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+	gwTime = time.Since(start)
 
 	recordOps, txOkCallBack, _, err := oc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
 	if err != nil {
@@ -230,19 +239,24 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	txOkCallBack()
 	oc.podRecorder.AddLSP(pod.UID, oc.NetInfo)
 
+	start = time.Now()
 	// check if this pod is serving as an external GW
 	err = oc.addPodExternalGW(pod)
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
+	exGWTime = time.Since(start)
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
 		return fmt.Errorf("UUID is empty from LSP: %+v", *lsp)
 	}
 
+	start = time.Now()
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(pod, switchName, ovntypes.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+	lspCacheTime = time.Since(start)
+	start = time.Now()
 
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
@@ -256,6 +270,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 	}
+	mcTime = time.Since(start)
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
 		metrics.RecordPodCreated(pod, oc.NetInfo)

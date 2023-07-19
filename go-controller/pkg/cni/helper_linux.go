@@ -641,7 +641,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 
 	klog.Warningf("##### [%s/%s] trozet getNS: %v, setupIface: %v, ipt: %v, OVS: %v, oDelete: %v, oFound: %v, oClear: %v, oJunk: %v, oFindBr: %v, oCreate: %v, oWait: %v, v6: %v, TOTAL: %v",
 		pr.PodNamespace, pr.PodName, getNSTime, setupIfaceTime, iptTime, confOVSTime, ovsTime.deleteTime, ovsTime.foundTime, ovsTime.clearQOSTime, ovsTime.junkTime, ovsTime.findBridgeTime,
-		ovsTime.createPortTime, ovsTime.waitTime, v6Time, overall)
+		ovsTime.createPortTime, ovsTime.waitTime, v6Time, time.Since(overall))
 
 	return []*current.Interface{hostIface, contIface}, nil
 }
