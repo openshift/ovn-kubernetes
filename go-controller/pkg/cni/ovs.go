@@ -233,7 +233,7 @@ func waitForPodInterface(vsClient client.Client, ctx context.Context,
 	var detail string
 	var ofPort int
 
-	waitTime := 20 * time.Millisecond
+	waitTime := 10 * time.Millisecond
 
 	mac := ifInfo.MAC.String()
 	ifAddrs := ifInfo.IPs
