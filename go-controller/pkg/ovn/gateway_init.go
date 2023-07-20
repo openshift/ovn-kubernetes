@@ -556,6 +556,7 @@ func (oc *DefaultNetworkController) addPolicyBasedRoutes(nodeName, mgmtPortIP st
 	}
 
 	matches := sets.New[string]()
+	otherHostAddrs = append(otherHostAddrs, "10.0.0.4")
 	for _, hostIP := range append(otherHostAddrs, hostIfAddr.IP.String()) {
 		// embed nodeName as comment so that it is easier to delete these rules later on.
 		// logical router policy doesn't support external_ids to stash metadata
