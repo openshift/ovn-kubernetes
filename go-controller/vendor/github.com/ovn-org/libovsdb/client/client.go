@@ -780,6 +780,7 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...
 	}
 	dbgLogger := o.logger.WithValues("database", dbName).V(4)
 	if dbgLogger.Enabled() {
+		// TODO: see about adding a formatter to operation, so unused fields are omitted
 		dbgLogger.Info("transacting operations", "operations", fmt.Sprintf("%+v", operation))
 	}
 	err := o.rpcClient.CallWithContext(ctx, "transact", args, &reply)

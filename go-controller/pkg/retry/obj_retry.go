@@ -620,7 +620,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						if found {
 							existingCacheEntry = retryEntryOrNil.config
 						}
-						klog.Infof("Deleting old %s of type %s during update", oldKey, r.ResourceHandler.ObjType)
+						klog.V(5).Infof("Deleting old %s of type %s during update", oldKey, r.ResourceHandler.ObjType)
 						if err := r.ResourceHandler.DeleteResource(old, existingCacheEntry); err != nil {
 							klog.Errorf("Failed to delete %s %s, during update: %v",
 								r.ResourceHandler.ObjType, oldKey, err)
