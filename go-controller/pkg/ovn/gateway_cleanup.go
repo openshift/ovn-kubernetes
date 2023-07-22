@@ -1,11 +1,13 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
@@ -27,7 +29,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	var nextHops []net.IP
 
 	gwIPAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
-	if err != nil {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return err
 	}
 
