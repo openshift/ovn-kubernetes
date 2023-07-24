@@ -9,14 +9,18 @@
 # are built in this Dockerfile and included in the image (instead of the rpm)
 #
 
+# Build RHEL-8 binaries
 FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.16-openshift-4.9 AS builder
-
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
+RUN cd go-controller; CGO_ENABLED=1 make
+RUN cd go-controller; CGO_ENABLED=1 make windows
 
-# build the binaries
-RUN cd go-controller; CGO_ENABLED=0 make
-RUN cd go-controller; CGO_ENABLED=0 make windows
+# Build RHEL-7 binaries
+FROM registry.ci.openshift.org/ocp/builder:rhel-7-golang-1.16-openshift-4.9 AS rhel7
+WORKDIR /go/src/github.com/openshift/ovn-kubernetes
+COPY . .
+RUN cd go-controller; CGO_ENABLED=1 make
 
 FROM registry.ci.openshift.org/ocp/4.9:cli AS cli
 
@@ -61,6 +65,12 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/windows/hybrid-overlay-node.exe /root/windows/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovndbchecker /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/bin/
+
+# Copy RHEL-8 and RHEL-7 shim binaries where the CNO's ovnkube-node container startup script can find them
+RUN mkdir -p /usr/libexec/cni/rhel8
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/rhel8/
+RUN mkdir -p /usr/libexec/cni/rhel7
+COPY --from=rhel7 /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/rhel7/
 
 COPY --from=cli /usr/bin/oc /usr/bin/
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
