@@ -1443,16 +1443,6 @@ func (oc *DefaultNetworkController) cleanupNetworkPolicy(np *networkPolicy) erro
 	oc.shutdownHandlers(np)
 	var err error
 
-	// delete from peer address set
-	for i, asKey := range np.peerAddressSets {
-		if err := oc.DeletePodSelectorAddressSet(asKey, np.getKeyWithKind()); err != nil {
-			// remove deleted address sets from the list
-			np.peerAddressSets = np.peerAddressSets[i:]
-			return fmt.Errorf("failed to delete network policy from peer address set %s: %v", asKey, err)
-		}
-	}
-	np.peerAddressSets = nil
-
 	// Delete the port group, idempotent
 	ops, err := libovsdbops.DeletePortGroupsOps(oc.nbClient, nil, np.portGroupName)
 	if err != nil {
@@ -1477,6 +1467,17 @@ func (oc *DefaultNetworkController) cleanupNetworkPolicy(np *networkPolicy) erro
 	if err != nil {
 		return fmt.Errorf("unable to delete policy from default deny port groups: %v", err)
 	}
+
+	// delete from peer address set, this may cause address set deletion, so we need to
+	// do that after ACLs are deleted to avoid ovn-controller errors
+	for i, asKey := range np.peerAddressSets {
+		if err := oc.DeletePodSelectorAddressSet(asKey, np.getKeyWithKind()); err != nil {
+			// remove deleted address sets from the list
+			np.peerAddressSets = np.peerAddressSets[i:]
+			return fmt.Errorf("failed to delete network policy from peer address set %s: %v", asKey, err)
+		}
+	}
+	np.peerAddressSets = nil
 
 	// finally, delete netpol from existing networkPolicies
 	// this is the signal that cleanup was successful
