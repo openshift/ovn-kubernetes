@@ -6,6 +6,7 @@ reviewers:
   - danwinship
   - dcbw
   - JacobTanenbaum
+  - jcaamano
   - juanluisvaladas
   - pecameron
   - rcarrillocruz
@@ -16,6 +17,7 @@ approvers:
   - abhat
   - danwinship
   - dcbw
+  - jcaamano
   - knobunc
   - trozet
   - rcarrillocruz
