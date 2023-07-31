@@ -247,7 +247,14 @@ func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 	}
 
 	mode.identity, _ = identities.PopAny()
-
+	// OCP HACK begin
+	// when cluster manager runs alone, use pod name as identity to avoid duplicate leaders
+	// while switching from global zone to multizone
+	if mode.clusterManager && !mode.ovnkubeController {
+		mode.identity = os.Getenv("POD_NAME")
+	}
+	// OCP HACK end
+	klog.Infof("identity: %s", mode.identity)
 	return mode, nil
 }
 
