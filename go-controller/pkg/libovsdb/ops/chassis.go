@@ -151,10 +151,10 @@ func CreateOrUpdateChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis
 			BulkOp:         false,
 		},
 		{
-			Model:          chassis,
-			OnModelUpdates: onModelUpdatesAllNonDefault(),
-			ErrNotFound:    false,
-			BulkOp:         false,
+			Model:            chassis,
+			OnModelMutations: []interface{}{&chassis.OtherConfig},
+			ErrNotFound:      false,
+			BulkOp:           false,
 		},
 	}
 
