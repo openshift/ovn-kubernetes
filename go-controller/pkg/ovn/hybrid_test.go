@@ -357,11 +357,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterRouterDatapath := &sbdb.DatapathBinding{
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
+				TunnelKey:   5,
 			}
 			gr := types.GWRouterPrefix + node1.Name
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+				TunnelKey:   6,
 			}
 
 			dbSetup := libovsdbtest.TestSetup{
@@ -484,7 +486,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					return nil, err
 				}
 				return clusterRouter.Policies, nil
-			}, 2).Should(gomega.Equal([]string{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			gomega.Eventually(func() error {
 				_, err := libovsdbops.GetLogicalSwitchPort(clusterController.nbClient, &nbdb.LogicalSwitchPort{Name: "jtor-GR_node1"})
@@ -502,7 +504,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				}
 				return ovnJoinSwitch.Ports, err
 
-			}, 2).Should(gomega.Equal([]string{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			//check if the hybrid overlay elements have been cleaned up
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
@@ -518,7 +520,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					return nil, err
 				}
 				return logicalRouterStaticRoutes, nil
-			}, 2).Should(gomega.Equal([]*nbdb.LogicalRouterStaticRoute{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
 				p := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -534,7 +536,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				}
 				return logicalRouterPolicies, nil
 
-			}, 2).Should(gomega.Equal([]*nbdb.LogicalRouterPolicy{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			gomega.Eventually(func() error {
 				_, err := libovsdbops.GetLogicalSwitchPort(clusterController.nbClient, &nbdb.LogicalSwitchPort{Name: "int-node1"})
@@ -646,11 +648,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterRouterDatapath := &sbdb.DatapathBinding{
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
+				TunnelKey:   5,
 			}
 			gr := types.GWRouterPrefix + node1.Name
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+				TunnelKey:   6,
 			}
 
 			expectedDatabaseState := []libovsdbtest.TestData{ovnClusterRouterLRP}
@@ -858,11 +862,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterRouterDatapath := &sbdb.DatapathBinding{
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
+				TunnelKey:   5,
 			}
 			gr := types.GWRouterPrefix + node1.Name
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+				TunnelKey:   6,
 			}
 
 			dbSetup := libovsdbtest.TestSetup{
@@ -977,7 +983,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					return nil, err
 				}
 				return clusterRouter.Policies, nil
-			}, 2).Should(gomega.Equal([]string{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			gomega.Eventually(func() error {
 				_, err := libovsdbops.GetLogicalSwitchPort(clusterController.nbClient, &nbdb.LogicalSwitchPort{Name: "jtor-GR_node1"})
@@ -995,7 +1001,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				}
 				return ovnJoinSwitch.Ports, err
 
-			}, 2).Should(gomega.Equal([]string{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			//check if the hybrid overlay elements have been cleaned up
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterStaticRoute, error) {
@@ -1011,7 +1017,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 					return nil, err
 				}
 				return logicalRouterStaticRoutes, nil
-			}, 2).Should(gomega.Equal([]*nbdb.LogicalRouterStaticRoute{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			gomega.Eventually(func() ([]*nbdb.LogicalRouterPolicy, error) {
 				p := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -1027,7 +1033,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				}
 				return logicalRouterPolicies, nil
 
-			}, 2).Should(gomega.Equal([]*nbdb.LogicalRouterPolicy{}))
+			}, 2).Should(gomega.HaveLen(0))
 
 			gomega.Eventually(func() error {
 				_, err := libovsdbops.GetLogicalSwitchPort(clusterController.nbClient, &nbdb.LogicalSwitchPort{Name: "int-node1"})
@@ -1139,11 +1145,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterRouterDatapath := &sbdb.DatapathBinding{
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
+				TunnelKey:   5,
 			}
 			gr := types.GWRouterPrefix + node1.Name
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+				TunnelKey:   6,
 			}
 
 			dbSetup := libovsdbtest.TestSetup{
@@ -1355,11 +1363,13 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			clusterRouterDatapath := &sbdb.DatapathBinding{
 				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": expectedOVNClusterRouter.UUID, "name": types.OVNClusterRouter},
+				TunnelKey:   5,
 			}
 			gr := types.GWRouterPrefix + node1.Name
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+				TunnelKey:   6,
 			}
 
 			dbSetup := libovsdbtest.TestSetup{
