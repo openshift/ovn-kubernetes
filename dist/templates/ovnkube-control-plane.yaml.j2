@@ -1,23 +1,23 @@
-# ovnkube-master
+# ovnkube-control-plane
 # daemonset version 3
-# starts master daemons (ovnkube-master and ovn-northd), each in a separate container
-# it is run on the master(s)
+# starts ovnkube-cluster-manager
+# it is run on the master(s).  Should be used only if interconnect is enabled.
 kind: Deployment
 apiVersion: apps/v1
 metadata:
-  name: ovnkube-master
+  name: ovnkube-control-plane
   # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This Deployment launches the ovn-kubernetes master networking components.
+      This Deployment launches the ovn-kubernetes cluster manager networking component.
 spec:
   progressDeadlineSeconds: 600
   replicas: {{ ovn_master_count | default(1|int) }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      name: ovnkube-master
+      name: ovnkube-control-plane
   strategy:
     rollingUpdate:
       maxSurge: 0
@@ -26,7 +26,7 @@ spec:
   template:
     metadata:
       labels:
-        name: ovnkube-master
+        name: ovnkube-control-plane
         component: network
         type: infra
         kubernetes.io/os: "linux"
@@ -34,12 +34,12 @@ spec:
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
-      serviceAccountName: ovnkube-master
+      serviceAccountName: ovnkube-cluster-manager
       hostNetwork: true
       dnsPolicy: Default
 
       # required to be scheduled on a linux node with node-role.kubernetes.io/control-plane label and
-      # only one instance of ovnkube-master pod per node
+      # only one instance of ovnkube-control-plane pod per node
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -53,80 +53,12 @@ spec:
                     operator: In
                     values:
                       - "linux"
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: name
-                    operator: In
-                    values:
-                      - ovnkube-master
-              topologyKey: kubernetes.io/hostname
-
       containers:
-      # ovn-northd - v3
-      - name: ovn-northd
+      - name: ovnkube-cluster-manager
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "run-ovn-northd"]
-
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add: ["SYS_NICE"]
-
-        terminationMessagePolicy: FallbackToLogsOnError
-        volumeMounts:
-        # Run directories where we need to be able to access sockets
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
-        - mountPath: /var/log/openvswitch/
-          name: host-var-log-ovs
-        - mountPath: /var/log/ovn/
-          name: host-var-log-ovs
-        - mountPath: /var/run/openvswitch/
-          name: host-var-run-ovs
-        - mountPath: /var/run/ovn/
-          name: host-var-run-ovs
-        - mountPath: /ovn-cert
-          name: host-ovn-cert
-          readOnly: true
-
-        resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
-        env:
-        - name: OVN_DAEMONSET_VERSION
-          value: "3"
-        - name: OVN_LOGLEVEL_NORTHD
-          value: "{{ ovn_loglevel_northd }}"
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
-        - name: OVN_KUBERNETES_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        - name: OVN_SSL_ENABLE
-          value: "{{ ovn_ssl_en }}"
-        readinessProbe:
-          exec:
-            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
-          initialDelaySeconds: 30
-          timeoutSeconds: 30
-          periodSeconds: 60
-      # end of container
-
-      - name: ovnkube-master
-        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
-        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
-        command: ["/root/ovnkube.sh", "ovn-master"]
+        command: ["/root/ovnkube.sh", "ovn-cluster-manager"]
 
         securityContext:
           runAsUser: 0
@@ -164,8 +96,6 @@ spec:
           value: "{{ ovnkube_logfile_maxage }}"
         - name: OVNKUBE_CONFIG_DURATION_ENABLE
           value: "{{ ovnkube_config_duration_enable }}"
-        - name: OVNKUBE_METRICS_SCALE_ENABLE
-          value: "{{ ovnkube_metrics_scale_enable }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -195,10 +125,12 @@ spec:
               fieldPath: metadata.namespace
         - name: OVN_HYBRID_OVERLAY_ENABLE
           value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+          value: "{{ ovn_admin_network_policy_enable }}"
         - name: OVN_EGRESSIP_ENABLE
           value: "{{ ovn_egress_ip_enable }}"
-        - name: OVN_EGRESSIP_HEALTHCHECK_PORT
-          value: "{{ ovn_egress_ip_healthcheck_port }}"
+        - name: OVN_EGRESSSERVICE_ENABLE
+          value: "{{ ovn_egress_service_enable }}"
         - name: OVN_EGRESSFIREWALL_ENABLE
           value: "{{ ovn_egress_firewall_enable }}"
         - name: OVN_EGRESSQOS_ENABLE
@@ -228,6 +160,10 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_ENABLE_INTERCONNECT
+          value: "{{ ovn_enable_interconnect }}"
+        - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+          value: "{{ ovn_enable_multi_external_gateway }}"
       # end of container
 
       volumes:
