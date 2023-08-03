@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -59,9 +60,29 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 	podIPsOnNode := sets.NewString() // collects all podIPs on node
 	for _, pod := range pods.Items {
 		pod := pod
+		if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
+			continue
+		}
+		if util.PodCompleted(&pod) {
+			collidingPod, err := oc.findPodWithIPAddresses([]net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}) //even if a pod is completed we should still delete the nat if the ip is not in use anymore
+			if err != nil {
+				return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
+			}
+			if collidingPod != nil { //if the ip is in use we should not remove the nat
+				continue
+			}
+		}
 		podIPs, err := util.GetPodIPsOfNetwork(&pod, oc.NetInfo)
-		if err != nil {
-			return fmt.Errorf("unable to fetch podIPs for pod %s/%s", pod.Namespace, pod.Name)
+		if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
+			// It is possible that the pod is scheduled during this time, but the LSP add or
+			// IP Allocation has not happened and it is waiting for the WatchPods to start
+			// after WatchNodes completes (This function is called during syncNodes). So since
+			// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
+			// this pod from processing and move onto the next one.
+			klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			continue // no-op
+		} else if err != nil {
+			return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 		for _, podIP := range podIPs {
 			podIPsOnNode.Insert(podIP.String())
@@ -82,7 +103,7 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 	if len(natsToDelete) > 0 {
 		err := libovsdbops.DeleteNATs(oc.nbClient, &gatewayRouter, natsToDelete...)
 		if err != nil {
-			return fmt.Errorf("unable to delete NATs %+v from node %s", natsToDelete, nodeName)
+			return fmt.Errorf("unable to delete NATs %+v from node %s: %w", natsToDelete, nodeName, err)
 		}
 	}
 	return nil
