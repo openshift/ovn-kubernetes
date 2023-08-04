@@ -306,7 +306,19 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 		return false, fmt.Errorf("failed to parse the primary IP address string from kubernetes node status")
 	}
 	c.Lock()
-	exists := c.addresses.Has(nodePrimaryAddrStr)
+	var exists bool
+	for _, hostAddr := range c.addresses.UnsortedList() {
+		ip, _, err := net.ParseCIDR(hostAddr)
+		if err != nil {
+			klog.Errorf("Node IP: failed to parse node address %q. Unable to detect if node primary address changed: %w",
+				hostAddr, err)
+			continue
+		}
+		if ip.Equal(nodePrimaryAddr) {
+			exists = true
+			break
+		}
+	}
 	c.Unlock()
 
 	if !exists || c.nodePrimaryAddr.Equal(nodePrimaryAddr) {
