@@ -14,7 +14,7 @@ import (
 	egressserviceinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
 	egressservicelisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -518,12 +518,15 @@ func (c *Controller) repair() error {
 	}
 
 	// update caches after transaction completed
+	var allLocalV4Eps []string
 	for key, v4ToAdd := range svcKeyToLocalConfiguredV4Endpoints {
 		c.services[key].v4LocalEndpoints.Insert(v4ToAdd...)
+		allLocalV4Eps = append(allLocalV4Eps, v4ToAdd...)
 	}
-
+	var allLocalV6Eps []string
 	for key, v6ToAdd := range svcKeyToLocalConfiguredV6Endpoints {
 		c.services[key].v6LocalEndpoints.Insert(v6ToAdd...)
+		allLocalV6Eps = append(allLocalV6Eps, v6ToAdd...)
 	}
 
 	for key, v4ToAdd := range svcKeyToRemoteConfiguredV4Endpoints {
@@ -532,6 +535,11 @@ func (c *Controller) repair() error {
 
 	for key, v6ToAdd := range svcKeyToRemoteConfiguredV6Endpoints {
 		c.services[key].v6RemoteEndpoints.Insert(v6ToAdd...)
+	}
+
+	// re-set the global egressservice address set
+	if err := c.setPodIPsInAddressSet(createIPAddressNetSlice(allLocalV4Eps, allLocalV6Eps)); err != nil {
+		errorList = append(errorList, fmt.Errorf("failed to set pod IPs in the egressservice address set, err: %v", err))
 	}
 
 	return errors.NewAggregate(errorList)

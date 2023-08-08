@@ -247,7 +247,15 @@ func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 	}
 
 	mode.identity, _ = identities.PopAny()
-
+	// OCP HACK: when cluster manager runs alone, use pod name as identity to avoid duplicate leaders
+	// while switching from global zone to multizone
+	if mode.clusterManager && !mode.ovnkubeController {
+		podName, hasPodName := os.LookupEnv("POD_NAME")
+		if hasPodName {
+			mode.identity = podName
+		}
+	}
+	// END OCP HACK
 	return mode, nil
 }
 
@@ -319,7 +327,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	case runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
 		haConfig = &config.ClusterMgrHA
-		name = "ovn-kubernetes-cluster-manager"
+		name = "ovn-kubernetes-master"
 	}
 
 	// Set up leader election process. Use lease resource lock as configmap and
