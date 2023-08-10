@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -73,20 +74,6 @@ func (c *addressManager) addAddr(ipnet net.IPNet) bool {
 	if !c.addresses.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
 		klog.Infof("Adding IP: %s, to node IP manager", ipnet)
 		c.addresses.Insert(ipnet.String())
-		return true
-	}
-
-	return false
-}
-
-// removes IP from address manager
-// returns true if there was an update
-func (c *addressManager) delAddr(ipnet net.IPNet) bool {
-	c.Lock()
-	defer c.Unlock()
-	if c.addresses.Has(ipnet.String()) && c.isValidNodeIP(ipnet.IP) {
-		klog.Infof("Removing IP: %s, from node IP manager", ipnet)
-		c.addresses.Delete(ipnet.String())
 		return true
 	}
 
@@ -163,7 +150,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 
 		for {
 			select {
-			case a, ok := <-addrChan:
+			case _, ok := <-addrChan:
 				addressSyncTimer.Reset(30 * time.Second)
 				if !ok {
 					if subscribed, addrChan, err = subscribe(); err != nil {
@@ -171,22 +158,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 					}
 					continue
 				}
-				addrChanged := false
-				if a.NewAddr {
-					addrChanged = c.addAddr(a.LinkAddress)
-				} else {
-					addrChanged = c.delAddr(a.LinkAddress)
-				}
-
-				c.handleNodePrimaryAddrChange()
-				if addrChanged || !c.doesNodeHostAddressesMatch() {
-					klog.Infof("Host addresses changed to %v. Updating node address annotation.", c.addresses)
-					err := c.updateNodeAddressAnnotations()
-					if err != nil {
-						klog.Errorf("Address Manager failed to update node address annotations: %v", err)
-					}
-					c.OnChanged()
-				}
+				c.sync()
 			case <-addressSyncTimer.C:
 				if subscribed {
 					klog.V(5).Info("Node IP manager calling sync() explicitly")
@@ -418,29 +390,31 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 }
 
 func (c *addressManager) sync() {
-	var err error
-	var addrs []net.Addr
+	var addrs []netlink.Addr
 
 	if c.useNetlink {
-		addrs, err = net.InterfaceAddrs()
+		links, err := netlink.LinkList()
 		if err != nil {
-			klog.Errorf("Failed to sync Node IP Manager: unable list all IPs on the node, error: %v", err)
+			klog.Errorf("Failed sync due to being unable to list links: %v", err)
 			return
+		}
+		for _, link := range links {
+			foundAddrs, err := linkmanager.GetExternallyAvailableAddressesExcludeAssigned(link, config.IPv4Mode, config.IPv6Mode)
+			if err != nil {
+				klog.Errorf("Unable to retrieve addresses for link %s: %v", link.Attrs().Name, err)
+				return
+			}
+			addrs = append(addrs, foundAddrs...)
 		}
 	}
 
 	currAddresses := sets.New[string]()
 	for _, addr := range addrs {
-		ip, ipnet, err := net.ParseCIDR(addr.String())
-		if err != nil {
-			klog.Errorf("Invalid IP address found on host: %s", addr.String())
+		if !c.isValidNodeIP(addr.IP) {
+			klog.V(5).Infof("Skipping non-useable IP address for host: %s", addr.String())
 			continue
 		}
-		if !c.isValidNodeIP(ip) {
-			klog.V(5).Infof("Skipping non-useable IP address for host: %s", ip.String())
-			continue
-		}
-		netAddr := &net.IPNet{IP: ip, Mask: ipnet.Mask}
+		netAddr := net.IPNet{IP: addr.IP, Mask: addr.Mask}
 		currAddresses.Insert(netAddr.String())
 	}
 
