@@ -15,7 +15,7 @@ RUN dnf install -y --nodocs \
 ARG ovsver=3.1.0-32.el9fdp
 ARG ovnver=23.09.0-beta.31.el9fdp
 
-COPY ovn23.09-23.09.0-ip_tmp.130.el9fdp.x86_64.rpm ovn23.09-central-23.09.0-ip_tmp.130.el9fdp.x86_64.rpm ovn23.09-host-23.09.0-ip_tmp.130.el9fdp.x86_64.rpm ovn23.09-vtep-23.09.0-ip_tmp.130.el9fdp.x86_64.rpm /root/
+COPY ovn23.09-23.09.0-ip_with_loop_delay.127.el9fdp.x86_64.rpm ovn23.09-central-23.09.0-ip_with_loop_delay.127.el9fdp.x86_64.rpm ovn23.09-host-23.09.0-ip_with_loop_delay.127.el9fdp.x86_64.rpm ovn23.09-vtep-23.09.0-ip_with_loop_delay.127.el9fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS="iptables" && \
 	ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
