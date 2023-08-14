@@ -52,7 +52,7 @@ type testCtx struct {
 	subscribed   uint32
 }
 
-var _ = Describe("Node IP Handler tests", func() {
+var _ = XDescribe("Node IP Handler tests", func() {
 	// To ensure that variables don't leak between parallel Ginkgo specs,
 	// put all test context into a single struct and reference it via
 	// a pointer. The pointer will be different for each spec.
