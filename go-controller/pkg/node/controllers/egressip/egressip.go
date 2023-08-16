@@ -776,28 +776,27 @@ func (c *Controller) RepairNode() error {
 		assignedIPRules.Insert(ruleStr)
 		assignedIPRulesStrToRules[ruleStr] = existingRule
 	}
-	if c.v4 {
-		ipTableV4Rules, err := c.iptablesManager.GetIPv4ChainRuleArgs(utiliptables.TableNAT, chainName)
-		if err != nil {
-			return fmt.Errorf("failed to list IPTable IPv4 rules: %v", err)
-		}
-		for _, rule := range ipTableV4Rules {
-			ruleStr := strings.Join(rule.Args, " ")
-			assignedIPTableV4Rules.Insert(ruleStr)
-			assignedIPTablesV4StrToRules[ruleStr] = rule
-		}
+	// gather IPv4 and IPv6 IPTable rules and ignore what IP family we currently support because we may have converted from
+	// dual to single or vice versa
+	ipTableV4Rules, err := c.iptablesManager.GetIPv4ChainRuleArgs(utiliptables.TableNAT, chainName)
+	if err != nil {
+		return fmt.Errorf("failed to list IPTable IPv4 rules: %v", err)
 	}
-	if c.v6 {
-		ipTableV6Rules, err := c.iptablesManager.GetIPv6ChainRuleArgs(utiliptables.TableNAT, chainName)
-		if err != nil {
-			return fmt.Errorf("failed to list IPTable IPv4 rules: %v", err)
-		}
-		for _, rule := range ipTableV6Rules {
-			ruleStr := strings.Join(rule.Args, " ")
-			assignedIPTableV6Rules.Insert(ruleStr)
-			assignedIPTablesV6StrToRules[ruleStr] = rule
-		}
+	for _, rule := range ipTableV4Rules {
+		ruleStr := strings.Join(rule.Args, " ")
+		assignedIPTableV4Rules.Insert(ruleStr)
+		assignedIPTablesV4StrToRules[ruleStr] = rule
 	}
+	ipTableV6Rules, err := c.iptablesManager.GetIPv6ChainRuleArgs(utiliptables.TableNAT, chainName)
+	if err != nil {
+		return fmt.Errorf("failed to list IPTable IPv4 rules: %v", err)
+	}
+	for _, rule := range ipTableV6Rules {
+		ruleStr := strings.Join(rule.Args, " ")
+		assignedIPTableV6Rules.Insert(ruleStr)
+		assignedIPTablesV6StrToRules[ruleStr] = rule
+	}
+
 	expectedAddrs := sets.New[string]()
 	expectedIPRoutes := sets.New[string]()
 	expectedIPRules := sets.New[string]()
