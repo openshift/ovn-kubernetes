@@ -838,8 +838,7 @@ func (c *Controller) RepairNode() error {
 					eIPNet.IP.String(), err)
 			}
 			if !found {
-				return fmt.Errorf("expected to find network interface to assign EgressIP %s IP %s", egressIP.Name,
-					status.EgressIP)
+				continue
 			}
 			linkIdx := link.Attrs().Index
 			linkName := link.Attrs().Name
