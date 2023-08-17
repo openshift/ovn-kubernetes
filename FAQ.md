@@ -1,4 +1,4 @@
-# OVN Kubernetes CNI FAQ
+# OVN Kubernetes CNI FAQ 
 
 ## 1. How do I configure a non-default location for CNI configuration and bin directory?
 
