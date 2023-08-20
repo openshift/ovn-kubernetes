@@ -1525,7 +1525,10 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *networkPolicy, gp *gressPo
 	if util.PodCompleted(pod) {
 		ips, err := util.GetAllPodIPs(pod)
 		if err != nil {
-			return fmt.Errorf("can't get pod IPs %s/%s: %w", pod.Namespace, pod.Name, err)
+			// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
+			// therefore just log the error and return.
+			klog.Warningf("Could not find pod %s/%s IPs to delete from pod selector address set: %v", pod.Namespace, pod.Name, err)
+			return nil
 		}
 
 		collidingPod, err := oc.findPodWithIPAddresses(ips)
