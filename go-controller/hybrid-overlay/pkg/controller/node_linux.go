@@ -175,7 +175,8 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
-		klog.V(5).Infof("Cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
+		klog.Infof("XXX Cleaning up hybrid overlay resources for node %q. cidr: %v  nodeIP: %v  drMAC: %v because: %v",
+			node.Name, cidr, nodeIP, drMAC, err)
 		return n.DeleteNode(node)
 	}
 
@@ -262,10 +263,19 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		// Retry hybrid overlay initialization if the master was
 		// slow to add the hybrid overlay logical network elements
 		err = n.EnsureHybridOverlayBridge(node)
+		if err != nil {
+			klog.Infof("XXX failed to EnsureHybridOverlayBridge Node %s: %v", node.Name, err)
+			return err
+		}
 	} else {
 		klog.Infof("Add hybridOverlay Node %s", node.Name)
 		err = n.hybridOverlayNodeUpdate(node)
 	}
+	if err != nil {
+		klog.Infof("XXX failed to hybridOverlayNodeUpdate Node %s: %v", node.Name, err)
+		return err
+	}
+
 	if atomic.LoadUint32(n.initState) == hotypes.DistributedRouterInitialized {
 		pods, err := n.localPodLister.List(labels.Everything())
 		if err != nil {
