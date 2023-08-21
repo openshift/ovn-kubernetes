@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -334,6 +335,8 @@ func (oc *DefaultNetworkController) updateEgressFirewallStatusWithRetry(egressfi
 
 func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4,
 	hashedAddressSetNameIPv6 string, efStartPriority int, aclLogging *ACLLoggingLevels, ruleIDs ...int) error {
+	var ops []libovsdb.Operation
+	var err error
 	for _, rule := range ef.egressRules {
 		// check if only specific rule ids are requested to be added
 		if len(ruleIDs) > 0 {
@@ -394,17 +397,21 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 		}
 
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
-		err := oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace, aclLogging)
+		ops, err = oc.createEgressFirewallACLOps(ops, efStartPriority-rule.id, match, action, ef.namespace, aclLogging)
 		if err != nil {
 			return err
 		}
 	}
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to transact egressFirewall ACL: %v", err)
+	}
 	return nil
 }
 
-// createEgressFirewallRules uses the previously generated elements and creates the
+// createEgressFirewallACLOps uses the previously generated elements and creates the
 // acls for all node switches
-func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, match, action, externalID string, aclLogging *ACLLoggingLevels) error {
+func (oc *DefaultNetworkController) createEgressFirewallACLOps(ops []libovsdb.Operation, priority int, match, action, externalID string, aclLogging *ACLLoggingLevels) ([]libovsdb.Operation, error) {
 	// a name is needed for logging purposes - the name must be unique, so make it
 	// egressFirewall_<namespace name>_<priority>
 	aclName := buildEgressFwAclName(externalID, priority)
@@ -422,24 +429,21 @@ func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, matc
 			egressFirewallACLPriorityKey: fmt.Sprintf("%d", priority),
 		},
 	)
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressFirewallACL)
+	var err error
+	ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, egressFirewallACL)
 	if err != nil {
-		return fmt.Errorf("failed to create egressFirewall ACL %v: %v", egressFirewallACL, err)
+		return ops, fmt.Errorf("failed to create egressFirewall ACL %v: %v", egressFirewallACL, err)
 	}
 
 	// Applying ACLs on types.ClusterPortGroupName is equivalent to applying on every node switch, since
 	// types.ClusterPortGroupName contains management port from every switch.
 	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterPortGroupName, egressFirewallACL)
 	if err != nil {
-		return fmt.Errorf("failed to add egressFirewall ACL %v to port group %s: %v",
+		return ops, fmt.Errorf("failed to add egressFirewall ACL %v to port group %s: %v",
 			egressFirewallACL, types.ClusterPortGroupName, err)
 	}
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed to transact egressFirewall ACL: %v", err)
-	}
 
-	return nil
+	return ops, nil
 }
 
 func (oc *DefaultNetworkController) deleteEgressFirewallRule(name string) error {
