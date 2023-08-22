@@ -1035,6 +1035,12 @@ ovn-master() {
       disable_forwarding_flag="--disable-forwarding"
   fi
 
+  ovn_encap_port_flag=
+  if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
+
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
       disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
@@ -1187,6 +1193,7 @@ ovn-master() {
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
     ${disable_forwarding_flag} \
+    ${ovn_encap_port_flag} \
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
@@ -1254,6 +1261,12 @@ ovnkube-controller() {
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
   echo "disable_snat_multiple_gws_flag=${disable_snat_multiple_gws_flag}"
+
+  ovn_encap_port_flag=
+  if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
 
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
@@ -1418,6 +1431,7 @@ ovnkube-controller() {
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
+    ${ovn_encap_port_flag} \
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
@@ -1455,6 +1469,12 @@ ovnkube-controller() {
 ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
+
+  ovn_encap_port_flag=
+    if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
 
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
@@ -1556,6 +1576,7 @@ ovn-cluster-manager() {
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
+    ${ovn_encap_port_flag} \
     ${empty_lb_events_flag} \
     ${hybrid_overlay_flags} \
     ${ovn_v4_join_subnet_opt} \
@@ -1662,6 +1683,12 @@ ovn-node() {
   if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
+
+  ovn_encap_port_flag=
+  if [[ -n "${ovn_encap_port}" ]]; then
+      ovn_encap_port_flag="--encap-port=${ovn_encap_port}"
+  fi
+  echo "ovn_encap_port_flag=${ovn_encap_port_flag}"
 
   disable_forwarding_flag=
   if [[ ${ovn_disable_forwarding} == "true" ]]; then
@@ -1867,6 +1894,7 @@ ovn-node() {
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
     ${disable_forwarding_flag} \
+    ${ovn_encap_port_flag} \
     ${disable_pkt_mtu_check_flag} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \
