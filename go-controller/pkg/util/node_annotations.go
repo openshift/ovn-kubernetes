@@ -730,6 +730,24 @@ func ParseNodeHostAddressesDropNetMask(node *kapi.Node) (sets.Set[string], error
 	return sets.New(cfg...), nil
 }
 
+func ParseNodeHostAddressesExcludeOVNManagedNetworks(node *kapi.Node) ([]string, error) {
+	networks, err := ParseNodeHostAddressesList(node)
+	if err != nil {
+		return nil, err
+	}
+	ovnManagedNetworks, err := getNodeIfAddrAnnotation(node)
+	if err != nil {
+		return nil, err
+	}
+	if ovnManagedNetworks.IPv4 != "" {
+		networks = remove(networks, ovnManagedNetworks.IPv4)
+	}
+	if ovnManagedNetworks.IPv6 != "" {
+		networks = remove(networks, ovnManagedNetworks.IPv6)
+	}
+	return networks, nil
+}
+
 func ParseNodeHostAddressesList(node *kapi.Node) ([]string, error) {
 	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
 	if !ok {
@@ -837,19 +855,19 @@ func IsOVNManagedNetwork(node *v1.Node, ip net.IP) (bool, error) {
 
 // GetNonOVNNetworkContainingIP attempts to find a non OVN managed network to host the argument IP
 func GetNonOVNNetworkContainingIP(node *v1.Node, ip net.IP) (string, error) {
-	networks, err := ParseNodeHostAddressesList(node)
+	networks, err := ParseNodeHostAddressesExcludeOVNManagedNetworks(node)
 	if err != nil {
-		return "", fmt.Errorf("failed to get host-addresses annotation for node %s: %v", node.Name, err)
+		return "", fmt.Errorf("failed to get host-addresses annotation excluding OVN managed networks for node %s: %v",
+			node.Name, err)
 	}
 	cidrs, err := makeCIDRs(networks...)
 	if err != nil {
-		return "", fmt.Errorf("failed to determine non-OVN managed network for node %s that may host IP %s: %w",
-			node.Name, ip.String(), err)
+		return "", err
 	}
 	lpmTree := cidrtree.New(cidrs...)
 	addr, err := netip.ParseAddr(ip.String())
 	if err != nil {
-		return "", fmt.Errorf("failed to parse egress IP %s: %v", ip.String(), err)
+		return "", fmt.Errorf("failed to parse IP %s: %v", ip.String(), err)
 	}
 	match, found := lpmTree.Lookup(addr)
 	if !found {
@@ -1061,4 +1079,22 @@ func makeCIDRs(s ...string) (cidrs []netip.Prefix, err error) {
 		cidrs = append(cidrs, prefix)
 	}
 	return cidrs, nil
+}
+
+func remove(strs []string, candidate string) []string {
+	idxsToRemove := make([]int, 0)
+	for i, str := range strs {
+		if str == candidate {
+			idxsToRemove = append(idxsToRemove, i)
+		}
+	}
+	for _, idxToRemove := range idxsToRemove {
+		strs = removeIndex(strs, idxToRemove)
+	}
+	return strs
+}
+
+func removeIndex(strs []string, i int) []string {
+	strs[i] = strs[len(strs)-1]
+	return strs[:len(strs)-1]
 }
