@@ -15,7 +15,6 @@ import (
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -1392,21 +1391,24 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				config.Gateway.Mode = gwMode
 				app.Action = func(ctx *cli.Context) error {
 					namespace1 := *newNamespace("namespace1")
+					dnsName := "a.b.c"
+					resolvedIP := "2.2.2.2"
 					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
 						{
 							Type: "Deny",
 							To: egressfirewallapi.EgressFirewallDestination{
-								CIDRSelector: "1.2.3.4/23",
-							},
-						},
-						{
-							Type: "Deny",
-							To: egressfirewallapi.EgressFirewallDestination{
-								DNSName: "a.b.c",
+								DNSName: dnsName,
 							},
 						},
 					})
-					fakeOVN.startWithDBSetup(dbSetup,
+					initialData = []libovsdbtest.TestData{
+						nodeSwitch,
+						joinSwitch,
+						// delete clusterPortGroup to fail db transaction
+						//clusterPortGroup,
+						clusterRouter,
+					}
+					fakeOVN.startWithDBSetup(libovsdbtest.TestSetup{NBData: initialData},
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespace1,
@@ -1417,15 +1419,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					err = fakeOVN.controller.WatchEgressFirewall()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					// dns-based rule creation will fail, because addressset factory is nil
-					fakeOVN.controller.egressFirewallDNS = &EgressDNS{
-						dnsEntries:        make(map[string]*dnsEntry),
-						addressSetFactory: nil,
-
-						added:    make(chan struct{}),
-						deleted:  make(chan string, 1),
-						stopChan: make(chan struct{}),
-					}
+					setDNSOpsMock(dnsName, resolvedIP)
+					fakeOVN.controller.egressFirewallDNS, err = NewEgressDNS(fakeOVN.controller.addressSetFactory,
+						fakeOVN.controller.controllerName, fakeOVN.controller.stopChan)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
 						Create(context.TODO(), egressFirewall, metav1.CreateOptions{})
@@ -1436,30 +1433,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					retry.CheckRetryObjectEventually(efKey, true, fakeOVN.controller.retryEgressFirewalls)
 
-					// check first acl was successfully created
-					asHash, _ := getNsAddrSetHashNames(namespace1.Name)
-					acl := libovsdbops.BuildACL(
-						buildEgressFwAclName(namespace1.Name, t.EgressFirewallStartPriority),
-						nbdb.ACLDirectionToLport,
-						t.EgressFirewallStartPriority,
-						"(ip4.dst == 1.2.3.4/23) && ip4.src == $"+asHash,
-						nbdb.ACLActionDrop,
-						t.OvnACLLoggingMeter,
-						"",
-						false,
-						map[string]string{
-							egressFirewallACLExtIdKey:    namespace1.Name,
-							egressFirewallACLPriorityKey: fmt.Sprintf("%d", t.EgressFirewallStartPriority),
-						},
-						nil,
-					)
+					// check dns address set was created, db didn't change
+					addrSetIDs := getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName)
+					fakeOVN.asf.EventuallyExpectAddressSetWithIPs(addrSetIDs, []string{resolvedIP})
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(initialData))
 
-					acl.UUID = "acl-UUID"
-					clusterPortGroup.ACLs = []string{acl.UUID}
-					expectedDatabaseState := append(initialData, acl)
-					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-
-					// delete wrong object
+					// delete failed object
 					err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).
 						Delete(context.TODO(), egressFirewall.Name, metav1.DeleteOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1468,11 +1447,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						return retry.CheckRetryObj(efKey, fakeOVN.controller.retryEgressFirewalls)
 					}, time.Second).Should(gomega.BeFalse())
 
-					// check created acl will be cleaned up on delete
-					// acl will be dereferenced, but not deleted by the test server
-					clusterPortGroup.ACLs = []string{}
-					expectedDatabaseState = append(initialData, acl)
-					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+					// check dns address set is cleaned up on delete
+					fakeOVN.asf.EventuallyExpectNoAddressSet(addrSetIDs)
+					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(initialData))
 					return nil
 				}
 				err := app.Run([]string{app.Name})
@@ -1917,17 +1894,3 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		}
 	})
 })
-
-//helper functions to help test egressfirewallDNS
-
-// Create an EgressDNS object without the Sync function
-// To make it easier to mock EgressFirewall functionality create an egressFirewall
-// without the go routine of the sync function
-
-// GetDNSEntryForTest Gets a dnsEntry from a EgressDNS object for testing
-func (e *EgressDNS) GetDNSEntryForTest(dnsName string) (map[string]struct{}, []net.IP, addressset.AddressSet, error) {
-	if e.dnsEntries[dnsName] == nil {
-		return nil, nil, nil, fmt.Errorf("there is no dnsEntry for dnsName: %s", dnsName)
-	}
-	return e.dnsEntries[dnsName].namespaces, e.dnsEntries[dnsName].dnsResolves, e.dnsEntries[dnsName].dnsAddressSet, nil
-}
