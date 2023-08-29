@@ -44,8 +44,10 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 	options = append(options, opts...)
 
 	for _, endpoint := range strings.Split(cfg.GetURL(), ",") {
+		klog.Infof("Libovsdb client: %s endpoint: %s", dbModel.Name(), endpoint)
 		options = append(options, client.WithEndpoint(endpoint))
 	}
+
 	var updateFn func(client.Client, <-chan struct{})
 	if cfg.Scheme == config.OvnDBSchemeSSL {
 		tlsConfig, err := createTLSConfig(cfg.Cert, cfg.PrivKey, cfg.CACert, cfg.CertCommonName)

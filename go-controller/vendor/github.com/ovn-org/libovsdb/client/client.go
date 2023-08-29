@@ -21,6 +21,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	"github.com/ovn-org/libovsdb/cache"
+	syscall "github.com/ovn-org/libovsdb/internal"
 	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -351,7 +352,10 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, erro
 		return "", fmt.Errorf("failed to open connection: %w", err)
 	}
 
-	o.createRPC2Client(c)
+	err = o.createRPC2Client(c)
+	if err != nil {
+		return "", err
+	}
 
 	serverDBNames, err := o.listDbs(ctx)
 	if err != nil {
@@ -422,10 +426,19 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, erro
 // createRPC2Client creates an rpcClient using the provided connection
 // It is also responsible for setting up go routines for client-side event handling
 // Should only be called when the mutex is held
-func (o *ovsdbClient) createRPC2Client(conn net.Conn) {
+func (o *ovsdbClient) createRPC2Client(conn net.Conn) error {
 	o.stopCh = make(chan struct{})
 	if o.options.inactivityTimeout > 0 {
 		o.trafficSeen = make(chan struct{})
+	}
+	// set TCP_USER_TIMEOUT socket option for connection so that
+	// channel write doesn't block indefinitely on network disconnect.
+	if o.options.inactivityTimeout > 0 {
+		o.logger.V(3).Info("set tcp user timeout", "value", o.options.inactivityTimeout)
+		err := syscall.SetTCPUserTimeout(o.logger, conn, o.options.inactivityTimeout)
+		if err != nil {
+			return err
+		}
 	}
 	o.rpcClient = rpc2.NewClientWithCodec(jsonrpc.NewJSONCodec(conn))
 	o.rpcClient.SetBlocking(true)
@@ -442,6 +455,7 @@ func (o *ovsdbClient) createRPC2Client(conn net.Conn) {
 		return o.update3(args, reply)
 	})
 	go o.rpcClient.Run()
+	return nil
 }
 
 // isEndpointLeader returns true if the currently connected endpoint is leader,
@@ -773,14 +787,23 @@ func (o *ovsdbClient) listDbs(ctx context.Context) ([]string, error) {
 	return dbs, err
 }
 
+// logFromContext returns a Logger from ctx or return the default logger
+func (o *ovsdbClient) logFromContext(ctx context.Context) *logr.Logger {
+	if logger, err := logr.FromContext(ctx); err == nil {
+		return &logger
+	}
+	return o.logger
+}
+
 // Transact performs the provided Operations on the database
 // RFC 7047 : transact
 func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	logger := o.logFromContext(ctx)
 	o.rpcMutex.RLock()
 	if o.rpcClient == nil || !o.connected {
 		o.rpcMutex.RUnlock()
 		if o.options.reconnect {
-			o.logger.V(5).Info("blocking transaction until reconnected", "operations",
+			logger.V(5).Info("blocking transaction until reconnected", "operations",
 				fmt.Sprintf("%+v", operation))
 			ticker := time.NewTicker(50 * time.Millisecond)
 			defer ticker.Stop()
@@ -806,6 +829,7 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 }
 
 func (o *ovsdbClient) transact(ctx context.Context, dbName string, skipChWrite bool, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	logger := o.logFromContext(ctx)
 	var reply []ovsdb.OperationResult
 	db := o.databases[dbName]
 	db.modelMutex.RLock()
@@ -822,7 +846,7 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, skipChWrite b
 	if o.rpcClient == nil {
 		return nil, ErrNotConnected
 	}
-	dbgLogger := o.logger.WithValues("database", dbName).V(4)
+	dbgLogger := logger.WithValues("database", dbName).V(4)
 	if dbgLogger.Enabled() {
 		dbgLogger.Info("transacting operations", "operations", fmt.Sprintf("%+v", operation))
 	}
@@ -1187,72 +1211,36 @@ func (o *ovsdbClient) handleClientErrors(stopCh <-chan struct{}) {
 	}
 }
 
-func (o *ovsdbClient) sendEcho(args []interface{}, reply *[]interface{}) *rpc2.Call {
-	o.rpcMutex.RLock()
-	defer o.rpcMutex.RUnlock()
-	if o.rpcClient == nil {
-		return nil
-	}
-	return o.rpcClient.Go("echo", args, reply, make(chan *rpc2.Call, 1))
-}
-
 func (o *ovsdbClient) handleInactivityProbes() {
 	defer o.handlerShutdown.Done()
-	echoReplied := make(chan string)
-	var lastEcho string
 	stopCh := o.stopCh
 	trafficSeen := o.trafficSeen
+	timer := time.NewTimer(o.options.inactivityTimeout)
 	for {
 		select {
 		case <-stopCh:
+			o.logger.V(3).Info("got stop signal")
 			return
 		case <-trafficSeen:
+			o.logger.V(3).Info("traffic is seen, reset inactivity timer")
 			// We got some traffic from the server, restart our timer
-		case ts := <-echoReplied:
-			// Got a response from the server, check it against lastEcho; if same clear lastEcho; if not same Disconnect()
-			if ts != lastEcho {
-				o.Disconnect()
-				return
+			if !timer.Stop() {
+				<-timer.C
 			}
-			lastEcho = ""
-		case <-time.After(o.options.inactivityTimeout):
-			// If there's a lastEcho already, then we didn't get a server reply, disconnect
-			if lastEcho != "" {
-				o.Disconnect()
-				return
-			}
-			// Otherwise send an echo
-			thisEcho := fmt.Sprintf("%d", time.Now().UnixMicro())
-			args := []interface{}{"libovsdb echo", thisEcho}
-			var reply []interface{}
-			// Can't use o.Echo() because it blocks; we need the Call object direct from o.rpcClient.Go()
-			call := o.sendEcho(args, &reply)
-			if call == nil {
-				o.Disconnect()
-				return
-			}
-			lastEcho = thisEcho
+		case <-timer.C:
+			// Otherwise send an echo in a goroutine so that transactions don't block
 			go func() {
-				// Wait for the echo reply
-				select {
-				case <-stopCh:
-					return
-				case <-call.Done:
-					if call.Error != nil {
-						// RPC timeout; disconnect
-						o.logger.V(3).Error(call.Error, "server echo reply error")
-						o.Disconnect()
-					} else if !reflect.DeepEqual(args, reply) {
-						o.logger.V(3).Info("warning: incorrect server echo reply",
-							"expected", args, "reply", reply)
-						o.Disconnect()
-					} else {
-						// Otherwise stuff thisEcho into the echoReplied channel
-						echoReplied <- thisEcho
-					}
+				o.logger.V(3).Info("sending echo upon inactivity timeout")
+				ctx, cancel := context.WithTimeout(context.Background(), o.options.timeout)
+				err := o.Echo(ctx)
+				if err != nil {
+					o.logger.V(3).Error(err, "server echo reply error")
+					o.Disconnect()
 				}
+				cancel()
 			}()
 		}
+		timer.Reset(o.options.inactivityTimeout)
 	}
 }
 
@@ -1355,6 +1343,7 @@ func (o *ovsdbClient) _disconnect() {
 func (o *ovsdbClient) Disconnect() {
 	o.rpcMutex.Lock()
 	defer o.rpcMutex.Unlock()
+	o.logger.V(3).Info("disconnecting client")
 	o._disconnect()
 }
 

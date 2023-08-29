@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"strings"
@@ -48,7 +47,7 @@ func (schema DatabaseSchema) Print(w io.Writer) {
 
 // SchemaFromFile returns a DatabaseSchema from a file
 func SchemaFromFile(f *os.File) (DatabaseSchema, error) {
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return DatabaseSchema{}, err
 	}
@@ -124,7 +123,7 @@ of this library, we define an ExtendedType that includes all possible column typ
 atomic fields).
 */
 
-//ExtendedType includes atomic types as defined in the RFC plus Enum, Map and Set
+// ExtendedType includes atomic types as defined in the RFC plus Enum, Map and Set
 type ExtendedType = string
 
 // RefType is used to define the possible RefTypes
