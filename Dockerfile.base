@@ -15,9 +15,12 @@ RUN yum install -y  \
 ARG ovsver=2.17.0-62.el8fdp
 ARG ovnver=22.12.0-18.el8fdp
 
+COPY ovn22.12-22.12.1-ecmp_sym_reply_hack.6.el8fdp.x86_64.rpm ovn22.12-central-22.12.1-ecmp_sym_reply_hack.6.el8fdp.x86_64.rpm ovn22.12-host-22.12.1-ecmp_sym_reply_hack.6.el8fdp.x86_64.rpm ovn22.12-vtep-22.12.1-ecmp_sym_reply_hack.6.el8fdp.x86_64.rpm /root/
+
 RUN \
     yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "python3-openvswitch2.17 = $ovsver" && \
     yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.12 = $ovnver" "ovn22.12-central = $ovnver" "ovn22.12-host = $ovnver" && \
+    rpm -Uvh --force --nodeps /root/*.rpm && \
     yum clean all && rm -rf /var/cache/*
 
 RUN sed 's/%/"/g' <<<"%openvswitch2.17-devel = $ovsver% %openvswitch2.17-ipsec = $ovsver% %ovn22.12-vtep = $ovnver%" > /more-pkgs
