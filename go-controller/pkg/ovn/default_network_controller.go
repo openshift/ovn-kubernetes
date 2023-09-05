@@ -563,12 +563,18 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		return err
 	}
 
+	klog.Infof("######## setting backoff interval")
 	nbGlobal := nbdb.NBGlobal{
 		Options: map[string]string{"northd-backoff-interval-ms": fmt.Sprintf("%d", 200)},
 	}
 	if err := libovsdbops.UpdateNBGlobalSetOptions(oc.nbClient, &nbGlobal); err != nil {
 		return fmt.Errorf("unable to update NB global options northd-backoff-interval-ms: %v", err)
 	}
+	klog.Infof("######## set backoff interval")
+
+	var blah nbdb.NBGlobal
+	newNbGlobal, _ := libovsdbops.GetNBGlobal(oc.nbClient, &blah)
+	klog.Info("##### Got NBGlobal %+v", newNbGlobal)
 
 	return nil
 }
