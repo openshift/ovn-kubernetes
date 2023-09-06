@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/pkg/errors"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,7 +107,7 @@ func (oc *Controller) cleanTopologyAnnotation() error {
 func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	logicalRouter := &nbdb.LogicalRouter{Name: ovntypes.OVNClusterRouter}
 	logicalRouter, err := libovsdbops.GetLogicalRouter(oc.nbClient, logicalRouter)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return 0, fmt.Errorf("error getting router %s: %v", ovntypes.OVNClusterRouter, err)
 	}
 	if err == libovsdbclient.ErrNotFound {
