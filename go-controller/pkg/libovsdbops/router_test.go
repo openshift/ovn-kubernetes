@@ -147,7 +147,8 @@ func TestDeleteNATsFromRouter(t *testing.T) {
 	}{
 		{
 			desc:         "no router",
-			expectErr:    true,
+			routerName:   "doesNotExistRouter",
+			expectErr:    false,
 			nats:         []*nbdb.NAT{fakeNAT1.DeepCopy(), fakeNAT2.DeepCopy(), fakeNAT3.DeepCopy(), fakeNAT4.DeepCopy()},
 			expectedNbdb: initialNbdb,
 		},
@@ -206,6 +207,8 @@ func TestDeleteNATsFromRouter(t *testing.T) {
 			err = DeleteNATs(nbClient, &logicalRouter, tt.nats...)
 			if err != nil && !tt.expectErr {
 				t.Fatal(fmt.Errorf("DeleteNATsFromRouter() error = %v", err))
+			} else if err == nil && tt.expectErr {
+				t.Fatal(fmt.Errorf("DeleteNATsFromRouter() no error, but an error was expected"))
 			}
 
 			matcher := libovsdbtest.HaveData(tt.expectedNbdb.NBData)

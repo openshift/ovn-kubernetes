@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -1390,7 +1391,7 @@ func getGlobalOptionsValue(client libovsdbclient.Client, field string) float64 {
 	sbGlobal := sbdb.SBGlobal{}
 
 	if dbName == "OVN_Northbound" {
-		if nbGlobal, err := libovsdbops.GetNBGlobal(client, &nbGlobal); err != nil && err != libovsdbclient.ErrNotFound {
+		if nbGlobal, err := libovsdbops.GetNBGlobal(client, &nbGlobal); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 			klog.Errorf("Failed to get NB_Global table err: %v", err)
 			return 0
 		} else {
@@ -1399,7 +1400,7 @@ func getGlobalOptionsValue(client libovsdbclient.Client, field string) float64 {
 	}
 
 	if dbName == "OVN_Southbound" {
-		if sbGlobal, err := libovsdbops.GetSBGlobal(client, &sbGlobal); err != nil && err != libovsdbclient.ErrNotFound {
+		if sbGlobal, err := libovsdbops.GetSBGlobal(client, &sbGlobal); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 			klog.Errorf("Failed to get SB_Global table err: %v", err)
 			return 0
 		} else {
