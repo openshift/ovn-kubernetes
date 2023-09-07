@@ -30,6 +30,8 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+COPY ovn22.12-22.12.1-ecmp_ct_commit.8.el8fdp.x86_64.rpm ovn22.12-host-22.12.1-ecmp_ct_commit.8.el8fdp.x86_64.rpm ovn22.12-central-22.12.1-ecmp_ct_commit.8.el8fdp.x86_64.rpm ovn22.12-vtep-22.12.1-ecmp_ct_commit.8.el8fdp.x86_64.rpm /root/
+
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
 	selinux-policy && \
@@ -50,7 +52,8 @@ RUN INSTALL_PKGS=" \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	eval "yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $(cat /more-pkgs)" && \
-	yum clean all && rm -rf /var/cache/*
+	rpm -Uhv --nodeps --force /root/*.rpm && \
+        yum clean all && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
