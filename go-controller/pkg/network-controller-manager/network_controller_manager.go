@@ -227,7 +227,7 @@ func (cm *NetworkControllerManager) configureSvcTemplateSupport() {
 			"Disabling Templates Support")
 		cm.svcTemplateSupport = false
 	} else {
-		cm.svcTemplateSupport = true
+		cm.svcTemplateSupport = false
 	}
 }
 
