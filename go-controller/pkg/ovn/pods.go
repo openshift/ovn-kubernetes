@@ -253,7 +253,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 				needleIPs = append(needleIPs, podIPNet.IP)
 			}
 
-			collidingPod, err := oc.findPodWithIPAddresses(needleIPs)
+			collidingPod, err := oc.findPodWithIPAddresses(needleIPs, pod.Spec.NodeName)
 			if err != nil {
 				return false, fmt.Errorf("unable to determine if completed pod IP is in use by another pod. "+
 					"Will not release pod %s/%s IP: %#v from allocator. %v", pod.Namespace, pod.Name, podIfAddrs, err)
@@ -333,7 +333,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	return nil
 }
 
-func (bnc *Controller) findPodWithIPAddresses(needleIPs []net.IP) (*kapi.Pod, error) {
+func (bnc *Controller) findPodWithIPAddresses(needleIPs []net.IP, nodeName string) (*kapi.Pod, error) {
 	allPods, err := bnc.watchFactory.GetAllPods()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get pods: %w", err)
@@ -342,6 +342,10 @@ func (bnc *Controller) findPodWithIPAddresses(needleIPs []net.IP) (*kapi.Pod, er
 	// iterate through all pods
 	for _, p := range allPods {
 		if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) {
+			continue
+		}
+		// If the network type is Layer 3, then IP allocation is per node, so we can filter pods by node name.
+		if len(nodeName) > 0 && nodeName != p.Spec.NodeName {
 			continue
 		}
 		// check if the pod addresses match in the OVN annotation
