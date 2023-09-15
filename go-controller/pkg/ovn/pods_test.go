@@ -111,10 +111,10 @@ func newNode(nodeName, nodeIPv4 string) *v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
-				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", nodeIPv4),
-				"k8s.ovn.org/zone-name":           "global",
+				"k8s.ovn.org/node-primary-ifaddr":   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
+				"k8s.ovn.org/node-subnets":          fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+				"k8s.ovn.org/host-routable-subnets": fmt.Sprintf("[\"%s\"]", nodeIPv4),
+				"k8s.ovn.org/zone-name":             "global",
 			},
 			Labels: map[string]string{
 				"k8s.ovn.org/egress-assignable": "",
@@ -136,10 +136,10 @@ func newNodeGlobalZoneNotEgressableV4Only(nodeName, nodeIPv4 string) *v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
-				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", nodeIPv4),
-				"k8s.ovn.org/zone-name":           "global",
+				"k8s.ovn.org/node-primary-ifaddr":   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
+				"k8s.ovn.org/node-subnets":          fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+				"k8s.ovn.org/host-routable-subnets": fmt.Sprintf("[\"%s\"]", nodeIPv4),
+				"k8s.ovn.org/zone-name":             "global",
 			},
 		},
 		Status: v1.NodeStatus{
@@ -158,10 +158,10 @@ func newNodeGlobalZoneNotEgressableV6Only(nodeName, nodeIPv6 string) *v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", nodeIPv6),
-				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v6Node1Subnet),
-				"k8s.ovn.org/host-addresses":      fmt.Sprintf("[\"%s\"]", nodeIPv6),
-				"k8s.ovn.org/zone-name":           "global",
+				"k8s.ovn.org/node-primary-ifaddr":   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", nodeIPv6),
+				"k8s.ovn.org/node-subnets":          fmt.Sprintf("{\"default\":\"%s\"}", v6Node1Subnet),
+				"k8s.ovn.org/host-routable-subnets": fmt.Sprintf("[\"%s\"]", nodeIPv6),
+				"k8s.ovn.org/zone-name":             "global",
 			},
 		},
 		Status: v1.NodeStatus{

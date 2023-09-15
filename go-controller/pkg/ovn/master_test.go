@@ -77,7 +77,7 @@ const (
 
 	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
 	ovnNodeGRLRPAddr     = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
-	ovnHostAddr          = "k8s.ovn.org/host-addresses"
+	ovnHostAddr          = "k8s.ovn.org/host-routable-subnets"
 	ovnNodePrimaryIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 )
 

@@ -220,7 +220,7 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 }
 
 // updateNodeAddressAnnotations updates all relevant annotations for the node including
-// k8s.ovn.org/host-addresses, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config.
+// k8s.ovn.org/host-routeable-subnets, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config.
 func (c *addressManager) updateNodeAddressAnnotations() error {
 	var err error
 	var ifAddrs []*net.IPNet
@@ -239,7 +239,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 		}
 	}
 
-	// update k8s.ovn.org/host-addresses
+	// update k8s.ovn.org/host-routeable-subnets
 	if err = c.updateHostAddresses(node); err != nil {
 		return err
 	}

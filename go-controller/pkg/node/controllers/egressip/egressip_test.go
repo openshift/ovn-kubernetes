@@ -909,7 +909,7 @@ func getNodeObj(testNode testNode) corev1.Node {
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}",
 					node1OVNManagedNetworkV4, ""),
-				"k8s.ovn.org/host-addresses": fmt.Sprintf("[%s]", strings.Join(hostAddrs, ",")),
+				"k8s.ovn.org/host-routable-subnets": fmt.Sprintf("[%s]", strings.Join(hostAddrs, ",")),
 			}},
 		Status: corev1.NodeStatus{
 			Conditions: []corev1.NodeCondition{

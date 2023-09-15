@@ -75,8 +75,8 @@ const (
 	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
 	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
 
-	// ovnNodeHostAddresses is used to track the different host IP addresses on the node
-	ovnNodeHostAddresses = "k8s.ovn.org/host-addresses"
+	// ovnNodeHostRoutableSubnets is used to track the different externally routable hostIP addresses and associated subnets on the node
+	ovnNodeHostRoutable = "k8s.ovn.org/host-routable-subnets"
 
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
@@ -684,18 +684,18 @@ func GetNodeEgressLabel() string {
 }
 
 func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.Set[string]) error {
-	return nodeAnnotator.Set(ovnNodeHostAddresses, sets.List(addresses))
+	return nodeAnnotator.Set(ovnNodeHostRoutable, sets.List(addresses))
 }
 
 func NodeHostAddressesAnnotationChanged(oldNode, newNode *v1.Node) bool {
-	return oldNode.Annotations[ovnNodeHostAddresses] != newNode.Annotations[ovnNodeHostAddresses]
+	return oldNode.Annotations[ovnNodeHostRoutable] != newNode.Annotations[ovnNodeHostRoutable]
 }
 
 // ParseNodeHostAddresses returns the parsed host addresses living on a node
 func ParseNodeHostAddresses(node *kapi.Node) (sets.Set[string], error) {
-	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
+	addrAnnotation, ok := node.Annotations[ovnNodeHostRoutable]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostRoutable, node.Name)
 	}
 
 	var cfg []string
@@ -709,9 +709,9 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.Set[string], error) {
 
 // ParseNodeHostAddressesDropNetMask returns the parsed host addresses found on a nodes annotation. Removes the mask.
 func ParseNodeHostAddressesDropNetMask(node *kapi.Node) (sets.Set[string], error) {
-	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
+	addrAnnotation, ok := node.Annotations[ovnNodeHostRoutable]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostRoutable, node.Name)
 	}
 
 	var cfg []string
@@ -731,9 +731,9 @@ func ParseNodeHostAddressesDropNetMask(node *kapi.Node) (sets.Set[string], error
 }
 
 func ParseNodeHostAddressesList(node *kapi.Node) ([]string, error) {
-	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
+	addrAnnotation, ok := node.Annotations[ovnNodeHostRoutable]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostRoutable, node.Name)
 	}
 
 	var cfg []string
