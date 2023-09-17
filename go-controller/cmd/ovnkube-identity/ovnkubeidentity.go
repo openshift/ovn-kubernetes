@@ -19,7 +19,11 @@ import (
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/probe"
@@ -39,20 +43,24 @@ import (
 )
 
 type config struct {
-	kubeconfig          string
-	apiServer           string
-	logLevel            int
-	port                int
-	host                string
-	certDir             string
-	metricsAddress      string
-	leaseNamespace      string
-	enableHybridOverlay bool
-	disableWebhook      bool
-	disableApprover     bool
-	waitForKAPIDuration time.Duration
-	localKAPIPort       int
-	extraAllowedUsers   cli.StringSlice
+	kubeconfig                 string
+	apiServer                  string
+	logLevel                   int
+	port                       int
+	host                       string
+	certDir                    string
+	metricsAddress             string
+	leaseNamespace             string
+	enableHybridOverlay        bool
+	disableWebhook             bool
+	disableApprover            bool
+	waitForKAPIDuration        time.Duration
+	localKAPIPort              int
+	extraAllowedUsers          cli.StringSlice
+	csrAcceptanceConditionFile string
+	csrAcceptanceConditions    []csrapprover.CSRAcceptanceCondition
+	podAdmissionConditionFile  string
+	podAdmissionConditions     []ovnwebhook.PodAdmissionConditionOption
 }
 
 var cliCfg config
@@ -125,6 +133,16 @@ func main() {
 		}
 		if cliCfg.apiServer != "" {
 			restCfg.Host = cliCfg.apiServer
+		}
+
+		cliCfg.csrAcceptanceConditions, err = csrapprover.InitCSRAcceptanceConditions(cliCfg.csrAcceptanceConditionFile)
+		if err != nil {
+			return err
+		}
+
+		cliCfg.podAdmissionConditions, err = ovnwebhook.InitPodAdmissionConditionOptions(cliCfg.podAdmissionConditionFile)
+		if err != nil {
+			return err
 		}
 
 		startWg := &sync.WaitGroup{}
@@ -234,6 +252,16 @@ func main() {
 			Value:       6443,
 			Destination: &cliCfg.localKAPIPort,
 		},
+		&cli.StringFlag{
+			Name:        "csr-acceptance-conditions",
+			Usage:       "Configure additional certificate acceptance conditions",
+			Destination: &cliCfg.csrAcceptanceConditionFile,
+		},
+		&cli.StringFlag{
+			Name:        "pod-admission-conditions",
+			Usage:       "Configure additional pod validate admission conditions",
+			Destination: &cliCfg.podAdmissionConditionFile,
+		},
 	}
 	ctx := context.Background()
 
@@ -274,6 +302,11 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 	// The webhook server is set up and started in a very similar way to the default one:
 	// https://github.com/ovn-org/ovn-kubernetes/blob/7c0838bb46d6de202f509abe47609c8da09311b2/go-controller/vendor/sigs.k8s.io/controller-runtime/pkg/webhook/server.go#L212
 
+	client, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("error creating clientset: %v", err)
+	}
+
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
@@ -295,6 +328,32 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 		return fmt.Errorf("failed to setup the node admission webhook: %w", err)
 	}
 	webhookMux.Handle("/node", nodeHandler)
+
+	// ovnkube-node without additional conditions does not have the permissions to update pods
+	if len(cliCfg.csrAcceptanceConditions) > 1 {
+		informerFactory := informers.NewSharedInformerFactory(client, 10*time.Minute)
+		nodeInformer := informerFactory.Core().V1().Nodes().Informer()
+		informerFactory.Start(stopCh)
+		klog.Infof("Waiting for caches to sync")
+		cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
+
+		nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
+		podWebhook := admission.WithCustomValidator(
+			&corev1.Pod{},
+			ovnwebhook.NewPodAdmissionWebhook(nodeLister, cliCfg.podAdmissionConditions, cliCfg.extraAllowedUsers.Value()...),
+		).WithRecoverPanic(true)
+		podHandler, err := admission.StandaloneWebhook(
+			podWebhook,
+			admission.StandaloneOptions{
+				Logger:      logger.WithName("pod.network-identity"),
+				MetricsPath: "pod.network-identity",
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to setup the pod admission webhook: %w", err)
+		}
+		webhookMux.Handle("/pod", podHandler)
+	}
 
 	cfg := &tls.Config{
 		NextProtos: []string{"h2"},
@@ -380,10 +439,7 @@ func runCSRApproverManager(ctx context.Context, leaderID string, restCfg *rest.C
 		}).
 		Complete(csrapprover.NewController(
 			mgr.GetClient(),
-			csrapprover.NamePrefix,
-			csrapprover.Organization,
-			csrapprover.Groups,
-			csrapprover.UserPrefixes,
+			cliCfg.csrAcceptanceConditions,
 			csrapprover.Usages,
 			csrapprover.MaxDuration,
 			mgr.GetEventRecorderFor(csrapprover.ControllerName),
