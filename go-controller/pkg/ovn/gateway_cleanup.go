@@ -100,17 +100,17 @@ func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes 
 }
 
 func (oc *DefaultNetworkController) staticRouteCleanup(nextHops []net.IP) {
-	ips := sets.Set[string]{}
-	for _, nextHop := range nextHops {
-		ips.Insert(nextHop.String())
-	}
-	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return ips.Has(item.Nexthop)
-	}
-	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
-	if err != nil {
-		klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
-	}
+	//ips := sets.Set[string]{}
+	//for _, nextHop := range nextHops {
+	//	ips.Insert(nextHop.String())
+	//}
+	//p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+	//	return ips.Has(item.Nexthop)
+	//}
+	//err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	//if err != nil {
+	//	klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
+	//}
 }
 
 // policyRouteCleanup cleansup all policies on cluster router that have a nextHop
