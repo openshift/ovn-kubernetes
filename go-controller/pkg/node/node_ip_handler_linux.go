@@ -431,6 +431,7 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 }
 
 func (c *addressManager) sync() {
+	klog.Errorf("KEYWORD: RUNNING MY CODE")
 	var addrs []netlink.Addr
 
 	if c.useNetlink {
