@@ -555,6 +555,9 @@ func generateEIPConfigForPods(pods map[ktypes.NamespacedName][]net.IP, link netl
 	eipConfig.ip = getNetlinkAddressWithLabel(eIPNet, link.Attrs().Index, link.Attrs().Name)
 	for _, ips := range pods {
 		for _, ip := range ips {
+			if !isIPFamilyEqual(ip, eIPNet.IP) {
+				continue
+			}
 			ipConfig := newPodIPConfig()
 			ipConfig.ipTableRule = generateIPTablesSNATRuleArg(ip, link.Attrs().Name, eIPNet.IP.String())
 			ipConfig.ipRule = generateIPRule(ip, link.Attrs().Index)
@@ -893,6 +896,9 @@ func (c *Controller) RepairNode() error {
 							return err
 						}
 						for _, ip := range podIPs {
+							if !isIPFamilyEqual(ip, eIPNet.IP) {
+								continue
+							}
 							if !c.isIPSupported(ip) {
 								continue
 							}
@@ -1008,6 +1014,12 @@ func (c *Controller) isIPSupported(ip net.IP) bool {
 		return true
 	}
 	return false
+}
+
+func isIPFamilyEqual(ipA, ipB net.IP) bool {
+	isIPAV4 := ipA.To4() != nil
+	isIPBV4 := ipB.To4() != nil
+	return isIPAV4 == isIPBV4
 }
 
 func getRouteTableID(ifIndex int) int {
