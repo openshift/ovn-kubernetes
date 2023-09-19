@@ -451,6 +451,9 @@ func (c *Controller) getConfigAndUpdateRefs(eIP *eipv1.EgressIP, updateRefs bool
 		}
 		c.referencedObjects[eIP.Name] = refObjs
 	}
+	if eIPConfig == nil || podIPConfigs == nil {
+		return nil, nil
+	}
 	return &config{
 		namespacesWithPods: namespacePods,
 		eIPConfig:          eIPConfig,
@@ -463,8 +466,6 @@ func (c *Controller) getConfigAndUpdateRefs(eIP *eipv1.EgressIP, updateRefs bool
 // that can host one of the EIP IPs returning egress IP configuration, selected namespaces and pods
 func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigList, sets.Set[string], sets.Set[ktypes.NamespacedName],
 	map[string]map[ktypes.NamespacedName]*corev1.Pod, error) {
-	podIPConfigs := newPodIPConfigList()
-	eIPConfig := newEIPConfig()
 	selectedNamespaces := sets.Set[string]{}
 	selectedPods := sets.Set[ktypes.NamespacedName]{}
 	selectedPodIPs := make(map[ktypes.NamespacedName][]net.IP)
@@ -473,12 +474,12 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 	// namespace selector is mandatory for EIP
 	namespaces, err := c.listNamespacesBySelector(&eip.Spec.NamespaceSelector)
 	if err != nil {
-		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to list namespaces: %w", err)
+		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to list namespaces: %w", err)
 	}
 	for _, namespace := range namespaces {
 		pods, err := c.listPodsByNamespaceAndSelector(namespace.Name, &eip.Spec.PodSelector)
 		if err != nil {
-			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to list pods in namespace %s: %w",
+			return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to list pods in namespace %s: %w",
 				namespace.Name, err)
 		}
 		podsNsName := map[ktypes.NamespacedName]*corev1.Pod{}
@@ -489,7 +490,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 			}
 			ips, err := util.DefaultNetworkPodIPs(pod)
 			if err != nil {
-				return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to get pod ips: %w", err)
+				return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, fmt.Errorf("failed to get pod ips: %w", err)
 			}
 			if len(ips) == 0 {
 				continue
@@ -503,16 +504,16 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		selectedNamespaces.Insert(namespace.Name)
 	}
 	if selectedPods.Len() == 0 {
-		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
+		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
 	}
 	node, err := c.nodeLister.Get(c.nodeName)
 	if err != nil {
-		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
+		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
 			fmt.Errorf("failed to find this node %q kubernetes Node object: %v", c.nodeName, err)
 	}
 	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
 	if err != nil {
-		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
+		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
 			fmt.Errorf("failed to determine egress IP config for node %s: %w", node.Name, err)
 	}
 	// max of 1 EIP IP is selected. Return when 1 is found.
@@ -522,7 +523,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		}
 		eIPNet, err := util.GetIPNetFullMask(status.EgressIP)
 		if err != nil {
-			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
+			return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
 				fmt.Errorf("failed to generate mask for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
 		if util.IsOVNManagedNetwork(parsedNodeEIPConfig, eIPNet.IP) {
@@ -531,7 +532,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 		isV6 := eIPNet.IP.To4() == nil
 		found, link, err := findLinkOnSameNetworkAsIP(eIPNet.IP, c.v4, c.v6)
 		if err != nil {
-			return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods,
+			return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
 				fmt.Errorf("failed to find a network to host EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
 		if !found {
@@ -541,11 +542,11 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 			eip.Name, status.EgressIP, link.Attrs().Name)
 		// go through all selected pods and build a config per pod IP. We know there are at least one pod and these the
 		// pod(s) have IP(s).
-		eIPConfig, podIPConfigs = generateEIPConfigForPods(selectedPodIPs, link, eIPNet, isV6)
+		eIPConfig, podIPConfigs := generateEIPConfigForPods(selectedPodIPs, link, eIPNet, isV6)
 		// ignore other EIP IPs. Multiple EIP IPs cannot be assigned to the same node
-		break
+		return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
 	}
-	return eIPConfig, podIPConfigs, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
+	return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
 }
 
 func generateEIPConfigForPods(pods map[ktypes.NamespacedName][]net.IP, link netlink.Link, eIPNet *net.IPNet, v6 bool) (*eIPConfig, *podIPConfigList) {
