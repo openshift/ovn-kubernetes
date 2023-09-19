@@ -16,6 +16,8 @@ import (
 // This controller is running in ovnkube-node binary. It's responsible for local
 // node configuration and annotation.
 type NodeController struct {
+	kube kube.Interface
+	sync.RWMutex
 	nodeName  string
 	initState hotypes.HybridInitState
 	drMAC     net.HardwareAddr
