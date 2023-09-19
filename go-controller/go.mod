@@ -40,7 +40,7 @@ require (
 	github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01
 	golang.org/x/net v0.10.0
 	golang.org/x/sync v0.1.0
-	golang.org/x/sys v0.8.0
+	golang.org/x/sys v0.10.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.53.0
 	google.golang.org/protobuf v1.28.1
@@ -123,4 +123,6 @@ require (
 replace (
 	github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+	github.com/vishvananda/netlink => github.com/vishvananda/netlink v1.2.1-beta.2.0.20230905152006-63484bbf69f8
+
 )
