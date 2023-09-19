@@ -19,6 +19,7 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -537,7 +538,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
-					getExpectedLinkAddr(egressIP1IP),
+					getExpectedLinkEIPAddr(egressIP1IP, dummyLink1Name),
 					dummyLink1Name,
 					[]testPodConfig{
 						{
@@ -562,7 +563,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
-					getExpectedLinkAddr(egressIP1IP),
+					getExpectedLinkEIPAddr(egressIP1IP, dummyLink1Name),
 					dummyLink1Name,
 					[]testPodConfig{
 						{
@@ -593,7 +594,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
-					getExpectedLinkAddr(egressIP1IP),
+					getExpectedLinkEIPAddr(egressIP1IP, dummyLink1Name),
 					dummyLink1Name,
 					[]testPodConfig{
 						{
@@ -626,7 +627,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
-					getExpectedLinkAddr(egressIP1IP),
+					getExpectedLinkEIPAddr(egressIP1IP, dummyLink1Name),
 					dummyLink1Name,
 					[]testPodConfig{
 						{pod1Name,
@@ -658,7 +659,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink1Name)),
-					getExpectedLinkAddr(egressIP1IP),
+					getExpectedLinkEIPAddr(egressIP1IP, dummyLink1Name),
 					dummyLink1Name,
 					[]testPodConfig{
 						{
@@ -678,7 +679,7 @@ var _ = table.XDescribeTable("EgressIP selectors",
 				newEgressIP(egressIP2Name, egressIP2IP, node1Name, namespace2Label, egressPodLabel),
 				testConfig{ // expected config for EIP
 					getExpectedDefaultRoute(getLinkIndex(dummyLink2Name)),
-					getExpectedLinkAddr(egressIP1IP),
+					getExpectedLinkEIPAddr(egressIP1IP, dummyLink1Name),
 					dummyLink2Name,
 					[]testPodConfig{
 						{
@@ -802,7 +803,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 			[]testInfConfig{{dummyLink1Name, dummy1IPv4CIDR}, {dummyLink2Name, dummy2IPv4CIDR}},
 		}),
 	// skip for now - test in dev
-	table.XEntry("should remove stale address",
+	table.Entry("should remove stale address",
 		[]testEIPConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IP, node1Name, namespace1Label, egressPodLabel),
@@ -814,7 +815,7 @@ var _ = table.XDescribeTable("repair node", func(expectedStateFollowingClean []t
 		[]testConfig{ // node state before repair
 			{
 				nil,
-				getExpectedLinkAddr(egressIP1IP),
+				getExpectedLinkEIPAddr(egressIP1IP, dummyLink2Name),
 				dummyLink2Name,
 				[]testPodConfig{},
 			},
@@ -935,7 +936,7 @@ func getLinkAddresses(testNS ns.NetNS, infs ...string) (map[string][]netlink.Add
 			if !isStrInArray(infs, link.Attrs().Name) {
 				continue
 			}
-			addresses, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+			addresses, err := netlink.AddrList(link, netlink.FAMILY_V4)
 			if err != nil {
 				return err
 			}
@@ -1027,11 +1028,10 @@ func getExpectedIPTableMasqRule(podIP, infName, snatIP string) ovniptables.RuleA
 }
 
 func getExpectedDefaultRoute(linkIndex int) *netlink.Route {
-	// dst is nil because netlink represents a default route as nil
-	return &netlink.Route{LinkIndex: linkIndex, Table: getRouteTableID(linkIndex), Dst: nil}
+	return &netlink.Route{LinkIndex: linkIndex, Table: getRouteTableID(linkIndex), Dst: defaultV4AnyCIDR}
 }
 
-func getExpectedLinkAddr(ip string) *netlink.Addr {
+func getExpectedLinkEIPAddr(ip, linkName string) *netlink.Addr {
 	if !strings.Contains(ip, "/") {
 		ip = ip + "/32"
 	}
@@ -1039,6 +1039,7 @@ func getExpectedLinkAddr(ip string) *netlink.Addr {
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse %q: %v", ip, err))
 	}
+	addr.Label = linkmanager.GetAssignedAddressLabel(linkName)
 	return addr
 }
 
