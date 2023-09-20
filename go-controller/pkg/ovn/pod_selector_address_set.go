@@ -442,7 +442,7 @@ func (oc *DefaultNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, pod
 		return "", fmt.Errorf("can't get pod IPs %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
-	collidingPod, err := oc.findPodWithIPAddresses(ips)
+	collidingPod, err := oc.findPodWithIPAddresses(ips, pod.Spec.NodeName)
 	if err != nil {
 		return "", fmt.Errorf("lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
 	}

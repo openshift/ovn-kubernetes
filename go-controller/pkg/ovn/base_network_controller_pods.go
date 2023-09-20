@@ -225,7 +225,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 				needleIPs = append(needleIPs, podIPNet.IP)
 			}
 
-			collidingPod, err := bnc.findPodWithIPAddresses(needleIPs)
+			collidingPod, err := bnc.findPodWithIPAddresses(needleIPs, pod.Spec.NodeName)
 			if err != nil {
 				return false, fmt.Errorf("unable to determine if completed pod IP is in use by another pod. "+
 					"Will not release pod %s/%s IP: %#v from allocator. %v", pod.Namespace, pod.Name, podIfAddrs, err)
@@ -288,7 +288,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 	return &pInfo, nil
 }
 
-func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*kapi.Pod, error) {
+func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP, nodeName string) (*kapi.Pod, error) {
 	allPods, err := bnc.watchFactory.GetAllPods()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get pods: %w", err)
@@ -297,6 +297,14 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 	// iterate through all pods
 	for _, p := range allPods {
 		if util.PodCompleted(p) || util.PodWantsHostNetwork(p) || !util.PodScheduled(p) {
+			continue
+		}
+		// If the network type is Layer 3, then IP allocation is per node, so we can filter pods by node name.
+		// Default network topology is "".
+		// This specifically speeds up a case where a pod may have been annotated by ovnkube-node, but has not yet
+		// returned from CNI ADD. In that case the GetPodIPsOfNetwork would unmarshal the annotation and take a perf
+		// hit for no reason (since the IP cannot be in the same subnet as what we are looking for).
+		if (bnc.TopologyType() == "" || bnc.TopologyType() == ovntypes.Layer3Topology) && len(nodeName) > 0 && nodeName != p.Spec.NodeName {
 			continue
 		}
 		// check if the pod addresses match in the OVN annotation
