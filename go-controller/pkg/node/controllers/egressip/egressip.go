@@ -14,6 +14,7 @@ import (
 	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -52,7 +53,8 @@ const (
 
 var (
 	_, defaultV4AnyCIDR, _ = net.ParseCIDR("0.0.0.0/0")
-	_, defaultV6AnyCIDR, _ = net.ParseCIDR("0:0:0:0:0:0:0:0")
+	_, defaultV6AnyCIDR, _ = net.ParseCIDR("::/0")
+	_, linkLocalCIDR, _    = net.ParseCIDR("fe80::/64")
 	iptJumpRule            = iptables.RuleArg{Args: []string{"-j", chainName}}
 )
 
@@ -127,13 +129,13 @@ type Controller struct {
 	linkManager     *linkmanager.Controller
 	ruleManager     *iprulemanager.Controller
 	iptablesManager *iptables.Controller
-
-	nodeName string
-	v4       bool
-	v6       bool
+	nodeAnnotator   kube.Annotator
+	nodeName        string
+	v4              bool
+	v6              bool
 }
 
-func NewController(eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
+func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInformer, nodeInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer,
 	podInformer coreinformers.PodInformer, routeManager *routemanager.Controller, v4, v6 bool, nodeName string) (*Controller, error) {
 
 	c := &Controller{
@@ -163,6 +165,7 @@ func NewController(eIPInformer egressipinformer.EgressIPInformer, nodeInformer c
 		linkManager:           linkmanager.NewController(nodeName, v4, v6),
 		ruleManager:           iprulemanager.NewController(v4, v6),
 		iptablesManager:       iptables.NewController(),
+		nodeAnnotator:         kube.NewNodeAnnotator(k, nodeName),
 		nodeName:              nodeName,
 		v4:                    v4,
 		v6:                    v6,
@@ -250,9 +253,21 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 
 	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
 		func(ctx context.Context) (done bool, err error) {
-			if err := c.RepairNode(); err != nil {
+			if err := c.migrateFromAddrLabelToAnnotation(); err != nil {
+				klog.Errorf("Failed to migrate from managing EgressIP addresses using address labels to a node annotation - Retrying: %v", err)
+				return false, err
+			}
+			return true, nil
+		})
+	if err != nil {
+		return fmt.Errorf("failed to run EgressIP controller because migration from using address labels to a node annotation failed: %v", err)
+	}
+
+	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
+		func(ctx context.Context) (done bool, err error) {
+			if err := c.repairNode(); err != nil {
 				klog.Errorf("Failed to repair node: '%v' - Retrying", err)
-				return false, nil
+				return false, err
 			}
 			return true, nil
 		})
@@ -507,15 +522,11 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, *podIPConfigLi
 	if selectedPods.Len() == 0 {
 		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods, nil
 	}
-	node, err := c.nodeLister.Get(c.nodeName)
+
+	parsedNodeEIPConfig, err := c.getNodeEgressIPConfig()
 	if err != nil {
 		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
-			fmt.Errorf("failed to find this node %q kubernetes Node object: %v", c.nodeName, err)
-	}
-	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
-	if err != nil {
-		return nil, nil, selectedNamespaces, selectedPods, selectedNamespacesPods,
-			fmt.Errorf("failed to determine egress IP config for node %s: %w", node.Name, err)
+			fmt.Errorf("failed to determine egress IP config for node %s: %w", c.nodeName, err)
 	}
 	// max of 1 EIP IP is selected. Return when 1 is found.
 	for _, status := range eip.Status.Items {
@@ -554,7 +565,7 @@ func generateEIPConfigForPods(pods map[ktypes.NamespacedName][]net.IP, link netl
 	eipConfig := newEIPConfig()
 	newPodIPConfigs := newPodIPConfigList()
 	eipConfig.route = getDefaultRouteForLink(link, isEIPV6)
-	eipConfig.addr = getNetlinkAddressWithLabel(eIPNet, link.Attrs().Index, link.Attrs().Name)
+	eipConfig.addr = getNetlinkAddress(eIPNet, link.Attrs().Index)
 	for _, podIPs := range pods {
 		for _, podIP := range podIPs {
 			isPodIPv6 := utilnet.IsIPv6(podIP)
@@ -636,7 +647,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 
 		if err := c.linkManager.DelAddress(*existing.eIPConfig.addr); err != nil {
 			// TODO(mk): if we fail to delete address, handle it
-			return fmt.Errorf("failed to delete egress IP address %s: %w", existing.eIPConfig.addr, err)
+			return fmt.Errorf("failed to delete egress IP address %s: %w", existing.eIPConfig.addr.String(), err)
+		}
+		if err := c.deleteIPFromAnnotation(existing.eIPConfig.addr.IP.String()); err != nil {
+			return fmt.Errorf("failed to delete egress IP address %s from annotation: %v", existing.eIPConfig.addr.String(), err)
 		}
 	}
 	if (update == nil && existing.eIPConfig != nil && existing.eIPConfig.route != nil) ||
@@ -664,16 +678,17 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 				// applyPodConfig will apply pod specific configuration - ip rules and iptables rules
 				err := c.applyPodConfig(existingTargetPodConfig, update)
 				if err != nil {
-					return fmt.Errorf("failed to apply pod %s/%s configuration for EgressIP %s IP %s: %v",
-						updatedPod.Namespace, updatedPod.Name, update.eIPConfig.name, update.eIPConfig.addr.String(), err)
+					return fmt.Errorf("failed to apply pod %s/%s configuration: %v", updatedPod.Namespace, updatedPod.Name, err)
 				}
 			}
+		}
+		if err := c.addIPToAnnotation(update.eIPConfig.addr.IP.String()); err != nil {
+			return fmt.Errorf("failed to add egress IP address to annotation: %v", err)
 		}
 		// TODO(mk): only apply the follow when its new config or when it failed to apply
 		// Ok to repeat requests to route manager and link manager
 		if err := c.linkManager.AddAddress(*update.eIPConfig.addr); err != nil {
-			return fmt.Errorf("failed to add address EgressIP %s IP %s to link manager: %v", update.eIPConfig.name,
-				update.eIPConfig.addr.String(), err)
+			return fmt.Errorf("failed to add address to link: %v", err)
 		}
 		existing.eIPConfig.addr = update.eIPConfig.addr
 		// route manager manages retry
@@ -738,13 +753,9 @@ func (c *Controller) getAllEIPs() ([]*eipv1.EgressIP, error) {
 	return eips, nil
 }
 
-// RepairNode generates whats expected and what is seen on the node and removes any stale configuration. This should be
+// repairNode generates whats expected and what is seen on the node and removes any stale configuration. This should be
 // called at Controller startup.
-func (c *Controller) RepairNode() error {
-	links, err := util.GetNetLinkOps().LinkList()
-	if err != nil {
-		return fmt.Errorf("failed to ensure IP is correctly configured becase we could not list links: %v", err)
-	}
+func (c *Controller) repairNode() error {
 	// get address map for each interface -> addresses/mask
 	// also map address/mask -> interface name
 	assignedAddr := sets.New[string]()
@@ -757,18 +768,25 @@ func (c *Controller) RepairNode() error {
 	assignedIPTableV6Rules := sets.New[string]()
 	assignedIPTablesV4StrToRules := make(map[string]iptables.RuleArg)
 	assignedIPTablesV6StrToRules := make(map[string]iptables.RuleArg)
-
+	existingAddrsFromAnnot, err := c.getAnnotation()
+	if err != nil {
+		return fmt.Errorf("failed to get annotation: %v", err)
+	}
+	links, err := util.GetNetLinkOps().LinkList()
+	if err != nil {
+		return fmt.Errorf("failed to list links: %v", err)
+	}
 	for _, link := range links {
 		link := link
 		linkName := link.Attrs().Name
 		linkIdx := link.Attrs().Index
-		addresses, err := linkmanager.GetExternallyAvailableAddresses(link, c.v4, c.v6)
+		addresses, err := util.GetFilteredInterfaceAddrs(link, c.v4, c.v6)
 		if err != nil {
 			return fmt.Errorf("unable to get link addresses for link %s: %v", linkName, err)
 		}
 		for _, address := range addresses {
-			if address.Label == linkmanager.GetAssignedAddressLabel(linkName) {
-				addressStr := address.String()
+			if existingAddrsFromAnnot.Has(address.IP.String()) {
+				addressStr := address.IPNet.String()
 				assignedAddr.Insert(addressStr)
 				assignedAddrStrToAddrs[addressStr] = address
 			}
@@ -824,13 +842,9 @@ func (c *Controller) RepairNode() error {
 	if err != nil {
 		return err
 	}
-	node, err := c.nodeLister.Get(c.nodeName)
+	parsedNodeEIPConfig, err := c.getNodeEgressIPConfig()
 	if err != nil {
-		return err
-	}
-	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to get node egress IP config: %v", err)
 	}
 	for _, egressIP := range egressIPs {
 		if len(egressIP.Status.Items) == 0 {
@@ -859,7 +873,7 @@ func (c *Controller) RepairNode() error {
 			linkIdx := link.Attrs().Index
 			linkName := link.Attrs().Name
 			expectedIPRoutes.Insert(getDefaultRoute(linkIdx, isEIPV6).String())
-			expectedAddrs.Insert(getNetlinkAddressWithLabel(eIPNet, linkIdx, linkName).String())
+			expectedAddrs.Insert(getNetlinkAddress(eIPNet, linkIdx).String())
 			namespaceSelector, err := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
 			if err != nil {
 				return fmt.Errorf("invalid namespaceSelector for egress IP %s: %v", egressIP.Name, err)
@@ -933,6 +947,123 @@ func (c *Controller) RepairNode() error {
 	return nil
 }
 
+// migrateFromAddrLabelToAnnotation gathers currently assigned EIP addresses and adds this info to a node annotation which
+// will track assignment instead of using labels. The reason labels aren't sufficient to track assigned EIPs is because
+// labels are only supported for IPv4 in linux. This method should only be used once at startup and should be retried if failure.
+// This func should be executed before repairing a node and handlers workers are started because they depend on annot being set.
+func (c *Controller) migrateFromAddrLabelToAnnotation() error {
+	node, err := c.nodeLister.Get(c.nodeName)
+	if err != nil {
+		return err
+	}
+	if util.IsNodeNonOVNEgressIPsAnnotationSet(node) {
+		// if annotation is set, exit early as migration from labels must have has been completed previously
+		return nil
+	}
+	links, err := util.GetNetLinkOps().LinkList()
+	if err != nil {
+		return fmt.Errorf("failed to ensure IP is correctly configured becase we could not list links: %v", err)
+	}
+	assignedAddresses := make([]string, 0)
+	for _, link := range links {
+		linkName := link.Attrs().Name
+		addresses, err := util.GetFilteredInterfaceAddrs(link, c.v4, false) // Only IPv4 addresses have labels
+		if err != nil {
+			return fmt.Errorf("unable to get link addresses for link %s: %v", linkName, err)
+		}
+		for _, address := range addresses {
+			if address.Label == linkmanager.DeprecatedGetAssignedAddressLabel(linkName) {
+				assignedAddresses = append(assignedAddresses, address.IP.String())
+			}
+		}
+	}
+	if len(assignedAddresses) == 0 {
+		return nil
+	}
+	if err := c.nodeAnnotator.Set(util.OVNNodeNonOVNEgressIPs, assignedAddresses); err != nil {
+		return fmt.Errorf("node annotator failed to set EIP addresses using key %s and value %v: %v",
+			util.OVNNodeNonOVNEgressIPs, assignedAddresses, err)
+	}
+	if err := c.nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("node annotator failed to update annotations using key %s and value %v: %v",
+			util.OVNNodeNonOVNEgressIPs, assignedAddresses, err)
+	}
+	return nil
+}
+
+// addIPToAnnotation adds an address to the collection of existing addresses stored in the nodes annotation. Caller
+// may repeat addition of addresses without care for duplicate addresses being added.
+func (c *Controller) addIPToAnnotation(ip string) error {
+	if !isValidIP(ip) {
+		return fmt.Errorf("invalid IP %q", ip)
+	}
+	existingIPs, err := c.getAnnotation()
+	if err != nil {
+		return fmt.Errorf("failed to get annotation: %v", err)
+	}
+	if existingIPs.Has(ip) {
+		return nil
+	}
+	existingIPs.Insert(ip)
+	return c.setAnnotation(existingIPs)
+}
+
+// deleteIPFromAnnotation deletes address from annotation. If multiple users, callers must synchronise.
+// deletion of address that doesn't exist will not cause an error.
+func (c *Controller) deleteIPFromAnnotation(ip string) error {
+	if !isValidIP(ip) {
+		return fmt.Errorf("invalid IP %q", ip)
+	}
+	existingIPs, err := c.getAnnotation()
+	if err != nil {
+		return fmt.Errorf("failed to get annotation: %v", err)
+	}
+	if !existingIPs.Has(ip) {
+		return nil
+	}
+	existingIPs.Delete(ip)
+	return c.setAnnotation(existingIPs)
+}
+
+// getAnnotation retrieves the egress IP annotation from the current node Nodes object. If multiple users, callers must synchronise.
+// if annotation isn't present, empty set is returned
+func (c *Controller) getAnnotation() (sets.Set[string], error) {
+	node, err := c.nodeLister.Get(c.nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s from lister: %v", c.nodeName, err)
+	}
+	ips, err := util.ParseNodeNonOVNEgressIPsAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			ips = sets.New[string]()
+		} else {
+			return nil, fmt.Errorf("failed to parse annotation key %q from node object: %v", util.OVNNodeNonOVNEgressIPs, err)
+		}
+	}
+	return ips, nil
+}
+
+// setAnnotation sets annotation on the current nodes Node object. If multiple users, callers must synchronise.
+func (c *Controller) setAnnotation(ips sets.Set[string]) error {
+	if err := c.nodeAnnotator.Set(util.OVNNodeNonOVNEgressIPs, ips.UnsortedList()); err != nil {
+		return fmt.Errorf("node annotator failed to set IPs (%s: %v): %v",
+			util.OVNNodeNonOVNEgressIPs, ips, err)
+	}
+	if err := c.nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("node annotator failed to update annotations (%s: %v): %v",
+			util.OVNNodeNonOVNEgressIPs, ips, err)
+	}
+	return nil
+}
+
+func (c *Controller) getNodeEgressIPConfig() (*util.ParsedNodeEgressIPConfiguration, error) {
+	node, err := c.nodeLister.Get(c.nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s from lister: %v", c.nodeName, err)
+	}
+	return util.GetNodeEIPConfig(node)
+}
+
 func isEIPStatusItemValid(status eipv1.EgressIPStatusItem, nodeName string) bool {
 	if status.Node != nodeName {
 		return false
@@ -950,7 +1081,10 @@ func (c *Controller) removeStaleAddresses(staleAddresses sets.Set[string], addrS
 			return fmt.Errorf("expected to find address %q in map: %+v", address, addrStrToNetlinkAddr)
 		}
 		if err := c.linkManager.DelAddress(nlAddr); err != nil {
-			return err
+			return fmt.Errorf("failed to delete address from link: %v", err)
+		}
+		if err := c.deleteIPFromAnnotation(nlAddr.IP.String()); err != nil {
+			return fmt.Errorf("failed to delete address from annotation: %v", err)
 		}
 	}
 	return nil
@@ -1035,7 +1169,7 @@ func findLinkOnSameNetworkAsIPUsingLPM(ip net.IP, v4, v6 bool) (bool, netlink.Li
 	}
 	for _, link := range links {
 		link := link
-		linkPrefixes, err := linkmanager.GetExternallyAvailablePrefixesExcludeAssigned(link, v4, v6)
+		linkPrefixes, err := getFilteredPrefixes(link, v4, v6)
 		if err != nil {
 			klog.Errorf("Failed to get address from link %s: %v", link.Attrs().Name, err)
 			continue
@@ -1067,12 +1201,59 @@ func findLinkOnSameNetworkAsIPUsingLPM(ip net.IP, v4, v6 bool) (bool, netlink.Li
 	return true, link, nil
 }
 
-func getNetlinkAddressWithLabel(addr *net.IPNet, ifindex int, linkName string) *netlink.Addr {
+// getFilteredPrefixes returns address Prefixes from interfaces with the following characteristics:
+// Link must be up
+// Exclude keepalived assigned addresses
+// Exclude addresses assigned by metal LB
+// Exclude OVN reserved addresses
+// Exclude networks with just one IP i.e  masks /32 for IPv4 or /128 for IPv6
+func getFilteredPrefixes(link netlink.Link, v4, v6 bool) ([]netip.Prefix, error) {
+	validAddresses := make([]netip.Prefix, 0)
+	flags := link.Attrs().Flags.String()
+	if !isLinkUp(flags) {
+		return validAddresses, nil
+	}
+	linkAddresses, err := util.GetFilteredInterfaceAddrs(link, v4, v6)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get link %s addresses: %v", link.Attrs().Name, err)
+	}
+	for _, address := range linkAddresses {
+		if isOneIPNetwork(address.IPNet) {
+			continue
+		}
+		addr, err := netip.ParsePrefix(address.IPNet.String())
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse address %s on link %s: %v", address.String(), link.Attrs().Name, err)
+		}
+		validAddresses = append(validAddresses, addr)
+	}
+	return validAddresses, nil
+}
+
+// isOneIPNetwork returns true if only one address exists in the network attached to the IPs mask - itself.
+func isOneIPNetwork(ipnet *net.IPNet) bool {
+	ones, bits := ipnet.Mask.Size()
+	// IPv4
+	if ones == 32 && bits == 32 {
+		return true
+	}
+	// IPv6
+	if ones == 128 && bits == 128 {
+		return true
+	}
+	return false
+}
+
+func isLinkUp(flags string) bool {
+	// exclude interfaces that aren't up
+	return strings.Contains(flags, "up")
+}
+
+func getNetlinkAddress(addr *net.IPNet, ifindex int) *netlink.Addr {
 	return &netlink.Addr{
 		IPNet:     addr,
 		Scope:     int(netlink.SCOPE_UNIVERSE),
 		LinkIndex: ifindex,
-		Label:     linkmanager.GetAssignedAddressLabel(linkName),
 	}
 }
 
@@ -1137,4 +1318,36 @@ func generateIPTablesSNATRuleArg(srcIP net.IP, isIPv6 bool, infName, snatIP stri
 		srcIPFullMask = fmt.Sprintf("%s/32", srcIP.String())
 	}
 	return iptables.RuleArg{Args: []string{"-s", srcIPFullMask, "-o", infName, "-j", "SNAT", "--to-source", snatIP}}
+}
+
+func getIPFamily(v6 bool) int {
+	if v6 {
+		return netlink.FAMILY_V6
+	}
+	return netlink.FAMILY_V4
+}
+
+func isEgressIPOnLink(linkIndex, ipFamily int, assignedEIPs sets.Set[string]) (bool, error) {
+	link, err := netlink.LinkByIndex(linkIndex)
+	if err != nil {
+		return false, err
+	}
+	addresses, err := netlink.AddrList(link, ipFamily)
+	if err != nil {
+		return false, err
+	}
+	for _, address := range addresses {
+		if assignedEIPs.Has(address.IP.String()) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isValidIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	return len(ip) > 0
 }
