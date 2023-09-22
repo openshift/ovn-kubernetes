@@ -8,7 +8,7 @@ require (
 	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
-	github.com/cenkalti/backoff/v4 v4.1.1
+	github.com/cenkalti/backoff/v4 v4.1.3
 	github.com/containernetworking/cni v0.8.1
 	github.com/containernetworking/plugins v0.8.7
 	github.com/coreos/go-iptables v0.4.5
@@ -22,7 +22,7 @@ require (
 	github.com/onsi/gomega v1.14.0
 	github.com/openshift/api v0.0.0-20211201215911-5a82bae32e46
 	github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366
-	github.com/ovn-org/libovsdb v0.6.1-0.20221101143603-8f21d188c3a5
+	github.com/ovn-org/libovsdb v0.6.1-0.20230203213244-a6a173993830
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.12.1
 	github.com/prometheus/client_model v0.2.0
@@ -45,7 +45,7 @@ require (
 )
 
 require (
-	github.com/Microsoft/go-winio v0.5.0 // indirect
+	github.com/Microsoft/go-winio v0.5.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/hub v1.0.1 // indirect
 	github.com/cenkalti/rpc2 v0.0.0-20210604223624-c1acbc6ec984 // indirect
