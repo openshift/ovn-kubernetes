@@ -257,14 +257,31 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod) ([]*net.IPNet, error) {
 	return ips, nil
 }
 
-// GetPodIPsOfNetwork returns the pod's IP addresses, first from the OVN annotation
-// and then falling back to the Pod Status IPs. This function is intended to
-// also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
+// GetPodIPsOfNetwork returns the pod IP(s) address for primary and secondary networks.
+// If 'nInfo' is a primary network, attempt to get pod IP(s) first from the kapi pod status.PodIPs, then fall back to OVN managed
+// annotation and finally pod status.PodIP.
+// If 'nInfo' is a secondary network, attempts to get pod IP(s) from annotations.
+// This function is intended to also return IP(s) for HostNetwork and other non-OVN-IPAM-ed pods.
 func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
-	ips := []net.IP{}
+	var ips []net.IP
 	networkMap := map[string]*nadapi.NetworkSelectionElement{}
 	if !nInfo.IsSecondary() {
-		// default network, Pod annotation is under the name of DefaultNetworkName
+		// Try to use Kube API pod IPs for default network first
+		// This is much faster than trying to unmarshal annotations
+		ips = make([]net.IP, 0, len(pod.Status.PodIPs))
+		for _, podIP := range pod.Status.PodIPs {
+			ip := utilnet.ParseIPSloppy(podIP.IP)
+			if ip == nil {
+				klog.Warningf("Failed to parse pod IP %q", podIP)
+				continue
+			}
+			ips = append(ips, ip)
+		}
+
+		if len(ips) > 0 {
+			return ips, nil
+		}
+		// Fall back to using Pod annotation which is under the name of DefaultNetworkName
 		networkMap[types.DefaultNetworkName] = nil
 	} else {
 		var err error
@@ -278,6 +295,7 @@ func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
 			return []net.IP{}, nil
 		}
 	}
+
 	for nadName := range networkMap {
 		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
 		if annotation != nil {
@@ -299,21 +317,6 @@ func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
 	if nInfo.IsSecondary() {
 		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s found for network %s",
 			pod.Namespace, pod.Name, nInfo.GetNetworkName())
-	}
-
-	// Otherwise, default network, if the annotation is not valid try to use Kube API pod IPs
-	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
-	for _, podIP := range pod.Status.PodIPs {
-		ip := utilnet.ParseIPSloppy(podIP.IP)
-		if ip == nil {
-			klog.Warningf("Failed to parse pod IP %q", podIP)
-			continue
-		}
-		ips = append(ips, ip)
-	}
-
-	if len(ips) > 0 {
-		return ips, nil
 	}
 
 	// Fallback check pod.Status.PodIP
