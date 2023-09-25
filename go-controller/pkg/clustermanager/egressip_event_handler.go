@@ -61,6 +61,7 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, fro
 		return h.eIPC.reconcileEgressIP(nil, eIP)
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		klog.Infof("SURYA: Calling change from add: %v", cloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
@@ -147,6 +148,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 	case factory.CloudPrivateIPConfigType:
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		klog.Infof("SURYA: Calling change from update: %v/%v", oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
@@ -174,6 +176,7 @@ func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, cachedObj in
 		return nil
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		klog.Infof("SURYA: Calling change from delete: %v", cloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)

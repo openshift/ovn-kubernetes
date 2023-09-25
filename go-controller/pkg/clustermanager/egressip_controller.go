@@ -203,6 +203,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 		// toAdd and toDelete is non-empty, this indicates an UPDATE for which
 		// the object **must** exist, if not: that's an error.
 		if op.toAdd != "" && op.toDelete != "" {
+			klog.Infof("SURYA %v/%v", op.toAdd, op.toDelete)
 			if err != nil {
 				return fmt.Errorf("cloud update request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
 			}
@@ -223,7 +224,12 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 			// if the object already exists for the specified node that's a no-op
 			// if the object already exists and the request is for a different node, that's an error
 		} else if op.toAdd != "" {
+			klog.Infof("SURYA %v/%v/%v", op.toAdd, op.toDelete, err)
 			if err == nil {
+				// Do not add if object is being deleted; either retry the add (if this was an update) OR we will retry till we exhaust our retry count
+				if cloudPrivateIPConfig.GetDeletionTimestamp() != nil && !cloudPrivateIPConfig.GetDeletionTimestamp().IsZero() {
+					return fmt.Errorf("cloud update request failed, CloudPrivateIPConfig: %s is being deleted", cloudPrivateIPConfigName)
+				}
 				if op.toAdd == cloudPrivateIPConfig.Spec.Node {
 					klog.Infof("CloudPrivateIPConfig: %s already assigned to node: %s", cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node)
 					continue
@@ -254,6 +260,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 			// If for whatever reason we have a pending toDelete op for a deleted object, then this op should simply be silently ignored.
 			// Any other error, return an error to trigger a retry.
 		} else if op.toDelete != "" {
+			klog.Infof("SURYA %v/%v", op.toAdd, op.toDelete)
 			if err != nil {
 				if apierrors.IsNotFound(err) {
 					klog.Infof("Cloud deletion request failed for CloudPrivateIPConfig: %s, item already deleted, err: %v", cloudPrivateIPConfigName, err)
@@ -1492,6 +1499,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 		if shouldDelete {
 			nodeToDelete = oldCloudPrivateIPConfig.Status.Node
 		}
+		klog.Infof("SURYA %v/%v/%v/%v", newCloudPrivateIPConfig, shouldAdd, shouldDelete, nodeToDelete)
 	}
 
 	// As opposed to reconcileEgressIP, here we are only interested in changes
@@ -1499,8 +1507,10 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 	// to the spec). So don't process the object if there is no change made to
 	// the status.
 	if reflect.DeepEqual(oldCloudPrivateIPConfig.Status, newCloudPrivateIPConfig.Status) {
+		klog.Infof("SURYA: no change to CloudPrivateIPConfig status %v/%v", oldCloudPrivateIPConfig.Status, newCloudPrivateIPConfig.Status)
 		return nil
 	}
+	klog.Infof("SURYA %v/%v/%v/%v/%v", oldCloudPrivateIPConfig, newCloudPrivateIPConfig, shouldAdd, shouldDelete, nodeToDelete)
 
 	if shouldDelete {
 		// Get the EgressIP owner reference
@@ -1538,6 +1548,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 					updatedStatus = append(updatedStatus, status)
 				}
 			}
+			klog.Infof("SURYA %v/%v/%v/%v", egressIPString, statusItem, updatedStatus, egressIP.Name)
 			if err := eIPC.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
 				return err
 			}
@@ -1551,6 +1562,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 				return fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
+		klog.Infof("SURYA %v/%v/%v/%v", egressIPString, statusItem, resyncEgressIPs, egressIPName)
 	}
 	if shouldAdd {
 		// Get the EgressIP owner reference
@@ -1574,20 +1586,26 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 			Node:     newCloudPrivateIPConfig.Status.Node,
 			EgressIP: egressIPString,
 		}
+		klog.Infof("SURYA %v/%v/%v", egressIPString, statusItem, egressIPName)
 		// Guard against performing the same assignment twice, which might
 		// happen when multiple updates come in on the same object.
 		hasStatus := false
 		for _, status := range egressIP.Status.Items {
 			if reflect.DeepEqual(status, statusItem) {
 				hasStatus = true
+				klog.Infof("SURYA %v/%v/%v/%v", egressIPString, status, statusItem, egressIPName)
 				break
 			}
+			klog.Infof("SURYA %v/%v/%v", egressIPString, status, egressIPName)
 		}
 		if !hasStatus {
+			klog.Infof("SURYA %v/%v/%v", egressIPString, statusItem, egressIPName)
 			statusToKeep := append(egressIP.Status.Items, statusItem)
+			klog.Infof("SURYA %v/%v/%v/%v/%v", egressIPString, egressIP.Status.Items, statusItem, egressIPName, statusToKeep)
 			if err := eIPC.patchReplaceEgressIPStatus(egressIP.Name, statusToKeep); err != nil {
 				return err
 			}
+			klog.Infof("SURYA %v/%v/%v/%v/%v", egressIPString, egressIP.Status.Items, statusItem, egressIP.Name, statusToKeep)
 		}
 
 		eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
