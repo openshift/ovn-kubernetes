@@ -242,10 +242,24 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod) ([]*net.IPNet, error) {
 	return ips, nil
 }
 
-// GetAllPodIPs returns the pod's IP addresses, first from the OVN annotation
+// GetAllPodIPs returns the pod's IP addresses, first from K8 API, second from OVN-K annotation,
 // and then falling back to the Pod Status IPs. This function is intended to
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
 func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
+	// Try to use Kube API pod IPs for default network first
+	// This is much faster than trying to unmarshal annotations
+	ips := make([]net.IP, 0, len(pod.Status.PodIPs))
+	for _, podIP := range pod.Status.PodIPs {
+		ip := utilnet.ParseIPSloppy(podIP.IP)
+		if ip == nil {
+			continue
+		}
+		ips = append(ips, ip)
+	}
+	if len(ips) > 0 {
+		return ips, nil
+	}
+
 	annotation, err := UnmarshalPodAnnotation(pod.Annotations)
 	if err == nil && annotation != nil {
 		// Use the OVN annotation if valid
@@ -260,22 +274,6 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 		klog.Warningf("No IPs found in existing OVN annotation! Pod Name: %s, Annotation: %#v",
 			pod.Name, annotation)
 	}
-
-	// Otherwise if the annotation is not valid try to use Kube API pod IPs
-	ips := make([]net.IP, 0, len(pod.Status.PodIPs))
-	for _, podIP := range pod.Status.PodIPs {
-		ip := utilnet.ParseIPSloppy(podIP.IP)
-		if ip == nil {
-			klog.Warningf("Failed to parse pod IP %q", podIP)
-			continue
-		}
-		ips = append(ips, ip)
-	}
-
-	if len(ips) > 0 {
-		return ips, nil
-	}
-
 	// Fallback check pod.Status.PodIP
 	// Kubelet < 1.16 only set podIP
 	ip := utilnet.ParseIPSloppy(pod.Status.PodIP)

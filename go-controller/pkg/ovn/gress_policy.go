@@ -196,7 +196,10 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	ips, err := util.GetAllPodIPs(pod)
 	if err != nil {
-		return err
+		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
+		// therefore just log the error and return.
+		klog.Warningf("Could not find pod %s/%s IPs in-order to delete the pod IPs from peer address set: %v", pod.Namespace, pod.Name, err)
+		return nil
 	}
 	return gp.peerAddressSet.DeleteIPs(ips)
 }

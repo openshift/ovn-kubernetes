@@ -1531,7 +1531,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *networkPolicy, gp *gressPo
 			return nil
 		}
 
-		collidingPod, err := oc.findPodWithIPAddresses(ips)
+		collidingPod, err := oc.findPodWithIPAddresses(ips, pod.Spec.NodeName)
 		if err != nil {
 			return fmt.Errorf("lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
 		}
