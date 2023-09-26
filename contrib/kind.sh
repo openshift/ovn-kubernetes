@@ -580,10 +580,6 @@ set_default_params() {
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
   OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 
-  if [ "$OVN_HA" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
-     echo "HA mode cannot be used together with Interconnect"
-     exit 1
-  fi
 
   if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
      echo "Compact mode cannot be used together with Interconnect"
@@ -600,7 +596,7 @@ set_default_params() {
   if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
     KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
 
-    TOTAL_NODES=$((KIND_NUM_WORKER + 1))
+    TOTAL_NODES=$((KIND_NUM_WORKER + KIND_NUM_MASTER))
     if [[ ${KIND_NUM_NODES_PER_ZONE} -gt 1 ]] && [[ $((TOTAL_NODES % KIND_NUM_NODES_PER_ZONE)) -ne 0 ]]; then
       echo "(Total k8s nodes / number of nodes per zone) should be zero"
       exit 1

@@ -1183,7 +1183,7 @@ ovn-master() {
 
   ovnkube_metrics_scale_enable_flag=
   if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
-    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale"
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
   
@@ -1445,6 +1445,12 @@ ovnkube-controller() {
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
 
+  ovnkube_metrics_scale_enable_flag=
+  if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
+  fi
+  echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
+
   ovnkube_local_cert_flags=
   if [[ ${ovn_enable_ovnkube_identity} == "true" ]]; then
     bootstrap_kubeconfig="/host-kubernetes/kubelet.conf"
@@ -1480,6 +1486,7 @@ ovnkube-controller() {
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_local_cert_flags} \
     ${ovnkube_enable_multi_external_gateway_flag} \
+    ${ovnkube_metrics_scale_enable_flag} \
     ${ovnkube_metrics_tls_opts} \
     ${ovn_encap_port_flag} \
     ${ovn_master_ssl_opts} \
@@ -1814,6 +1821,11 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
 
+  ovnkube_metrics_scale_enable_flag=
+  if [[ ${ovnkube_metrics_scale_enable} == "true" ]]; then
+    ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
+  fi
+  echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
   ovnkube_local_cert_flags=
   if [[ ${ovn_enable_ovnkube_identity} == "true" ]]; then
     bootstrap_kubeconfig="/host-kubernetes/kubelet.conf"
