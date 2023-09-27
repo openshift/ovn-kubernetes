@@ -330,13 +330,17 @@ func (h *masterEventHandler) RecordSuccessEvent(obj interface{}) {
 }
 
 // Given an object and its type, RecordErrorEvent records an error event on this object.
-// Only used for pods now.
+// Only used for pods and nodes now.
 func (h *masterEventHandler) RecordErrorEvent(obj interface{}, err error) {
 	switch h.objType {
 	case factory.PodType:
 		pod := obj.(*kapi.Pod)
 		klog.V(5).Infof("Recording error event on pod %s/%s", pod.Namespace, pod.Name)
 		h.oc.recordPodEvent(err, pod)
+	case factory.NodeType:
+		node := obj.(*kapi.Node)
+		klog.V(5).Infof("Recording error event for node %s", node.Name)
+		h.oc.recordNodeEvent(err, node)
 	}
 }
 
