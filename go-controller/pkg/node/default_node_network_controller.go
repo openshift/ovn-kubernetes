@@ -872,7 +872,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 						if err != nil {
 							err1 = fmt.Errorf("unable to fetch node-subnet annotation for node %s: err, %v", node.Name, err)
-							return false, nil
+							continue
 						}
 						for _, nodeSubnet := range nodeSubnets {
 							klog.Infof("Upgrade Hack: node %s, subnet %s", node.Name, nodeSubnet)
