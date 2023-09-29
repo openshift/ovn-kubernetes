@@ -278,8 +278,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						{
 							Node:     node1Name,
 							EgressIP: egressIP,
-							// blank network
-							Network: "",
 						},
 					},
 				},
@@ -446,8 +444,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						{
 							Node:     node1Name,
 							EgressIP: egressIP,
-							// blank network
-							Network: "",
 						},
 					},
 				},
@@ -621,7 +617,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								{
 									Node:     node1Name,
 									EgressIP: egressIP,
-									Network:  node1IPv4OVNManagedNet,
 								},
 							},
 						},
@@ -6240,7 +6235,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						{
 							Node:     node1Name,
 							EgressIP: egressIP3,
-							Network:  node1IPv4Net,
 						},
 					}
 					err = fakeOvn.controller.patchReplaceEgressIPStatus(egressIP2Name, status)
