@@ -393,10 +393,13 @@ func runWebhook(c *cli.Context, restCfg *rest.Config) error {
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
 				// Enable SO_REUSEPORT
+				klog.Infof("Setting SO_REUSEPORT on webhook socket")
 				err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 				if err != nil {
-					klog.Fatalf("Failed to set SO_REUSEPORT:", err)
+					klog.Errorf("Failed to set SO_REUSEPORT on webhook socket: %v", err)
+					klog.Fatalf("Failed to set SO_REUSEPORT: %v", err)
 				}
+				klog.Infof("SO_REUSEPORT set on webhook socket")
 			})
 		},
 	}
