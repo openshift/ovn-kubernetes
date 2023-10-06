@@ -122,6 +122,7 @@ const (
 	OVNICMPV6ErrorsRateLimiter     = "icmp6-error"
 	OVNRejectRateLimiter           = "reject"
 	OVNTCPRSTRateLimiter           = "tcp-reset"
+	OVNServiceMonitorLimiter       = "svc-monitor"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
