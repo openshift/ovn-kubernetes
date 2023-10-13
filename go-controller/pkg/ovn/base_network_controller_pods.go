@@ -679,9 +679,8 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 		}
 	}
 
-	// Remove the port from the multicast allow policy.
-	if bnc.multicastSupport && nsInfo.multicastEnabled && len(portUUID) > 0 {
-		if err = bnc.podDeleteAllowMulticastPolicy(ns, portUUID); err != nil {
+	if nsInfo.portGroupName != "" && len(portUUID) > 0 {
+		if ops, err = libovsdbops.DeletePortsFromPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
 			return nil, err
 		}
 	}
@@ -1019,4 +1018,26 @@ func (bnc *BaseNetworkController) shouldReleaseDeletedPod(expectedSwitchName, sw
 		return false, fmt.Errorf("cannot determine if IPs are safe to release for completed pod: %s: %w", podDesc, err)
 	}
 	return shouldRelease, nil
+}
+
+func (bnc *BaseNetworkController) getNamespaceLSPs(ns string) ([]*nbdb.LogicalSwitchPort, error) {
+	ports := []*nbdb.LogicalSwitchPort{}
+	pods, err := bnc.watchFactory.GetPods(ns)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pods for namespace %q: %v", ns, err)
+	}
+	for _, pod := range pods {
+		if util.PodCompleted(pod) {
+			continue
+		}
+		portInfoMap, err := bnc.logicalPortCache.getAll(pod)
+		if err != nil {
+			klog.Errorf(err.Error())
+		} else {
+			for _, portInfo := range portInfoMap {
+				ports = append(ports, &nbdb.LogicalSwitchPort{UUID: portInfo.uuid})
+			}
+		}
+	}
+	return ports, nil
 }
