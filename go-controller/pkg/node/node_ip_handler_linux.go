@@ -155,10 +155,8 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 
 				if addrChanged || !c.doesNodeHostAddressesMatch() {
 					if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-						klog.Errorf("Failed to set node annotations: %v", err)
-						continue
-					}
-					if err := c.nodeAnnotator.Run(); err != nil {
+						klog.Errorf("Failed to set node host address: %v", err)
+					} else if err := c.nodeAnnotator.Run(); err != nil {
 						klog.Errorf("Failed to set node annotations: %v", err)
 					}
 					c.OnChanged()
@@ -275,5 +273,6 @@ func (c *addressManager) sync() {
 		} else if err := c.nodeAnnotator.Run(); err != nil {
 			klog.Errorf("Failed to set node annotations: %v", err)
 		}
+		c.OnChanged()
 	}
 }
