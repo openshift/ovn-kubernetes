@@ -601,7 +601,7 @@ func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclien
 		}
 	}
 
-	ops, err = CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, lrsr, nil, fields...)
+	ops, err = CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, lrsr, p, fields...)
 	if err != nil {
 		return err
 	}
