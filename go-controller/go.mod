@@ -62,6 +62,9 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1
 )
 
+// OCPHACK
+require sigs.k8s.io/knftables v0.0.16
+
 require (
 	github.com/Microsoft/go-winio v0.6.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
