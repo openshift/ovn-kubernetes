@@ -327,7 +327,8 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 
 	// cleanup port groups based on acl search
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[policyACLExtIdKey] != "" || item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != ""
+		return (item.ExternalIDs[policyACLExtIdKey] != "" || item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != "") &&
+			(item.Priority == types.DefaultAllowPriority || item.Priority == types.DefaultDenyPriority)
 	}
 	netpolACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 	if err != nil {
@@ -348,7 +349,7 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 			} else if netpolACL.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != "" {
 				// default deny acl
 				// parse the namespace.Name from the ACL name (if ACL name is 63 chars, then it will fully be namespace.Name)
-				namespace := strings.Split(*netpolACL.Name, "_")[0]
+				namespace := strings.Split(libovsdbops.GetACLName(netpolACL), "_")[0]
 				if _, ok := expectedPolicies[namespace]; !ok {
 					// no policies in that namespace are found, delete default deny port group
 					stalePGs.Insert(defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix))
