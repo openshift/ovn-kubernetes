@@ -24,7 +24,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podL
 		if err != nil {
 			return err
 		}
-		return kube.UpdatePod(cpod)
+		return kube.UpdatePodStatus(cpod)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update %s annotation on pod %s/%s for NAD %s: %v",
