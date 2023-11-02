@@ -34,7 +34,8 @@ spec:
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
-      serviceAccountName: ovn
+      # as this did not exist in the attempted backport use the same permissions as master
+      serviceAccountName: ovnkube-master
       hostNetwork: true
       dnsPolicy: Default
 
