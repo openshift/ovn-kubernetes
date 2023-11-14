@@ -199,6 +199,21 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		if accessor, err := meta.Accessor(obj); err == nil {
 			accessor.SetManagedFields(nil)
 		}
+		if pod, ok := obj.(*kapi.Pod); ok {
+			pod.Spec.Volumes = []kapi.Volume{}
+			for i := range pod.Spec.Containers {
+				pod.Spec.Containers[i].Command = nil
+				pod.Spec.Containers[i].Args = nil
+				pod.Spec.Containers[i].Env = nil
+				pod.Spec.Containers[i].VolumeMounts = nil
+			}
+		} else if node, ok := obj.(*kapi.Node); ok {
+			node.Status.Images = nil
+			node.Status.VolumesInUse = nil
+			node.Status.VolumesAttached = nil
+			node.Status.Capacity = nil
+			node.Status.Allocatable = nil
+		}
 		return obj, nil
 	}
 
