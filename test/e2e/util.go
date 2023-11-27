@@ -985,3 +985,8 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 	framework.Logf("%s iptables input rule for protocol %s port %s action DROP on node %s", op, protocol, port, nodeName)
 	framework.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
 }
+
+func isLocalGWModeEnabled() bool {
+	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
+	return present && val == "local"
+}
