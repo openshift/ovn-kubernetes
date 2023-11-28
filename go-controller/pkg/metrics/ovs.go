@@ -545,7 +545,8 @@ func updateOvsInterfaceMetrics(ovsVsctl ovsClient) error {
 		}
 		statValue, err = strconv.ParseFloat(interfaceFieldValues[0], 64)
 		if err != nil {
-			return fmt.Errorf("expected string to contain an integer. Failed to get OVS interface metrics: %v", err)
+			return fmt.Errorf("expected string %q to contain an integer. Failed to get OVS interface metrics: %v",
+			interfaceFieldValues[0], err)
 		}
 		linkReset += statValue
 		interfaceCount++
