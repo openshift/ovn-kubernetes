@@ -626,6 +626,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterRouterLBGroupName + "-UUID",
 				Name: types.ClusterRouterLBGroupName,
 			}
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -637,6 +642,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
 				},
 			})
 
