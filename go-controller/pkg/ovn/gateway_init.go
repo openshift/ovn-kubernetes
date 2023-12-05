@@ -542,7 +542,8 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 
 	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
 		[]*nbdb.LogicalRouterPort{&externalLogicalRouterPort}, &externalLogicalRouterPort.MAC,
-		&externalLogicalRouterPort.Networks, &externalLogicalRouterPort.ExternalIDs)
+		&externalLogicalRouterPort.Networks, &externalLogicalRouterPort.ExternalIDs,
+		&externalLogicalRouterPort.Options)
 	if err != nil {
 		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", externalLogicalRouterPort, gatewayRouter, err)
 	}
