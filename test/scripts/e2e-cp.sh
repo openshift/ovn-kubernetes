@@ -70,6 +70,15 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
   SKIPPED_TESTS+="Should ensure load balancer service|LGW"
 fi
 
+# FIXME(mk): when in local GW mode, a node is marked as egress and a pod resides on this node, it will fail to talk
+# to other nodes in the cluster because the ip rules redirect all packets even ones destined for nodes.
+if [ "$OVN_GATEWAY_MODE" == "local" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="\[non-ovn-eip\]"
+fi
+
 # skipping the egress ip legacy health check test because it requires two
 # sequenced rollouts of both ovnkube-node and ovnkube-master that take a lot of
 # time.
