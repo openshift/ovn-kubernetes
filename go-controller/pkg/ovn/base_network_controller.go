@@ -37,7 +37,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -410,33 +409,6 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 
 	// Add the switch to the logical switch cache
 	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets)
-}
-
-// UpdateNodeAnnotationWithRetry update node's annotation with the given node annotations.
-func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName string,
-	nodeAnnotations map[string]string) error {
-	// Retry if it fails because of potential conflict which is transient. Return error in the
-	// case of other errors (say temporary API server down), and it will be taken care of by the
-	// retry mechanism.
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		// Informer cache should not be mutated, so get a copy of the object
-		node, err := cnci.watchFactory.GetNode(nodeName)
-		if err != nil {
-			return err
-		}
-
-		cnode := node.DeepCopy()
-		for k, v := range nodeAnnotations {
-			cnode.Annotations[k] = v
-		}
-		// It is possible to update the node annotations using status subresource
-		// because changes to metadata via status subresource are not restricted for nodes.
-		return cnci.kube.UpdateNodeStatus(cnode)
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation", nodeName)
-	}
-	return nil
 }
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
