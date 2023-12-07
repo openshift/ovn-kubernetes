@@ -16,9 +16,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
@@ -385,7 +383,7 @@ func (c *Controller) patchNodeLabels(node string, labels map[string]any) error {
 		return err
 	}
 
-	_, err = c.client.CoreV1().Nodes().Patch(context.TODO(), node, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = c.client.CoreV1().Nodes().PatchStatus(context.TODO(), node, patchData)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
