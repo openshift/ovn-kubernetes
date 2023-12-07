@@ -38,7 +38,8 @@ type PodSelectorAddressSet struct {
 	backRefs map[string]bool
 
 	// handler is either pod or namespace handler
-	handler *factory.Handler
+	nsHandler  *factory.Handler
+	podHandler *factory.Handler
 
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
@@ -51,6 +52,8 @@ type PodSelectorAddressSet struct {
 
 	// handlerResources holds the data that is used and updated by the handlers.
 	handlerResources *PodSelectorAddrSetHandlerInfo
+
+	cancelableContext *util.CancelableContext
 }
 
 // EnsurePodSelectorAddressSet returns address set for requested (podSelector, namespaceSelector, namespace).
@@ -158,6 +161,10 @@ func (oc *DefaultNetworkController) DeletePodSelectorAddressSet(addrSetKey, back
 
 func (psas *PodSelectorAddressSet) init(oc *DefaultNetworkController) error {
 	// create pod handler resources before starting the handlers
+	if psas.cancelableContext == nil {
+		cancelableContext := util.NewCancelableContextChild(oc.cancelableCtx)
+		psas.cancelableContext = &cancelableContext
+	}
 	if psas.handlerResources == nil {
 		as, err := oc.addressSetFactory.NewAddressSet(psas.addrSetDbIDs, nil)
 		if err != nil {
@@ -169,11 +176,12 @@ func (psas *PodSelectorAddressSet) init(oc *DefaultNetworkController) error {
 			podSelector:       psas.podSelector,
 			namespaceSelector: psas.namespaceSelector,
 			namespace:         psas.namespace,
+			stopChan:          psas.cancelableContext.Done(),
 		}
 	}
 
 	var err error
-	if psas.handler == nil {
+	if psas.nsHandler == nil && psas.podHandler == nil {
 		if psas.namespace != "" {
 			// static namespace
 			if psas.podSelector.Empty() {
@@ -205,6 +213,11 @@ func (psas *PodSelectorAddressSet) init(oc *DefaultNetworkController) error {
 
 func (psas *PodSelectorAddressSet) destroy(oc *DefaultNetworkController) error {
 	klog.Infof("Deleting shared address set for pod selector %s", psas.key)
+	if psas.cancelableContext != nil {
+		psas.cancelableContext.Cancel()
+		psas.cancelableContext = nil
+	}
+
 	psas.needsCleanup = true
 	if psas.handlerResources != nil {
 		err := psas.handlerResources.destroy(oc)
@@ -212,9 +225,13 @@ func (psas *PodSelectorAddressSet) destroy(oc *DefaultNetworkController) error {
 			return fmt.Errorf("failed to delete handler resources: %w", err)
 		}
 	}
-	if psas.handler != nil {
-		oc.watchFactory.RemovePodHandler(psas.handler)
-		psas.handler = nil
+	if psas.podHandler != nil {
+		oc.watchFactory.RemovePodHandler(psas.podHandler)
+		psas.podHandler = nil
+	}
+	if psas.nsHandler != nil {
+		oc.watchFactory.RemoveNamespaceHandler(psas.nsHandler)
+		psas.nsHandler = nil
 	}
 	psas.needsCleanup = false
 	return nil
@@ -229,17 +246,18 @@ func (oc *DefaultNetworkController) addPodSelectorHandler(psAddrSet *PodSelector
 		_ = oc.handlePodAddUpdate(podHandlerResources, objs...)
 		return nil
 	}
-	retryFramework := oc.newRetryFrameworkWithParameters(
+	retryFramework := oc.newRetryFrameworkWithParametersAndStopChan(
 		factory.AddressSetPodSelectorType,
 		syncFunc,
-		podHandlerResources)
+		podHandlerResources,
+		psAddrSet.cancelableContext.Done())
 
 	podHandler, err := retryFramework.WatchResourceFiltered(namespace, podSelector)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPodSelectorHandler: %v", err)
 		return err
 	}
-	psAddrSet.handler = podHandler
+	psAddrSet.podHandler = podHandler
 	return nil
 }
 
@@ -250,10 +268,11 @@ func (oc *DefaultNetworkController) addNamespacedPodSelectorHandler(psAddrSet *P
 	// start watching namespaces selected by the namespace selector nsSel;
 	// upon namespace add event, start watching pods in that namespace selected
 	// by the label selector podSel
-	retryFramework := oc.newRetryFrameworkWithParameters(
+	retryFramework := oc.newRetryFrameworkWithParametersAndStopChan(
 		factory.AddressSetNamespaceAndPodSelectorType,
 		nil,
 		psAddrSet.handlerResources,
+		psAddrSet.cancelableContext.Done(),
 	)
 	namespaceHandler, err := retryFramework.WatchResourceFiltered("", psAddrSet.namespaceSelector)
 	if err != nil {
@@ -261,7 +280,7 @@ func (oc *DefaultNetworkController) addNamespacedPodSelectorHandler(psAddrSet *P
 		return err
 	}
 
-	psAddrSet.handler = namespaceHandler
+	psAddrSet.nsHandler = namespaceHandler
 	return nil
 }
 
@@ -293,6 +312,8 @@ type PodSelectorAddrSetHandlerInfo struct {
 	namespaceSelector labels.Selector
 	// namespace is used when namespaceSelector is nil to set static namespace
 	namespace string
+
+	stopChan <-chan struct{}
 }
 
 // idempotent
@@ -526,10 +547,11 @@ func (oc *DefaultNetworkController) handleNamespaceAddUpdate(podHandlerInfo *Pod
 		_ = oc.handlePodAddUpdate(podHandlerInfo, objs...)
 		return nil
 	}
-	retryFramework := oc.newRetryFrameworkWithParameters(
+	retryFramework := oc.newRetryFrameworkWithParametersAndStopChan(
 		factory.AddressSetPodSelectorType,
 		syncFunc,
 		podHandlerInfo,
+		podHandlerInfo.stopChan,
 	)
 	// syncFunc and factory.AddressSetPodSelectorType add event handler also take np.RLock,
 	// and will be called form the same thread. The same thread shouldn't take the same rlock twice.

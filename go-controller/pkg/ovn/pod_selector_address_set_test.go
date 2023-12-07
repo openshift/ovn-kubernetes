@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"time"
 
 	"github.com/onsi/ginkgo"
@@ -142,10 +143,9 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 	})
 	ginkgo.It("creates one address set for multiple users with the same selector", func() {
 		namespace1 := *newNamespace(namespaceName1)
-		namespace2 := *newNamespace(namespaceName2)
 		networkPolicy1 := getMatchLabelsNetworkPolicy(netPolicyName1, namespace1.Name,
 			"", "label1", true, true)
-		networkPolicy2 := getMatchLabelsNetworkPolicy(netPolicyName2, namespace2.Name,
+		networkPolicy2 := getMatchLabelsNetworkPolicy(netPolicyName2, namespace1.Name,
 			"", "label1", true, true)
 		startOvn(initialDB, []v1.Namespace{namespace1}, []knet.NetworkPolicy{*networkPolicy1, *networkPolicy2},
 			nil, nil)
@@ -468,6 +468,32 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		// IP should be deleted from the address set on delete event, since the new pod with the same ip
 		// should not be present in given address set
 		eventuallyExpectEmptyAddressSetsExist(fakeOvn, peer, namespace1.Name)
+	})
+	ginkgo.It("cleans up retryFramework resources", func() {
+		namespace1 := *newNamespace(namespaceName1)
+		namespace1.Labels = map[string]string{"key": "value"}
+		startOvn(initialDB, []v1.Namespace{namespace1}, nil, nil, nil)
+		selector := &metav1.LabelSelector{
+			MatchLabels: map[string]string{"key": "value"},
+		}
+
+		goroutinesNumInit := runtime.NumGoroutine()
+		// namespace selector will be run because it is not empty.
+		// one namespace should match the label and start a pod watchFactory.
+		// that gives us 2 retryFrameworks, so 2 periodicallyRetryResources goroutines.
+		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(
+			selector, selector, namespaceName1, "backRef")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(func() int {
+			return runtime.NumGoroutine()
+		}).Should(gomega.Equal(goroutinesNumInit + 2))
+
+		err = fakeOvn.controller.DeletePodSelectorAddressSet(peerASKey, "backRef")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		// expect goroutines number to get back
+		gomega.Eventually(func() int {
+			return runtime.NumGoroutine()
+		}).Should(gomega.Equal(goroutinesNumInit))
 	})
 })
 

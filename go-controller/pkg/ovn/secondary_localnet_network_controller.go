@@ -38,6 +38,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
 					stopChan:                    stopChan,
 					wg:                          &sync.WaitGroup{},
+					cancelableCtx:               util.NewCancelableContext(),
 				},
 			},
 		},

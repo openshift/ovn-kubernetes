@@ -190,6 +190,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			addressSetFactory:           addressSetFactory,
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
+			cancelableCtx:               util.NewCancelableContext(),
 		},
 		externalGWCache:        make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:         sync.RWMutex{},
@@ -257,6 +258,14 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
 	extraParameters interface{}) *retry.RetryFramework {
+	return oc.newRetryFrameworkWithParametersAndStopChan(objectType, syncFunc, extraParameters, oc.stopChan)
+}
+
+func (oc *DefaultNetworkController) newRetryFrameworkWithParametersAndStopChan(
+	objectType reflect.Type,
+	syncFunc func([]interface{}) error,
+	extraParameters interface{},
+	stopChan <-chan struct{}) *retry.RetryFramework {
 	eventHandler := &defaultNetworkControllerEventHandler{
 		baseHandler:     baseNetworkControllerEventHandler{},
 		objType:         objectType,
@@ -272,7 +281,7 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 		EventHandler:           eventHandler,
 	}
 	r := retry.NewRetryFramework(
-		oc.stopChan,
+		stopChan,
 		oc.wg,
 		oc.watchFactory,
 		resourceHandler,
@@ -309,6 +318,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
 	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 }
 
