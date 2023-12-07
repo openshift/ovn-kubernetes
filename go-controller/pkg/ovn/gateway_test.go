@@ -1420,16 +1420,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Name: types.ClusterRouterLBGroupName,
 			}
 
+			gr := types.GWRouterPrefix + nodeName
+			datapath := &sbdb.DatapathBinding{
+				UUID:        gr + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
+			}
+
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
 						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
 						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
 						Networks: []string{"100.64.0.1/16"},
-					},
-					&nbdb.StaticMACBinding{
-						IP:          config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String(),
-						LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
 					},
 					&nbdb.LogicalRouterPort{
 						UUID:    types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
@@ -1454,6 +1456,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
+				},
+				SBData: []libovsdbtest.TestData{
+					datapath,
 				},
 			})
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
