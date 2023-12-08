@@ -78,6 +78,9 @@ type RetryFramework struct {
 	watchFactory      *factory.WatchFactory
 	ResourceHandler   *ResourceHandler
 	terminatedObjects sync.Map
+
+	// stopChan may be used to stop RetryFramework before watchFactory is shut down
+	stopChan <-chan struct{}
 }
 
 // NewRetryFramework returns a new RetryFramework instance, essential for the whole retry logic.
@@ -88,12 +91,22 @@ type RetryFramework struct {
 func NewRetryFramework(
 	watchFactory *factory.WatchFactory,
 	resourceHandler *ResourceHandler) *RetryFramework {
+	return NewRetryFrameworkWithStopChan(watchFactory, resourceHandler, nil)
+}
+
+// NewRetryFrameworkWithStopChan returns a new RetryFramework instance that may be stopped by closing a given stopChan.
+// It is also stopped on watchFactory shutdown.
+func NewRetryFrameworkWithStopChan(
+	watchFactory *factory.WatchFactory,
+	resourceHandler *ResourceHandler,
+	stopChan <-chan struct{}) *RetryFramework {
 	return &RetryFramework{
 		retryEntries:      syncmap.NewSyncMap[*retryObjEntry](),
 		retryChan:         make(chan struct{}, 1),
 		watchFactory:      watchFactory,
 		ResourceHandler:   resourceHandler,
 		terminatedObjects: sync.Map{},
+		stopChan:          stopChan,
 	}
 }
 
@@ -372,7 +385,7 @@ func (r *RetryFramework) periodicallyRetryResources() {
 	timer := time.NewTicker(RetryObjInterval)
 	waitCh := make(chan struct{})
 	go func() {
-		r.watchFactory.WaitForWatchFactoryStopChannel(waitCh)
+		r.watchFactory.WaitForWatchFactoryStopChannel(waitCh, r.stopChan)
 	}()
 	defer timer.Stop()
 	for {
@@ -386,7 +399,7 @@ func (r *RetryFramework) periodicallyRetryResources() {
 			timer.Reset(RetryObjInterval)
 
 		case <-waitCh:
-			klog.V(5).Infof("Stop channel got triggered: will stop retrying failed objects of type %s", r.ResourceHandler.ObjType)
+			klog.V(5).Infof("Watch factory was shut down OR stop channel got triggered: will stop retrying failed objects of type %s", r.ResourceHandler.ObjType)
 			return
 		}
 	}

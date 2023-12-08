@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1957,6 +1958,47 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("cleans up retryFramework resources", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				namespace1.Labels = map[string]string{"name": "label1"}
+				networkPolicy := newNetworkPolicy(netPolicyName2, namespace1.Name, metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{{
+						From: []knet.NetworkPolicyPeer{{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: namespace1.Labels,
+							}},
+						}},
+					}, nil)
+				startOvn(initialDB, []v1.Namespace{namespace1}, nil, nil, nil)
+				// wait for all initial handlers to be running
+				time.Sleep(100 * time.Millisecond)
+				goroutinesNumInit := runtime.NumGoroutine()
+				// network policy will create 1 watchFactory for local pods selector, 1 peer namespace selector and 1 service selector
+				// that gives us 3 retryFrameworks, each create 1 goroutine to retry and 1 goroutine to track watch factory stop channel
+				// so 6 periodicallyRetryResources goroutines.
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
+					Create(context.TODO(), networkPolicy, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() int {
+					return runtime.NumGoroutine()
+				}).Should(gomega.Equal(goroutinesNumInit + 6))
+
+				// Delete network policy
+				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
+					Delete(context.TODO(), networkPolicy.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// expect goroutines number to get back
+				gomega.Eventually(func() int {
+					return runtime.NumGoroutine()
+				}).Should(gomega.Equal(goroutinesNumInit))
+
+				return nil
+			}
+
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		})
 	})
 
