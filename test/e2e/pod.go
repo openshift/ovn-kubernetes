@@ -22,6 +22,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 		echoClientPodName         = "echo-client-pod"
 		echoServerPodPortMin      = 9800
 		echoServerPodPortMax      = 9899
+		ovnNs                     = "ovn-kubernetes"
 		primaryNetworkName        = "kind"
 	)
 
