@@ -839,7 +839,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// for at least one node in the given zone)
 	// NOTE: ovnkube-node in DPU-host mode has no SBDB to connect to. The encap port will be handled by the
 	// ovnkube-node running in DPU mode on behalf of the host.
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Default.EncapPort != config.DefaultEncapPort {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if err := setEncapPort(ctx); err != nil {
 			return err
 		}

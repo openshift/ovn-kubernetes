@@ -149,13 +149,11 @@ func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRe
 	encap := sbdb.Encap{
 		ChassisName: chassisID,
 		IP:          nodePrimaryIp,
-		Type:        "geneve",
-		Options:     map[string]string{"csum": "true"},
-	}
-
-	// set the geneve port if using something else than default
-	if config.Default.EncapPort != config.DefaultEncapPort {
-		encap.Options["dst_port"] = strconv.FormatUint(uint64(config.Default.EncapPort), 10)
+		Type:        "vxlan",
+		Options:     map[string]string{
+			"csum":     "true",
+			"dst_port": strconv.FormatUint(uint64(config.Default.EncapPort), 10),
+		},
 	}
 
 	return libovsdbops.CreateOrUpdateChassis(zch.sbClient, &chassis, &encap)

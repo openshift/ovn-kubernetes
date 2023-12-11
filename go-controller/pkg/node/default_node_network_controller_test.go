@@ -247,7 +247,7 @@ var _ = Describe("Node", func() {
 				fexec := ovntest.NewFakeExec()
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-type=vxlan "+
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
@@ -351,7 +351,7 @@ var _ = Describe("Node", func() {
 				fexec := ovntest.NewFakeExec()
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-type=vxlan "+
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
@@ -419,7 +419,7 @@ var _ = Describe("Node", func() {
 				fexec := ovntest.NewFakeExec()
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-type=vxlan "+
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
@@ -493,7 +493,7 @@ var _ = Describe("Node", func() {
 				fexec := ovntest.NewFakeExec()
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-type=vxlan "+
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
@@ -567,7 +567,7 @@ var _ = Describe("Node", func() {
 				fexec := ovntest.NewFakeExec()
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-type=vxlan "+
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
