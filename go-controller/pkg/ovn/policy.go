@@ -326,6 +326,25 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 			}
 		}
 	}
+	// Cleanup ACLs with priority 1013
+	// This is a 4.13 specific solution to get rid of a panic caused by presence
+	// of ACL with priority 1013(deprecated) and without a name.
+	// https://issues.redhat.com/browse/OCPBUGS-21668
+	// Start OCPBUG downstream SPECIFIC
+	predicate := func(item *nbdb.ACL) bool {
+		return item.Priority == types.DefaultRoutedMcastAllowPriority
+	}
+	staleACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, predicate)
+	if err != nil {
+		return fmt.Errorf("cannot find ACL with priority %d: %v", types.DefaultRoutedMcastAllowPriority, err)
+	}
+	if len(staleACLs) > 0 {
+		err = libovsdbops.DeleteACLsFromAllPortGroups(oc.nbClient, staleACLs...)
+		if err != nil {
+			return fmt.Errorf("unable to delete leftover ACLs from port groups: %v", err)
+		}
+	}
+	// End OCPBUG downstream SPECIFIC
 
 	// cleanup port groups based on acl search
 	p := func(item *nbdb.ACL) bool {
