@@ -329,7 +329,8 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 
 	// cleanup port groups based on acl search
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[policyACLExtIdKey] != "" || item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != ""
+		return item.ExternalIDs[policyACLExtIdKey] != "" || (item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != "" &&
+			item.Priority != types.DefaultRoutedMcastAllowPriority)
 	}
 	netpolACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 	if err != nil {
@@ -347,7 +348,7 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 					portGroupName, _ := getNetworkPolicyPGName(namespace, policyName)
 					stalePGs.Insert(portGroupName)
 				}
-			} else if netpolACL.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != "" {
+			} else if netpolACL.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] != "" && netpolACL.Name != nil {
 				// default deny acl
 				// parse the namespace.Name from the ACL name (if ACL name is 63 chars, then it will fully be namespace.Name)
 				namespace := strings.Split(*netpolACL.Name, "_")[0]
