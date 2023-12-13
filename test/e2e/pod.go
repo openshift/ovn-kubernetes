@@ -22,6 +22,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 		echoClientPodName         = "echo-client-pod"
 		echoServerPodPortMin      = 9800
 		echoServerPodPortMax      = 9899
+		ovnNs                     = "ovn-kubernetes"
 		primaryNetworkName        = "kind"
 	)
 
@@ -228,9 +229,6 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 						for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
 							framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
 							containerName := "ovnkube-node"
-							if isInterconnectEnabled() {
-								containerName = "ovnkube-controller"
-							}
 							_, err := framework.RunKubectl(ovnNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
 								"ip", "route", "flush", "cache")
 							framework.ExpectNoError(err, "Flushing the ip route cache failed")
