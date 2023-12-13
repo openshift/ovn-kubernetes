@@ -27,6 +27,10 @@ if [ "$KIND_IPV4_SUPPORT" == true ]; then
     fi
 fi
 
+if [ "$KIND_IPV4_SUPPORT" == false ]; then
+  SKIPPED_TESTS+="\[IPv4\]"
+fi
+
 if [ "$OVN_HA" == false ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
   	SKIPPED_TESTS+="|"
@@ -63,7 +67,7 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
     SKIPPED_TESTS+="|"
   fi
-  SKIPPED_TESTS+="Should ensure load balancer service"
+  SKIPPED_TESTS+="Should ensure load balancer service|LGW"
 fi
 
 # skipping the egress ip legacy health check test because it requires two
