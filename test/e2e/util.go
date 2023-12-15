@@ -1060,3 +1060,8 @@ func randStr(n int) string {
 	}
 	return string(b)
 }
+
+func isLocalGWModeEnabled() bool {
+	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
+	return present && val == "local"
+}

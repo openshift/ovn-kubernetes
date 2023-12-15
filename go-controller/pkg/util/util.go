@@ -62,6 +62,22 @@ func StringArg(context *cli.Context, name string) (string, error) {
 	return val, nil
 }
 
+// GetIPNetFullMask returns an IPNet object for IPV4 or IPV6 address with a full subnet mask
+func GetIPNetFullMask(ipStr string) (*net.IPNet, error) {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return nil, fmt.Errorf("failed to parse IP %q", ipStr)
+	}
+	mask := net.CIDRMask(32, 32)
+	if utilnet.IsIPv6(ip) {
+		mask = net.CIDRMask(128, 128)
+	}
+	return &net.IPNet{
+		IP:   ip,
+		Mask: mask,
+	}, nil
+}
+
 // GetIPFullMask returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
 func GetIPFullMask(ip string) string {
 	const (
