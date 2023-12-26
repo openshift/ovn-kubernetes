@@ -768,7 +768,7 @@ func getSessionAffinityTimeOut(service *v1.Service) int32 {
 
 func hasSessionAffinityTimeOut(service *v1.Service) bool {
 	return service.Spec.SessionAffinity == v1.ServiceAffinityClientIP &&
-		getSessionAffinityTimeOut(service) > 0
+		getSessionAffinityTimeOut(service) != 86000
 }
 
 // lbOpts generates the OVN load balancer options from the kubernetes Service.
