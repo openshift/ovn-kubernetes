@@ -1742,12 +1742,6 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		}
 	}
 
-	// OCP HACK -- block MCS ports https://github.com/openshift/ovn-kubernetes/pull/170
-	if err := insertMCSBlockIptRules(); err != nil {
-		return nil, err
-	}
-	// END OCP HACK
-
 	gw.initFunc = func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
@@ -1817,6 +1811,12 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing")
 		}
+
+		// OCP HACK -- block MCS ports https://github.com/openshift/ovn-kubernetes/pull/170
+		if err := insertMCSBlockIptRules(); err != nil {
+			return err
+		}
+		// END OCP HACK
 
 		return nil
 	}

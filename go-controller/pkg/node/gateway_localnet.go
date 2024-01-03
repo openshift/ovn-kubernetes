@@ -49,12 +49,6 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		return nil, err
 	}
 
-	// OCP HACK -- block MCS ports https://github.com/openshift/ovn-kubernetes/pull/170
-	if err := insertMCSBlockIptRules(); err != nil {
-		return nil, err
-	}
-	// END OCP HACK
-
 	if exGwBridge != nil {
 		gw.readyFunc = func() (bool, error) {
 			ready, err := gatewayReady(gwBridge.patchPort)
@@ -137,6 +131,12 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing")
 		}
+
+		// OCP HACK -- block MCS ports https://github.com/openshift/ovn-kubernetes/pull/170
+		if err := insertMCSBlockIptRules(); err != nil {
+			return err
+		}
+		// END OCP HACK
 
 		return nil
 	}
