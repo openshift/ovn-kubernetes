@@ -618,14 +618,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
 				UUID:        gr + "-UUID",
@@ -640,8 +632,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -664,7 +654,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			sctpSupport := false
 
 			var err error
-			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -1306,14 +1296,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.ClusterLBGroupName + "-UUID",
 				Name: types.ClusterLBGroupName,
 			}
-			expectedSwitchLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterSwitchLBGroupName + "-UUID",
-				Name: types.ClusterSwitchLBGroupName,
-			}
-			expectedRouterLBGroup := &nbdb.LoadBalancerGroup{
-				UUID: types.ClusterRouterLBGroupName + "-UUID",
-				Name: types.ClusterRouterLBGroupName,
-			}
 
 			gr := types.GWRouterPrefix + nodeName
 			datapath := &sbdb.DatapathBinding{
@@ -1349,8 +1331,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
-					expectedSwitchLBGroup,
-					expectedRouterLBGroup,
 				},
 				SBData: []libovsdbtest.TestData{
 					datapath,
@@ -1371,7 +1351,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
-			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedOVNClusterRouter.StaticRoutes = []string{}
