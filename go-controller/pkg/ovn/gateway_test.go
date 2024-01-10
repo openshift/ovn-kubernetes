@@ -193,7 +193,6 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			"gateway-physical-ip": "yes",
 		},
 		Networks: networks,
-		Options:  options,
 	})
 
 	natUUIDs := make([]string, 0, len(clusterIPSubnets))
