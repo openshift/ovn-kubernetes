@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
+	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -413,6 +415,18 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 
 // Run starts the actual watching.
 func (oc *DefaultNetworkController) Run(ctx context.Context) error {
+
+	klog.Info("Starting CPU profiling TROZET")
+	f, err := os.Create("trozet.pprof")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := pprof.StartCPUProfile(f); err != nil {
+		return fmt.Errorf("could not start CPU profiling")
+	}
+	defer pprof.StopCPUProfile()
+
 	oc.syncPeriodic()
 	klog.Info("Starting all the Watchers...")
 	start := time.Now()
@@ -432,7 +446,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	startSvc := time.Now()
 	// Services should be started after nodes to prevent LB churn
-	err := oc.StartServiceController(oc.wg, true)
+	err = oc.StartServiceController(oc.wg, true)
 	endSvc := time.Since(startSvc)
 	metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service").Set(endSvc.Seconds())
 	if err != nil {
