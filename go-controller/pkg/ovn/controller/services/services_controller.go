@@ -169,9 +169,12 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	}
 	// We need node cache to be synced first, as we rely on it to properly reprogram initial per node load balancers
 	klog.Info("Waiting for node tracker caches to sync")
-	if !util.WaitForNamedCacheSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
+	start := time.Now()
+	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
+	elapsed := time.Since(start)
+	klog.Infof("rravaiol: Node tracker sync took %s", elapsed)
 
 	klog.Info("Setting up event handlers for services")
 	svcHandler, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
