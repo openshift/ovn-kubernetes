@@ -1038,6 +1038,7 @@ k8s.io/kube-openapi/pkg/util/proto
 k8s.io/kube-openapi/pkg/validation/spec
 # k8s.io/kubernetes v1.27.3
 ## explicit; go 1.20
+k8s.io/kubernetes/pkg/apis/core
 k8s.io/kubernetes/pkg/probe
 k8s.io/kubernetes/pkg/probe/http
 k8s.io/kubernetes/pkg/util/iptables
