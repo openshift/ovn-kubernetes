@@ -365,8 +365,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	return wf, nil
 }
 
-func (wf *WatchFactory) WaitForWatchFactoryStopChannel(stopChan chan struct{}) {
-	<-wf.stopChan
+// WaitForWatchFactoryStopChannel closes given stopChan when either watch factory stopChan is closed or
+// a given externalStopChan is closed
+func (wf *WatchFactory) WaitForWatchFactoryStopChannel(stopChan chan struct{}, externalStopChan <-chan struct{}) {
+	select {
+	case <-wf.stopChan:
+	case <-externalStopChan:
+	}
 	close(stopChan)
 }
 

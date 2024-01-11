@@ -208,6 +208,8 @@ type networkPolicy struct {
 	// or this value will be set to true and handler can't proceed.
 	// Use networkPolicy.RLock to read this field and hold it for the whole event handling.
 	deleted bool
+
+	stopChan chan struct{}
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -998,9 +1000,9 @@ func (oc *Controller) addLocalPodHandler(policy *knet.NetworkPolicy, np *network
 	retryLocalPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.LocalPodSelectorType,
 		syncFunc,
-		&NetworkPolicyExtraParameters{
-			np: np,
-		})
+		&NetworkPolicyExtraParameters{np: np},
+		np.stopChan,
+	)
 
 	podHandler, err := retryLocalPods.WatchResourceFiltered(policy.Namespace, sel)
 	if err != nil {
@@ -1216,6 +1218,10 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 		// since pod handlers take np.RLock
 		np.Unlock()
 		npLocked = false
+
+		if np.stopChan == nil {
+			np.stopChan = make(chan struct{})
+		}
 
 		// 6. Start peer handlers to update all allow rules first
 		for _, handler := range policyHandlers {
@@ -1596,10 +1602,9 @@ func (oc *Controller) addPeerServiceHandler(
 	retryPeerServices := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerServiceType,
 		nil,
-		&NetworkPolicyExtraParameters{
-			gp: gp,
-			np: np,
-		})
+		&NetworkPolicyExtraParameters{gp: gp, np: np},
+		np.stopChan,
+	)
 
 	serviceHandler, err := retryPeerServices.WatchResourceFiltered(policy.Namespace, nil)
 	if err != nil {
@@ -1632,11 +1637,9 @@ func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
 	retryPeerPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerPodSelectorType,
 		syncFunc,
-		&NetworkPolicyExtraParameters{
-			np:          np,
-			gp:          gp,
-			podSelector: sel,
-		})
+		&NetworkPolicyExtraParameters{np: np, gp: gp, podSelector: sel},
+		np.stopChan,
+	)
 
 	podHandler, err := retryPeerPods.WatchResourceFiltered(namespace, sel)
 	if err != nil {
@@ -1678,11 +1681,8 @@ func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressP
 	retryPeerPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerPodForNamespaceAndPodSelectorType,
 		syncFunc,
-		&NetworkPolicyExtraParameters{
-			gp:          gp,
-			np:          np,
-			podSelector: podSelector,
-		},
+		&NetworkPolicyExtraParameters{gp: gp, np: np, podSelector: podSelector},
+		np.stopChan,
 	)
 	// syncFunc and factory.PeerPodForNamespaceAndPodSelectorType add event handler also take np.RLock,
 	// and will be called form the same thread. The same thread shouldn't take the same rlock twice.
@@ -1761,10 +1761,8 @@ func (oc *Controller) addPeerNamespaceAndPodHandler(namespaceSelector *metav1.La
 	retryPeerNamespaces := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerNamespaceAndPodSelectorType,
 		nil,
-		&NetworkPolicyExtraParameters{
-			gp:          gp,
-			np:          np,
-			podSelector: podSel}, // will be used in the addFunc to create a pod handler
+		&NetworkPolicyExtraParameters{gp: gp, np: np, podSelector: podSel},
+		np.stopChan,
 	)
 
 	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", nsSel)
@@ -1893,6 +1891,7 @@ func (oc *Controller) addPeerNamespaceHandler(
 		factory.PeerNamespaceSelectorType,
 		syncFunc,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
+		np.stopChan,
 	)
 
 	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", sel)
@@ -1906,6 +1905,10 @@ func (oc *Controller) addPeerNamespaceHandler(
 }
 
 func (oc *Controller) shutdownHandlers(np *networkPolicy) {
+	if np.stopChan != nil {
+		close(np.stopChan)
+		np.stopChan = nil
+	}
 	for _, handler := range np.podHandlerList {
 		oc.watchFactory.RemovePodHandler(handler)
 	}

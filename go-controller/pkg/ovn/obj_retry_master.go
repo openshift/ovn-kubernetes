@@ -46,7 +46,8 @@ type masterEventHandler struct {
 func (oc *Controller) newRetryFrameworkMasterWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
-	extraParameters interface{}) *retry.RetryFramework {
+	extraParameters interface{},
+	stopChan <-chan struct{}) *retry.RetryFramework {
 	resourceHandler := &retry.ResourceHandler{
 		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
 		NeedsUpdateDuringRetry: needsUpdateDuringRetry(objectType),
@@ -58,9 +59,10 @@ func (oc *Controller) newRetryFrameworkMasterWithParameters(
 			syncFunc:        syncFunc,
 		},
 	}
-	r := retry.NewRetryFramework(
+	r := retry.NewRetryFrameworkWithStopChan(
 		oc.watchFactory,
 		resourceHandler,
+		stopChan,
 	)
 	return r
 }
@@ -73,7 +75,7 @@ func (oc *Controller) newRetryFrameworkMasterWithParameters(
 // This is true for all resource types except for those that are dynamically created when
 // adding a network policy.
 func (oc *Controller) newRetryFrameworkMaster(objectType reflect.Type) *retry.RetryFramework {
-	return oc.newRetryFrameworkMasterWithParameters(objectType, nil, nil)
+	return oc.newRetryFrameworkMasterWithParameters(objectType, nil, nil, nil)
 }
 
 // hasResourceAnUpdateFunc returns true if the given resource type has a dedicated update function.
