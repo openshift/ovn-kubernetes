@@ -403,7 +403,12 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	return nil
 }
 
-func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset, eventRecorder record.EventRecorder) error {
+func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset, eventRecorder record.EventRecorder) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from a panic in runOvnKube: %v", r)
+		}
+	}()
 	startTime := time.Now()
 
 	if runMode.cleanupNode {
@@ -418,7 +423,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	}()
 
 	var masterWatchFactory *factory.WatchFactory
-	var err error
 
 	if runMode.networkControllerManager {
 		// create factory and start the controllers asked for
