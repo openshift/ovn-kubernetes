@@ -25,7 +25,9 @@ import (
 
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2erc "k8s.io/kubernetes/test/e2e/framework/rc"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
+	testutils "k8s.io/kubernetes/test/utils"
 )
 
 var _ = ginkgo.Describe("Services", func() {
@@ -105,6 +107,69 @@ var _ = ginkgo.Describe("Services", func() {
 			return stdout == nodeName, nil
 		})
 		framework.ExpectNoError(err)
+	})
+
+	ginkgo.It("Creates a service with session-affinity, and ensures it works after backend deletion", func() {
+		namespace := f.Namespace.Name
+		servicePort := 80
+		jig := e2eservice.NewTestJig(cs, namespace, serviceName)
+
+		ginkgo.By("Creating a session-affinity service")
+		var createdPods []*v1.Pod
+		maxContainerFailures := 0
+		replicas := 3
+		config := testutils.RCConfig{
+			Client:               cs,
+			Image:                framework.ServeHostnameImage,
+			Command:              []string{"/agnhost", "serve-hostname"},
+			Name:                 "backend",
+			Labels:               jig.Labels,
+			Namespace:            namespace,
+			PollInterval:         3 * time.Second,
+			Timeout:              framework.PodReadyBeforeTimeout,
+			Replicas:             replicas,
+			CreatedPods:          &createdPods,
+			MaxContainerFailures: &maxContainerFailures,
+		}
+		err := e2erc.RunRC(config)
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		gomega.Expect(len(createdPods)).To(gomega.Equal(replicas), fmt.Sprintf("incorrect number of running pods: %v", len(createdPods)))
+
+		svc, err := jig.CreateTCPService(func(s *v1.Service) {
+			s.Spec.SessionAffinity = "ClientIP"
+			s.Spec.Type = v1.ServiceTypeClusterIP
+			s.Spec.Ports = []v1.ServicePort{{
+				Port: int32(servicePort),
+				// agnhost serve-hostname port
+				TargetPort: intstr.FromInt(9376),
+				Protocol:   v1.ProtocolTCP,
+			}}
+		})
+		framework.ExpectNoError(err)
+
+		execPod := e2epod.CreateExecPodOrFail(cs, namespace, "execpod-affinity", nil)
+		err = jig.CheckServiceReachability(svc, execPod)
+		framework.ExpectNoError(err)
+
+		ensureStickySession := func() string {
+			hosts := getServiceBackendsFromPod(execPod, svc.Spec.ClusterIP, int(svc.Spec.Ports[0].Port))
+			uniqHosts := sets.NewString(hosts...)
+			gomega.Expect(uniqHosts.Len()).To(gomega.Equal(1), fmt.Sprintf("expected the same backend for every connection with session-affinity set, got %v", uniqHosts))
+			backendPod, _ := uniqHosts.PopAny()
+			return backendPod
+		}
+
+		ginkgo.By("check sessions affinity from a client pod")
+		backendPod := ensureStickySession()
+
+		ginkgo.By(fmt.Sprintf("delete chosen backend pod %v", backendPod))
+		err = f.PodClient().Delete(context.TODO(), backendPod, metav1.DeleteOptions{})
+		framework.ExpectNoError(err)
+		err = e2epod.WaitForPodNotFoundInNamespace(cs, backendPod, namespace, 60*time.Second)
+		framework.ExpectNoError(err)
+
+		ginkgo.By("check sessions affinity from a client pod again")
+		ensureStickySession()
 	})
 
 	// The below series of tests queries nodePort services with hostNetwork:true and hostNetwork:false pods as endpoints,
@@ -534,6 +599,28 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 	})
 })
+
+func getServiceBackendsFromPod(execPod *v1.Pod, serviceIP string, servicePort int) []string {
+	connectionAttempts := 15
+	serviceIPPort := net.JoinHostPort(serviceIP, strconv.Itoa(servicePort))
+	curl := fmt.Sprintf(`curl -q -s --connect-timeout 2 http://%s/`, serviceIPPort)
+	cmd := fmt.Sprintf("for i in $(seq 1 %d); do echo; %s ; done", connectionAttempts, curl)
+
+	stdout, err := framework.RunHostCmd(execPod.Namespace, execPod.Name, cmd)
+	if err != nil {
+		framework.Logf("Failed to get response from %s. Retry until timeout", serviceIPPort)
+		return nil
+	}
+	hosts := strings.Split(stdout, "\n")
+	nonEmptyHosts := []string{}
+	for _, host := range hosts {
+		if len(host) > 0 {
+			nonEmptyHosts = append(nonEmptyHosts, strings.TrimSpace(host))
+		}
+	}
+	gomega.Expect(len(nonEmptyHosts)).To(gomega.Equal(connectionAttempts), fmt.Sprintf("Expected %v replies, got %v", connectionAttempts, nonEmptyHosts))
+	return nonEmptyHosts
+}
 
 // This test ensures that - when a pod that's a backend for a service curls the
 // service ip; if the traffic was DNAT-ed to the same src pod (hairpin/loopback case) -
