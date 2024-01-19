@@ -732,6 +732,10 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 				serviceInterface)
 			continue
 		}
+		// don't process headless service
+		if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
+			continue
+		}
 
 		epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
 		if err != nil {
@@ -1076,6 +1080,10 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		if !ok {
 			klog.Errorf("Spurious object in syncServices: %v",
 				serviceInterface)
+			continue
+		}
+		// don't process headless service
+		if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 			continue
 		}
 		// Add correct iptables rules.
