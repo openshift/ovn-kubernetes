@@ -111,6 +111,7 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 			if !ok {
 				return
 			}
+			klog.Infof("rravaiol: nodeTracker.Start() on %s", node.Name)
 			nt.updateNode(node)
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -140,6 +141,8 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 				util.NodeHostCIDRsAnnotationChanged(oldObj, newObj) ||
 				util.NodeZoneAnnotationChanged(oldObj, newObj) ||
 				util.NodeMigratedZoneAnnotationChanged(oldObj, newObj) {
+				klog.Infof("rravaiol: nodeTracker.Update() on %s", newObj.Name)
+
 				nt.updateNode(newObj)
 			}
 		},
@@ -157,6 +160,8 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 					return
 				}
 			}
+			klog.Infof("rravaiol: nodeTracker.Delete() on %s", node.Name)
+
 			nt.removeNodeWithServiceReSync(node.Name)
 		},
 	}))
@@ -182,10 +187,12 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
 	}
 
-	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
+	klog.Infof("rravaiol: Node %s switch + router changed, syncing services, nt lock requested", nodeName)
 
 	nt.Lock()
+	defer klog.Infof("rravaiol: Node %s switch + router changed, syncing services, nt lock released", nodeName)
 	defer nt.Unlock()
+	klog.Infof("rravaiol: Node %s switch + router changed, syncing services: nt Lock taken", nodeName)
 	if existing, ok := nt.nodes[nodeName]; ok {
 		if reflect.DeepEqual(existing, ni) {
 			return
@@ -196,24 +203,32 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 
 	// Resync all services
 	nt.resyncFn(nt.getZoneNodes())
+	klog.Infof("rravaiol: Node %s switch + router changed, syncing services: all services resync'ed", nodeName)
+
 }
 
 // removeNodeWithServiceReSync removes a node from the LB -> node mapper
 // *and* forces full reconciliation of services.
 func (nt *nodeTracker) removeNodeWithServiceReSync(nodeName string) {
 	nt.removeNode(nodeName)
+	klog.Infof("rravaiol: removeNodeWithServiceReSync(%s), nt lock requested", nodeName)
 	nt.Lock()
+	klog.Infof("rravaiol: removeNodeWithServiceReSync(%s), nt lock taken", nodeName)
 	nt.resyncFn(nt.getZoneNodes())
 	nt.Unlock()
+	klog.Infof("rravaiol: removeNodeWithServiceReSync(%s), nt lock released", nodeName)
 }
 
 // RemoveNode removes a node from the LB -> node mapper
 // We don't need to re-sync here, because any stale LBs
 // will eventually be cleaned up, and they don't have any cost.
 func (nt *nodeTracker) removeNode(nodeName string) {
+	klog.Infof("rravaiol: removeNode(%s), nt lock requested", nodeName)
 	nt.Lock()
+	defer klog.Infof("rravaiol: removeNode (%s), nt lock released", nodeName)
 	defer nt.Unlock()
 
+	klog.Infof("rravaiol: removeNode (%s), nt lock taken", nodeName)
 	delete(nt.nodes, nodeName)
 }
 

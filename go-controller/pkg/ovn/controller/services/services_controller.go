@@ -169,9 +169,13 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	}
 	// We need node cache to be synced first, as we rely on it to properly reprogram initial per node load balancers
 	klog.Info("Waiting for node tracker caches to sync")
+	start := time.Now()
 	if !util.WaitForNamedCacheSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
-		return fmt.Errorf("error syncing cache")
+		elapsed := time.Since(start)
+		panic(fmt.Errorf("rravaiol: error syncing node tracker cache, timed out after %s", elapsed))
 	}
+	elapsed := time.Since(start)
+	klog.Infof("rravaiol: Node tracker sync took %s", elapsed)
 
 	klog.Info("Setting up event handlers for services")
 	svcHandler, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -196,7 +200,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	// Wait for the caches to be synced
 	klog.Info("Waiting for service and endpoint caches to sync")
 	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, svcHandler.HasSynced, endpointHandler.HasSynced) {
-		return fmt.Errorf("error syncing cache")
+		panic(fmt.Errorf("error syncing service and endpoint caches"))
 	}
 
 	if runRepair {
@@ -274,8 +278,11 @@ func (c *Controller) handleErr(err error, key interface{}) {
 func (c *Controller) initTopLevelCache() error {
 	var err error
 
+	klog.Infof("rravaiol: initTopLevelCache, requesting c.alreadyAppliedRWLock.RLock")
 	c.alreadyAppliedRWLock.Lock()
+	defer klog.Infof("rravaiol: initTopLevelCache, released c.alreadyAppliedRWLock.RLock")
 	defer c.alreadyAppliedRWLock.Unlock()
+	klog.Infof("rravaiol: initTopLevelCache, took c.alreadyAppliedRWLock.RLock")
 
 	// First list all the templates.
 	allTemplates := TemplateMap{}
@@ -318,7 +325,7 @@ func (c *Controller) syncService(key string) error {
 	if err != nil {
 		return err
 	}
-	klog.V(5).Infof("Processing sync for service %s/%s", namespace, name)
+	klog.Infof("Processing sync for service %s/%s", namespace, name)
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
@@ -328,8 +335,11 @@ func (c *Controller) syncService(key string) error {
 
 	// Shared node information (c.nodeInfos, c.nodeIPv4Template, c.nodeIPv6Template)
 	// needs to be accessed with the nodeInfoRWLock taken for read.
+	klog.Infof("rravaiol: syncService %s/%s, requesting c.nodeInfoRWLock.RLock", namespace, name)
 	c.nodeInfoRWLock.RLock()
+	defer klog.Infof("rravaiol: syncService %s/%s, released c.nodeInfoRWLock.RLock", namespace, name)
 	defer c.nodeInfoRWLock.RUnlock()
+	klog.Infof("rravaiol: syncService %s/%s, took c.nodeInfoRWLock.RLock", namespace, name)
 
 	// Get current Service from the cache
 	service, err := c.serviceLister.Services(namespace).Get(name)
@@ -349,8 +359,10 @@ func (c *Controller) syncService(key string) error {
 				Name:      name,
 			},
 		}
-
+		klog.Infof("rravaiol: syncService %s/%s (consider delete), requesting c.alreadyAppliedRWLock.RLock", namespace, name)
 		c.alreadyAppliedRWLock.RLock()
+		klog.Infof("rravaiol: syncService %s/%s (consider delete), took c.alreadyAppliedRWLock.RLock", namespace, name)
+
 		alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
 		var existingLBs []LB
 		if alreadyAppliedKeyExists {
@@ -358,7 +370,7 @@ func (c *Controller) syncService(key string) error {
 			copy(existingLBs, alreadyAppliedLbs)
 		}
 		c.alreadyAppliedRWLock.RUnlock()
-
+		klog.Infof("rravaiol: syncService %s/%s (consider delete), released c.alreadyAppliedRWLock.RLock", namespace, name)
 		if alreadyAppliedKeyExists {
 			//
 			// The controller's alreadyApplied functions as the cache for the service controller to map into OVN
@@ -370,10 +382,12 @@ func (c *Controller) syncService(key string) error {
 				return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
 					namespace, name, err)
 			}
-
+			klog.Infof("rravaiol: syncService %s/%s (alreadyAppliedKeyExists), requesting c.alreadyAppliedRWLock.Lock", namespace, name)
 			c.alreadyAppliedRWLock.Lock()
+			klog.Infof("rravaiol: syncService %s/%s  (alreadyAppliedKeyExists), took c.alreadyAppliedRWLock.Lock", namespace, name)
 			delete(c.alreadyApplied, key)
 			c.alreadyAppliedRWLock.Unlock()
+			klog.Infof("rravaiol: syncService %s/%s (alreadyAppliedKeyExists), released c.alreadyAppliedRWLock.Lock", namespace, name)
 		}
 
 		c.repair.serviceSynced(key)
@@ -419,7 +433,9 @@ func (c *Controller) syncService(key string) error {
 	lbs = append(lbs, perNodeLBs...)
 
 	// Short-circuit if nothing has changed
+	klog.Infof("rravaiol: syncService %s/%s, requesting c.alreadyAppliedRWLock.RLock", namespace, name)
 	c.alreadyAppliedRWLock.RLock()
+	klog.Infof("rravaiol: syncService %s/%s, took c.alreadyAppliedRWLock.RLock", namespace, name)
 	alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
 	var existingLBs []LB
 	if alreadyAppliedKeyExists {
@@ -427,6 +443,7 @@ func (c *Controller) syncService(key string) error {
 		copy(existingLBs, alreadyAppliedLbs)
 	}
 	c.alreadyAppliedRWLock.RUnlock()
+	klog.Infof("rravaiol: syncService %s/%s, released c.alreadyAppliedRWLock.RLock", namespace, name)
 
 	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
 		klog.V(5).Infof("Skipping no-op change for service %s", key)
@@ -439,10 +456,12 @@ func (c *Controller) syncService(key string) error {
 		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs); err != nil {
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
-
+		klog.Infof("rravaiol: syncService %s/%s, services do not match, requesting c.alreadyAppliedRWLock.RLock", namespace, name)
 		c.alreadyAppliedRWLock.Lock()
+		klog.Infof("rravaiol: syncService %s/%s, services do not match, took c.alreadyAppliedRWLock.RLock", namespace, name)
 		c.alreadyApplied[key] = lbs
 		c.alreadyAppliedRWLock.Unlock()
+		klog.Infof("rravaiol: syncService %s/%s, services do not match, released c.alreadyAppliedRWLock.RLock", namespace, name)
 	}
 
 	c.repair.serviceSynced(key)
@@ -450,8 +469,11 @@ func (c *Controller) syncService(key string) error {
 }
 
 func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
+	klog.Infof("rravaiol: syncNodeInfos, requesting nodeInfoRWLock.Lock")
 	c.nodeInfoRWLock.Lock()
+	defer klog.Infof("rravaiol: syncNodeInfos, released nodeInfoRWLock.Lock")
 	defer c.nodeInfoRWLock.Unlock()
+	klog.Infof("rravaiol: syncNodeInfos, took nodeInfoRWLock.Lock")
 
 	c.nodeInfos = nodeInfos
 	if !c.useTemplates {
