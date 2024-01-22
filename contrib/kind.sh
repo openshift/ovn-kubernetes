@@ -150,6 +150,7 @@ usage() {
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
     echo "-sm  | --scale-metrics              Enable scale metrics"
+    echo "--disable-ovnkube-identity          Disable per-node cert and ovnkube-identity webhook"
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -303,6 +304,8 @@ parse_args() {
             -mne | --multi-network-enable )     shift
                                                 ENABLE_MULTI_NET=true
                                                 ;;
+           --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -336,6 +339,7 @@ print_params() {
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "ENABLE_IPSEC = $ENABLE_IPSEC"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
@@ -510,6 +514,7 @@ set_default_params() {
   else
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
+  OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
@@ -727,7 +732,8 @@ create_ovn_kube_manifests() {
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
-    --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}"
+    --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
+    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}"
   popd
 }
 
@@ -754,9 +760,13 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   run_kubectl apply -f ovn-setup.yaml
+  run_kubectl apply -f rbac-ovnkube-identity.yaml
   run_kubectl apply -f rbac-ovnkube-master.yaml
   run_kubectl apply -f rbac-ovnkube-node.yaml
   run_kubectl apply -f rbac-ovnkube-db.yaml
+  if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
+    run_kubectl apply -f ovnkube-identity.yaml
+  fi
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
   # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=

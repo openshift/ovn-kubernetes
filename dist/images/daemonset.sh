@@ -78,6 +78,7 @@ OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
 OVNKUBE_METRICS_SCALE_ENABLE=
+OVN_ENABLE_OVNKUBE_IDENTITY="true"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -270,7 +271,9 @@ while [ "$1" != "" ]; do
   --in-upgrade)
     IN_UPGRADE=true
     ;;
-
+  --enable-ovnkube-identity)
+    OVN_ENABLE_OVNKUBE_IDENTITY=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -412,6 +415,9 @@ echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
 echo "ovnkube_metrics_scale_enable: ${ovnkube_metrics_scale_enable}"
 
+ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY}
+echo "ovn_enable_ovnkube_identity: ${ovn_enable_ovnkube_identity}"
+
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
@@ -448,6 +454,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -481,6 +488,7 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
@@ -511,6 +519,7 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \
@@ -575,6 +584,31 @@ ovn_image=${image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
 
+ovnkube_certs_dir="/tmp/ovnkube-certs"
+ovnkube_webhook_name="ovnkube-webhook"
+mkdir -p ${ovnkube_certs_dir}
+path_prefix="${ovnkube_certs_dir}/${ovnkube_webhook_name}"
+
+if [ "${ovn_enable_ovnkube_identity}" = "true" ]; then
+  # Create self signed CA and webhook cert
+  # NOTE: The CA and certificate are not renewed after they expire, this should only be used in development environments
+ openssl req -x509 -newkey rsa:4096 -nodes -keyout "${path_prefix}-ca.key" -out "${path_prefix}-ca.crt" -days 400 -subj "/CN=self-signed-ca"
+  openssl req -newkey rsa:4096 -nodes -keyout "${path_prefix}.key" -out "${path_prefix}.csr" -subj "/CN=localhost"
+  openssl x509 -req -in "${path_prefix}.csr" -CA "${path_prefix}-ca.crt" -CAkey "${path_prefix}-ca.key" -extfile <(printf "subjectAltName=DNS:localhost") -CAcreateserial -out "${path_prefix}.crt" -days 365
+fi
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_master_count=${ovn_master_count} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  webhook_ca_bundle=$(cat "${path_prefix}-ca.crt" | base64 -w0) \
+  webhook_key=$(cat "${path_prefix}.key" | base64 -w0) \
+  webhook_cert=$(cat "${path_prefix}.crt" | base64 -w0) \
+  ovn_enable_multi_node_zone=${ovn_enable_multi_node_zone} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  j2 ../templates/ovnkube-identity.yaml.j2 -o ${output_dir}/ovnkube-identity.yaml
+
 if ${enable_ipsec}; then
   ovn_image=${image} \
     j2 ../templates/ovn-ipsec.yaml.j2 -o ${output_dir}/ovn-ipsec.yaml
@@ -600,7 +634,10 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   in_upgrade=${in_upgrade} \
   j2 ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
-cp ../templates/rbac-ovnkube-node.yaml.j2 ${output_dir}/rbac-ovnkube-node.yaml
+ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  j2 ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
+
+cp ../templates/rbac-ovnkube-identity.yaml.j2 ${output_dir}/rbac-ovnkube-identity.yaml
 cp ../templates/rbac-ovnkube-master.yaml.j2 ${output_dir}/rbac-ovnkube-master.yaml
 cp ../templates/rbac-ovnkube-db.yaml.j2 ${output_dir}/rbac-ovnkube-db.yaml
 cp ../templates/ovnkube-monitor.yaml.j2 ${output_dir}/ovnkube-monitor.yaml

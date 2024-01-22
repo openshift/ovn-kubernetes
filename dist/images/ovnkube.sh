@@ -21,6 +21,7 @@ fi
 #    nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
 #    sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
 #    ovn-master     Runs ovnkube in master mode (v3)
+#    ovn-identity   Runs ovnkube-identity (v3)
 #    ovn-controller Runs ovn controller (v3)
 #    ovn-node       Runs ovnkube in node mode (v3)
 #    cleanup-ovn-node   Runs ovnkube to cleanup the node (v3)
@@ -81,6 +82,7 @@ fi
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
+# OVN_ENABLE_OVNKUBE_IDENTITY - enable per node certificate ovn-kubernetes
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -171,6 +173,8 @@ metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+#OVN_ENABLE_OVNKUBE_IDENTITY - enable per node cert
+ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 
 # host on which ovnkube-db POD is running and this POD contains both
 # OVN NB and SB DB running in their own container.
@@ -441,7 +445,7 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnkube-cluster-manager" | "ovnkube-network-controller-manager")
+  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnkube-cluster-manager" | "ovnkube-network-controller-manager" | "ovnkube-identity")
     # just check for presence of pid
     ;;
   "ovnnb_db" | "ovnsb_db")
@@ -881,6 +885,28 @@ run-ovn-northd() {
   exit 8
 }
 
+# v3 -  run ovnkube-identity
+ovnkube-identity() {
+    trap 'kill $(jobs -p); exit 0' TERM
+    check_ovn_daemonset_version "3"
+    rm -f ${OVN_RUNDIR}/ovnkube-identity.pid
+
+    ovnkube_enable_hybrid_overlay_flag=
+    if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
+      ovnkube_enable_hybrid_overlay_flag="--enable-hybrid-overlay"
+    fi
+
+    # extra-allowed-user:
+    #   ovnkube-master service account - required for compact mode
+    exec /usr/bin/ovnkube-identity  --k8s-apiserver="${K8S_APISERVER}" \
+    --webhook-cert-dir="/etc/webhook-cert" \
+    ${ovnkube_enable_hybrid_overlay_flag} \
+    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovnkube-master" \
+    --loglevel="${ovnkube_loglevel}"
+
+    exit 9
+}
+
 # v3 - run ovnkube --master (both cluster-manager and network-controller-manager)
 ovn-master() {
   trap 'kill $(jobs -p); exit 0' TERM
@@ -1000,6 +1026,21 @@ ovn-master() {
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
 
+  ovnkube_local_cert_flags=
+  if [[ ${ovn_enable_ovnkube_identity} == "true" ]]; then
+    bootstrap_kubeconfig="/host-kubernetes/kubelet.conf"
+    if [ -f "${bootstrap_kubeconfig}" ]; then
+      ovnkube_local_cert_flags="
+        --bootstrap-kubeconfig ${bootstrap_kubeconfig}
+        --cert-dir /var/run/ovn-kubernetes/certs
+      "
+    else
+      echo "bootstrap kubeconfig file: ${bootstrap_kubeconfig} doesn't exist,
+       skipping bootstrap-kubeconfig/cert-dir parameters"
+    fi
+  fi
+  echo "ovnkube_local_cert_flags=${ovnkube_local_cert_flags}"
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1026,6 +1067,7 @@ ovn-master() {
     ${egressfirewall_enabled_flag} \
     ${egressqos_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
+    ${ovnkube_local_cert_flags} \
     ${ovnkube_metrics_scale_enable_flag} \
     ${multi_network_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
@@ -1514,6 +1556,15 @@ ovn-node() {
       "
   fi
 
+  ovnkube_node_certs_flags=
+  if [[ ${ovn_enable_ovnkube_identity} == "true" ]]; then
+     ovnkube_node_certs_flags="
+        --bootstrap-kubeconfig /host/etc/kubernetes/kubelet.conf
+        --cert-dir /var/run/ovn-kubernetes/certs
+     "
+  fi
+  echo "ovnkube_node_certs_flags=${ovnkube_node_certs_flags}"
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -1535,6 +1586,7 @@ ovn-node() {
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
+    ${ovnkube_node_certs_flags} \
     ${ovnkube_metrics_tls_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${monitor_all} \
@@ -1647,6 +1699,9 @@ case ${cmd} in
 "ovn-master") # pod ovnkube-master container ovnkube-master
   ovn-master
   ;;
+"ovnkube-identity") # pod ovnkube-identity container ovnkube-identity
+  ovnkube-identity
+  ;;
 "ovn-network-controller-manager") # pod ovnkube-master container ovnkube-network-controller-manager
   ovn-network-controller-manager
   ;;
@@ -1695,7 +1750,7 @@ case ${cmd} in
 *)
   echo "invalid command ${cmd}"
   echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master " \
-    "ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server " \
+    "ovnkube-identity ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server " \
     "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
   exit 0
   ;;
