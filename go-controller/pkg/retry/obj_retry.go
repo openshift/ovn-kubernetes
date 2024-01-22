@@ -133,6 +133,7 @@ func NewRetryFramework(
 
 func (r *RetryFramework) DoWithLock(key string, f func(key string)) {
 	r.retryEntries.LockKey(key)
+	klog.Infof("SURYA %v", key)
 	defer r.retryEntries.UnlockKey(key)
 	f(key)
 }
@@ -144,6 +145,7 @@ func (r *RetryFramework) initRetryObjWithAddBackoff(obj interface{}, lockedKey s
 	entry.newObj = obj
 	entry.failedAttempts = 0
 	entry.backoffSec = backoff
+	klog.Infof("SURYA: %v/%v", lockedKey, entry)
 	return entry
 }
 
@@ -192,7 +194,9 @@ func (r *RetryFramework) AddRetryObjWithAddNoBackoff(obj interface{}) error {
 	if err != nil {
 		return fmt.Errorf("could not get the key of %s %v: %v", r.ResourceHandler.ObjType, obj, err)
 	}
+	klog.Infof("SURYA %v", key)
 	r.DoWithLock(key, func(key string) {
+		klog.Infof("SURYA %v", key)
 		r.initRetryObjWithAddBackoff(obj, key, noBackoff)
 	})
 	return nil
@@ -251,7 +255,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 	r.DoWithLock(objKey, func(key string) {
 		entry, loaded := r.getRetryObj(key)
 		if !loaded {
-			klog.V(5).Infof("%v resource %s was not found in the iterateRetryResources map while retrying resource setup", r.ResourceHandler.ObjType, objKey)
+			klog.Infof("SURYA: %v resource %s was not found in the iterateRetryResources map while retrying resource setup", r.ResourceHandler.ObjType, objKey)
 			return
 		}
 
@@ -270,12 +274,13 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 		// check if immediate retry is requested
 		if entry.backoffSec == noBackoff {
 			entry.backoffSec = initialBackoff
+			klog.Infof("SURYA: immediate retry %v", initialBackoff)
 			forceRetry = true
 		}
 		backoff := (entry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
 		objTimer := entry.timeStamp.Add(backoff)
 		if !forceRetry && now.Before(objTimer) {
-			klog.V(5).Infof("Attempting retry of %s %s before timer (time: %s): skip", r.ResourceHandler.ObjType, objKey, objTimer)
+			klog.Infof("SURYA: Attempting retry of %s %s before timer (time: %s): skip", r.ResourceHandler.ObjType, objKey, objTimer)
 			return
 		}
 
@@ -313,7 +318,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			entry.newObj = kObj
 		}
 		if r.ResourceHandler.NeedsUpdateDuringRetry && entry.config != nil && entry.newObj != nil {
-			klog.Infof("%v retry: updating object %s", r.ResourceHandler.ObjType, objKey)
+			klog.Infof("SURYA: %v retry: updating object %s", r.ResourceHandler.ObjType, objKey)
 			if err := r.ResourceHandler.UpdateResource(entry.config, entry.newObj, true); err != nil {
 				entry.timeStamp = time.Now()
 				entry.failedAttempts++
@@ -392,6 +397,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 // Keys added after the snapshot was done won't be retried during this run.
 func (r *RetryFramework) iterateRetryResources() {
 	entriesKeys := r.retryEntries.GetKeys()
+	klog.Infof("SURYA %v", entriesKeys)
 	if len(entriesKeys) == 0 {
 		return
 	}
@@ -399,7 +405,7 @@ func (r *RetryFramework) iterateRetryResources() {
 	wg := &sync.WaitGroup{}
 
 	// Process the above list of objects that need retry by holding the lock for each one of them.
-	klog.V(5).Infof("Going to retry %v resource setup for %d objects: %s", r.ResourceHandler.ObjType, len(entriesKeys), entriesKeys)
+	klog.Infof("SURYA: Going to retry %v resource setup for %d objects: %s", r.ResourceHandler.ObjType, len(entriesKeys), entriesKeys)
 
 	for _, entryKey := range entriesKeys {
 		wg.Add(1)
@@ -408,9 +414,9 @@ func (r *RetryFramework) iterateRetryResources() {
 			r.resourceRetry(entryKey, now)
 		}(entryKey)
 	}
-	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.ResourceHandler.ObjType)
+	klog.Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.ResourceHandler.ObjType)
 	wg.Wait()
-	klog.V(5).Infof("Function iterateRetryResources for %s ended (in %v)", r.ResourceHandler.ObjType, time.Since(now))
+	klog.Infof("Function iterateRetryResources for %s ended (in %v)", r.ResourceHandler.ObjType, time.Since(now))
 }
 
 // periodicallyRetryResources tracks RetryFramework and checks if any object needs to be retried for add or delete every
@@ -421,15 +427,16 @@ func (r *RetryFramework) periodicallyRetryResources() {
 	for {
 		select {
 		case <-timer.C:
+			klog.Infof("SURYA: ticked!!")
 			r.iterateRetryResources()
 
 		case <-r.retryChan:
-			klog.V(5).Infof("periodicallyRetryResources: Retry channel got triggered: retrying failed objects of type %s", r.ResourceHandler.ObjType)
+			klog.Infof("periodicallyRetryResources: Retry channel got triggered: retrying failed objects of type %s", r.ResourceHandler.ObjType)
 			r.iterateRetryResources()
 			timer.Reset(RetryObjInterval)
 
 		case <-r.stopChan:
-			klog.V(5).Infof("Stop channel got triggered: will stop retrying failed objects of type %s", r.ResourceHandler.ObjType)
+			klog.Infof("Stop channel got triggered: will stop retrying failed objects of type %s", r.ResourceHandler.ObjType)
 			return
 		}
 	}

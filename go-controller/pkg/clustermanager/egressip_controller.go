@@ -642,6 +642,7 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		}
+		klog.Infof("SURYA %v", nodeName)
 	}
 }
 
@@ -745,7 +746,7 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 
 func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	var errors []error
-	klog.V(5).Infof("Egress node: %s about to be initialized", nodeName)
+	klog.Infof("SURYA: Egress node: %s about to be initialized", nodeName)
 
 	// If a node has been labelled for egress IP we need to check if there are any
 	// egress IPs which are missing an assignment. If there are, we need to send a
@@ -764,6 +765,7 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 			// implementation will not trigger a watch event for updates on
 			// objects which have no semantic difference, hence: call the
 			// reconciliation function directly.
+			klog.Infof("SURYA: %v/%v", egressIP.Spec.EgressIPs, egressIP.Status.Items)
 			if err := eIPC.reconcileEgressIP(nil, &egressIP); err != nil {
 				errors = append(errors, fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err))
 			}
@@ -773,6 +775,7 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	if len(errors) > 0 {
 		return utilerrors.NewAggregate(errors)
 	}
+	klog.Infof("SURYA: here")
 	return nil
 }
 
@@ -1049,6 +1052,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			// DELETE, new will be nil and we should not update the object.
 			if new != nil {
 				if err := eIPC.patchReplaceEgressIPStatus(name, statusToKeep); err != nil {
+					klog.Infof("SURYA: here %v/%v", statusToKeep, statusToRemove)
 					return err
 				}
 			}
@@ -1554,18 +1558,22 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 			updatedStatus := []egressipv1.EgressIPStatusItem{}
 			for _, status := range egressIP.Status.Items {
 				if !reflect.DeepEqual(status, statusItem) {
+					klog.Infof("SURYA: here %v", updatedStatus)
 					updatedStatus = append(updatedStatus, status)
 				}
 			}
 			if err := eIPC.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
+				klog.Infof("SURYA: here %v", updatedStatus)
 				return err
 			}
 		}
 		resyncEgressIPs, err := eIPC.removePendingOpsAndGetResyncs(egressIPName, egressIPString)
+		klog.Infof("SURYA: here %v", resyncEgressIPs)
 		if err != nil {
 			return err
 		}
 		for _, resyncEgressIP := range resyncEgressIPs {
+			klog.Infof("SURYA: here %v", resyncEgressIP)
 			if err := eIPC.reconcileEgressIP(nil, resyncEgressIP); err != nil {
 				return fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
@@ -1679,12 +1687,15 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 	if !exists {
 		return nil, fmt.Errorf("pending operations found for EgressIP: %s, but not for the finalized IP: %s", egressIPName, egressIP)
 	}
+	klog.Infof("SURYA: Before loop %v/%v/%v", egressIPName, egressIP, ops)
 	// Make sure we are dealing with a delete operation, since for update
 	// operations will still need to process the add afterwards.
 	if op.toAdd == "" && op.toDelete != "" {
+		klog.Infof("SURYA: Before loop %v/%v", egressIPName, egressIP)
 		delete(ops, egressIP)
 	}
 	if len(ops) == 0 {
+		klog.Infof("SURYA: Before loop %v/%v", egressIPName, egressIP)
 		delete(eIPC.pendingCloudPrivateIPConfigsOps, egressIPName)
 	}
 
@@ -1698,28 +1709,36 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 		return nil, fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
 	resyncs := make([]*egressipv1.EgressIP, 0, len(egressIPs))
+	klog.Infof("SURYA: Before loop %v", egressIPs)
 	for _, egressIP := range egressIPs {
 		egressIP := *egressIP
 		// Do not process the egress IP object which owns the
 		// CloudPrivateIPConfig for which we are currently processing the
 		// deletion for.
 		if egressIP.Name == egressIPName {
+			klog.Infof("SURYA: IT's the same!!")
 			continue
 		}
 		unassigned := len(egressIP.Spec.EgressIPs) - len(egressIP.Status.Items)
 		ops, pending := eIPC.pendingCloudPrivateIPConfigsOps[egressIP.Name]
+		klog.Infof("SURYA: IT's here %v/%v/%v!!", unassigned, ops, pending)
 		// If the EgressIP was never added to the pending cache to begin
 		// with, but has un-assigned egress IPs, try it.
 		if !pending && unassigned > 0 {
+			klog.Infof("SURYA: IT's here %v!!", unassigned)
 			resyncs = append(resyncs, &egressIP)
+			klog.Infof("SURYA %v", resyncs)
 			continue
 		}
 		// If the EgressIP has pending operations, have a look at if the
 		// unassigned operations superseed the pending ones. It could be
 		// that it could only execute a couple of assignments at one point.
 		if pending && unassigned > len(ops) {
+			klog.Infof("SURYA: IT's here %v/%v!!", unassigned, pending)
 			resyncs = append(resyncs, &egressIP)
+			klog.Infof("SURYA %v", resyncs)
 		}
 	}
+	klog.Infof("SURYA %v", resyncs)
 	return resyncs, nil
 }
