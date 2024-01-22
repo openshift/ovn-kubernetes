@@ -152,7 +152,7 @@ func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *
 		return bnnc.Kube.UpdatePodStatus(cpod)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update %s annotation for %s: %v", util.DPUConnetionStatusAnnot, podDesc, resultErr)
+		return fmt.Errorf("failed to update %s annotation for %s: %v", util.DPUConnectionStatusAnnot, podDesc, resultErr)
 	}
 	return nil
 }

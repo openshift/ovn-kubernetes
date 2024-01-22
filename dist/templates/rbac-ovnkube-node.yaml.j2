@@ -4,6 +4,8 @@ metadata:
     name: ovnkube-node
     namespace: ovn-kubernetes
 
+# When ovn_enable_ovnkube_identity is true, an ovnkube-node process will identify as a user in a system:ovn-nodes group,
+# not the ovnkube-node serviceAccount
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -11,6 +13,31 @@ metadata:
     name: ovnkube-node
 roleRef:
     name: ovnkube-node
+    kind: ClusterRole
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    {% if ovn_enable_ovnkube_identity == "true" -%}
+    - kind: Group
+      name: system:ovn-nodes
+      apiGroup: rbac.authorization.k8s.io
+    {% else %}
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+    {%- endif %}
+
+
+# even when ovn_enable_ovnkube_identity is enabled, an ovnkube-node service account
+# is used in the ovnkube-node pod during initialization:
+# https://github.com/ovn-org/ovn-kubernetes/blob/c135b19e0b424c847e1de8bc214d884f8f905a8c/dist/images/ovnkube.sh#L2249
+# https://github.com/ovn-org/ovn-kubernetes/blob/c135b19e0b424c847e1de8bc214d884f8f905a8c/dist/images/ovnkube.sh#L748
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+    name: ovnkube-node-status-reader
+roleRef:
+    name: ovnkube-node-status-reader
     kind: ClusterRole
     apiGroup: rbac.authorization.k8s.io
 subjects:
@@ -29,10 +56,41 @@ roleRef:
     kind: Role
     apiGroup: rbac.authorization.k8s.io
 subjects:
+  {% if ovn_enable_ovnkube_identity == "true" -%}
+  - kind: Group
+    name: system:ovn-nodes
+    apiGroup: rbac.authorization.k8s.io
+  {% else %}
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+  {%- endif %}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: ovnkube-node-ep
+    namespace: ovn-kubernetes
+roleRef:
+    name: ovnkube-node-ep
+    kind: Role
+    apiGroup: rbac.authorization.k8s.io
+subjects:
     - kind: ServiceAccount
       name: ovnkube-node
       namespace: ovn-kubernetes
 
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    name: ovnkube-node-status-reader
+rules:
+    - apiGroups: [""]
+      resources:
+          - nodes/status
+      verbs: [ "get" ]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -65,6 +123,16 @@ rules:
           - egressservices
           - adminpolicybasedexternalroutes
       verbs: [ "get", "list", "watch" ]
+    {% if ovn_enable_ovnkube_identity == "true" -%}
+    - apiGroups: ["certificates.k8s.io"]
+      resources:
+      - certificatesigningrequests
+      verbs:
+      - create
+      - get
+      - list
+      - watch
+    {%- endif %}
     - apiGroups: [""]
       resources:
           - events
