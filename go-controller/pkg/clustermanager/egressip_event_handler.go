@@ -36,6 +36,7 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, fro
 			return nil
 		}
 
+		klog.Infof("SURYA: Calling change from add: %v", node)
 		// Initialize the allocator on every update,
 		// ovnkube-node/cloud-network-config-controller will make sure to
 		// annotate the node with the egressIPConfig, but that might have
@@ -66,6 +67,7 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, fro
 		return h.eIPC.reconcileEgressIP(nil, eIP)
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		klog.Infof("SURYA: Calling change from add: %v", cloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
@@ -91,6 +93,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			return nil
 		}
 
+		klog.Infof("SURYA: Calling change from update: %v/%v", oldNode, newNode)
 		// Initialize the allocator on every update,
 		// ovnkube-node/cloud-network-config-controller will make sure to
 		// annotate the node with the egressIPConfig, but that might have
@@ -133,9 +136,11 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			}
 			return nil
 		}
-		if isOldReady == isNewReady && !isHostCIDRsAltered {
+		klog.Infof("SURYA %v/%v/%v/%v", newNode.Name, isOldReady, isNewReady, isHostCIDRsAltered)
+		/*if isOldReady == isNewReady && !isHostCIDRsAltered {
+			klog.Infof("SURYA: returning with no-op")
 			return nil
-		}
+		}*/
 		if !isNewReady {
 			klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
 			if err := h.eIPC.deleteEgressNode(newNode.Name); err != nil {
@@ -149,6 +154,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			}
 		}
 		if isHostCIDRsAltered {
+			klog.Infof("SURYA %v/%v/%v/%v", newNode.Name, isOldReady, isNewReady, isHostCIDRsAltered)
 			// we only need to consider EIPs that are assigned to networks that aren't managed by OVN
 			if err := h.eIPC.reconcileNonOVNNetworkEIPs(newNode); err != nil {
 				return fmt.Errorf("failed to reconsider egress IPs that are host on non-OVN managed networks: %v", err)
@@ -158,6 +164,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 	case factory.CloudPrivateIPConfigType:
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		klog.Infof("SURYA: Calling change from update: %v/%v", oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
@@ -177,6 +184,7 @@ func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, cachedObj in
 		if util.NoHostSubnet(node) {
 			return nil
 		}
+		klog.Infof("SURYA: Calling change from delete: %v", node)
 		h.eIPC.deleteNodeForEgress(node)
 		nodeEgressLabel := util.GetNodeEgressLabel()
 		nodeLabels := node.GetLabels()
@@ -189,6 +197,7 @@ func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, cachedObj in
 		return nil
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		klog.Infof("SURYA: Calling change from delete: %v", cloudPrivateIPConfig)
 		return h.eIPC.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
