@@ -604,8 +604,8 @@ func (bnc *BaseNetworkController) getNamespaceLocked(ns string, readOnly bool) (
 }
 
 // deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
-// namespace, locked.
-func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInfo {
+// namespace, locked. If error != nil, namespaceInfo is nil.
+func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceInfo, error) {
 	// The locking here is the same as in getNamespaceLocked
 
 	bnc.namespacesMutex.Lock()
@@ -613,7 +613,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInf
 	bnc.namespacesMutex.Unlock()
 
 	if nsInfo == nil {
-		return nil
+		return nil, nil
 	}
 	nsInfo.Lock()
 
@@ -621,7 +621,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInf
 	defer bnc.namespacesMutex.Unlock()
 	if nsInfo != bnc.namespaces[ns] {
 		nsInfo.Unlock()
-		return nil
+		return nil, nil
 	}
 	if nsInfo.addressSet != nil {
 		// Empty the address set, then delete it after an interval.
@@ -655,9 +655,16 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInf
 			}
 		}()
 	}
+	if nsInfo.portGroupName != "" {
+		err := libovsdbops.DeletePortGroups(bnc.nbClient, nsInfo.portGroupName)
+		if err != nil {
+			nsInfo.Unlock()
+			return nil, err
+		}
+	}
 	delete(bnc.namespaces, ns)
 
-	return nsInfo
+	return nsInfo, nil
 }
 
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic

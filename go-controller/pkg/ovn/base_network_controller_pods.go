@@ -679,9 +679,8 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 		}
 	}
 
-	// Remove the port from the multicast allow policy.
-	if bnc.multicastSupport && nsInfo.multicastEnabled && len(portUUID) > 0 {
-		if err = bnc.podDeleteAllowMulticastPolicy(ns, portUUID); err != nil {
+	if nsInfo.portGroupName != "" && len(portUUID) > 0 {
+		if ops, err = libovsdbops.DeletePortsFromPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
 			return nil, err
 		}
 	}

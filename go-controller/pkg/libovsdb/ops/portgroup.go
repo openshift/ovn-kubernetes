@@ -75,6 +75,20 @@ func CreateOrUpdatePortGroups(nbClient libovsdbclient.Client, pgs ...*nbdb.PortG
 	return err
 }
 
+// CreatePortGroup creates the provided port group if it doesn't exist
+func CreatePortGroup(nbClient libovsdbclient.Client, portGroup *nbdb.PortGroup) error {
+	opModel := operationModel{
+		Model:          portGroup,
+		OnModelUpdates: onModelUpdatesNone(),
+		ErrNotFound:    false,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(nbClient)
+	_, err := m.CreateOrUpdate(opModel)
+	return err
+}
+
 // GetPortGroup looks up a port group from the cache
 func GetPortGroup(nbClient libovsdbclient.Client, pg *nbdb.PortGroup) (*nbdb.PortGroup, error) {
 	found := []*nbdb.PortGroup{}
@@ -141,7 +155,7 @@ func DeletePortsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.
 	opModel := operationModel{
 		Model:            &pg,
 		OnModelMutations: []interface{}{&pg.Ports},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 
@@ -229,7 +243,7 @@ func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	opModel := operationModel{
 		Model:            &pg,
 		OnModelMutations: []interface{}{&pg.ACLs},
-		ErrNotFound:      true,
+		ErrNotFound:      false,
 		BulkOp:           false,
 	}
 
