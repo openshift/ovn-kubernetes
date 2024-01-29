@@ -126,6 +126,10 @@ type Controller struct {
 	// nodeTracker
 	nodeTracker *nodeTracker
 
+	// nodeTrackerInitialSyncDone is false up until the initial node tracker sync at startup is done
+	nodeTrackerInitialSyncDone     bool
+	nodeTrackerInitialSyncDoneLock sync.RWMutex
+
 	// Per node information and template variables.  The latter expand to each
 	// chassis' node IP (v4 and v6).
 	// Must be accessed only with the nodeInfo mutex taken.
@@ -168,15 +172,22 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		return err
 	}
 	// We need node cache to be synced first, as we rely on it to properly reprogram initial per node load balancers
+	// No need to sync services here, since workers aren't up yet.
 	klog.Info("Waiting for node tracker caches to sync")
+	c.nodeTrackerInitialSyncDoneLock.Lock()
+	c.nodeTrackerInitialSyncDone = false
+	c.nodeTrackerInitialSyncDoneLock.Unlock()
 	start := time.Now()
 	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
 		elapsed := time.Since(start)
 		panic(fmt.Errorf("rravaiol: error syncing node tracker cache, timed out after %s", elapsed))
 	}
+
+	c.nodeTrackerInitialSyncDoneLock.Lock()
+	c.nodeTrackerInitialSyncDone = true
+	c.nodeTrackerInitialSyncDoneLock.Unlock()
 	elapsed := time.Since(start)
 	klog.Infof("rravaiol: Node tracker sync took %s", elapsed)
-
 	klog.Info("Setting up event handlers for services")
 	svcHandler, err := c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
@@ -534,15 +545,20 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 	// Resync node infos and node IP templates.
 	c.syncNodeInfos(nodeInfos)
 
-	// Resync services.
-	services, err := c.serviceLister.List(labels.Everything())
-	if err != nil {
-		klog.Errorf("Cached lister failed!? %v", err)
-		return
-	}
+	// Resync all services unless we're processing the initial node tracker sync (in which case
+	// the service add will happen at the next step in the controller services Run())
+	c.nodeTrackerInitialSyncDoneLock.RLock()
+	defer c.nodeTrackerInitialSyncDoneLock.RUnlock()
+	if c.nodeTrackerInitialSyncDone {
+		services, err := c.serviceLister.List(labels.Everything())
+		if err != nil {
+			klog.Errorf("Cached lister failed!? %v", err)
+			return
+		}
 
-	for _, service := range services {
-		c.onServiceAdd(service)
+		for _, service := range services {
+			c.onServiceAdd(service)
+		}
 	}
 }
 
