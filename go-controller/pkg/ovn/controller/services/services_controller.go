@@ -170,7 +170,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	// We need node cache to be synced first, as we rely on it to properly reprogram initial per node load balancers
 	klog.Info("Waiting for node tracker caches to sync")
 	start := time.Now()
-	if !util.WaitForNamedCacheSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
+	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, nodeHandler.HasSynced) {
 		elapsed := time.Since(start)
 		panic(fmt.Errorf("rravaiol: error syncing node tracker cache, timed out after %s", elapsed))
 	}
@@ -199,7 +199,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 
 	// Wait for the caches to be synced
 	klog.Info("Waiting for service and endpoint caches to sync")
-	if !util.WaitForNamedCacheSyncWithTimeout(controllerName, stopCh, svcHandler.HasSynced, endpointHandler.HasSynced) {
+	if !util.WaitForHandlerSyncWithTimeout(controllerName, stopCh, svcHandler.HasSynced, endpointHandler.HasSynced) {
 		panic(fmt.Errorf("error syncing service and endpoint caches"))
 	}
 

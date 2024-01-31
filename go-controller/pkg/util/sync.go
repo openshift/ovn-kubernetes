@@ -27,6 +27,10 @@ func GetChildStopChanWithTimeout(parentStopChan <-chan struct{}, duration time.D
 	return childStopChan
 }
 
-func WaitForNamedCacheSyncWithTimeout(controllerName string, stopCh <-chan struct{}, cacheSyncs ...cache.InformerSynced) bool {
+func WaitForInformerCacheSyncWithTimeout(controllerName string, stopCh <-chan struct{}, cacheSyncs ...cache.InformerSynced) bool {
 	return cache.WaitForNamedCacheSync(controllerName, GetChildStopChanWithTimeout(stopCh, types.InformerSyncTimeout), cacheSyncs...)
+}
+
+func WaitForHandlerSyncWithTimeout(controllerName string, stopCh <-chan struct{}, handlerSyncs ...cache.InformerSynced) bool {
+	return cache.WaitForNamedCacheSync(controllerName, GetChildStopChanWithTimeout(stopCh, types.HandlerSyncTimeout), handlerSyncs...)
 }
