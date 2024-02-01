@@ -297,7 +297,7 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	// Build the abstract LB configs for this service
-	perNodeConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices)
+	perNodeConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.nodeTracker.allNodes())
 	klog.V(5).Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
 	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
 
