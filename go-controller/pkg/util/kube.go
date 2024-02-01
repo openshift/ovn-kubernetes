@@ -690,23 +690,23 @@ func IsEndpointReady(endpoint discovery.Endpoint) bool {
 	return endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
 }
 
-// IsEndpointServing takes as input an endpoint from an endpoint slice and returns true if the endpoint is
-// to be considered serving. Falling back to IsEndpointReady when Serving field is nil, as per doc:
-// "If nil, consumers should defer to the ready condition.
-// https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L138-L139
-func IsEndpointServing(endpoint discovery.Endpoint) bool {
-	if endpoint.Conditions.Serving != nil {
-		return *endpoint.Conditions.Serving
-	} else {
-		return IsEndpointReady(endpoint)
-	}
-}
+// // IsEndpointServing takes as input an endpoint from an endpoint slice and returns true if the endpoint is
+// // to be considered serving. Falling back to IsEndpointReady when Serving field is nil, as per doc:
+// // "If nil, consumers should defer to the ready condition.
+// // https://github.com/kubernetes/api/blob/0478a3e95231398d8b380dc2a1905972be8ae1d5/discovery/v1/types.go#L138-L139
+// func IsEndpointServing(endpoint discovery.Endpoint) bool {
+// 	if endpoint.Conditions.Serving != nil {
+// 		return *endpoint.Conditions.Serving
+// 	} else {
+// 		return IsEndpointReady(endpoint)
+// 	}
+// }
 
 // IsEndpointEligible takes as input an endpoint from an endpoint slice and a boolean that indicates whether to include
 // all terminating endpoints, as per the PublishNotReadyAddresses feature in kubernetes service spec. It always returns true
 // if includeTerminating is true and falls back to IsEndpointServing otherwise.
 func IsEndpointEligible(endpoint discovery.Endpoint, includeTerminating bool) bool {
-	return includeTerminating || IsEndpointServing(endpoint)
+	return includeTerminating || IsEndpointReady(endpoint)
 }
 
 // NoHostSubnet() compares the no-hostsubnet-nodes flag with node labels to see if the node is managing its
