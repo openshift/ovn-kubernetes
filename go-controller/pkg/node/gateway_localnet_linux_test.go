@@ -548,6 +548,7 @@ var _ = Describe("Node Operations", func() {
 				)
 				ep1 := discovery.Endpoint{
 					Addresses: []string{"10.244.0.3"},
+					NodeName:  &fakeNodeName,
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -1930,6 +1931,7 @@ var _ = Describe("Node Operations", func() {
 				)
 				ep1 := discovery.Endpoint{
 					Addresses: []string{"10.244.0.3"},
+					NodeName:  &fakeNodeName,
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2069,6 +2071,7 @@ var _ = Describe("Node Operations", func() {
 
 				ep1 := discovery.Endpoint{
 					Addresses: []string{"10.244.0.3"},
+					NodeName:  &fakeNodeName,
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2359,6 +2362,7 @@ var _ = Describe("Node Operations", func() {
 				)
 				ep1 := discovery.Endpoint{
 					Addresses: []string{"10.244.0.3"},
+					NodeName:  &fakeNodeName,
 				}
 				epPort1 := discovery.EndpointPort{
 					Name: &epPortName,
@@ -2670,6 +2674,7 @@ var _ = Describe("Node Operations", func() {
 
 				ep1 := discovery.Endpoint{
 					Addresses: []string{"10.128.0.3"},
+					NodeName:  &fakeNodeName,
 				}
 				epPort := discovery.EndpointPort{
 					Name: &epPortName,
