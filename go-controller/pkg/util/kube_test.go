@@ -47,6 +47,8 @@ dEr/VxqHD3VILs9RaRegAhJhldXRQLIQTO7ErBBDpqWeCtWVYpoNz4iCxTIM5Cuf
 ReYNnyicsbkqWletNw+vHX/bvZ8=
 -----END CERTIFICATE-----`
 
+var nodeA string = "node-A"
+
 func TestNewClientset(t *testing.T) {
 	tests := []struct {
 		desc        string
@@ -420,7 +422,68 @@ func makeNodeWithAddresses(name, internal, external string) *v1.Node {
 	return node
 }
 
-func Test_getLbEndpoints(t *testing.T) {
+// makeReadyEndpointList returns a list of only one endpoint that carries the input addresses.
+func makeReadyEndpointList(addresses ...string) []discovery.Endpoint {
+	return []discovery.Endpoint{
+		makeReadyEndpoint(addresses...),
+	}
+}
+
+func makeReadyEndpoint(addresses ...string) discovery.Endpoint {
+	return discovery.Endpoint{
+		Conditions: discovery.EndpointConditions{
+			Ready:       utilpointer.Bool(true),
+			Serving:     utilpointer.Bool(true),
+			Terminating: utilpointer.Bool(false),
+		},
+		Addresses: addresses,
+		NodeName:  &nodeA,
+	}
+}
+
+func makeReadyEndpointOnNode(node string, addresses ...string) discovery.Endpoint {
+	ep := makeReadyEndpoint(addresses...)
+	ep.NodeName = &node
+	return ep
+}
+
+func makeTerminatingServingEndpoint(addresses ...string) discovery.Endpoint {
+	return discovery.Endpoint{
+		Conditions: discovery.EndpointConditions{
+			Ready:       utilpointer.Bool(false),
+			Serving:     utilpointer.Bool(true),
+			Terminating: utilpointer.Bool(true),
+		},
+		Addresses: addresses,
+		NodeName:  &nodeA,
+	}
+}
+
+func makeTerminatingServingEndpointOnNode(node string, addresses ...string) discovery.Endpoint {
+	ep := makeTerminatingServingEndpoint(addresses...)
+	ep.NodeName = &node
+	return ep
+}
+
+func makeTerminatingNonServingEndpoint(addresses ...string) discovery.Endpoint {
+	return discovery.Endpoint{
+		Conditions: discovery.EndpointConditions{
+			Ready:       utilpointer.Bool(false),
+			Serving:     utilpointer.Bool(false),
+			Terminating: utilpointer.Bool(true),
+		},
+		Addresses: addresses,
+		NodeName:  &nodeA,
+	}
+}
+
+func makeTerminatingNonServingEndpointOnNode(node string, addresses ...string) discovery.Endpoint {
+	ep := makeTerminatingNonServingEndpoint(addresses...)
+	ep.NodeName = &node
+	return ep
+}
+
+func Test_getCandidateLbEndpoints(t *testing.T) {
 	type args struct {
 		slices  []*discovery.EndpointSlice
 		svcPort v1.ServicePort
@@ -462,14 +525,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("10.0.0.2"),
 					},
 				},
 				svcPort: v1.ServicePort{
@@ -479,7 +535,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 80},
+			want: LbEndpoints{V4Endpoints: makeReadyEndpointList("10.0.0.2"), Port: 80},
 		},
 		{
 			name: "slice with different port name than the service",
@@ -499,14 +555,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("10.0.0.2"),
 					},
 				},
 				svcPort: v1.ServicePort{
@@ -516,7 +565,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{}, 0},
+			want: LbEndpoints{},
 		},
 		{
 			name: "slice and service without a port name",
@@ -535,14 +584,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("10.0.0.2"),
 					},
 				},
 				svcPort: v1.ServicePort{
@@ -551,7 +593,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 8080},
+			want: LbEndpoints{V4Endpoints: makeReadyEndpointList("10.0.0.2"), Port: 8080},
 		},
 		{
 			name: "slice with an IPv6 endpoint",
@@ -571,14 +613,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("2001:db2::2"),
 					},
 				},
 				svcPort: v1.ServicePort{
@@ -588,7 +623,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::2"}, 80},
+			want: LbEndpoints{V6Endpoints: makeReadyEndpointList("2001:db2::2"), Port: 80},
 		},
 		{
 			name: "a slice with an IPv4 endpoint and a slice with an IPv6 endpoint (dualstack cluster)",
@@ -608,14 +643,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("10.0.0.2"),
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
@@ -631,14 +659,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv6,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("2001:db2::2"),
 					},
 				},
 				svcPort: v1.ServicePort{
@@ -648,10 +669,10 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{"2001:db2::2"}, 80},
+			want: LbEndpoints{V4Endpoints: makeReadyEndpointList("10.0.0.2"), V6Endpoints: makeReadyEndpointList("2001:db2::2"), Port: 80},
 		},
 		{
-			name: "multiples slices with a duplicate endpoint",
+			name: "one slice with a duplicate address in the same endpoint",
 			args: args{
 				slices: []*discovery.EndpointSlice{
 					{
@@ -668,14 +689,71 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
+						Endpoints:   makeReadyEndpointList("10.0.0.2", "10.0.0.2"),
+					},
+				},
+				svcPort: v1.ServicePort{
+					Name:       "tcp-example",
+					TargetPort: intstr.FromInt(80),
+					Protocol:   v1.ProtocolTCP,
+				},
+				service: getSampleService(false),
+			},
+			want: LbEndpoints{
+				V4Endpoints: makeReadyEndpointList("10.0.0.2"),
+				Port:        80},
+		},
+		{
+			name: "one slice with a duplicate address across two endpoints",
+			args: args{
+				slices: []*discovery.EndpointSlice{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab23",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
 							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2", "10.1.1.2"},
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
 							},
 						},
+						AddressType: discovery.AddressTypeIPv4,
+						Endpoints:   []discovery.Endpoint{makeReadyEndpoint("10.0.0.2"), makeReadyEndpoint("10.0.0.2")},
+					},
+				},
+				svcPort: v1.ServicePort{
+					Name:       "tcp-example",
+					TargetPort: intstr.FromInt(80),
+					Protocol:   v1.ProtocolTCP,
+				},
+				service: getSampleService(false),
+			},
+			want: LbEndpoints{
+				V4Endpoints: []discovery.Endpoint{makeReadyEndpoint("10.0.0.2")},
+				Port:        80},
+		},
+		{
+			name: "multiples slices with a duplicate address, with both address being ready",
+			args: args{
+				slices: []*discovery.EndpointSlice{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab23",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv4,
+						Endpoints:   makeReadyEndpointList("10.0.0.2", "10.1.1.2"),
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
@@ -691,14 +769,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2", "10.2.2.2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("10.0.0.2", "10.2.2.2"),
 					},
 				},
 				svcPort: v1.ServicePort{
@@ -708,8 +779,111 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, []string{}, 80},
+			want: LbEndpoints{
+				V4Endpoints: []discovery.Endpoint{makeReadyEndpoint("10.0.0.2", "10.1.1.2"), makeReadyEndpoint("10.2.2.2")},
+				Port:        80},
 		},
+		{
+			name: "multiples slices with a duplicate address, one endpoint is ready, the other one is not",
+			args: args{
+				slices: []*discovery.EndpointSlice{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab23",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv4,
+						Endpoints:   makeReadyEndpointList("10.0.0.2", "10.1.1.2"),
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab24",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv4,
+						Endpoints:   []discovery.Endpoint{makeTerminatingServingEndpoint("10.0.0.2", "10.2.2.2")},
+					},
+				},
+				svcPort: v1.ServicePort{
+					Name:       "tcp-example",
+					TargetPort: intstr.FromInt(80),
+					Protocol:   v1.ProtocolTCP,
+				},
+				service: getSampleService(false),
+			},
+			want: LbEndpoints{
+				// will keep the endpoint in the worse state in case of duplicates
+				V4Endpoints: []discovery.Endpoint{makeReadyEndpoint("10.1.1.2"), makeTerminatingServingEndpoint("10.0.0.2", "10.2.2.2")},
+				Port:        80},
+		},
+		{
+			name: "multiples slices with a duplicate address, both are terminating and serving",
+			args: args{
+				slices: []*discovery.EndpointSlice{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab23",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv4,
+
+						Endpoints: []discovery.Endpoint{makeTerminatingServingEndpoint("10.0.0.2", "10.1.1.2")},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab24",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Name:     utilpointer.StringPtr("tcp-example"),
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(80)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv4,
+						Endpoints:   []discovery.Endpoint{makeTerminatingServingEndpoint("10.0.0.2", "10.2.2.2")},
+					},
+				},
+				svcPort: v1.ServicePort{
+					Name:       "tcp-example",
+					TargetPort: intstr.FromInt(80),
+					Protocol:   v1.ProtocolTCP,
+				},
+				service: getSampleService(false),
+			},
+			want: LbEndpoints{
+				V4Endpoints: []discovery.Endpoint{
+					makeTerminatingServingEndpoint("10.0.0.2", "10.1.1.2"),
+					makeTerminatingServingEndpoint("10.2.2.2")},
+				Port: 80},
+		},
+
 		{
 			name: "multiples slices with different ports",
 			args: args{
@@ -728,14 +902,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.2", "10.1.1.2"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("10.0.0.2", "10.1.1.2"),
 					},
 					{ // this slice should be ignored, we're considering only one service port per execution
 						ObjectMeta: metav1.ObjectMeta{
@@ -751,14 +918,7 @@ func Test_getLbEndpoints(t *testing.T) {
 							},
 						},
 						AddressType: discovery.AddressTypeIPv4,
-						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3", "10.2.2.3"},
-							},
-						},
+						Endpoints:   makeReadyEndpointList("10.0.0.3", "10.2.2.3"),
 					},
 				},
 				svcPort: v1.ServicePort{
@@ -768,7 +928,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2"}, []string{}, 80},
+			want: LbEndpoints{V4Endpoints: makeReadyEndpointList("10.0.0.2", "10.1.1.2"), Port: 80},
 		},
 		{
 			name: "slice with a mix of ready and terminating (serving and non-serving) endpoints",
@@ -789,46 +949,11 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::6"},
-							},
+							makeReadyEndpoint("2001:db2::2"),
+							makeReadyEndpoint("2001:db2::3"),
+							makeTerminatingServingEndpoint("2001:db2::4"),
+							makeTerminatingServingEndpoint("2001:db2::5"),
+							makeTerminatingNonServingEndpoint("2001:db2::6"), // ignored
 						},
 					},
 				},
@@ -839,7 +964,15 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::2", "2001:db2::3"}, 80},
+			want: LbEndpoints{
+				V6Endpoints: []discovery.Endpoint{
+					makeReadyEndpoint("2001:db2::2"),
+					makeReadyEndpoint("2001:db2::3"),
+					makeTerminatingServingEndpoint("2001:db2::4"),
+					makeTerminatingServingEndpoint("2001:db2::5"),
+				},
+				Port: 80,
+			},
 		},
 		{
 			name: "slice with a mix of terminating (serving and non-serving) endpoints and no ready endpoints",
@@ -860,38 +993,10 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::6"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::7"},
-							},
+							makeTerminatingServingEndpoint("2001:db2::4"),
+							makeTerminatingServingEndpoint("2001:db2::5"),
+							makeTerminatingNonServingEndpoint("2001:db2::6"),
+							makeTerminatingNonServingEndpoint("2001:db2::7"),
 						},
 					},
 				},
@@ -902,7 +1007,12 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::4", "2001:db2::5"}, 80},
+			want: LbEndpoints{
+				V6Endpoints: []discovery.Endpoint{
+					makeTerminatingServingEndpoint("2001:db2::4"),
+					makeTerminatingServingEndpoint("2001:db2::5"),
+				},
+				Port: 80},
 		},
 		{
 			name: "slice with only terminating non-serving endpoints",
@@ -923,22 +1033,8 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::6"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::7"},
-							},
+							makeTerminatingNonServingEndpoint("2001:db2::6"),
+							makeTerminatingNonServingEndpoint("2001:db2::7"),
 						},
 					},
 				},
@@ -949,7 +1045,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{}, 80},
+			want: LbEndpoints{Port: 80},
 		},
 		{
 			name: "multiple slices with a mix terminating (serving and non-serving) endpoints and no ready endpoints",
@@ -970,22 +1066,8 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
+							makeTerminatingNonServingEndpoint("2001:db2::2"), // ignored
+							makeTerminatingServingEndpoint("2001:db2::3"),
 						},
 					},
 					{
@@ -1003,22 +1085,8 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
+							makeTerminatingServingEndpoint("2001:db2::4"),
+							makeTerminatingNonServingEndpoint("2001:db2::5"), // ignored
 						},
 					},
 				},
@@ -1029,7 +1097,12 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::3", "2001:db2::4"}, 80},
+			want: LbEndpoints{
+				V6Endpoints: []discovery.Endpoint{
+					makeTerminatingServingEndpoint("2001:db2::3"),
+					makeTerminatingServingEndpoint("2001:db2::4"),
+				},
+				Port: 80},
 		},
 		{
 			name: "multiple slices with only terminating non-serving endpoints",
@@ -1050,14 +1123,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
+							makeTerminatingNonServingEndpoint("2001:db2::2"),
 						},
 					},
 					{
@@ -1075,14 +1141,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::5"},
-							},
+							makeTerminatingNonServingEndpoint("2001:db2::5"),
 						},
 					},
 				},
@@ -1093,7 +1152,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{}, 80},
+			want: LbEndpoints{Port: 80},
 		},
 		{
 			name: "multiple slices with a mix of IPv4 and IPv6 ready and terminating (serving and non-serving) endpoints (dualstack cluster)",
@@ -1114,30 +1173,9 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv4,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
+							makeReadyEndpoint("10.0.0.2"),
+							makeTerminatingServingEndpoint("10.0.0.3"),
+							makeTerminatingNonServingEndpoint("10.0.0.4"), // ignored
 						},
 					},
 					{
@@ -1155,30 +1193,9 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
+							makeReadyEndpoint("2001:db2::2"),
+							makeTerminatingServingEndpoint("2001:db2::3"),
+							makeTerminatingNonServingEndpoint("2001:db2::4"), // ignored
 						},
 					},
 				},
@@ -1189,7 +1206,16 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{"2001:db2::2"}, 80},
+			want: LbEndpoints{
+				V4Endpoints: []discovery.Endpoint{
+					makeReadyEndpoint("10.0.0.2"),
+					makeTerminatingServingEndpoint("10.0.0.3"),
+				},
+				V6Endpoints: []discovery.Endpoint{
+					makeReadyEndpoint("2001:db2::2"),
+					makeTerminatingServingEndpoint("2001:db2::3"),
+				},
+				Port: 80},
 		},
 		{
 			name: "multiple slices with a mix of IPv4 and IPv6 terminating (serving and non-serving) endpoints and no ready endpoints (dualstack cluster)",
@@ -1210,22 +1236,8 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv4,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
+							makeTerminatingServingEndpoint("10.0.0.3"),
+							makeTerminatingNonServingEndpoint("10.0.0.4"),
 						},
 					},
 					{
@@ -1243,22 +1255,8 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
+							makeTerminatingServingEndpoint("2001:db2::3"),
+							makeTerminatingNonServingEndpoint("2001:db2::4"),
 						},
 					},
 				},
@@ -1269,7 +1267,11 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{"10.0.0.3"}, []string{"2001:db2::3"}, 80},
+			want: LbEndpoints{
+				V4Endpoints: []discovery.Endpoint{makeTerminatingServingEndpoint("10.0.0.3")},
+				V6Endpoints: []discovery.Endpoint{makeTerminatingServingEndpoint("2001:db2::3")},
+				Port:        80,
+			},
 		},
 		{
 			name: "multiple slices with a mix of IPv4 and IPv6 terminating non-serving endpoints (dualstack cluster)",
@@ -1290,14 +1292,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv4,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
+							makeTerminatingNonServingEndpoint("10.0.0.4"), // ignored
 						},
 					},
 					{
@@ -1315,14 +1310,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // ignored
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
+							makeTerminatingNonServingEndpoint("2001:db2::4"), // ignored
 						},
 					},
 				},
@@ -1333,7 +1321,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(false),
 			},
-			want: LbEndpoints{[]string{}, []string{}, 80},
+			want: LbEndpoints{Port: 80},
 		},
 		{
 			name: "multiple slices with a mix of IPv4 and IPv6 ready and terminating (serving and non-serving) endpoints (dualstack cluster) and service.PublishNotReadyAddresses=true",
@@ -1354,30 +1342,9 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv4,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"10.0.0.2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"10.0.0.4"},
-							},
+							makeReadyEndpoint("10.0.0.2"),                 // included
+							makeTerminatingServingEndpoint("10.0.0.3"),    // included
+							makeTerminatingNonServingEndpoint("10.0.0.4"), // included
 						},
 					},
 					{
@@ -1395,30 +1362,9 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						AddressType: discovery.AddressTypeIPv6,
 						Endpoints: []discovery.Endpoint{
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(true),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(false),
-								},
-								Addresses: []string{"2001:db2::2"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(true),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::3"},
-							},
-							{
-								Conditions: discovery.EndpointConditions{ // included
-									Ready:       utilpointer.Bool(false),
-									Serving:     utilpointer.Bool(false),
-									Terminating: utilpointer.Bool(true),
-								},
-								Addresses: []string{"2001:db2::4"},
-							},
+							makeReadyEndpoint("2001:db2::2"),                 // included
+							makeTerminatingServingEndpoint("2001:db2::3"),    // included
+							makeTerminatingNonServingEndpoint("2001:db2::4"), // included
 						},
 					},
 				},
@@ -1429,13 +1375,125 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				service: getSampleService(true), // <-- publishNotReadyAddresses=true
 			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.0.0.3", "10.0.0.4"}, []string{"2001:db2::2", "2001:db2::3", "2001:db2::4"}, 80},
+			want: LbEndpoints{
+				V4Endpoints: []discovery.Endpoint{
+					makeReadyEndpoint("10.0.0.2"),
+					makeTerminatingServingEndpoint("10.0.0.3"),
+					makeTerminatingNonServingEndpoint("10.0.0.4"),
+				},
+				V6Endpoints: []discovery.Endpoint{
+					makeReadyEndpoint("2001:db2::2"),
+					makeTerminatingServingEndpoint("2001:db2::3"),
+					makeTerminatingNonServingEndpoint("2001:db2::4"),
+				},
+				Port: 80},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetLbEndpoints(tt.args.slices, tt.args.svcPort, tt.args.service)
+			got := GetCandidateLbEndpoints(tt.args.slices, tt.args.svcPort, tt.args.service)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRemoveDuplicateAddressesFromEndpoints(t *testing.T) {
+	var tests = []struct {
+		name      string
+		endpoints []discovery.Endpoint
+		want      []discovery.Endpoint
+	}{
+		{
+			"one endpoint, no duplicates",
+			[]discovery.Endpoint{makeReadyEndpoint("10.0.0.1", "10.0.0.2")},
+			[]discovery.Endpoint{makeReadyEndpoint("10.0.0.1", "10.0.0.2")},
+		},
+		{
+			"one endpoint, a duplicate",
+			[]discovery.Endpoint{makeReadyEndpoint("10.0.0.1", "10.0.0.2", "10.0.0.1")},
+			[]discovery.Endpoint{makeReadyEndpoint("10.0.0.1", "10.0.0.2")},
+		},
+		{
+			"two endpoints, no duplicates",
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+				makeReadyEndpoint("10.0.0.3", "10.0.0.4")},
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+				makeReadyEndpoint("10.0.0.3", "10.0.0.4"),
+			},
+		},
+		{
+			"two endpoints, both ready, a duplicate",
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+				makeReadyEndpoint("10.0.0.2", "10.0.0.4")},
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+				makeReadyEndpoint("10.0.0.4"),
+			},
+		},
+		{
+			"two endpoints, both ready, more duplicates",
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2", "10.0.0.2", "10.0.0.4")},
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+				makeReadyEndpoint("10.0.0.4"),
+			},
+		},
+
+		{
+			"two endpoints, one ready, one terminating & serving, a duplicate",
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+				makeTerminatingServingEndpoint("10.0.0.2", "10.0.0.4")},
+			[]discovery.Endpoint{
+				makeReadyEndpoint("10.0.0.1"),
+				makeTerminatingServingEndpoint("10.0.0.2", "10.0.0.4"),
+			},
+		},
+		{
+			"two endpoints, one ready, one terminating & serving, a duplicate (swapped)",
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpoint("10.0.0.2", "10.0.0.4"),
+				makeReadyEndpoint("10.0.0.1", "10.0.0.2"),
+			},
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpoint("10.0.0.2", "10.0.0.4"),
+				makeReadyEndpoint("10.0.0.1"),
+			},
+		},
+
+		{
+			"two endpoints, both terminating & serving, a duplicate",
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpoint("10.0.0.1", "10.0.0.2"),
+				makeTerminatingServingEndpoint("10.0.0.2", "10.0.0.4")},
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpoint("10.0.0.1", "10.0.0.2"),
+				makeTerminatingServingEndpoint("10.0.0.4"),
+			},
+		},
+		{
+			"two endpoints, one terminating & serving, one terminating & not serving, a duplicate",
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpoint("10.0.0.1", "10.0.0.2"),
+				makeTerminatingNonServingEndpoint("10.0.0.2", "10.0.0.4")},
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpoint("10.0.0.1"),
+				makeTerminatingNonServingEndpoint("10.0.0.2", "10.0.0.4"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			answer := removeDuplicateAddressesFromEndpoints(tt.endpoints)
+			if !reflect.DeepEqual(answer, tt.want) {
+				t.Errorf("got %v, want %v", answer, tt.want)
+			}
 		})
 	}
 }
@@ -1534,14 +1592,6 @@ func getSampleService(publishNotReadyAddresses bool) *v1.Service {
 	}
 }
 
-func getSampleEndpointSliceOnAnotherNode(service *kapi.Service) *discovery.EndpointSlice {
-	endpointSlice := getSampleEndpointSlice(service)
-	for i := range endpointSlice.Endpoints {
-		endpointSlice.Endpoints[i].NodeName = &otherNode
-	}
-	return endpointSlice
-}
-
 // returns an endpoint slice with three endpoints, two of which belong to the expected local node
 // and one belongs to "otherNode"
 func getSampleEndpointSlice(service *kapi.Service) *discovery.EndpointSlice {
@@ -1629,88 +1679,38 @@ func setEndpointsToAMixOfStatusConditions(endpointSlice *discovery.EndpointSlice
 	return endpointSlice
 }
 
-func setNodeEndpointsToReady(endpointSlice *discovery.EndpointSlice, nodeName string) *discovery.EndpointSlice {
-	for i := range endpointSlice.Endpoints {
-		if *endpointSlice.Endpoints[i].NodeName == nodeName {
-			setEndpointToReady(&endpointSlice.Endpoints[i])
-		}
-	}
-	return endpointSlice
-}
-func setNodeEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice, nodeName string) *discovery.EndpointSlice {
-	for i := range endpointSlice.Endpoints {
-		if *endpointSlice.Endpoints[i].NodeName == nodeName {
-			setEndpointToTerminatingAndServing(&endpointSlice.Endpoints[i])
-		}
-	}
-	return endpointSlice
-}
-
-func setNodeEndpointsToTerminatingAndNotServing(endpointSlice *discovery.EndpointSlice, nodeName string) *discovery.EndpointSlice {
-	for i := range endpointSlice.Endpoints {
-		if *endpointSlice.Endpoints[i].NodeName == testNode {
-			setEndpointToTerminatingAndNotServing(&endpointSlice.Endpoints[i])
-		}
-	}
-	return endpointSlice
-}
-
-func setLocalEndpointsToReady(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToReady(endpointSlice, testNode)
-}
-
-func setLocalEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndServing(endpointSlice, testNode)
-}
-
-func setLocalEndpointsToTerminatingAndNotServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndNotServing(endpointSlice, testNode)
-}
-
-func setRemoteEndpointsToReady(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToReady(endpointSlice, otherNode)
-}
-
-func setRemoteEndpointsToTerminatingAndServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndServing(endpointSlice, otherNode)
-}
-
-func setRemoteEndpointsToTerminatingAndNotServing(endpointSlice *discovery.EndpointSlice) *discovery.EndpointSlice {
-	return setNodeEndpointsToTerminatingAndNotServing(endpointSlice, otherNode)
-}
-
 func TestGetEndpointAddresses(t *testing.T) {
 	service := getSampleService(false)
 	var tests = []struct {
 		name          string
 		endpointSlice *discovery.EndpointSlice
-		want          sets.Set[string]
+		want          []string
 	}{
 		{
 			"Tests an endpointslice with all ready endpoints",
 			setAllEndpointsToReady(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address, ep3Address),
+			[]string{ep1Address, ep2Address, ep3Address},
 		},
 		{
 			"Tests an endpointslice with all non-ready, serving, terminating endpoints",
 			setAllEndpointsToTerminatingAndServing(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address, ep3Address), // with no ready endpoints, we fallback to terminating serving endpoints
+			[]string{ep1Address, ep2Address, ep3Address}, // with no ready endpoints, we fallback to terminating serving endpoints
 		},
 		{
 			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints",
 			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSlice(service)),
-			sets.New[string](),
+			[]string{},
 		},
 		{
 			"Tests an endpointslice with endpoints showing a mix of status conditions",
 			setEndpointsToAMixOfStatusConditions(getSampleEndpointSlice(service)),
-			sets.New(ep1Address), // only the ready endpoint is included
+			[]string{ep1Address}, // only the ready endpoint is included
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			answer := GetEligibleEndpointAddresses([]*discovery.EndpointSlice{tt.endpointSlice}, service)
+			answer := GetEligibleEndpointAddressesFromSlices([]*discovery.EndpointSlice{tt.endpointSlice}, service)
 			if !reflect.DeepEqual(answer, tt.want) {
 				t.Errorf("got %v, want %v", answer, tt.want)
 			}
@@ -1759,65 +1759,105 @@ func TestHasLocalHostNetworkEndpoints(t *testing.T) {
 func TestGetLocalEligibleEndpointAddresses(t *testing.T) {
 	service := getSampleService(false)
 	var tests = []struct {
-		name          string
-		endpointSlice *discovery.EndpointSlice
-		want          sets.Set[string]
+		name      string
+		endpoints []discovery.Endpoint
+		want      []string
 	}{
 		{
 			"Tests an endpointslice with all ready endpoints, one of which is on a different node",
-			setAllEndpointsToReady(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address),
+			[]discovery.Endpoint{
+				makeReadyEndpointOnNode(testNode, ep1Address),
+				makeReadyEndpointOnNode(testNode, ep2Address),
+				makeReadyEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{ep1Address, ep2Address},
 		},
 		{
-			"Tests an endpointslice with all ready endpoints, all of which are on a different node",
-			setAllEndpointsToReady(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			"Tests an endpointslice with all ready endpoints, all of which are on another node",
+			[]discovery.Endpoint{
+				makeReadyEndpointOnNode(otherNode, ep1Address),
+				makeReadyEndpointOnNode(otherNode, ep2Address),
+				makeReadyEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{},
 		},
 		{
 			"Tests an endpointslice with all non-ready, serving, terminating endpoints, one of which is on a different node",
-			setAllEndpointsToTerminatingAndServing(getSampleEndpointSlice(service)),
-			sets.New(ep1Address, ep2Address), // with no ready endpoints, we fallback to terminating serving endpoints
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpointOnNode(testNode, ep1Address),
+				makeTerminatingServingEndpointOnNode(testNode, ep2Address),
+				makeTerminatingServingEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{ep1Address, ep2Address}, // with no ready endpoints, we fallback to terminating serving endpoints
 		},
 		{
 			"Tests an endpointslice with all non-ready, serving, terminating endpoints, all of which are on a different node",
-			setAllEndpointsToTerminatingAndServing(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpointOnNode(otherNode, ep1Address),
+				makeTerminatingServingEndpointOnNode(otherNode, ep2Address),
+				makeTerminatingServingEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{},
 		},
 		{
 			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints, one of which is on a different node",
-			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSlice(service)),
-			sets.New[string](),
+			[]discovery.Endpoint{
+				makeTerminatingNonServingEndpointOnNode(testNode, ep1Address),
+				makeTerminatingNonServingEndpointOnNode(testNode, ep2Address),
+				makeTerminatingNonServingEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{},
 		},
 		{
 			"Tests an endpointslice with all non-ready, non-serving, terminating endpoints, all of which are on a different node",
-			setAllEndpointsToTerminatingAndNotServing(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			[]discovery.Endpoint{
+				makeTerminatingNonServingEndpointOnNode(otherNode, ep1Address),
+				makeTerminatingNonServingEndpointOnNode(otherNode, ep2Address),
+				makeTerminatingNonServingEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{},
 		},
 		{
 			"Tests an endpointslice with endpoints showing a mix of status conditions, one of which is on a different node",
-			setEndpointsToAMixOfStatusConditions(getSampleEndpointSlice(service)),
-			sets.New(ep1Address), // only the ready endpoint is included
+			[]discovery.Endpoint{
+				makeReadyEndpointOnNode(testNode, ep1Address),
+				makeTerminatingServingEndpointOnNode(testNode, ep2Address),
+				makeTerminatingNonServingEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{ep1Address}, // only the ready endpoint is included
 		},
 		{
 			"Tests an endpointslice with endpoints showing a mix of status conditions, all of which are on a different node",
-			setEndpointsToAMixOfStatusConditions(getSampleEndpointSliceOnAnotherNode(service)),
-			sets.New[string](),
+			[]discovery.Endpoint{
+				makeReadyEndpointOnNode(otherNode, ep1Address),
+				makeTerminatingServingEndpointOnNode(otherNode, ep2Address),
+				makeTerminatingNonServingEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{},
 		},
 		{
 			"Tests an endpointslice where all local endpoints are serving and terminating and a remote endpoint is ready",
-			setLocalEndpointsToTerminatingAndServing(setRemoteEndpointsToReady(getSampleEndpointSlice(service))),
-			sets.New(ep1Address, ep2Address), // fallback to serving&terminating should apply
+			[]discovery.Endpoint{
+				makeTerminatingServingEndpointOnNode(testNode, ep1Address),
+				makeTerminatingServingEndpointOnNode(testNode, ep2Address),
+				makeReadyEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{ep1Address, ep2Address}, // fallback to serving&terminating should apply
 		},
 		{
 			"Tests an endpointslice where all local endpoints are terminating and not serving and a remote endpoint is ready",
-			setLocalEndpointsToTerminatingAndNotServing(setRemoteEndpointsToReady(getSampleEndpointSlice(service))),
-			sets.New[string](),
+			[]discovery.Endpoint{
+				makeTerminatingNonServingEndpointOnNode(testNode, ep1Address),
+				makeTerminatingNonServingEndpointOnNode(testNode, ep2Address),
+				makeReadyEndpointOnNode(otherNode, ep3Address),
+			},
+			[]string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			answer := GetLocalEligibleEndpointAddresses([]*discovery.EndpointSlice{tt.endpointSlice}, service, testNode)
+			answer := GetLocalEligibleEndpointAddresses(tt.endpoints, service, testNode)
 			if !reflect.DeepEqual(answer, tt.want) {
 				t.Errorf("got %v, want %v", answer, tt.want)
 			}
