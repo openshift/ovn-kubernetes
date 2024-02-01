@@ -398,8 +398,7 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	// Build the abstract LB configs for this service
-	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices,
-		c.useLBGroups, c.useTemplates)
+	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.useLBGroups, c.useTemplates) // The returned configs have 1 config per port
 	klog.V(5).Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
 	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
 	klog.V(5).Infof("Built service %s LB template configs %#v", key, templateConfigs)

@@ -41,19 +41,15 @@ type lbConfig struct {
 	hasNodePort bool
 }
 
-func (c *lbConfig) makeNodeSwitchTargetIPs(service *v1.Service, node *nodeInfo, epIPs []string) (targetIPs []string, changed bool) {
-	targetIPs = epIPs
+func (c *lbConfig) makeNodeSwitchTargetIPs(service *v1.Service, node *nodeInfo, endpoints []discovery.Endpoint) (targetIPs []string, changed bool) {
+	allTargetIPs := util.GetEligibleEndpointAddressesFromEndpoints(endpoints, service)
+	targetIPs = allTargetIPs
 	changed = false
-
-	if c.externalTrafficLocal {
+	if c.externalTrafficLocal || c.internalTrafficLocal {
 		// for ExternalTrafficPolicy=Local, remove non-local endpoints from the router/switch targets
 		// NOTE: on the switches, filtered eps are used only by masqueradeVIP
-		targetIPs = util.FilterIPsSlice(targetIPs, node.nodeSubnets(), true)
-	}
-
-	if c.internalTrafficLocal {
 		// for InternalTrafficPolicy=Local, remove non-local endpoints from the switch targets only
-		targetIPs = util.FilterIPsSlice(targetIPs, node.nodeSubnets(), true)
+		targetIPs = util.GetLocalEligibleEndpointAddressesFromEndpoints(endpoints, service, node.name)
 	}
 
 	// OCP HACK BEGIN
@@ -61,27 +57,28 @@ func (c *lbConfig) makeNodeSwitchTargetIPs(service *v1.Service, node *nodeInfo, 
 		// if service is annotated and is ETP=local, fallback to ETP=cluster on nodes with no local endpoints:
 		// include endpoints from other nodes
 		if len(targetIPs) == 0 {
-			targetIPs = epIPs
+			targetIPs = allTargetIPs
 		}
 	}
 	// OCP HACK END
 
 	// We potentially only removed stuff from the original slice, so just
 	// comparing lenghts is enough.
-	if len(targetIPs) != len(epIPs) {
+	if len(targetIPs) != len(allTargetIPs) {
 		changed = true
 	}
 	return
 }
 
-func (c *lbConfig) makeNodeRouterTargetIPs(service *v1.Service, node *nodeInfo, epIPs []string, hostMasqueradeIP string) (targetIPs []string, changed, zeroRouterLocalEndpoints bool) {
-	targetIPs = epIPs
+func (c *lbConfig) makeNodeRouterTargetIPs(service *v1.Service, node *nodeInfo, endpoints []discovery.Endpoint, hostMasqueradeIP string) (targetIPs []string, changed, zeroRouterLocalEndpoints bool) {
+	allTargetIPs := util.GetEligibleEndpointAddressesFromEndpoints(endpoints, service)
+	targetIPs = allTargetIPs
 	changed = false
 
 	if c.externalTrafficLocal {
 		// for ExternalTrafficPolicy=Local, remove non-local endpoints from the router/switch targets
 		// NOTE: on the switches, filtered eps are used only by masqueradeVIP
-		targetIPs = util.FilterIPsSlice(targetIPs, node.nodeSubnets(), true)
+		targetIPs = util.GetLocalEligibleEndpointAddressesFromEndpoints(endpoints, service, node.name)
 	}
 
 	// OCP HACK BEGIN
@@ -91,7 +88,7 @@ func (c *lbConfig) makeNodeRouterTargetIPs(service *v1.Service, node *nodeInfo, 
 		// include endpoints from other nodes
 		if len(targetIPs) == 0 {
 			zeroRouterLocalEndpoints = true
-			targetIPs = epIPs
+			targetIPs = allTargetIPs
 		}
 	}
 	// OCP HACK END
@@ -101,7 +98,7 @@ func (c *lbConfig) makeNodeRouterTargetIPs(service *v1.Service, node *nodeInfo, 
 	targetIPs, updated := util.UpdateIPsSlice(targetIPs, node.l3gatewayAddressesStr(), []string{hostMasqueradeIP})
 
 	// We either only removed stuff from the original slice, or updated some IPs.
-	if len(targetIPs) != len(epIPs) || updated {
+	if len(targetIPs) != len(allTargetIPs) || updated {
 		changed = true
 	}
 	return
@@ -136,7 +133,6 @@ var protos = []v1.Protocol{
 //     affinity timeout set.
 func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice, useLBGroup, useTemplates bool) (perNodeConfigs, templateConfigs, clusterConfigs []lbConfig) {
 	needsAffinityTimeout := hasSessionAffinityTimeOut(service)
-
 	// For each svcPort, determine if it will be applied per-node or cluster-wide
 	for _, svcPort := range service.Spec.Ports {
 		eps := util.GetLbEndpoints(endpointSlices, svcPort, service)
@@ -153,7 +149,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 				protocol:             svcPort.Protocol,
 				inport:               svcPort.NodePort,
 				vips:                 []string{placeholderNodeIPs}, // shortcut for all-physical-ips
-				eps:                  eps,
+				eps:                  eps,                          // candidate endpoints (ready + terminating&serving)
 				externalTrafficLocal: externalTrafficLocal,
 				internalTrafficLocal: false, // always false for non-ClusterIPs
 				hasNodePort:          true,
@@ -209,7 +205,9 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		// - OCP only HACK: It's an openshift-dns:default-dns service
 		//
 		// In that case, we need to create per-node LBs.
-		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) || internalTrafficLocal ||
+		// TODO this host address might be wiped out by the readiness selection if, for instance, it's serving&terminating and all other endpoints
+		// are ready.
+		if haveEndpointsAHostAddress(eps.V4Endpoints) || haveEndpointsAHostAddress(eps.V6Endpoints) || internalTrafficLocal ||
 			// OCP only hack begin
 			(service.Namespace == "openshift-dns" && service.Name == "dns-default") {
 			// OCP only hack end
@@ -279,24 +277,24 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 			Groups:   groups,
 		}
 
-		for _, config := range cfgs {
+		for _, config := range cfgs { // it's one config per service port
 			if config.externalTrafficLocal {
 				klog.Errorf("BUG: service %s/%s has routerLocalMode=true for cluster-wide lbConfig",
 					service.Namespace, service.Name)
 			}
 
-			v4targets := make([]Addr, 0, len(config.eps.V4IPs))
-			for _, tgt := range config.eps.V4IPs {
+			v4targets := []Addr{}
+			for _, targetIP := range util.GetEligibleEndpointAddressesFromEndpoints(config.eps.V4Endpoints, service) {
 				v4targets = append(v4targets, Addr{
-					IP:   tgt,
+					IP:   targetIP,
 					Port: config.eps.Port,
 				})
 			}
 
-			v6targets := make([]Addr, 0, len(config.eps.V6IPs))
-			for _, tgt := range config.eps.V6IPs {
+			v6targets := []Addr{}
+			for _, targetIP := range util.GetEligibleEndpointAddressesFromEndpoints(config.eps.V6Endpoints, service) {
 				v6targets = append(v6targets, Addr{
-					IP:   tgt,
+					IP:   targetIP,
 					Port: config.eps.Port,
 				})
 			}
@@ -384,8 +382,11 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 						service, proto, config.inport,
 						optsV6.AddressFamily, "node_router_template"))
 
+			allV4TargetIPs := util.GetEligibleEndpointAddressesFromEndpoints(config.eps.V4Endpoints, service)
+			allV6TargetIPs := util.GetEligibleEndpointAddressesFromEndpoints(config.eps.V6Endpoints, service)
+
 			for range config.vips {
-				klog.V(5).Infof(" buildTemplateLBs() service %s/%s adding rules", service.Namespace, service.Name)
+				klog.V(5).Infof("buildTemplateLBs() service %s/%s adding rules", service.Namespace, service.Name)
 
 				// If all targets have exactly the same IPs on all nodes there's
 				// no need to use a template, just use the same list of explicit
@@ -396,20 +397,20 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 				routerV6TargetNeedsTemplate := false
 
 				for _, node := range nodes {
-					switchV4targetips, changed := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V4IPs)
+					switchV4targetips, changed := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V4Endpoints)
 					if !switchV4TargetNeedsTemplate && changed {
 						switchV4TargetNeedsTemplate = true
 					}
-					switchV6targetips, changed := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V6IPs)
+					switchV6targetips, changed := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V6Endpoints)
 					if !switchV6TargetNeedsTemplate && changed {
 						switchV6TargetNeedsTemplate = true
 					}
 
-					routerV4targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V4IPs, conf.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String())
+					routerV4targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V4Endpoints, conf.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String())
 					if !routerV4TargetNeedsTemplate && changed {
 						routerV4TargetNeedsTemplate = true
 					}
-					routerV6targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V6IPs, conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
+					routerV6targetips, changed, _ := config.makeNodeRouterTargetIPs(service, &node, config.eps.V6Endpoints, conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
 					if !routerV6TargetNeedsTemplate && changed {
 						routerV6TargetNeedsTemplate = true
 					}
@@ -428,10 +429,10 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 				sharedV4Targets := []Addr{}
 				sharedV6Targets := []Addr{}
 				if !switchV4TargetNeedsTemplate || !routerV4TargetNeedsTemplate {
-					sharedV4Targets = joinHostsPort(config.eps.V4IPs, config.eps.Port)
+					sharedV4Targets = joinHostsPort(allV4TargetIPs, config.eps.Port)
 				}
 				if !switchV6TargetNeedsTemplate || !routerV6TargetNeedsTemplate {
-					sharedV6Targets = joinHostsPort(config.eps.V6IPs, config.eps.Port)
+					sharedV6Targets = joinHostsPort(allV6TargetIPs, config.eps.Port)
 				}
 
 				for _, nodeIPv4Template := range nodeIPv4Templates.AsTemplates() {
@@ -554,8 +555,8 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 // buildPerNodeLBs takes a list of lbConfigs and expands them to one LB per protocol per node
 //
 // Per-node lbs are created for
-// - clusterip services with host-network endpoints are attached to each node's gateway router + switch
-// - nodeport services are attached to each node's gateway router + switch, vips are node's physical IPs (except if etp=local+ovnk backend pods)
+// - clusterip services with host-network endpoints, which are attached to each node's gateway router + switch
+// - nodeport services are attached to each node's gateway router + switch, vips are the node's physical IPs (except if etp=local+ovnk backend pods)
 // - any services with host-network endpoints
 // - services with external IPs / LoadBalancer Status IPs
 //
@@ -566,7 +567,7 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 // For ExternalTrafficPolicy, all "External" IPs (NodePort, ExternalIPs, Loadbalancer Status) have:
 // - targets filtered to only local targets
 // - SkipSNAT enabled
-// - NP LB on the switch will have masqueradeIP as the vip to handle etp=local for LGW case.
+// - NodePort LB on the switch will have masqueradeIP as the vip to handle etp=local for LGW case.
 // This results in the creation of an additional load balancer on the GatewayRouters and NodeSwitches.
 func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) []LB {
 	cbp := configsByProto(configs)
@@ -574,8 +575,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 	out := make([]LB, 0, len(nodes)*len(configs))
 
-	// output is one LB per node per protocol
-	// with one rule per vip
+	// output is one LB per node per protocol with one rule per vip
 	for _, node := range nodes {
 		for _, proto := range protos {
 			configs, ok := cbp[proto]
@@ -585,36 +585,40 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 			// attach to router & switch,
 			// rules may or may not be different
-			// localRouterRules are rules with no snat
 			routerRules := make([]LBRule, 0, len(configs))
 			noSNATRouterRules := make([]LBRule, 0)
 			switchRules := make([]LBRule, 0, len(configs))
 
 			for _, config := range configs {
-				switchV4targetips, _ := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V4IPs)
-				switchV6targetips, _ := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V6IPs)
+				allV4TargetIPs := util.GetEligibleEndpointAddressesFromEndpoints(config.eps.V4Endpoints, service)
+				allV6TargetIPs := util.GetEligibleEndpointAddressesFromEndpoints(config.eps.V6Endpoints, service)
 
-				routerV4targetips, _, zeroRouterV4LocalEndpoints := config.makeNodeRouterTargetIPs(service, &node, config.eps.V4IPs, conf.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String())
-				routerV6targetips, _, zeroRouterV6LocalEndpoints := config.makeNodeRouterTargetIPs(service, &node, config.eps.V6IPs, conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
+				switchV4targetips, _ := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V4Endpoints)
+				switchV6targetips, _ := config.makeNodeSwitchTargetIPs(service, &node, config.eps.V6Endpoints)
+
+				routerV4targetips, _, zeroRouterV4LocalEndpoints := config.makeNodeRouterTargetIPs(
+					service, &node, config.eps.V4Endpoints, conf.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String())
+				routerV6targetips, _, zeroRouterV6LocalEndpoints := config.makeNodeRouterTargetIPs(
+					service, &node, config.eps.V6Endpoints, conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
 
 				routerV4targets := joinHostsPort(routerV4targetips, config.eps.Port)
 				routerV6targets := joinHostsPort(routerV6targetips, config.eps.Port)
 
-				switchV4targets := joinHostsPort(config.eps.V4IPs, config.eps.Port)
-				switchV6targets := joinHostsPort(config.eps.V6IPs, config.eps.Port)
+				switchV4targets := joinHostsPort(allV4TargetIPs, config.eps.Port) // TODO Why not switchV4targetips???
+				switchV6targets := joinHostsPort(allV6TargetIPs, config.eps.Port) // TODO Why not switchV6targetips???
 
 				// OCP HACK begin
 				// TODO: Remove this hack once we add support for ITP:preferLocal and DNS operator starts using it.
 				if service.Namespace == "openshift-dns" && service.Name == "dns-default" {
-					// Filter out endpoints that are local to this node.
-					switchV4targetDNSips := util.FilterIPsSlice(config.eps.V4IPs, node.podSubnets, true)
-					switchV6targetDNSips := util.FilterIPsSlice(config.eps.V6IPs, node.podSubnets, true)
+					// Filter out endpoints that are not local to this node.
+					switchV4targetDNSips := util.FilterIPsSlice(allV4TargetIPs, node.podSubnets, true)
+					switchV6targetDNSips := util.FilterIPsSlice(allV6TargetIPs, node.podSubnets, true)
 					// If no local endpoints were found add all the endpoints as targets.
 					if len(switchV4targetDNSips) == 0 {
-						switchV4targetDNSips = config.eps.V4IPs
+						switchV4targetDNSips = allV4TargetIPs
 					}
 					if len(switchV6targetDNSips) == 0 {
-						switchV6targetDNSips = config.eps.V6IPs
+						switchV6targetDNSips = allV6TargetIPs
 					}
 					switchV4targets = joinHostsPort(switchV4targetDNSips, config.eps.Port)
 					switchV6targets = joinHostsPort(switchV6targetDNSips, config.eps.Port)

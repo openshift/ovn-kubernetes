@@ -594,17 +594,16 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 }
 
 type LbEndpoints struct {
-	V4IPs []string
-	V6IPs []string
-	Port  int32
+	V4IPs       []string // now unused
+	V6IPs       []string // now unused
+	Port        int32
+	V4Endpoints []discovery.Endpoint
+	V6Endpoints []discovery.Endpoint
 }
 
-// GetLbEndpoints returns the IPv4 and IPv6 addresses of eligible endpoints from a
+// GetLbEndpoints returns a LbEndpoints struct filled in with the IPv4 and IPv6 endpoints from a
 // provided list of endpoint slices, for a given service and service port.
 func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, service *v1.Service) LbEndpoints {
-	var validSlices []*discovery.EndpointSlice
-	v4IPs := sets.NewString()
-	v6IPs := sets.NewString()
 	out := LbEndpoints{}
 
 	// return an empty object so the caller doesn't have to check for nil and can use it as an iterator
@@ -633,43 +632,31 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 
 			out.Port = *slicePort.Port
 
-			if slice.AddressType == discovery.AddressTypeFQDN {
+			switch slice.AddressType {
+			case discovery.AddressTypeFQDN:
 				klog.V(5).Infof("Skipping FQDN slice %s/%s", slice.Namespace, slice.Name)
-			} else { // endpoints are here either IPv4 or IPv6
-				validSlices = append(validSlices, slice)
+			case discovery.AddressTypeIPv4:
+				for _, ep := range slice.Endpoints {
+					if IsEndpointReady(ep) || IsEndpointServing(ep) {
+						out.V4Endpoints = append(out.V4Endpoints, ep)
+					}
+				}
+			case discovery.AddressTypeIPv6:
+				for _, ep := range slice.Endpoints {
+					if IsEndpointReady(ep) || IsEndpointServing(ep) {
+						out.V6Endpoints = append(out.V6Endpoints, ep)
+					}
+				}
 			}
 		}
 	}
 
-	serviceStr := ""
-	if service != nil {
-		serviceStr = fmt.Sprintf(" for service %s/%s", service.Namespace, service.Name)
-	}
-	// separate IPv4 from IPv6 addresses for eligible endpoints
-	for _, endpoint := range getEligibleEndpoints(validSlices, service) {
-		for _, ip := range endpoint.Addresses {
-			if utilnet.IsIPv4String(ip) {
-				klog.V(5).Infof("Adding endpoint IPv4 address %s port %d%s",
-					ip, out.Port, serviceStr)
-				v4IPs.Insert(utilnet.ParseIPSloppy(ip).String())
-
-			} else if utilnet.IsIPv6String(ip) {
-				klog.V(5).Infof("Adding endpoint IPv6 address %s port %d%s",
-					ip, out.Port, serviceStr)
-				v6IPs.Insert(utilnet.ParseIPSloppy(ip).String())
-
-			} else {
-				klog.V(5).Infof("Skipping unrecognized address %s port %d%s",
-					ip, out.Port, serviceStr)
-			}
-		}
-	}
-
-	out.V4IPs = v4IPs.List()
-	out.V6IPs = v6IPs.List()
-	klog.V(5).Infof("LB Endpoints for %s/%s are: %v / %v on port: %d",
+	// TODO make message below more readable (from endpoints to IP addresses?)
+	// TODO (2): The message below is not the full picture anymore
+	// The final selection on endpoints is not centralized in this function anymore...
+	klog.V(5).Infof("LB candidate endpoints for %s/%s are: %v / %v on port: %d",
 		slices[0].Namespace, slices[0].Labels[discovery.LabelServiceName],
-		out.V4IPs, out.V6IPs, out.Port)
+		out.V4Endpoints, out.V6Endpoints, out.Port)
 	return out
 }
 
@@ -784,14 +771,73 @@ func getSelectedEligibleEndpoints(endpointSlices []*discovery.EndpointSlice, ser
 	return eligibleEndpoints
 }
 
+// getSelectedEligibleEndpoints does the following:
+// (1) filters the given endpoints with the provided condition function condFn;
+// (2) further selects eligible endpoints based on readiness.
+// Eligible endpoints are ready endpoints; if there are none, eligible endpoints are serving & terminating
+// endpoints, as defined in KEP-1669
+// (https://github.com/kubernetes/enhancements/blob/master/keps/sig-network/1669-proxy-terminating-endpoints/README.md).
+// The service corresponding to the given endpoints needs to provided as an input argument
+// because if Spec.PublishNotReadyAddresses is set, then all provided endpoints must always be returned.
+// PublishNotReadyAddresses tells endpoint consumers to disregard any indications of ready/not-ready and
+// is generally used together with headless services so that DNS records of all endpoints (ready or not)
+// are always published.
+// Note that condFn, when specified, is used by utility functions to filter out non-local endpoints.
+// It's important to run it /before/ the eligible endpoint selection, since the order impacts the output.
+func getSelectedEligibleEndpointsFromEndpoints(endpoints []discovery.Endpoint, service *kapi.Service, condFn func(ep discovery.Endpoint) bool) []discovery.Endpoint {
+	var readySelectedEndpoints []discovery.Endpoint
+	var servingTerminatingSelectedEndpoints []discovery.Endpoint
+	var eligibleEndpoints []discovery.Endpoint
+
+	includeAllEndpoints := service != nil && service.Spec.PublishNotReadyAddresses
+
+	for _, endpoint := range endpoints {
+		// Apply precondition on endpoints, if provided
+		if condFn == nil || condFn(endpoint) {
+			// Assign to the ready or the serving&terminating slice for a later decision
+			if includeAllEndpoints || IsEndpointReady(endpoint) {
+				readySelectedEndpoints = append(readySelectedEndpoints, endpoint)
+			} else if IsEndpointServing(endpoint) && IsEndpointTerminating(endpoint) {
+				servingTerminatingSelectedEndpoints = append(servingTerminatingSelectedEndpoints, endpoint)
+			}
+		}
+	}
+	serviceStr := ""
+	if service != nil {
+		serviceStr = fmt.Sprintf(" (service %s/%s)", service.Namespace, service.Name)
+	}
+	klog.V(5).Infof("Endpoint selection%s: found %d ready endpoints", serviceStr, len(readySelectedEndpoints))
+
+	// Select eligible endpoints based on readiness
+	eligibleEndpoints = readySelectedEndpoints
+	// Fallback to serving terminating endpoints (ready=false, serving=true, terminating=true) only if none are ready
+	if len(readySelectedEndpoints) == 0 {
+		eligibleEndpoints = servingTerminatingSelectedEndpoints
+		klog.V(5).Infof("Endpoint selection%s: fallback to %d serving & terminating endpoints",
+			serviceStr, len(servingTerminatingSelectedEndpoints))
+	}
+
+	return eligibleEndpoints
+}
+
 func getLocalEligibleEndpoints(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, nodeName string) []discovery.Endpoint {
 	return getSelectedEligibleEndpoints(endpointSlices, service, func(endpoint discovery.Endpoint) bool {
 		return endpoint.NodeName != nil && *endpoint.NodeName == nodeName
 	})
 }
 
+func getLocalEligibleEndpointsFromEndpoints(endpoints []discovery.Endpoint, service *kapi.Service, nodeName string) []discovery.Endpoint {
+	return getSelectedEligibleEndpointsFromEndpoints(endpoints, service, func(endpoint discovery.Endpoint) bool {
+		return endpoint.NodeName != nil && *endpoint.NodeName == nodeName
+	})
+}
+
 func getEligibleEndpoints(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) []discovery.Endpoint {
 	return getSelectedEligibleEndpoints(endpointSlices, service, nil)
+}
+
+func getEligibleEndpointsFromEndpoints(endpoints []discovery.Endpoint, service *kapi.Service) []discovery.Endpoint {
+	return getSelectedEligibleEndpointsFromEndpoints(endpoints, service, nil)
 }
 
 // getEligibleEndpointAddresses takes a list of endpointSlices, a service and, optionally, a nodeName
@@ -814,15 +860,42 @@ func getEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, ser
 	return endpointsAddresses
 }
 
+func getEligibleEndpointAddressesFromEndpoints(endpoints []discovery.Endpoint, service *kapi.Service, nodeName string) []string {
+	endpointsAddresses := sets.New[string]()
+	var eligibleEndpoints []discovery.Endpoint
+
+	if nodeName != "" {
+		eligibleEndpoints = getLocalEligibleEndpointsFromEndpoints(endpoints, service, nodeName)
+	} else {
+		eligibleEndpoints = getEligibleEndpointsFromEndpoints(endpoints, service)
+	}
+	for _, endpoint := range eligibleEndpoints {
+		for _, ip := range endpoint.Addresses {
+			endpointsAddresses.Insert(utilnet.ParseIPSloppy(ip).String())
+		}
+	}
+
+	return sets.List(endpointsAddresses)
+}
+
 // GetEligibleEndpointAddresses returns a list of IP addresses of all eligible endpoints from the given endpoint slices.
 func GetEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.Set[string] {
 	return getEligibleEndpointAddresses(endpointSlices, service, "")
+}
+
+// GetEligibleEndpointAddresses returns a list of IP addresses of all eligible endpoints from the given endpoint slices.
+func GetEligibleEndpointAddressesFromEndpoints(endpoints []discovery.Endpoint, service *kapi.Service) []string {
+	return getEligibleEndpointAddressesFromEndpoints(endpoints, service, "")
 }
 
 // GetLocalEligibleEndpointAddresses returns a list of IP address of endpoints that are local to the specified node
 // and are eligible.
 func GetLocalEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, nodeName string) sets.Set[string] {
 	return getEligibleEndpointAddresses(endpointSlices, service, nodeName)
+}
+
+func GetLocalEligibleEndpointAddressesFromEndpoints(endpoints []discovery.Endpoint, service *kapi.Service, nodeName string) []string {
+	return getEligibleEndpointAddressesFromEndpoints(endpoints, service, nodeName)
 }
 
 // DoesEndpointSliceContainEndpoint returns true if the endpointslice

@@ -18,6 +18,41 @@ import (
 	utilpointer "k8s.io/utils/pointer"
 )
 
+const (
+	nodeA = "node-a"
+	nodeB = "node-b"
+)
+
+func makeReadyEndpoint(addresses ...string) []discovery.Endpoint {
+	return []discovery.Endpoint{
+		{
+			Conditions: discovery.EndpointConditions{
+				Ready: utilpointer.Bool(true),
+			},
+			Addresses: addresses,
+		},
+	}
+}
+
+func makeReadyEndpointOnNode(nodeName string, addresses ...string) []discovery.Endpoint {
+	return []discovery.Endpoint{
+		{
+			Conditions: discovery.EndpointConditions{
+				Ready: utilpointer.Bool(true),
+			},
+			Addresses: addresses,
+			NodeName:  &nodeName,
+		},
+	}
+}
+
+func setEndpointsNodeName(nodeName string, endpoints []discovery.Endpoint) []discovery.Endpoint {
+	for _, ep := range endpoints {
+		ep.NodeName = &nodeName
+	}
+	return endpoints
+}
+
 func Test_buildServiceLBConfigs(t *testing.T) {
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	oldGwMode := globalconfig.Gateway.Mode
@@ -39,7 +74,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 	inport1 := int32(81)
 	outport1 := int32(8081)
 	outportstr := intstr.FromInt(int(outport))
-	emptyEPs := util.LbEndpoints{V4IPs: []string{}, V6IPs: []string{}, Port: 0}
 	tcp := v1.ProtocolTCP
 	udp := v1.ProtocolUDP
 
@@ -161,7 +195,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				vips:     []string{"192.168.1.1"},
 				protocol: v1.ProtocolTCP,
 				inport:   80,
-				eps:      emptyEPs,
+				eps:      util.LbEndpoints{},
 			}},
 			resultsSame: true,
 		},
@@ -188,15 +222,14 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{},
-					Port:  outport,
+					V4Endpoints: makeReadyEndpoint("10.128.0.2"),
+					Port:        outport,
 				},
 			}},
 			resultsSame: true,
 		},
 		{
-			name: "v4 clusterip, two tcp ports, endpoints",
+			name: "v4 clusterip, two tcp ports, two endpoints",
 			args: args{
 				slices: []*discovery.EndpointSlice{
 					{
@@ -257,9 +290,8 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("10.128.0.2", "10.128.1.2"),
 					},
 				},
 				{
@@ -267,15 +299,14 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport1,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport1,
+						Port:        outport1,
+						V4Endpoints: makeReadyEndpoint("10.128.0.2", "10.128.1.2"),
 					},
 				},
 			},
 		},
 		{
-			name: "v4 clusterip, one tcp, one udp port, endpoints",
+			name: "v4 clusterip, one tcp, one udp port, two endpoints",
 			args: args{
 				slices: []*discovery.EndpointSlice{
 					{
@@ -336,9 +367,8 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("10.128.0.2", "10.128.1.2"),
 					},
 				},
 				{
@@ -346,9 +376,8 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolUDP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("10.128.0.2", "10.128.1.2"),
 					},
 				},
 			},
@@ -377,9 +406,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					Port:        outport,
+					V4Endpoints: makeReadyEndpoint("10.128.0.2"),
+					V6Endpoints: makeReadyEndpoint("fe00::1:1"),
 				},
 			}},
 		},
@@ -415,9 +444,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					Port:        outport,
+					V4Endpoints: makeReadyEndpoint("10.128.0.2"),
+					V6Endpoints: makeReadyEndpoint("fe00::1:1"),
 				},
 			}},
 		},
@@ -455,9 +484,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2"},
-						V6IPs: []string{"fe00::1:1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("10.128.0.2"),
+						V6Endpoints: makeReadyEndpoint("fe00::1:1"),
 					},
 				},
 			},
@@ -468,9 +497,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					inport:               inport,
 					externalTrafficLocal: true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2"},
-						V6IPs: []string{"fe00::1:1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("10.128.0.2"),
+						V6Endpoints: makeReadyEndpoint("fe00::1:1"),
 					},
 				},
 			},
@@ -500,9 +529,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					Port:        outport,
+					V4Endpoints: makeReadyEndpoint("10.128.0.2"),
+					V6Endpoints: makeReadyEndpoint("fe00::1:1"),
 				},
 			}},
 			resultSharedGatewayTemplate: []lbConfig{{
@@ -510,9 +539,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   5,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					Port:        outport,
+					V4Endpoints: makeReadyEndpoint("10.128.0.2"),
+					V6Endpoints: makeReadyEndpoint("fe00::1:1"),
 				},
 				hasNodePort: true,
 			}},
@@ -544,9 +573,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 				},
 			},
@@ -556,9 +585,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 					hasNodePort: true,
 				},
@@ -570,9 +599,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 				},
 			},
@@ -582,9 +611,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 					hasNodePort: true,
 				},
@@ -618,9 +647,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 					externalTrafficLocal: true,
 					hasNodePort:          true,
@@ -630,9 +659,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 				},
 			},
@@ -642,9 +671,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 					externalTrafficLocal: true,
 					hasNodePort:          true,
@@ -654,9 +683,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 				},
 			},
@@ -687,9 +716,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 				},
 			},
@@ -699,9 +728,9 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						Port:        outport,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("2001::1"),
 					},
 				},
 			},
@@ -750,14 +779,14 @@ func Test_buildClusterLBs(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:               "node-a",
+			name:               nodeA,
 			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.1")},
 			hostAddresses:      []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName:  "gr-node-a",
 			switchName:         "switch-node-a",
 		},
 		{
-			name:               "node-b",
+			name:               nodeB,
 			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.2")},
 			hostAddresses:      []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName:  "gr-node-b",
@@ -791,8 +820,8 @@ func Test_buildClusterLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1", "192.168.0.2"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1", "192.168.0.2"),
+						Port:        8080,
 					},
 				},
 				{
@@ -800,8 +829,8 @@ func Test_buildClusterLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   443,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						Port:  8043,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						Port:        8043,
 					},
 				},
 			},
@@ -838,8 +867,8 @@ func Test_buildClusterLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1", "192.168.0.2"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1", "192.168.0.2"),
+						Port:        8080,
 					},
 				},
 				{
@@ -847,8 +876,8 @@ func Test_buildClusterLBs(t *testing.T) {
 					protocol: v1.ProtocolUDP,
 					inport:   443,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						Port:  8043,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						Port:        8043,
 					},
 				},
 			},
@@ -897,9 +926,9 @@ func Test_buildClusterLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1", "192.168.0.2"},
-						V6IPs: []string{"fe90::1", "fe91::1"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1", "192.168.0.2"),
+						V6Endpoints: makeReadyEndpoint("fe90::1", "fe91::1"),
+						Port:        8080,
 					},
 				},
 				{
@@ -907,9 +936,9 @@ func Test_buildClusterLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   443,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"fe90::1"},
-						Port:  8043,
+						V4Endpoints: makeReadyEndpoint("192.168.0.1"),
+						V6Endpoints: makeReadyEndpoint("fe90::1"),
+						Port:        8043,
 					},
 				},
 			},
@@ -946,7 +975,7 @@ func Test_buildClusterLBs(t *testing.T) {
 			},
 		},
 	}
-
+	// TODO Here you should add tests for proxy terminating services
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
 			actual := buildClusterLBs(tt.service, tt.configs, tt.nodeInfos, true)
@@ -980,7 +1009,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:               "node-a",
+			name:               nodeA,
 			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.1")},
 			hostAddresses:      []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.111")},
 			gatewayRouterName:  "gr-node-a",
@@ -988,7 +1017,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			podSubnets:         []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
-			name:               "node-b",
+			name:               nodeB,
 			l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.2")},
 			hostAddresses:      []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName:  "gr-node-b",
@@ -1022,8 +1051,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.0.0.1"),
+						Port:        8080,
 					},
 				},
 			},
@@ -1066,8 +1095,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.128.0.2"),
+						Port:        8080,
 					},
 				},
 			},
@@ -1149,8 +1178,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.0.0.1"),
+						Port:        8080,
 					},
 				},
 				{
@@ -1158,8 +1187,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.0.0.1"),
+						Port:        8080,
 					},
 				},
 			},
@@ -1290,7 +1319,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 		},
 		{
 			// The most complicated case
-			name:    "nodeport service, host-network pod, ExternalTrafficPolicy",
+			name:    "nodeport service, host-network pod, ExternalTrafficPolicy", // TODO fails
 			service: defaultService,
 			configs: []lbConfig{
 				{
@@ -1298,8 +1327,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.0.0.1"),
+						Port:        8080,
 					},
 				},
 				{
@@ -1309,8 +1338,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					externalTrafficLocal: true,
 					hasNodePort:          true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1"},
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.0.0.1"),
+						Port:        8080,
 					},
 				},
 			},
@@ -1320,7 +1349,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				// router nodeport
 				// switch clusterip + nodeport
 				{
-					Name:        "Service_testns/foo_TCP_node_router_node-a",
+					Name:        "Service_testns/foo_TCP_node_router_node-a", // TODO fails: adds two extra RUles with empty target. WTF?
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
@@ -1333,7 +1362,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					Opts: defaultOpts,
 				},
 				{
-					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
+					Name:        "Service_testns/foo_TCP_node_local_router_node-a", // TODO fails: totally missing
 					ExternalIDs: defaultExternalIDs,
 					Routers:     []string{"gr-node-a"},
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
@@ -1433,8 +1462,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					inport:               80,
 					internalTrafficLocal: true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.1", "10.128.1.1"}, // 1 ep on node-a and 1 ep on node-b
-						Port:  8080,
+						V4Endpoints: append(
+							makeReadyEndpointOnNode(nodeA, "10.128.0.1"),
+							makeReadyEndpointOnNode(nodeB, "10.128.1.1")...), // 1 ep on node-a and 1 ep on node-b
+						Port: 8080,
 					},
 				},
 				{
@@ -1442,8 +1473,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.1", "10.128.1.1"},
-						Port:  8080,
+						V4Endpoints: append(
+							makeReadyEndpointOnNode(nodeA, "10.128.0.1"),
+							makeReadyEndpointOnNode(nodeB, "10.128.1.1")...), // 1 ep on node-a and 1 ep on node-b
+						Port: 8080,
 					},
 				},
 			},
@@ -1555,7 +1588,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			},
 		},
 		{
-			name:    "clusterIP + externalIP service, host-networked pods, InternalTrafficPolicy=local",
+			name:    "clusterIP + externalIP service, host-networked pods, InternalTrafficPolicy=local", // fails
 			service: defaultService,
 			configs: []lbConfig{
 				{
@@ -1564,8 +1597,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					inport:               80,
 					internalTrafficLocal: true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1", "10.0.0.2"}, // 1 ep on node-a and 1 ep on node-b
-						Port:  8080,
+						V4Endpoints: append(
+							makeReadyEndpointOnNode(nodeA, "10.0.0.1"), // 1 ep on node-a and 1 ep on node-b
+							makeReadyEndpointOnNode(nodeB, "10.0.0.2")...),
+						Port: 8080,
 					},
 				},
 				{
@@ -1573,8 +1608,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1", "10.0.0.2"},
-						Port:  8080,
+						V4Endpoints: append(
+							makeReadyEndpointOnNode(nodeA, "10.0.0.1"), // 1 ep on node-a and 1 ep on node-b
+							makeReadyEndpointOnNode(nodeB, "10.0.0.2")...),
+						Port: 8080,
 					},
 				},
 			},
@@ -1731,8 +1768,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					internalTrafficLocal: true,
 					externalTrafficLocal: false, // ETP is applicable only to nodePorts and LBs
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1"}, // only one ep on node-a
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.0.0.1"), // only one ep on node-a
+
+						Port: 8080,
 					},
 				},
 				{
@@ -1743,8 +1781,8 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					internalTrafficLocal: false, // ITP is applicable only to clusterIPs
 					hasNodePort:          true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.0.0.1"}, // only one ep on node-a
-						Port:  8080,
+						V4Endpoints: makeReadyEndpointOnNode(nodeA, "10.0.0.1"), // only one ep on node-a
+						Port:        8080,
 					},
 				},
 			},
