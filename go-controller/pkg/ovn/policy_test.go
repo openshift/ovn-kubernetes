@@ -1293,6 +1293,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy3 := getPortNetworkPolicy(netPolicyName1, "leftover1", labelName, labelVal, portNum)
 				egressPGName := defaultDenyPortGroupName("leftover1", egressDefaultDenySuffix)
 				ingressPGName := defaultDenyPortGroupName("leftover1", ingressDefaultDenySuffix)
+				ClusterRtrPortGroupName := "clusterRtrPortGroup"
 				egressOptions := map[string]string{
 					// older versions of ACLs don't have, should be added by syncNetworkPolicies on startup
 					//	"apply-after-lb": "true",
@@ -1378,6 +1379,47 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				leftOverACL4FromUpgrade.UUID = *leftOverACL4FromUpgrade.Name + "-ingressDenyACL-UUID"
 
+				// ACL5: leftover multicast Egress ACL with 1013 priority
+				leftOverACL5FromUpgrade := libovsdbops.BuildACL(
+					"",
+					nbdb.ACLDirectionFromLport,
+					types.DefaultRoutedMcastAllowPriority,
+					"inport == @"+ClusterRtrPortGroupName+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+					nbdb.ACLActionAllow,
+					"",
+					"",
+					false,
+					map[string]string{
+						defaultDenyPolicyTypeACLExtIdKey: "Egress",
+					},
+					egressOptions,
+				)
+				leftOverACL5FromUpgrade.UUID = "egress-multicast-UUID"
+
+				// ACL6: leftover multicast Ingres ACL with 1013 priority
+				leftOverACL6FromUpgrade := libovsdbops.BuildACL(
+					"",
+					nbdb.ACLDirectionToLport,
+					types.DefaultRoutedMcastAllowPriority,
+					"outport == @"+ClusterRtrPortGroupName+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
+					nbdb.ACLActionAllow,
+					"",
+					"",
+					false,
+					map[string]string{
+						defaultDenyPolicyTypeACLExtIdKey: "Ingress",
+					},
+					nil,
+				)
+				leftOverACL6FromUpgrade.UUID = "ingress-multicast-UUID"
+				testOnlyMulticastPG := libovsdbops.BuildPortGroup(
+					ClusterRtrPortGroupName,
+					ClusterRtrPortGroupName,
+					nil,
+					[]*nbdb.ACL{leftOverACL5FromUpgrade, leftOverACL6FromUpgrade},
+				)
+				testOnlyMulticastPG.UUID = "multicast-pg-UUID"
+
 				initialDB.NBData = append(
 					initialDB.NBData,
 					leftOverACL1FromUpgrade,
@@ -1386,6 +1428,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					leftOverACL4FromUpgrade,
 					testOnlyIngressDenyPG,
 					testOnlyEgressDenyPG,
+					leftOverACL5FromUpgrade,
+					leftOverACL6FromUpgrade,
+					testOnlyMulticastPG,
 				)
 
 				startOvn(initialDB, []v1.Namespace{namespace1}, []knet.NetworkPolicy{*networkPolicy1, *networkPolicy3},
@@ -1420,11 +1465,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				testOnlyIngressDenyPG.ACLs = nil // Sync Function should remove stale ACL from PGs
 				testOnlyEgressDenyPG.ACLs = nil  // Sync Function should remove stale ACL from PGs
 				expectedData = append(expectedData, testOnlyIngressDenyPG)
+
+				testOnlyMulticastPG.ACLs = nil // Sync Function should remove stale ACL(priority=1013) from PG
+				expectedData = append(expectedData, testOnlyMulticastPG)
+
 				// since test server doesn't garbage collect dereferenced acls, they will stay in the test db after they
 				// were deleted. Even though they are derefenced from the port group at this point, they will be updated
 				// as all the other ACLs.
-				// Update deleted leftOverACL1FromUpgrade and leftOverACL2FromUpgrade to match on expected data
-				// Once our test server can delete such acls, this part should be deleted
+				// Update deleted leftOverACL1FromUpgrade, leftOverACL2FromUpgrade, leftOverACL5FromUpgrade and leftOverACL5FromUpgrade
+				// to match on expected data Once our test server can delete such acls, this part should be deleted
 				// start of db hack
 				newDefaultDenyLeftoverIngressACLName := getDefaultDenyPolicyACLName("leftover1", lportIngress)
 				newDefaultDenyLeftoverEgressACLName := getDefaultDenyPolicyACLName("leftover1", lportEgressAfterLB)
@@ -1436,6 +1485,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				expectedData = append(expectedData, leftOverACL2FromUpgrade)
 				expectedData = append(expectedData, leftOverACL1FromUpgrade)
+				leftOverACL5FromUpgrade.Options = egressOptions
+				expectedData = append(expectedData, leftOverACL5FromUpgrade)
+				expectedData = append(expectedData, leftOverACL6FromUpgrade)
 				// end of db hack
 				expectedData = append(expectedData, testOnlyEgressDenyPG)
 
