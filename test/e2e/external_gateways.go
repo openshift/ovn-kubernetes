@@ -19,6 +19,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	"k8s.io/kubernetes/test/e2e/framework/skipper"
+	utilnet "k8s.io/utils/net"
 )
 
 // This is the image used for the containers acting as externalgateways, built
@@ -476,8 +477,14 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 		podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 		totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 		if protocol == "udp" {
-			gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-			gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+			// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
+			if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+			} else {
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0))
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // 6-2
+			}
 		} else {
 			gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 			gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
@@ -563,8 +570,14 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 		podConnEntriesWithMACLabelsSet = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 		totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 		if protocol == "udp" {
-			gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-			gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+			// FIXME(trozet): for ipv6 we flush all mac label flows due to no support for IPv6 NDP
+			if utilnet.IsIPv4String(addresses.gatewayIPs[0]) {
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+			} else {
+				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0))
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // 6-2
+			}
 		} else {
 			gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 			gomega.Expect(totalPodConnEntries).To(gomega.Equal(6))
@@ -1088,9 +1101,13 @@ func setupGatewayContainers(f *framework.Framework, nodes *v1.NodeList, containe
 
 	if addressesv6.srcPodIP != "" && addressesv6.nodeIP != "" {
 		testIPv6 = true
+	} else {
+		addressesv6 = gatewayTestIPs{}
 	}
 	if addressesv4.srcPodIP != "" && addressesv4.nodeIP != "" {
 		testIPv4 = true
+	} else {
+		addressesv4 = gatewayTestIPs{}
 	}
 	if !testIPv4 && !testIPv6 {
 		framework.Fail("No ipv4 nor ipv6 addresses found in nodes and src pod")
@@ -1160,9 +1177,19 @@ func setupGatewayPods(f *framework.Framework, nodes *v1.NodeList, pod1, pod2, ns
 	}
 
 	for i, gwPod := range gwPods {
-		networkIPs := fmt.Sprintf("\"%s\"", addressesv4.gatewayIPs[i])
+		var networkIPs string
+		if len(addressesv4.gatewayIPs) > 0 {
+			// IPv4
+			networkIPs = fmt.Sprintf("\"%s\"", addressesv4.gatewayIPs[i])
+		}
 		if addressesv6.srcPodIP != "" && addressesv6.nodeIP != "" {
-			networkIPs = fmt.Sprintf("\"%s\", \"%s\"", addressesv4.gatewayIPs[i], addressesv6.gatewayIPs[i])
+			if len(networkIPs) > 0 {
+				// IPv4 and IPv6
+				networkIPs = fmt.Sprintf("%s, \"%s\"", networkIPs, addressesv6.gatewayIPs[i])
+			} else {
+				// IPv6 only
+				networkIPs = fmt.Sprintf("\"%s\"", addressesv6.gatewayIPs[i])
+			}
 		}
 		annotatePodForGateway(gwPod, ns, f.Namespace.Name, networkIPs, bfd)
 	}
