@@ -469,17 +469,17 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			defer clusterManagerWatchFactory.Shutdown()
 		}
 
-		cm, err := clustermanager.NewClusterManager(ovnClientset.GetClusterManagerClientset(), clusterManagerWatchFactory,
+		clusterManager, err := clustermanager.NewClusterManager(ovnClientset.GetClusterManagerClientset(), clusterManagerWatchFactory,
 			runMode.identity, wg, eventRecorder)
 		if err != nil {
 			return fmt.Errorf("failed to create new cluster manager: %w", err)
 		}
 		metrics.RegisterClusterManagerFunctional()
-		err = cm.Start(ctx)
+		err = clusterManager.Start(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to start cluster manager: %w", err)
 		}
-		defer cm.Stop()
+		defer clusterManager.Stop()
 
 		// record delay until ready
 		metrics.MetricClusterManagerReadyDuration.Set(time.Since(startTime).Seconds())
@@ -498,7 +498,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
 
-		cm, err := controllerManager.NewNetworkControllerManager(ovnClientset, masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, eventRecorder, wg)
+		networkControllerManager, err := controllerManager.NewNetworkControllerManager(ovnClientset, masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, eventRecorder, wg)
 		if err != nil {
 			return err
 		}
@@ -510,7 +510,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		ovnkubeControllerWG.Add(1)
 		go func() {
 			defer ovnkubeControllerWG.Done()
-			err = cm.Start(ctx)
+			err = networkControllerManager.Start(ctx)
 			if err != nil {
 				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)
 				klog.Error(ovnkubeControllerStartErr)
@@ -519,9 +519,12 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			// record delay until ready
 			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
 		}()
+		// make sure ovnkubeController started in a separate goroutine will execute .Stop() on shutdown.
+		// Stop() only makes sense to call if Start() succeeded.
 		defer func() {
-			if ovnkubeControllerStartErr != nil {
-				cm.Stop()
+			ovnkubeControllerWG.Wait()
+			if ovnkubeControllerStartErr == nil {
+				networkControllerManager.Stop()
 			}
 		}()
 	}
@@ -560,6 +563,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
 	}
 
+	// wait for ovnkubeController to start and check error
 	if runMode.ovnkubeController {
 		ovnkubeControllerWG.Wait()
 		if ovnkubeControllerStartErr != nil {
