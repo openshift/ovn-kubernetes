@@ -37,14 +37,14 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:              "node-a",
+			name:              nodeA,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
-			name:              "node-b",
+			name:              nodeB,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
@@ -77,8 +77,10 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   80,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						Port:  8080,
+						V4Endpoints: append(
+							makeReadyEndpointOnNode(nodeA, "10.128.0.2"),
+							makeReadyEndpointOnNode(nodeB, "10.128.1.2")...),
+						Port: 8080,
 					},
 				},
 			},
@@ -188,14 +190,14 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:              "node-a",
+			name:              nodeA,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
-			name:              "node-b",
+			name:              nodeB,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
@@ -228,9 +230,10 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					externalTrafficLocal: true,
 					hasNodePort:          true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						V4Endpoints: append(
+							makeReadyEndpointOnNode(nodeA, "10.128.0.2"),
+							makeReadyEndpointOnNode(nodeB, "10.128.1.2")...),
+						Port: outport,
 					},
 				},
 				{
@@ -239,9 +242,10 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					inport:               inport,
 					externalTrafficLocal: true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						V4Endpoints: append(
+							makeReadyEndpointOnNode(nodeA, "10.128.0.2"),
+							makeReadyEndpointOnNode(nodeB, "10.128.1.2")...),
+						Port: outport,
 					},
 				},
 			},
@@ -321,9 +325,8 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					externalTrafficLocal: true,
 					hasNodePort:          true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.1.2"}, // only endpoint on node-b is running
-						V6IPs: []string{},
-						Port:  outport,
+						V4Endpoints: makeReadyEndpointOnNode(nodeB, "10.128.1.2"), // only endpoint on node-b is running
+						Port:        outport,
 					},
 				},
 				{
@@ -332,9 +335,8 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					inport:               inport,
 					externalTrafficLocal: true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						V4Endpoints: makeReadyEndpointOnNode(nodeB, "10.128.1.2"),
+						Port:        outport,
 					},
 				},
 			},
