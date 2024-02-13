@@ -52,10 +52,6 @@ func LinkSetVfVlanQos(link Link, vf, vlan, qos int) error {
 	return ErrNotImplemented
 }
 
-func LinkSetVfVlanQosProto(link Link, vf, vlan, qos, proto int) error {
-	return ErrNotImplemented
-}
-
 func LinkSetVfTxRate(link Link, vf, rate int) error {
 	return ErrNotImplemented
 }
@@ -133,14 +129,6 @@ func LinkSetGSOMaxSize(link Link, maxSize int) error {
 }
 
 func LinkSetGROMaxSize(link Link, maxSize int) error {
-	return ErrNotImplemented
-}
-
-func LinkSetGSOIPv4MaxSize(link Link, maxSize int) error {
-	return ErrNotImplemented
-}
-
-func LinkSetGROIPv4MaxSize(link Link, maxSize int) error {
 	return ErrNotImplemented
 }
 

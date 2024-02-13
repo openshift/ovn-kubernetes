@@ -77,10 +77,6 @@ const (
 	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
 
-	// OVNNodeSecondaryHostEgressIPs contains EgressIP addresses that aren't managed by OVN. The EIP addresses are assigned to
-	// standard linux interfaces and not interfaces of type OVS.
-	OVNNodeSecondaryHostEgressIPs = "k8s.ovn.org/secondary-host-egress-ips"
-
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
@@ -750,20 +746,20 @@ func ParseNodeHostCIDRsDropNetMask(node *kapi.Node) (sets.Set[string], error) {
 	return sets.New(cfg...), nil
 }
 
-func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {
+func ParseNodeHostCIDRsExcludeOVNManagedNetworks(node *kapi.Node) ([]string, error) {
 	networks, err := ParseNodeHostCIDRsList(node)
 	if err != nil {
 		return nil, err
 	}
-	ovnNetworks, err := getNodeIfAddrAnnotation(node)
+	ovnManagedNetworks, err := getNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
-	if ovnNetworks.IPv4 != "" {
-		networks = RemoveItemFromSliceUnstable(networks, ovnNetworks.IPv4)
+	if ovnManagedNetworks.IPv4 != "" {
+		networks = RemoveItemFromSliceUnstable(networks, ovnManagedNetworks.IPv4)
 	}
-	if ovnNetworks.IPv6 != "" {
-		networks = RemoveItemFromSliceUnstable(networks, ovnNetworks.IPv6)
+	if ovnManagedNetworks.IPv6 != "" {
+		networks = RemoveItemFromSliceUnstable(networks, ovnManagedNetworks.IPv6)
 	}
 	return networks, nil
 }
@@ -782,39 +778,18 @@ func ParseNodeHostCIDRsList(node *kapi.Node) ([]string, error) {
 	return cfg, nil
 }
 
-// IsNodeSecondaryHostEgressIPsAnnotationSet returns true if an annotation that tracks assigned of egress IPs to interfaces OVN doesn't manage
-// is set
-func IsNodeSecondaryHostEgressIPsAnnotationSet(node *kapi.Node) bool {
-	_, ok := node.Annotations[OVNNodeSecondaryHostEgressIPs]
-	return ok
-}
-
-// ParseNodeSecondaryHostEgressIPsAnnotation returns secondary host egress IPs addresses for a node
-func ParseNodeSecondaryHostEgressIPsAnnotation(node *kapi.Node) (sets.Set[string], error) {
-	addrAnnotation, ok := node.Annotations[OVNNodeSecondaryHostEgressIPs]
-	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeSecondaryHostEgressIPs, node.Name)
-	}
-
-	var cfg []string
-	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeSecondaryHostEgressIPs, addrAnnotation, node.Name, err)
-	}
-	return sets.New(cfg...), nil
-}
-
-// IsSecondaryHostNetworkContainingIP attempts to find a secondary host network that will host the argument IP. If no network is
+// IsNonOVNManagedNetworkContainingIP attempts to find a non OVN managed network that will host the argument IP. If no network is
 // found, false is returned
-func IsSecondaryHostNetworkContainingIP(node *v1.Node, ip net.IP) (bool, error) {
+func IsNonOVNManagedNetworkContainingIP(node *v1.Node, ip net.IP) (bool, error) {
 	if ip == nil {
 		return false, fmt.Errorf("empty IP is not valid")
 	}
 	if node == nil {
-		return false, fmt.Errorf("unable to determine if IP %s is a secondary host network because node argument is nil", ip.String())
+		return false, fmt.Errorf("unable to determine if IP %s is a non OVN managed network because node argument is nil", ip.String())
 	}
-	network, err := GetSecondaryHostNetworkContainingIP(node, ip)
+	network, err := GetNonOVNNetworkContainingIP(node, ip)
 	if err != nil {
-		return false, fmt.Errorf("failed to determine if IP %s is hosted by a secondary host network for node %s: %v",
+		return false, fmt.Errorf("failed to determine if IP %s is hosted by a non OVN managed network for node %s: %v",
 			ip.String(), node.Name, err)
 	}
 	if network == "" {
@@ -823,8 +798,8 @@ func IsSecondaryHostNetworkContainingIP(node *v1.Node, ip net.IP) (bool, error) 
 	return true, nil
 }
 
-// GetEgressIPNetwork attempts to retrieve a network that contains EgressIP. Check the OVN network first as
-// represented by parameter eIPConfig, and if no match is found, and if not in a cloud environment, check secondary host networks.
+// GetEgressIPNetwork attempts to retrieve a network that contains EgressIP. Check the OVN managed network first as
+// represented by parameter eIPConfig, and if no match is found, and if not in a cloud environment, check non-OVN managed networks.
 func GetEgressIPNetwork(node *v1.Node, eIPConfig *ParsedNodeEgressIPConfiguration, eIP net.IP) (string, error) {
 	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(eIP) {
 		return eIPConfig.V4.Net.String(), nil
@@ -832,20 +807,20 @@ func GetEgressIPNetwork(node *v1.Node, eIPConfig *ParsedNodeEgressIPConfiguratio
 	if eIPConfig.V6.Net != nil && eIPConfig.V6.Net.Contains(eIP) {
 		return eIPConfig.V6.Net.String(), nil
 	}
-	// Do not attempt to check if a secondary host network may host an EIP if we are in a cloud environment
+	// Do not attempt to check if a non-OVN managed network may host an EIP if we are in a cloud environment
 	if PlatformTypeIsEgressIPCloudProvider() {
 		return "", nil
 	}
-	network, err := GetSecondaryHostNetworkContainingIP(node, eIP)
+	network, err := GetNonOVNNetworkContainingIP(node, eIP)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Egress IP %s network for node %s: %v", eIP.String(), node.Name, err)
 	}
 	return network, nil
 }
 
-// IsOVNNetwork attempts to detect if the argument IP can be hosted by a network managed by OVN. Currently, this is
+// IsOVNManagedNetwork attempts to detect if the argument IP can be hosted by a network managed by OVN. Currently, this is
 // only the primary OVN network
-func IsOVNNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) bool {
+func IsOVNManagedNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) bool {
 	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(ip) {
 		return true
 	}
@@ -855,32 +830,21 @@ func IsOVNNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) bool {
 	return false
 }
 
-// GetSecondaryHostNetworkContainingIP attempts to find a secondary host network to host the argument IP
-// and includes only global unicast addresses.
-func GetSecondaryHostNetworkContainingIP(node *v1.Node, ip net.IP) (string, error) {
-	networks, err := ParseNodeHostCIDRsExcludeOVNNetworks(node)
+// GetNonOVNNetworkContainingIP attempts to find a non OVN managed network to host the argument IP
+func GetNonOVNNetworkContainingIP(node *v1.Node, ip net.IP) (string, error) {
+	networks, err := ParseNodeHostCIDRsExcludeOVNManagedNetworks(node)
 	if err != nil {
-		return "", fmt.Errorf("failed to get host-cidrs annotation excluding OVN networks for node %s: %v",
+		return "", fmt.Errorf("failed to get host-cidrs annotation excluding OVN managed networks for node %s: %v",
 			node.Name, err)
 	}
 	cidrs, err := makeCIDRs(networks...)
 	if err != nil {
 		return "", err
 	}
-	if len(cidrs) == 0 {
-		return "", nil
-	}
-	isIPv6 := ip.To4() == nil
-	cidrs = filterIPVersion(cidrs, isIPv6)
 	lpmTree := cidrtree.New(cidrs...)
-	for _, prefix := range cidrs {
-		if !prefix.Addr().IsGlobalUnicast() {
-			lpmTree.Delete(prefix)
-		}
-	}
 	addr, err := netip.ParseAddr(ip.String())
 	if err != nil {
-		return "", fmt.Errorf("failed to convert IP %s to netip address: %v", ip.String(), err)
+		return "", fmt.Errorf("failed to parse IP %s: %v", ip.String(), err)
 	}
 	match, found := lpmTree.Lookup(addr)
 	if !found {
@@ -1092,18 +1056,4 @@ func makeCIDRs(s ...string) (cidrs []netip.Prefix, err error) {
 		cidrs = append(cidrs, prefix)
 	}
 	return cidrs, nil
-}
-
-func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
-	validCIDRs := make([]netip.Prefix, 0, len(cidrs))
-	for _, cidr := range cidrs {
-		if cidr.Addr().Is4() && v6 {
-			continue
-		}
-		if cidr.Addr().Is6() && !v6 {
-			continue
-		}
-		validCIDRs = append(validCIDRs, cidr)
-	}
-	return validCIDRs
 }

@@ -26,7 +26,6 @@ type checkNodeAnnot func(v annotationChange, nodeName string) error
 // commonNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in non-IC and IC environments
 var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.OVNNodeHostCIDRs:                nil,
-	util.OVNNodeSecondaryHostEgressIPs:   nil,
 	util.OvnNodeL3GatewayConfig:          nil,
 	util.OvnNodeManagementPortMacAddress: nil,
 	util.OvnNodeIfAddr:                   nil,

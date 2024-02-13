@@ -690,10 +690,10 @@ func (eIPC *egressIPClusterController) setNodeEgressReachable(nodeName string, i
 	}
 }
 
-// reconcileSecondaryHostNetworkEIPs is used to reconsider existing assigned EIPs that are assigned to secondary host
+// reconcileNonOVNNetworkEIPs is used to reconsider existing assigned EIPs that are assigned to non-OVN managed
 // networks and will send a 'synthetic' reconcile for any EIPs which are hosted by an invalid network which is determined
 // from the nodes host-cidrs annotation
-func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v1.Node) error {
+func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node) error {
 	var errorAggregate []error
 	egressIPs, err := eIPC.kube.GetEgressIPs()
 	if err != nil {
@@ -714,14 +714,14 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v
 					reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 					continue
 				}
-				// do not reconcile if EIP is hosted by OVN network or if network is what we expect
-				if util.IsOVNNetwork(eNode.egressIPConfig, egressIPIP) {
+				// do not reconcile if EIP is hosted by OVN managed network or if network is what we expect
+				if util.IsOVNManagedNetwork(eNode.egressIPConfig, egressIPIP) {
 					continue
 				}
-				network, err := util.GetSecondaryHostNetworkContainingIP(node, egressIPIP)
+				network, err := util.GetNonOVNNetworkContainingIP(node, egressIPIP)
 				if err != nil {
 					errorAggregate = append(errorAggregate, fmt.Errorf("failed to determine if egress IP %s IP %s "+
-						"is hosted by secondary host network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
+						"is hosted by non-OVN managed network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
 					continue
 				}
 				if network == "" {
@@ -734,7 +734,7 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v
 	for _, egressIP := range reconcileEgressIPs {
 		if err := eIPC.reconcileEgressIP(nil, egressIP); err != nil {
 			errorAggregate = append(errorAggregate, fmt.Errorf("re-assignment for EgressIP %s hosted by a "+
-				"secondary host network failed, unable to update object, err: %v", egressIP.Name, err))
+				"non-OVN managed network failed, unable to update object, err: %v", egressIP.Name, err))
 		}
 	}
 	if len(errorAggregate) > 0 {
@@ -1169,7 +1169,7 @@ func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interfa
 // ascending order following their existing amount of allocations, and trying to
 // assign the egress IP to the node with the lowest amount of allocations every
 // time, this does not guarantee complete balance, but mostly complete.
-// For Egress IPs that are hosted by secondary host networks, there must be at least
+// For Egress IPs that are hosted by non-OVN managed networks, there must be at least
 // one node that hosts the network and exposed via the nodes host-cidrs annotation.
 func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string) []egressipv1.EgressIPStatusItem {
 	eIPC.allocator.Lock()
@@ -1258,7 +1258,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				return assignments
 			}
 		}
-		// Egress IP for secondary host networks is only available on baremetal environments
+		// Egress IP for non-OVN managed networks is only available on baremetal environments
 		if !util.PlatformTypeIsEgressIPCloudProvider() {
 			assignableNodesWithSecondaryNet := make([]*egressNode, 0)
 			for _, eNode := range assignableNodes {
@@ -1268,12 +1268,12 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 						name, eNode.name, eIP.String(), err)
 					continue
 				}
-				if util.IsOVNNetwork(eNode.egressIPConfig, eIP) {
+				if util.IsOVNManagedNetwork(eNode.egressIPConfig, eIP) {
 					continue
 				}
-				network, err := util.GetSecondaryHostNetworkContainingIP(node, eIP)
+				network, err := util.GetNonOVNNetworkContainingIP(node, eIP)
 				if err != nil {
-					klog.Warningf("Failed to determine if egress IP is hosted by a secondary host network for node %s: %v",
+					klog.Warningf("Failed to determine if egress IP is hosted by a non-OVN managed networks for node %s: %v",
 						eIP.String(), node.Name, err)
 					continue
 				}
@@ -1283,11 +1283,11 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				assignableNodesWithSecondaryNet = append(assignableNodesWithSecondaryNet, eNode)
 
 			}
-			// if the EIP is hosted by a secondary host network, then limit the assignable nodes to the set of nodes
-			// that connect to this network.
+			// if the EIP is hosted by a non OVN managed network, then restrict the assignable nodes to the set of nodes that
+			// may host the non-OVN managed network
 			if len(assignableNodesWithSecondaryNet) > 0 {
 				klog.V(5).Infof("Restricting the number of assignable nodes from %d to %d because EgressIP %s IP %s "+
-					"is going to be hosted by a secondary host network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
+					"is going to be hosted by a non-OVN managed network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
 				assignableNodes = assignableNodesWithSecondaryNet
 			}
 		}
@@ -1455,13 +1455,13 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 				klog.Errorf("Allocator error: failed to validate and will not consider node %s for egress IP %s: %v",
 					eNode.name, name, err)
 			}
-			isOVNNetwork := util.IsOVNNetwork(eNode.egressIPConfig, ip)
-			isSecondaryHostNetwork, err := util.IsSecondaryHostNetworkContainingIP(node, ip)
+			isOVNManaged := util.IsOVNManagedNetwork(eNode.egressIPConfig, ip)
+			isSecondaryNetwork, err := util.IsNonOVNManagedNetworkContainingIP(node, ip)
 			if err != nil {
-				klog.Errorf("Allocator error: failed to determine if Egress IP %q is to be hosted by a secondary host "+
+				klog.Errorf("Allocator error: failed to determine if Egress IP %q is to be hosted by a non-OVN managed "+
 					"network for egress IP %s: %v", eIPStatus.EgressIP, name, err)
 			}
-			if !isOVNNetwork && !isSecondaryHostNetwork {
+			if !isOVNManaged && !isSecondaryNetwork {
 				klog.Errorf("Allocator error: failed to assign Egress IP %s IP %q", name, eIPStatus.EgressIP)
 				validAssignment = false
 			}
