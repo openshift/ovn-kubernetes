@@ -124,7 +124,7 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 	if err != nil {
 		return err
 	}
-	isOVNKubeNode, podAdmission, nodeName := checkNodeIdentity(p.podAdmissions, req.UserInfo)
+	_, podAdmission, nodeName := checkNodeIdentity(p.podAdmissions, req.UserInfo)
 
 	changes := mapDiff(oldPod.Annotations, newPod.Annotations)
 	changedKeys := maps.Keys(changes)
@@ -137,23 +137,6 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 		}
 	}
 
-	if !isOVNKubeNode {
-		if !p.annotationKeys.HasAny(changedKeys...) {
-			// the user is not an ovnkube-node and hasn't changed any ovnkube-node annotations
-			return nil
-		}
-
-		if !p.extraAllowedUsers.Has(req.UserInfo.Username) {
-			return fmt.Errorf("user %q is not allowed to set the following annotations on pod: %q: %v",
-				req.UserInfo.Username,
-				newPod.Name,
-				p.annotationKeys.Intersection(sets.New[string](changedKeys...)).UnsortedList())
-		}
-
-		// The user is not ovnkube-node, in this case the nodeName comes from the object
-		nodeName = newPod.Spec.NodeName
-	}
-
 	for _, key := range changedKeys {
 		if check := p.annotations[key]; check != nil {
 			if err := check(p.nodeLister, changes[key], newPod, nodeName); err != nil {
@@ -163,27 +146,17 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 	}
 
 	// if there is no matched acceptanceCondition as well as ovnkube-node, then skip following check
-	if !isOVNKubeNode && podAdmission == nil {
+	if podAdmission == nil {
 		return nil
 	}
 
-	prefixName := "ovnkube-node"
-	if podAdmission != nil {
-		prefixName = podAdmission.CommonNamePrefix
-	}
+	prefixName := podAdmission.CommonNamePrefix
 
 	if oldPod.Spec.NodeName != nodeName {
 		return fmt.Errorf("%s on node: %q is not allowed to modify pods %q annotations", prefixName, nodeName, oldPod.Name)
 	}
 	if newPod.Spec.NodeName != nodeName {
 		return fmt.Errorf("%s on node: %q is not allowed to modify pods %q annotations", prefixName, nodeName, newPod.Name)
-	}
-
-	// ovnkube-node is not allowed to change annotations outside of it's scope
-	if isOVNKubeNode && !p.annotationKeys.HasAll(changedKeys...) {
-		return fmt.Errorf("%s on node: %q is not allowed to set the following annotations on pod: %q: %v",
-			prefixName, nodeName, newPod.Name,
-			sets.New[string](changedKeys...).Difference(p.annotationKeys).UnsortedList())
 	}
 
 	// Verify that nothing but the annotations changed.

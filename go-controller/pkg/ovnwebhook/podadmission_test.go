@@ -71,28 +71,6 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			expectedErr: nil,
 		},
 		{
-			name: "error out if different user tries to set ovnkube-node annotations",
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: "system:nodes:node",
-				}},
-			}),
-			node: &corev1.Node{},
-			oldObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: "old"},
-				},
-			},
-			newObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: "new"},
-				},
-			},
-			expectedErr: fmt.Errorf("user %q is not allowed to set the following annotations on pod: %q: %v", "system:nodes:node", podName, []string{util.OvnPodAnnotationName}),
-		},
-		{
 			name: "error out if the request is not in context",
 			node: &corev1.Node{},
 			ctx:  context.TODO(),
@@ -108,57 +86,6 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				},
 			},
 			expectedErr: errors.New("admission.Request not found in context"),
-		},
-		{
-			name: "ovnkube-node cannot modify annotations on pods running on different nodes",
-			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{
-				Name:        nodeName + "_rougeOne",
-				Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
-			}},
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: userName + "_rougeOne",
-				}},
-			}),
-			oldObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			newObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to modify pods %q annotations", nodeName+"_rougeOne", podName),
-		},
-		{
-			name: "ovnkube-node cannot modify pod annotations that do not belong to it",
-			node: &corev1.Node{},
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: userName,
-				}},
-			}),
-			oldObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName + "bad": "old"},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			newObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName + "bad": "new"},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to set the following annotations on pod: %q: %v", nodeName, podName, []string{util.OvnPodAnnotationName + "bad"}),
 		},
 		{
 			name: "ovnkube-node can modify OvnPodAnnotationName annotation on a pod",
@@ -332,37 +259,6 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
 		},
-		{
-			name: "ovnkube-node cannot modify anything other than pods annotations",
-			node: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
-				},
-			},
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: userName,
-				}},
-			}),
-			oldObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-					Labels:      map[string]string{"key": "old"},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			newObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-					Labels:      map[string]string{"key": "new"},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to modify anything other than annotations", nodeName),
-		},
 		// additional acceptance conditions
 		{
 			name: "additonal acceptance conditions valid",
@@ -453,34 +349,6 @@ func TestPodAdmission_ValidateUpdateExtraUsers(t *testing.T) {
 		newObj      runtime.Object
 		expectedErr error
 	}{
-		{
-			name: "extra-user can modify OvnPodAnnotationName annotation on a pod",
-			node: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
-				},
-			},
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: extraUser,
-				}},
-			}),
-			oldObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			newObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-		},
 		{
 			name: "extra-user cannot set an IP in the OvnPodAnnotationName annotation on host-networked pods",
 			node: &corev1.Node{
