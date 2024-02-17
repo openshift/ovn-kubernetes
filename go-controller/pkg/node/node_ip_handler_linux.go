@@ -129,26 +129,13 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		c.sync()
 		return true, addrChan, nil
 	}
-
+	c.addHandlerForPrimaryAddrChange()
 	c.runInternal(stopChan, doneWg, subscribe)
 }
 
 // runInternal can be used by testcases to provide a fake subscription function
 // rather than using netlink
 func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGroup, subscribe subscribeFn) {
-	// Add an event handler to the node informer. This is needed for cases where users first update the node's IP
-	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
-	// IP address inside the node's status field).
-	nodeInformer := c.watchFactory.NodeInformer()
-	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			c.handleNodePrimaryAddrChange()
-		},
-	})
-	if err != nil {
-		klog.Fatalf("Could not add node event handler while starting address manager %v", err)
-	}
-
 	doneWg.Add(1)
 	go func() {
 		defer doneWg.Done()
@@ -203,6 +190,22 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	}()
 
 	klog.Info("Node IP manager is running")
+}
+
+// addHandlerForPrimaryAddrChange handles reconfiguration of a node primary IP address change
+func (c *addressManager) addHandlerForPrimaryAddrChange() {
+	// Add an event handler to the node informer. This is needed for cases where users first update the node's IP
+	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
+	// IP address inside the node's status field).
+	nodeInformer := c.watchFactory.NodeInformer()
+	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			c.handleNodePrimaryAddrChange()
+		},
+	})
+	if err != nil {
+		klog.Fatalf("Could not add node event handler while starting address manager %v", err)
+	}
 }
 
 // updates OVN's EncapIP if the node IP changed
