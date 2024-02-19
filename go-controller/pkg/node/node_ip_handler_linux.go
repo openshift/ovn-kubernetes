@@ -6,6 +6,7 @@ package node
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -137,7 +138,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	nodeInformer := c.watchFactory.NodeInformer()
 	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
-			c.handleNodeChanges(new)
+			c.handleNodePrimaryAddrChange()
 		},
 	})
 	if err != nil {
@@ -173,14 +174,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 					addrChanged = c.delAddr(a.LinkAddress.IP)
 				}
 
-				nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
-				if err != nil {
-					klog.Error("Address Manager failed to check node primary address change: %v", err)
-				}
-				if nodePrimaryAddrChanged {
-					klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-					c.updateOVNEncapIPAndReconnect()
-				}
+				c.handleNodePrimaryAddrChange()
 				if addrChanged || !c.doesNodeHostAddressesMatch() {
 					klog.Infof("Host addresses changed to %v. Updating node address annotation.", c.addresses)
 					err := c.updateNodeAddressAnnotations()
@@ -207,10 +201,10 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 	klog.Info("Node IP manager is running")
 }
 
-// handleNodeChanges takes a node obj, extracts its name and determines if the node's address changed. If so, it
-// updates the node's OVS encapsulation IP.
-func (c *addressManager) handleNodeChanges(obj interface{}) {
-	var err error
+// updates OVN's EncapIP if the node IP changed
+func (c *addressManager) handleNodePrimaryAddrChange() {
+	c.Lock()
+	defer c.Unlock()
 	nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
 	if err != nil {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
@@ -218,7 +212,7 @@ func (c *addressManager) handleNodeChanges(obj interface{}) {
 	}
 	if nodePrimaryAddrChanged {
 		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-		c.updateOVNEncapIPAndReconnect()
+		updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 	}
 }
 
@@ -329,30 +323,6 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 	return true, nil
 }
 
-// updateOVNEncapIP updates encap IP to OVS when the node primary IP changed.
-func (c *addressManager) updateOVNEncapIPAndReconnect() {
-	cmd := []string{
-		"set",
-		"Open_vSwitch",
-		".",
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", c.nodePrimaryAddr),
-	}
-	_, stderr, err := util.RunOVSVsctl(cmd...)
-	if err != nil {
-		klog.Errorf("Error setting OVS encap IP: %v  %q", err, stderr)
-		return
-	}
-
-	// force ovn-controller to reconnect SB with new encap IP immediately.
-	// otherwise there will be a max delay of 200s due to the 100s
-	// ovn-controller inactivity probe.
-	_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart")
-	if err != nil {
-		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
-		return
-	}
-}
-
 // detects if the IP is valid for a node
 // excludes things like local IPs, mgmt port ip, special masquerade IP
 func (c *addressManager) isValidNodeIP(addr net.IP) bool {
@@ -410,14 +380,7 @@ func (c *addressManager) sync() {
 	}
 
 	addrChanged := c.assignAddresses(currAddresses)
-	nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
-	if err != nil {
-		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
-	}
-	if nodePrimaryAddrChanged {
-		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-		c.updateOVNEncapIPAndReconnect()
-	}
+	c.handleNodePrimaryAddrChange()
 	if addrChanged || !c.doesNodeHostAddressesMatch() {
 		klog.Infof("Node address changed to %v. Updating annotations.", currAddresses)
 		err := c.updateNodeAddressAnnotations()
@@ -425,5 +388,47 @@ func (c *addressManager) sync() {
 			klog.Errorf("Address Manager failed to update node address annotations: %v", err)
 		}
 		c.OnChanged()
+	}
+}
+
+// updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.
+func updateOVNEncapIPAndReconnect(newIP net.IP) {
+	checkCmd := []string{
+		"get",
+		"Open_vSwitch",
+		".",
+		"external_ids:ovn-encap-ip",
+	}
+	encapIP, stderr, err := util.RunOVSVsctl(checkCmd...)
+	if err != nil {
+		klog.Warningf("Unable to retrieve configured ovn-encap-ip from OVS: %v, %q", err, stderr)
+	} else {
+		encapIP = strings.TrimSuffix(encapIP, "\n")
+		if len(encapIP) > 0 && newIP.String() == encapIP {
+			klog.V(4).Infof("Will not update encap IP %s - it is already configured", newIP.String())
+			return
+		}
+	}
+
+	confCmd := []string{
+		"set",
+		"Open_vSwitch",
+		".",
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", newIP),
+	}
+
+	_, stderr, err = util.RunOVSVsctl(confCmd...)
+	if err != nil {
+		klog.Errorf("Error setting OVS encap IP %s: %v %q", newIP.String(), err, stderr)
+		return
+	}
+
+	// force ovn-controller to reconnect SB with new encap IP immediately.
+	// otherwise there will be a max delay of 200s due to the 100s
+	// ovn-controller inactivity probe.
+	_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart")
+	if err != nil {
+		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
+		return
 	}
 }
