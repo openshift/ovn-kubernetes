@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"testing"
 
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/csrapprover"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/exp/maps"
@@ -24,10 +23,8 @@ func TestNewNodeAdmissionWebhook(t *testing.T) {
 	maps.Copy(icAnnotations, commonNodeAnnotationChecks)
 	hoAnnotations := make(map[string]checkNodeAnnot)
 	maps.Copy(hoAnnotations, commonNodeAnnotationChecks)
-	maps.Copy(hoAnnotations, hybridOverlayNodeAnnotationChecks)
 	tests := []struct {
-		name                string
-		enableHybridOverlay bool
+		name string
 
 		expectedKeys []string
 	}{
@@ -40,14 +37,13 @@ func TestNewNodeAdmissionWebhook(t *testing.T) {
 			expectedKeys: maps.Keys(icAnnotations),
 		},
 		{
-			name:                "should contain common and hybrid overlay annotations in hybrid overlay ",
-			enableHybridOverlay: true,
-			expectedKeys:        maps.Keys(hoAnnotations),
+			name:         "should contain common and hybrid overlay annotations in hybrid overlay ",
+			expectedKeys: maps.Keys(hoAnnotations),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewNodeAdmissionWebhook(tt.enableHybridOverlay); !got.annotationKeys.HasAll(tt.expectedKeys...) {
+			if got := NewNodeAdmissionWebhook(); !got.annotationKeys.HasAll(tt.expectedKeys...) {
 				t.Errorf("NewNodeAdmissionWebhook() = %v, want %v", got.annotationKeys, tt.expectedKeys)
 			}
 		})
@@ -60,7 +56,7 @@ var additionalNamePrefix = "system:foobar"
 var additionalUserName = fmt.Sprintf("%s:%s", additionalNamePrefix, nodeName)
 
 func TestNodeAdmission_ValidateUpdate(t *testing.T) {
-	adm := NewNodeAdmissionWebhook(false)
+	adm := NewNodeAdmissionWebhook()
 	tests := []struct {
 		name        string
 		ctx         context.Context
@@ -257,65 +253,6 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 			err := adm.ValidateUpdate(tt.ctx, tt.oldObj, tt.newObj)
 			if !reflect.DeepEqual(err, tt.expectedErr) {
 				t.Errorf("ValidateUpdate() error = %v, expectedErr %v", err, tt.expectedErr)
-				return
-			}
-		})
-	}
-}
-
-func TestNodeAdmission_ValidateUpdateHybridOverlay(t *testing.T) {
-	adm := NewNodeAdmissionWebhook(true)
-	tests := []struct {
-		name        string
-		ctx         context.Context
-		oldObj      runtime.Object
-		newObj      runtime.Object
-		expectedErr error
-	}{
-		{
-			name: "ovnkube-node can set HybridOverlayDRMAC in hybrid overlay environments",
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: v1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: userName,
-				}},
-			}),
-			oldObj: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName,
-				},
-			},
-			newObj: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{hotypes.HybridOverlayDRMAC: "0a:58:0a:80:00:05"},
-				},
-			},
-		},
-		{
-			name: "ovnkube-node can set HybridOverlayDRIP in hybrid overlay environments",
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: v1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: userName,
-				}},
-			}),
-			oldObj: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: nodeName,
-				},
-			},
-			newObj: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{hotypes.HybridOverlayDRIP: "192.168.0.3"},
-				},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := adm.ValidateUpdate(tt.ctx, tt.oldObj, tt.newObj)
-			if !reflect.DeepEqual(err, tt.expectedErr) {
-				t.Errorf("ValidateUpdate() error = %v, wantErr %v", err, tt.expectedErr)
 				return
 			}
 		})

@@ -15,7 +15,6 @@ import (
 	nodeutil "k8s.io/component-helpers/node/util"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -40,24 +39,15 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	},
 }
 
-// hybridOverlayNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users hybrid overlay environments
-var hybridOverlayNodeAnnotationChecks = map[string]checkNodeAnnot{
-	hotypes.HybridOverlayDRMAC: nil,
-	hotypes.HybridOverlayDRIP:  nil,
-}
-
 type NodeAdmission struct {
 	annotationChecks  map[string]checkNodeAnnot
 	annotationKeys    sets.Set[string]
 	extraAllowedUsers sets.Set[string]
 }
 
-func NewNodeAdmissionWebhook(enableHybridOverlay bool, extraAllowedUsers ...string) *NodeAdmission {
+func NewNodeAdmissionWebhook(extraAllowedUsers ...string) *NodeAdmission {
 	checks := make(map[string]checkNodeAnnot)
 	maps.Copy(checks, commonNodeAnnotationChecks)
-	if enableHybridOverlay {
-		maps.Copy(checks, hybridOverlayNodeAnnotationChecks)
-	}
 	return &NodeAdmission{
 		annotationChecks:  checks,
 		annotationKeys:    sets.New[string](maps.Keys(checks)...),

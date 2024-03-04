@@ -51,7 +51,6 @@ type config struct {
 	certDir                    string
 	metricsAddress             string
 	leaseNamespace             string
-	enableHybridOverlay        bool
 	disableWebhook             bool
 	disableApprover            bool
 	waitForKAPIDuration        time.Duration
@@ -233,12 +232,6 @@ func main() {
 			Value:       "0",
 			Destination: &cliCfg.metricsAddress,
 		},
-		&cli.BoolFlag{
-			Name:        "enable-hybrid-overlay",
-			Usage:       "Configure to enable hybrid overlay checks",
-			Destination: &cliCfg.enableHybridOverlay,
-			Value:       false,
-		},
 		&cli.StringSliceFlag{
 			Name:        "extra-allowed-user",
 			Usage:       "Configure extra user that is allowed to modify annotations protected by the webhook, can be used multiple times",
@@ -318,7 +311,7 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 
 	nodeWebhook := admission.WithCustomValidator(
 		&corev1.Node{},
-		ovnwebhook.NewNodeAdmissionWebhook(cliCfg.enableHybridOverlay, cliCfg.extraAllowedUsers.Value()...),
+		ovnwebhook.NewNodeAdmissionWebhook(cliCfg.extraAllowedUsers.Value()...),
 	).WithRecoverPanic(true)
 
 	nodeHandler, err := admission.StandaloneWebhook(
