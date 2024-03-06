@@ -342,6 +342,18 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 // IP of a specific node
 func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *kapi.Node) ([]net.IP, error) {
 	var ips []net.IP
+	// skip hybrid overlay nodes
+	// This is a release-4.14 specific change required as addIPToHostNetworkNamespaceAddrSet()
+	// and delIPFromHostNetworkNamespaceAddrSet() getting executed even for HybridOverlay nodes.
+	// release-4.15 onward below commit is merged to take care of HybridOverlay nodes and return
+	// from either AddResource() or UpdateResource().
+	// https://github.com/openshift/ovn-kubernetes/commit/aeb9817f5634a8ed46873c9afd221114a0344291
+	// Start OCPBUG downstream SPECIFIC
+	if util.NoHostSubnet(node) {
+		klog.Warningf("Node %s is a hybrid overlay node", node.Name)
+		return nil, nil
+	}
+	// End OCPBUG downstream SPECIFIC
 	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {
 		return nil, err
