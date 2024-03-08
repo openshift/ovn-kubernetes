@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
@@ -467,14 +468,14 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
 	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string) error { return nil }
-	createNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, *kapi.Node, string) error { return nil }
-	deleteNodeNoReroutePolicies := func(addressset.AddressSetFactory, string, net.IP, net.IP, string) error { return nil }
+	ensureNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, listers.NodeLister) error {
+		return nil
+	}
 	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
-		createNodeNoReroutePolicies = CreateDefaultNoRerouteNodePolicies
-		deleteNodeNoReroutePolicies = DeleteDefaultNoRerouteNodePolicies
+		ensureNodeNoReroutePolicies = ensureDefaultNoRerouteNodePolicies
 		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
 	}
 
@@ -498,8 +499,7 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 	}
 
 	return egresssvc.NewController(controllerName, client, nbClient, addressSetFactory,
-		initClusterEgressPolicies, createNodeNoReroutePolicies,
-		deleteNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies, isReachable,
+		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies, isReachable,
 		stopCh, svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes())
