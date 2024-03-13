@@ -542,7 +542,7 @@ func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.Set[strin
 }
 
 func NodeHostAddressesAnnotationChanged(oldNode, newNode *v1.Node) bool {
-	return oldNode.Annotations[ovnNodeHostAddresses] != newNode.Annotations[ovnNodeHostAddresses]
+	return oldNode.Annotations[OvnNodeHostAddresses] != newNode.Annotations[OvnNodeHostAddresses]
 }
 
 // ParseNodeHostAddresses returns the parsed host addresses living on a node
