@@ -33,6 +33,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -122,6 +123,7 @@ type DefaultNetworkController struct {
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
 	syncMigratablePodsFailed    sync.Map
+	syncHostNetAddrSetFailed    sync.Map
 
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
@@ -737,6 +739,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
+		var aggregatedErrors []error
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -764,13 +767,19 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
 				klog.Infof("Node add failed for %s, will try again later: %v",
 					node.Name, err)
-				return err
+				aggregatedErrors = append(aggregatedErrors, err)
 			}
 		} else {
 			if err = h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect); err != nil {
-				return err
+				aggregatedErrors = append(aggregatedErrors, err)
 			}
 		}
+		if err = h.oc.addIPToHostNetworkNamespaceAddrSet(node); err != nil {
+			klog.Errorf("Failed to add node IPs to %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
+			h.oc.syncHostNetAddrSetFailed.Store(node.Name, true)
+			aggregatedErrors = append(aggregatedErrors, err)
+		}
+		return kerrors.NewAggregate(aggregatedErrors)
 
 	case factory.EgressFirewallType:
 		var err error
@@ -886,6 +895,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode)
 		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode)
+		var aggregatedErrors []error
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -919,7 +929,9 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect, true}
 			}
 
-			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
+			if err := h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam); err != nil {
+				aggregatedErrors = append(aggregatedErrors, err)
+			}
 		} else {
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 
@@ -930,8 +942,20 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
 			}
-			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
+			if err := h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC); err != nil {
+				aggregatedErrors = append(aggregatedErrors, err)
+			}
 		}
+		_, syncHostNetAddrSet := h.oc.syncHostNetAddrSetFailed.Load(newNode.Name)
+		if syncHostNetAddrSet {
+			if err := h.oc.addIPToHostNetworkNamespaceAddrSet(newNode); err != nil {
+				klog.Errorf("Failed to add node IPs to %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
+				aggregatedErrors = append(aggregatedErrors, err)
+			} else {
+				h.oc.syncHostNetAddrSetFailed.Delete(newNode.Name)
+			}
+		}
+		return kerrors.NewAggregate(aggregatedErrors)
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)

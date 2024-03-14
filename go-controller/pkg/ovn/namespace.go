@@ -317,6 +317,8 @@ func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bo
 	return oc.ensureNamespaceLockedCommon(ns, readOnly, namespace, ipsGetter, oc.configureNamespace)
 }
 
+// getAllHostNamespaceAddresses retrives management port and gateway router LRP
+// IP for all nodes in the cluster
 func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 	var ips []net.IP
 	// add the mp0 interface addresses to this namespace.
@@ -326,26 +328,49 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 	} else {
 		ips = make([]net.IP, 0, len(existingNodes))
 		for _, node := range existingNodes {
-			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+			hostNetworkIPs, err := oc.getHostNamespaceAddressesForNode(node)
 			if err != nil {
-				klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
-					node.Name, err)
+				klog.Errorf("Error parsing annotation for node %s: %v", node.Name, err)
 			}
-			for _, hostSubnet := range hostSubnets {
-				mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-				ips = append(ips, mgmtIfAddr.IP)
-			}
-			// for shared gateway mode we will use LRP IPs to SNAT host network traffic
-			// so add these to the address set.
-			lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err != nil {
-				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
-			}
-
-			for _, lrpIP := range lrpIPs {
-				ips = append(ips, lrpIP.IP)
-			}
+			ips = append(ips, hostNetworkIPs...)
 		}
 	}
 	return ips
+}
+
+// getHostNamespaceAddressesForNode retrives management port and gateway router LRP
+// IP of a specific node
+func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *kapi.Node) ([]net.IP, error) {
+	var ips []net.IP
+	// skip hybrid overlay nodes
+	// This is a release-4.14 specific change required as addIPToHostNetworkNamespaceAddrSet()
+	// and delIPFromHostNetworkNamespaceAddrSet() getting executed even for HybridOverlay nodes.
+	// release-4.15 onward below commit is merged to take care of HybridOverlay nodes and return
+	// from either AddResource() or UpdateResource().
+	// https://github.com/openshift/ovn-kubernetes/commit/aeb9817f5634a8ed46873c9afd221114a0344291
+	// Start OCPBUG downstream SPECIFIC
+	if util.NoHostSubnet(node) {
+		klog.Warningf("Node %s is a hybrid overlay node", node.Name)
+		return nil, nil
+	}
+	// End OCPBUG downstream SPECIFIC
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	if err != nil {
+		return nil, err
+	}
+	for _, hostSubnet := range hostSubnets {
+		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		ips = append(ips, mgmtIfAddr.IP)
+	}
+	// for shared gateway mode we will use LRP IPs to SNAT host network traffic
+	// so add these to the address set.
+	lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, lrpIP := range lrpIPs {
+		ips = append(ips, lrpIP.IP)
+	}
+	return ips, nil
 }
