@@ -8,12 +8,9 @@ import (
 // SleepWithContext pauses the current goroutine until the context expires or
 // until after duration d, which ever happens first.
 func SleepWithContext(ctx context.Context, duration time.Duration) {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+	<-ctx.Done()
 }
 
 // CancelableContext utility wraps a context that can be canceled
