@@ -20,6 +20,7 @@ const maxRetries = 15
 type Controller interface {
 	Start(threadiness int) error
 	Stop()
+	Reconcile(key string)
 	ReconcileAll()
 }
 
@@ -196,6 +197,10 @@ func (c *controller[T]) processNextQueueItem() bool {
 	}
 	c.queue.Forget(key)
 	return true
+}
+
+func (c *controller[T]) Reconcile(key string) {
+	c.queue.Add(key)
 }
 
 func (c *controller[T]) ReconcileAll() {
