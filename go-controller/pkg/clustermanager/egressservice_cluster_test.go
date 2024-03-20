@@ -9,9 +9,9 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -1451,13 +1451,6 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					},
 				}
 
-				ginkgo.By("modifying the controller's IsReachable func to return false on the first call and true for the second")
-				count := 0
-
-				isReachable = func(nodeName string, _ []net.IP, _ healthcheck.EgressIPHealthClient) bool {
-					count++
-					return count == 2
-				}
 				fakeCM.start(objs...)
 
 				gomega.Eventually(func() error {
@@ -1487,8 +1480,9 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
-				ginkgo.By("calling the reachability check which will return that the node is unreachable it will be drained")
-				fakeCM.esvc.CheckNodesReachabilityIterate()
+				ginkgo.By("informing the node has become UNREACHABLE so that it will be drained")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNREACHABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
 				gomega.Eventually(func() error {
 					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
@@ -1515,9 +1509,69 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
-				ginkgo.By("calling the reachability check which will return that the node is reachable the service will be reallocated")
-				fakeCM.esvc.CheckNodesReachabilityIterate()
+				ginkgo.By("informing the node has become UNAVAILABLE and checking it is kept drained")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNAVAILABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
+				gomega.Consistently(func() error {
+					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != "" {
+						return fmt.Errorf("expected svc1's host value %s to be empty", es.Status.Host)
+					}
+
+					node1ExpectedLabels := map[string]string{
+						"kubernetes.io/hostname": "node1",
+					}
+
+					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if !reflect.DeepEqual(node1.Labels, node1ExpectedLabels) {
+						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
+					}
+
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
+				ginkgo.By("informing the node has become AVAILABLE so that the service will be reallocated")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.AVAILABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
 				gomega.Eventually(func() error {
+					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if es.Status.Host != node1.Name {
+						return fmt.Errorf("expected svc1's host value %s to be node1", es.Status.Host)
+					}
+
+					node1ExpectedLabels := map[string]string{
+						"kubernetes.io/hostname":                            "node1",
+						fmt.Sprintf("%s/testns-svc1", egressSVCLabelPrefix): "",
+					}
+
+					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					if !reflect.DeepEqual(node1.Labels, node1ExpectedLabels) {
+						return fmt.Errorf("expected node1's labels %v to be equal %v", node1.Labels, node1ExpectedLabels)
+					}
+
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+
+				ginkgo.By("informing the node has become UNAVAILABLE and checking it is not drained")
+				fakeCM.FakeHealthCheckProvider.ReportHealthState(healthcheck.UNAVAILABLE)
+				fakeCM.FakeHealthCheckProvider.LastConsumer().HealthStateChanged(node1Name)
+				gomega.Consistently(func() error {
 					es, err := fakeCM.fakeClient.EgressServiceClient.K8sV1().EgressServices("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
 					if err != nil {
 						return err
