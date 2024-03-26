@@ -1248,6 +1248,14 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 	return np, err
 }
 
+// this method makes nil and empty PodSelectors behave differently (it shouldn't be the case,
+// but this is a legacy behaviour that customers rely on).
+// nil selector will use namespace address sets, a side-effect of this is hostNetwork pods won't be selected, and
+// config.Kubernetes.HostNetworkNamespace will be included with empty NamespaceSelector.
+func useNamespaceAddrSet(peer knet.NetworkPolicyPeer) bool {
+	return peer.NamespaceSelector != nil && peer.PodSelector == nil
+}
+
 func (oc *DefaultNetworkController) setupGressPolicy(np *networkPolicy, gp *gressPolicy,
 	peer knet.NetworkPolicyPeer) (*policyHandler, error) {
 	// Add IPBlock to ingress network policy
@@ -1262,49 +1270,30 @@ func (oc *DefaultNetworkController) setupGressPolicy(np *networkPolicy, gp *gres
 	}
 	gp.hasPeerSelector = true
 
+	if useNamespaceAddrSet(peer) {
+		// namespace selector, use namespace address sets
+		handler := &policyHandler{
+			gress:             gp,
+			namespaceSelector: peer.NamespaceSelector,
+		}
+		return handler, nil
+	}
+	// use podSelector address set
 	podSelector := peer.PodSelector
 	if podSelector == nil {
 		// nil pod selector is equivalent to empty pod selector, which selects all
 		podSelector = &metav1.LabelSelector{}
 	}
-	podSel, _ := metav1.LabelSelectorAsSelector(podSelector)
-	nsSel, _ := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
+	// np.namespace will be used when fromJSON.NamespaceSelector = nil
+	asKey, ipv4as, ipv6as, err := oc.EnsurePodSelectorAddressSet(
+		podSelector, peer.NamespaceSelector, np.namespace, np.getKeyWithKind())
+	// even if GetPodSelectorAddressSet failed, add key for future cleanup or retry.
+	np.peerAddressSets = append(np.peerAddressSets, asKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to ensure pod selector address set %s: %v", asKey, err)
+	}
+	gp.addPeerAddressSets(ipv4as, ipv6as)
 
-	if podSel.Empty() && (peer.NamespaceSelector == nil || !nsSel.Empty()) {
-		// namespace-based filtering
-		if peer.NamespaceSelector == nil {
-			// nil namespace selector means same namespace
-			_, err := gp.addNamespaceAddressSet(np.namespace, oc.addressSetFactory)
-			if err != nil {
-				return nil, fmt.Errorf("failed to add namespace address set for gress policy: %w", err)
-			}
-		} else if !nsSel.Empty() {
-			// namespace selector, use namespace address sets
-			handler := &policyHandler{
-				gress:             gp,
-				namespaceSelector: peer.NamespaceSelector,
-			}
-			return handler, nil
-		}
-	} else {
-		// use podSelector address set
-		// np.namespace will be used when fromJSON.NamespaceSelector = nil
-		asKey, ipv4as, ipv6as, err := oc.EnsurePodSelectorAddressSet(
-			podSelector, peer.NamespaceSelector, np.namespace, np.getKeyWithKind())
-		// even if GetPodSelectorAddressSet failed, add key for future cleanup or retry.
-		np.peerAddressSets = append(np.peerAddressSets, asKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to ensure pod selector address set %s: %v", asKey, err)
-		}
-		gp.addPeerAddressSets(ipv4as, ipv6as)
-	}
-	if podSel.Empty() && nsSel.Empty() && config.Kubernetes.HostNetworkNamespace != "" {
-		// all namespaces selector, add hostnetwork address set
-		_, err := gp.addNamespaceAddressSet(config.Kubernetes.HostNetworkNamespace, oc.addressSetFactory)
-		if err != nil {
-			return nil, fmt.Errorf("failed to add namespace address set for gress policy: %w", err)
-		}
-	}
 	return nil, nil
 }
 
