@@ -334,7 +334,7 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 	webhookMux.Handle("/node", nodeHandler)
 
 	// ovnkube-node without additional conditions does not have the permissions to update pods
-	if len(cliCfg.csrAcceptanceConditions) > 1 {
+	if len(cliCfg.podAdmissionConditions) > 1 {
 		informerFactory := informers.NewSharedInformerFactory(client, 10*time.Minute)
 		nodeInformer := informerFactory.Core().V1().Nodes().Informer()
 		informerFactory.Start(stopCh)
