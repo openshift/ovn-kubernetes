@@ -14,44 +14,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // checkPodAnnot defines additional checks for the allowed annotations
 type checkPodAnnot func(nodeLister listers.NodeLister, v annotationChange, pod *corev1.Pod, nodeName string) error
-
-// interconnectPodAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in IC environments
-var interconnectPodAnnotations = map[string]checkPodAnnot{
-	util.OvnPodAnnotationName: func(nodeLister listers.NodeLister, v annotationChange, pod *corev1.Pod, nodeName string) error {
-		if pod.Spec.HostNetwork {
-			return fmt.Errorf("the annotation is not allowed on host networked pods")
-		}
-
-		podAnnot, err := util.UnmarshalPodAnnotation(map[string]string{util.OvnPodAnnotationName: v.value}, types.DefaultNetworkName)
-		if err != nil {
-			return err
-		}
-		node, err := nodeLister.Get(nodeName)
-		if err != nil {
-			return fmt.Errorf("could not get info on node %s from client: %w", nodeName, err)
-		}
-
-		subnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-		if err != nil {
-			return err
-		}
-		for _, ip := range podAnnot.IPs {
-			if !util.IsContainedInAnyCIDR(ip, subnets...) {
-				return fmt.Errorf("%s does not belong to %s node", ip, nodeName)
-			}
-		}
-		return nil
-	},
-	util.DPUConnectionDetailsAnnot: nil,
-	util.DPUConnectionStatusAnnot:  nil,
-}
 
 // PodAdmissionConditionOptions specifies additional validate admission for pod.
 type PodAdmissionConditionOption struct {
@@ -97,8 +63,6 @@ type PodAdmission struct {
 func NewPodAdmissionWebhook(nodeLister listers.NodeLister, podAdmissions []PodAdmissionConditionOption, extraAllowedUsers ...string) *PodAdmission {
 	return &PodAdmission{
 		nodeLister:        nodeLister,
-		annotations:       interconnectPodAnnotations,
-		annotationKeys:    sets.New[string](maps.Keys(interconnectPodAnnotations)...),
 		extraAllowedUsers: sets.New[string](extraAllowedUsers...),
 		podAdmissions:     podAdmissions,
 	}
