@@ -62,6 +62,9 @@ spec:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
+        - mountPath: /var/lib/kubelet
+          name: host-kubelet
+          readOnly: true
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
           # We mount our socket here
@@ -219,6 +222,8 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: metadata.name
+        - name: OVN_ENABLE_OVNKUBE_IDENTITY
+          value: "{{ ovn_enable_ovnkube_identity }}"
 
         readinessProbe:
           exec:
@@ -341,6 +346,9 @@ spec:
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
+      - name: host-kubelet
+        hostPath:
+          path: /var/lib/kubelet
       - name: host-var-log-ovnkube
         hostPath:
           path: /var/log/ovn-kubernetes

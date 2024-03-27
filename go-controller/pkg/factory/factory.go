@@ -12,6 +12,7 @@ import (
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
@@ -852,6 +853,10 @@ func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkP
 func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewallapi.EgressFirewall, error) {
 	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
 	return egressFirewallLister.EgressFirewalls(namespace).Get(name)
+}
+
+func (wf *WatchFactory) CertificateSigningRequestInformer() certificatesinformers.CertificateSigningRequestInformer {
+	return wf.iFactory.Certificates().V1().CertificateSigningRequests()
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {

@@ -1,0 +1,284 @@
+package ovnwebhook
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"testing"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	admv1 "k8s.io/api/admission/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
+	listersv1 "k8s.io/client-go/listers/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+)
+
+type fakeNodeLister struct {
+	nodes map[string]*corev1.Node
+}
+
+func (f *fakeNodeLister) List(selector labels.Selector) (ret []*corev1.Node, err error) {
+	panic("implement me")
+}
+
+func (f *fakeNodeLister) Get(name string) (*corev1.Node, error) {
+	node, ok := f.nodes[name]
+	if !ok {
+		return nil, fmt.Errorf("nodr %q not found", name)
+	}
+	return node, nil
+}
+
+var _ listersv1.NodeLister = &fakeNodeLister{}
+
+const podName = "testpod"
+
+func TestPodAdmission_ValidateUpdate(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		ctx         context.Context
+		oldObj      runtime.Object
+		newObj      runtime.Object
+		expectedErr error
+	}{
+		{
+			name: "allow if user is not ovnkube-node and doesn't modify ovnkube-node annotations",
+			node: &corev1.Node{},
+			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+					Username: "system:nodes:node",
+				}},
+			}),
+			oldObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   podName,
+					Labels: map[string]string{"key": "old"},
+				},
+			},
+			newObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   podName,
+					Labels: map[string]string{"key": "new"},
+				},
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "error out if the request is not in context",
+			node: &corev1.Node{},
+			ctx:  context.TODO(),
+			oldObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: podName,
+				},
+			},
+			newObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"new": "value"},
+				},
+			},
+			expectedErr: errors.New("admission.Request not found in context"),
+		},
+		{
+			name: "ovnkube-node can modify OvnPodAnnotationName annotation on a pod",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
+				},
+			},
+			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+					Username: userName,
+				}},
+			}),
+			oldObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+			newObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+		},
+		/*
+			{
+				name: "ovnkube-node can use an IP in OvnPodAnnotationName annotation that belongs to a different node in kubevirt live-migration",
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        nodeName,
+						Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
+					},
+				},
+				ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+					AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+						Username: userName,
+					}},
+				}),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        podName,
+						Annotations: map[string]string{kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: ""},
+					},
+					Spec: corev1.PodSpec{NodeName: nodeName},
+				},
+				newObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: podName,
+						Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.10.10.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`,
+							kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: ""},
+					},
+					Spec: corev1.PodSpec{NodeName: nodeName},
+				},
+			},
+		*/
+		{
+			name: "ovnkube-node can modify DPUConnectionDetailsAnnot annotation on a pod",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
+				},
+			},
+			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+					Username: userName,
+				}},
+			}),
+			oldObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{util.DPUConnectionDetailsAnnot: "old"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+			newObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{util.DPUConnectionDetailsAnnot: "new"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+		},
+		{
+			name: "ovnkube-node can modify DPUConnetionStatusAnnot annotation on a pod",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
+				},
+			},
+			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+					Username: userName,
+				}},
+			}),
+			oldObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{util.DPUConnectionStatusAnnot: "old"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+			newObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{util.DPUConnectionStatusAnnot: "new"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+		},
+		// additional acceptance conditions
+		{
+			name: "additonal acceptance conditions valid",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			},
+			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+					Username: additionalUserName,
+				}},
+			}),
+			oldObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"pod-annotation-valid1": "old"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+			newObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"pod-annotation-valid1": "new"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+		},
+		{
+			name: "additonal acceptance conditions invalid",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			},
+			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
+				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
+					Username: additionalUserName,
+				}},
+			}),
+			oldObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"pod-annotation-invalid1": "old"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+			newObj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"pod-annotation-invalid1": "new"},
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			},
+			expectedErr: fmt.Errorf("%s node: %q is not allowed to set the following annotations on pod: \"testpod\": [pod-annotation-invalid1]", additionalNamePrefix, nodeName),
+		},
+	}
+
+	allowedPodAnnotations := []string{"pod-annotation-valid1"}
+	additionalPodAdmissions := PodAdmissionConditionOption{
+		CommonNamePrefix:         additionalNamePrefix,
+		AllowedPodAnnotations:    allowedPodAnnotations,
+		AllowedPodAnnotationKeys: sets.New[string](allowedPodAnnotations...),
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			padm := NewPodAdmissionWebhook(&fakeNodeLister{
+				nodes: map[string]*corev1.Node{tt.node.Name: tt.node},
+			}, []PodAdmissionConditionOption{
+				additionalPodAdmissions,
+			})
+			err := padm.ValidateUpdate(tt.ctx, tt.oldObj, tt.newObj)
+			if !reflect.DeepEqual(err, tt.expectedErr) {
+				fmt.Printf("KEYWORD: %+v\n", err)
+				t.Errorf("ValidateUpdate() error = %v, expectedErr %v", err, tt.expectedErr)
+				return
+			}
+		})
+	}
+}
