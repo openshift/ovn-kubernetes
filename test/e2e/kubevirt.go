@@ -61,7 +61,6 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 }
 
 var _ = Describe("Kubevirt Virtual Machines", func() {
-
 	var (
 		fr                 = wrappedTestFramework("kv-live-migration")
 		crClient           crclient.Client
@@ -261,13 +260,19 @@ passwd:
 			}
 			allErrors := func(error) bool { return true }
 			var conn *net.TCPConn
-			return conn, retry.OnError(backoff, allErrors, func() error {
+			if err := retry.OnError(backoff, allErrors, func() error {
 				conn, err = net.DialTCP("tcp", nil, tcpAddr)
 				if err != nil {
 					return fmt.Errorf("failed DialTCP: %w", err)
 				}
 				return nil
-			})
+			}); err != nil {
+				return nil, err
+			}
+			if err := conn.SetKeepAlive(true); err != nil {
+				return nil, err
+			}
+			return conn, nil
 		}
 
 		dialServiceNodePort = func(svc *corev1.Service) ([]*net.TCPConn, error) {
@@ -283,13 +288,22 @@ passwd:
 					if err != nil {
 						return endpoints, err
 					}
-					if err := conn.SetKeepAlive(true); err != nil {
-						return nil, err
-					}
 					endpoints = append(endpoints, conn)
 				}
 			}
 			return endpoints, nil
+		}
+
+		reconnect = func(conns []*net.TCPConn) error {
+			for i, conn := range conns {
+				conn.Close()
+				conn, err := dial(conn.RemoteAddr().String())
+				if err != nil {
+					return err
+				}
+				conns[i] = conn
+			}
+			return nil
 		}
 		composeService = func(name, vmName string, port int32) *corev1.Service {
 			ipFamilyPolicy := corev1.IPFamilyPolicyPreferDualStack
@@ -393,8 +407,10 @@ passwd:
 
 			Expect(fr.ClientSet.NetworkingV1().NetworkPolicies(namespace).Delete(context.TODO(), policy.Name, metav1.DeleteOptions{})).To(Succeed())
 
-			// Wait some time for network policy removal to take effect
-			time.Sleep(1 * time.Second)
+			// After apply a deny all policy, the keep-alive packets will be block and
+			// the tcp connection may break, to overcome that the test reconnects
+			// after deleting the deny all policy to ensure a healthy tcp connection
+			Expect(reconnect(endpoints)).To(Succeed(), step)
 
 			step = by(vmName, stage+": Check connectivity is restored after delete deny all network policy")
 			Expect(sendEchos(endpoints)).To(Succeed(), step)
@@ -757,30 +773,26 @@ passwd:
 
 		By("Creating a test pod at all worker nodes")
 		for _, selectedNode := range selectedNodes {
-			httpServerWorkerNode := composeAgnhostPod(
+			httpServerTestPod := composeAgnhostPod(
 				"testpod-"+selectedNode.Name,
 				namespace,
 				selectedNode.Name,
 				"netexec", "--http-port", "8000")
-			_ = e2epod.NewPodClient(fr).CreateSync(context.TODO(), httpServerWorkerNode)
+			httpServerTestPod = e2epod.NewPodClient(fr).CreateSync(context.TODO(), httpServerTestPod)
 		}
 
 		By("Waiting until both pods have an IP address")
 		for _, httpServerTestPod := range httpServerTestPods {
-			Eventually(func() error {
+			Eventually(func(g Gomega) {
 				var err error
 				httpServerTestPod, err = fr.ClientSet.CoreV1().Pods(fr.Namespace.Name).Get(context.TODO(), httpServerTestPod.Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				if httpServerTestPod.Status.PodIP == "" {
-					return fmt.Errorf("pod %s has no valid IP address yet", httpServerTestPod.Name)
-				}
-				return nil
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(httpServerTestPod.Status.PodIP).ToNot(BeEmpty(), "pod %s has no valid IP address yet", httpServerTestPod.Name)
 			}).
 				WithTimeout(time.Minute).
 				WithPolling(time.Second).
 				Should(Succeed())
+			httpServerTestPods = append(httpServerTestPods, httpServerTestPod)
 		}
 
 		vmLabels := map[string]string{}

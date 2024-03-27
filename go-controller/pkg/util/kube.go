@@ -104,6 +104,7 @@ type OVNClusterManagerClientset struct {
 	EgressServiceClient    egressserviceclientset.Interface
 	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
 	EgressFirewallClient   egressfirewallclientset.Interface
+	EgressQoSClient        egressqosclientset.Interface
 }
 
 const (
@@ -165,6 +166,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		EgressServiceClient:    cs.EgressServiceClient,
 		AdminPolicyRouteClient: cs.AdminPolicyRouteClient,
 		EgressFirewallClient:   cs.EgressFirewallClient,
+		EgressQoSClient:        cs.EgressQoSClient,
 	}
 }
 
@@ -211,7 +213,7 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		if (conf.Token == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
+		if (conf.Token == "" && conf.TokenFile == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
 			return nil, fmt.Errorf("TLS-secured apiservers require token/cert and CA certificate")
 		}
 		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
@@ -716,7 +718,7 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 	if gk.String() == "" {
 		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
 		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
-			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
+			klog.Warningf("Object %v either has no GroupVersionKind or has an ambiguous GroupVersionKind: %#v, err", obj, err)
 		}
 		gk = kinds[0].GroupKind()
 	}

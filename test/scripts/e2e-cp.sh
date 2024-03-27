@@ -36,7 +36,6 @@ Should validate conntrack entry deletion for TCP/UDP traffic via multiple extern
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
-Load Balancer Service Tests with MetalLB|\
 egress IP validation|\
 e2e egress firewall policy validation|\
 OVS CPU affinity pinning|\
@@ -108,14 +107,13 @@ if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
 fi
 
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-    SKIPPED_TESTS+="|"
-  fi
   # See https://github.com/ovn-org/ovn-kubernetes/labels/ci-ipv6 for details:
   if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    if [ "$SKIPPED_TESTS" != "" ]; then
+        SKIPPED_TESTS+="|"
+    fi
     SKIPPED_TESTS+="Should be allowed to node local host-networked endpoints by nodeport services|\
 EgressQoS validation|\
-e2e br-int flow monitoring export validation|\
 Should be allowed by nodeport services|\
 Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|\
 Should successfully create then remove a static pod|\
