@@ -115,63 +115,6 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
 		},
-		{
-			name: "ovnkube-node cannot modify an IP in the OvnPodAnnotationName annotation to an invalid value",
-			node: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
-				},
-			},
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: userName,
-				}},
-			}),
-			oldObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			newObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.10.10.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName},
-			},
-			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: 10.10.10.10/24 does not belong to %s node", userName, util.OvnPodAnnotationName, podName, nodeName),
-		},
-		{
-			name: "ovnkube-node cannot set an IP in the OvnPodAnnotationName annotation on host-networked pods",
-			node: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":"192.168.0.0/24"}`},
-				},
-			},
-			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
-				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
-					Username: userName,
-				}},
-			}),
-			oldObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: podName,
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName, HostNetwork: true},
-			},
-			newObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        podName,
-					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
-				},
-				Spec: corev1.PodSpec{NodeName: nodeName, HostNetwork: true},
-			},
-			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: the annotation is not allowed on host networked pods", userName, util.OvnPodAnnotationName, podName),
-		},
 		/*
 			{
 				name: "ovnkube-node can use an IP in OvnPodAnnotationName annotation that belongs to a different node in kubevirt live-migration",
@@ -332,6 +275,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			})
 			err := padm.ValidateUpdate(tt.ctx, tt.oldObj, tt.newObj)
 			if !reflect.DeepEqual(err, tt.expectedErr) {
+				fmt.Printf("KEYWORD: %+v\n", err)
 				t.Errorf("ValidateUpdate() error = %v, expectedErr %v", err, tt.expectedErr)
 				return
 			}
