@@ -632,9 +632,6 @@ var _ = Describe("Node Operations", func() {
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-ofctl show ",
 				})
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1316,9 +1313,6 @@ var _ = Describe("Node Operations", func() {
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-ofctl show ",
 				})
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-ofctl show ",
-				})
 
 				service := *newService("service1", "namespace1", clusterIPv4,
 					[]v1.ServicePort{
@@ -1770,7 +1764,6 @@ var _ = Describe("Node Operations", func() {
 				key, err := retry.GetResourceKey(&service)
 				Expect(err).NotTo(HaveOccurred())
 				retry.CheckRetryObjectEventually(key, true, nodePortWatcherRetry)
-
 				// check iptables
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
