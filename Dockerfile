@@ -12,6 +12,12 @@ COPY . .
 RUN cd go-controller; CGO_ENABLED=1 make
 RUN cd go-controller; CGO_ENABLED=1 make windows
 
+# Build RHEL-8 binaries (for upgrades from 4.12 and earlier)
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.21-openshift-4.16 AS rhel8
+WORKDIR /go/src/github.com/openshift/ovn-kubernetes
+COPY . .
+RUN cd go-controller; CGO_ENABLED=1 make
+
 # ovn-kubernetes-base image is built from Dockerfile.base
 # The following changes are included in ovn-kubernetes-base
 # image and removed from this Dockerfile:
@@ -52,9 +58,14 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/hybrid-overlay-node /usr/bin/
 
-# Copy RHEL-9 shim binaries where the CNO's ovnkube-node container startup script can find them
+# Copy RHEL-8 and RHEL-9 shim binaries where the CNO's ovnkube-node container startup script can find them
 RUN mkdir -p /usr/libexec/cni/rhel9
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/rhel9/
+RUN mkdir -p /usr/libexec/cni/rhel8
+COPY --from=rhel8 /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/rhel8/
+# Copy RHEL-8 ovnkube-trace file into /usr/lib/rhel8 directory so that user can download and run it on RHEL-8 platform.
+RUN mkdir -p /usr/lib/rhel8
+COPY --from=rhel8 /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/lib/rhel8/
 
 RUN stat /usr/bin/oc
 
