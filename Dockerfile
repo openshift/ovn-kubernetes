@@ -1,3 +1,6 @@
+# URGENT! ART metadata configuration has a different number of FROMs
+# than this Dockerfile. ART will be unable to build your component or
+# reconcile this Dockerfile until that disparity is addressed.
 #
 # This is the OpenShift ovn overlay network image.
 # it provides an overlay network using ovs/ovn/ovn-kube
