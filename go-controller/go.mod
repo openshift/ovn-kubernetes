@@ -23,6 +23,7 @@ require (
 	github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 	github.com/k8snetworkplumbingwg/sriovnet v1.2.1-0.20230427090635-4929697df2dc
+	github.com/mdlayher/ndp v1.0.1
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.16.5
@@ -33,7 +34,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/client_model v0.5.0
-	github.com/safchain/ethtool v0.3.0
+	github.com/safchain/ethtool v0.3.1-0.20231027162144-83e5e0097c91
 	github.com/spf13/afero v1.9.5
 	github.com/stretchr/testify v1.8.4
 	github.com/urfave/cli/v2 v2.2.0
