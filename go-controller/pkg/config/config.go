@@ -1782,7 +1782,9 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	if err := overrideFields(&Gateway, &cli.Gateway, &savedGateway); err != nil {
 		return err
 	}
-
+	// HACK start
+	Gateway.Mode = GatewayModeLocal
+	// HACK end
 	if Gateway.Mode != GatewayModeDisabled {
 		validModes := []string{string(GatewayModeShared), string(GatewayModeLocal)}
 		var found bool
