@@ -139,6 +139,7 @@ func (ehc *egressIPHealthClient) Connect(dialCtx context.Context, mgmtIPs []net.
 		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
 			return proxy.Dial(ctx, "tcp", s)
 		}),
+		grpc.WithReturnConnectionError(),
 	}
 	cfg := &config.OvnNorth
 	if cfg.CACert == "" || cfg.CertCommonName == "" {
@@ -160,6 +161,7 @@ func (ehc *egressIPHealthClient) Connect(dialCtx context.Context, mgmtIPs []net.
 			break
 		}
 		klog.Warningf("Could not connect to %s (%s): %v", ehc.nodeName, nodeAddr, err)
+		klog.Warningf("Could not connect to %s (%s): %#v", ehc.nodeName, nodeAddr, err)
 	}
 	if conn == nil {
 		return false
@@ -194,6 +196,7 @@ func (ehc *egressIPHealthClient) Probe(dialCtx context.Context) bool {
 		// let's tolerate it to account for cases where session went down and we just need it re-established.
 		// Otherwise, declare it failed.
 		klog.V(5).Infof("Probe failed %s (%s): %s", ehc.nodeName, ehc.nodeAddr, err)
+		klog.V(5).Infof("Probe failed %s (%s): %#v", ehc.nodeName, ehc.nodeAddr, err)
 		ehc.Disconnect()
 		prevProbeFailed := ehc.probeFailed
 		ehc.probeFailed = true
