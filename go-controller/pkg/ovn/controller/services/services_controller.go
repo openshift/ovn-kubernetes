@@ -410,18 +410,18 @@ func (c *Controller) syncService(key string) error {
 
 	// Build the abstract LB configs for this service
 	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.nodeInfos, c.useLBGroups, c.useTemplates)
-	klog.V(5).Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
-	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
-	klog.V(5).Infof("Built service %s LB template configs %#v", key, templateConfigs)
+	klog.Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
+	klog.Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
+	klog.Infof("Built service %s LB template configs %#v", key, templateConfigs)
 
 	// Convert the LB configs in to load-balancer objects
 	clusterLBs := buildClusterLBs(service, clusterConfigs, c.nodeInfos, c.useLBGroups)
 	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos, c.nodeIPv4Templates, c.nodeIPv6Templates)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, c.nodeInfos)
-	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
-	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
-	klog.V(5).Infof("Built service %s template LB %#v", key, templateLBs)
-	klog.V(5).Infof("Service %s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
+	klog.Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
+	klog.Infof("Built service %s per-node LB %#v", key, perNodeLBs)
+	klog.Infof("Built service %s template LB %#v", key, templateLBs)
+	klog.Infof("Service %s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(templateConfigs),
 		len(clusterLBs), len(perNodeLBs), len(templateLBs))
 	lbs := append(clusterLBs, templateLBs...)
@@ -438,9 +438,9 @@ func (c *Controller) syncService(key string) error {
 	c.alreadyAppliedRWLock.RUnlock()
 
 	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
-		klog.V(5).Infof("Skipping no-op change for service %s", key)
+		klog.Infof("Skipping no-op change for service %s", key)
 	} else {
-		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
+		klog.Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
