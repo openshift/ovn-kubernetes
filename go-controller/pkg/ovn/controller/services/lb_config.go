@@ -951,7 +951,7 @@ func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Servi
 			}
 		}
 	}
-	klog.V(5).Infof("Cluster endpoints for %s/%s are: %v", service.Namespace, service.Name, portToLBEndpoints)
+	klog.Infof("Cluster endpoints for %s/%s  are: %v", service.Namespace, service.Name, portToLBEndpoints)
 
 	for port, nodeToEndpoints := range portToNodeToEndpoints {
 		for node, endpoints := range nodeToEndpoints {
@@ -973,7 +973,7 @@ func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Servi
 	}
 
 	if requiresLocalEndpoints {
-		klog.V(5).Infof("Local endpoints for %s/%s are: %v", service.Namespace, service.Name, portToNodeToLBEndpoints)
+		klog.Infof("Local endpoints for %s/%s  are: %v", service.Namespace, service.Name, portToNodeToLBEndpoints)
 	}
 
 	return portToLBEndpoints, portToNodeToLBEndpoints
