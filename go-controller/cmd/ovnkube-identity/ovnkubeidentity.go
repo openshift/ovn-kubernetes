@@ -334,30 +334,28 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 	webhookMux.Handle("/node", nodeHandler)
 
 	// ovnkube-node without additional conditions does not have the permissions to update pods
-	if len(cliCfg.podAdmissionConditions) > 1 {
-		informerFactory := informers.NewSharedInformerFactory(client, 10*time.Minute)
-		nodeInformer := informerFactory.Core().V1().Nodes().Informer()
-		informerFactory.Start(stopCh)
-		klog.Infof("Waiting for caches to sync")
-		cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
+	informerFactory := informers.NewSharedInformerFactory(client, 10*time.Minute)
+	nodeInformer := informerFactory.Core().V1().Nodes().Informer()
+	informerFactory.Start(stopCh)
+	klog.Infof("Waiting for caches to sync")
+	cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
 
-		nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
-		podWebhook := admission.WithCustomValidator(
-			&corev1.Pod{},
-			ovnwebhook.NewPodAdmissionWebhook(nodeLister, cliCfg.podAdmissionConditions, cliCfg.extraAllowedUsers.Value()...),
-		).WithRecoverPanic(true)
-		podHandler, err := admission.StandaloneWebhook(
-			podWebhook,
-			admission.StandaloneOptions{
-				Logger:      logger.WithName("pod.network-identity"),
-				MetricsPath: "pod.network-identity",
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("failed to setup the pod admission webhook: %w", err)
-		}
-		webhookMux.Handle("/pod", podHandler)
+	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
+	podWebhook := admission.WithCustomValidator(
+		&corev1.Pod{},
+		ovnwebhook.NewPodAdmissionWebhook(nodeLister, cliCfg.podAdmissionConditions, cliCfg.extraAllowedUsers.Value()...),
+	).WithRecoverPanic(true)
+	podHandler, err := admission.StandaloneWebhook(
+		podWebhook,
+		admission.StandaloneOptions{
+			Logger:      logger.WithName("pod.network-identity"),
+			MetricsPath: "pod.network-identity",
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to setup the pod admission webhook: %w", err)
 	}
+	webhookMux.Handle("/pod", podHandler)
 
 	cfg := &tls.Config{
 		NextProtos: []string{"h2"},
