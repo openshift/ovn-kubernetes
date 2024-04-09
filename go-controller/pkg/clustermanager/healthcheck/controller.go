@@ -12,7 +12,6 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	controllerutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/timequeue"
@@ -81,7 +80,7 @@ type nodeInfo struct {
 type probeTask struct {
 	node   string
 	time   time.Time
-	client healthcheck.EgressIPHealthClient
+	client healthStateClient
 	ctx    context.Context
 }
 
@@ -208,22 +207,21 @@ func (c *controller) run() {
 }
 
 func (c *controller) probe(task *probeTask) {
-	nodeInfo, exists := c.isProbedWithNodeInfo(task.node)
+	_, exists := c.isProbedWithNodeInfo(task.node)
 	if !exists {
 		// no longer interested in this node, bail out
-		task.client.Disconnect()
+		task.client.disconnect()
 		return
 	}
 
 	// probe
-	state := AVAILABLE
-	reachable := IsReachable(task.ctx, task.node, nodeInfo.ips, task.client, c.port, period)
-	if !reachable {
-		klog.Warningf("Failed asserting reachability for node %s", task.node)
-		state = UNREACHABLE
+	err := task.client.isReachable(task.ctx)
+	if err != nil {
+		klog.Errorf("Failed asserting reachability for node %s: %v", task.node, err)
 	}
 
 	// update state & retask
+	state := healthStateFromError(err)
 	updated := c.setNodeStateAndRetask(task, state)
 	if updated {
 		c.informConsumers(task.node)
@@ -359,7 +357,7 @@ func (c *controller) startProbeWithNodeInfo(node string, nodeInfo nodeInfo) {
 
 	task := &probeTask{
 		node:   node,
-		client: healthcheck.NewEgressIPHealthClient(node),
+		client: newHealthStateClient(node, nodeInfo.ips, c.port, period),
 		time:   addPeriodAndJitter(time.Now(), 0, jitter),
 		ctx:    ctx,
 	}
@@ -374,7 +372,7 @@ func (c *controller) setNodeStateAndRetask(task *probeTask, new HealthState) boo
 	// task was cancelled, either no interest in probing or updated config, bail
 	// out
 	if task.cancelled() {
-		task.client.Disconnect()
+		task.client.disconnect()
 		return false
 	}
 
