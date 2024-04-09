@@ -818,8 +818,14 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
 		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		// add the 103 qos rule to new node's switch (we don't need to do it for node updates)
+		// (we don't need to remove this on node delete since entire node switch will get cleaned up anways)
+		err := h.oc.ensureDefaultNoRerouteQoSRules(node)
+		if err != nil {
+			return err
+		}
 		// add the nodeIP to the default LRP (102 priority) destination address-set
-		err := h.oc.ensureDefaultNoRerouteNodePolicies()
+		err = h.oc.ensureDefaultNoRerouteNodePolicies()
 		if err != nil {
 			return err
 		}

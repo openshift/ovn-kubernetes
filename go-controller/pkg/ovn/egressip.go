@@ -39,17 +39,19 @@ import (
 )
 
 type egressIPAddrSetName string
-type egressIPPolicyIPFamilyValue string
+type egressIPFamilyValue string
 type egressIPNoReroutePolicyName string
+type egressIPQoSRuleName string
 
 const (
 	NodeIPAddrSetName             egressIPAddrSetName = "node-ips"
 	EgressIPServedPodsAddrSetName egressIPAddrSetName = "egressip-served-pods"
 	// the possible values for LRP DB objects for EIPs
-	IPFamilyValueV4       egressIPPolicyIPFamilyValue = "ip4"
-	IPFamilyValueV6       egressIPPolicyIPFamilyValue = "ip6"
-	IPFamilyValue         egressIPPolicyIPFamilyValue = "ip" // use it when its dualstack
+	IPFamilyValueV4       egressIPFamilyValue         = "ip4"
+	IPFamilyValueV6       egressIPFamilyValue         = "ip6"
+	IPFamilyValue         egressIPFamilyValue         = "ip" // use it when its dualstack
 	ReplyTrafficNoReroute egressIPNoReroutePolicyName = "EIP-No-Reroute-reply-traffic"
+	ReplyTrafficMark      egressIPQoSRuleName         = "EgressIP-Mark-Reply-Traffic"
 )
 
 func getEgressIPAddrSetDbIDs(name egressIPAddrSetName, controller string) *libovsdbops.DbObjectIDs {
@@ -59,11 +61,20 @@ func getEgressIPAddrSetDbIDs(name egressIPAddrSetName, controller string) *libov
 	})
 }
 
-func getEgressIPLRPNoReRouteDbIDs(priority int, uniqueName egressIPNoReroutePolicyName, ipFamily egressIPPolicyIPFamilyValue) *libovsdbops.DbObjectIDs {
+func getEgressIPLRPNoReRouteDbIDs(priority int, uniqueName egressIPNoReroutePolicyName, ipFamily egressIPFamilyValue) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterPolicyEgressIP, DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
 		// egress ip creates global no-reroute policies at 102 priority
 		libovsdbops.ObjectNameKey: string(uniqueName),
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", priority),
+		libovsdbops.IPFamilyKey:   string(ipFamily),
+	})
+}
+
+func getEgressIPQoSRuleDbIDs(ipFamily egressIPFamilyValue) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterPolicyEgressIP, DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
+		// egress ip creates reply traffic marker rule at 103 priority
+		libovsdbops.ObjectNameKey: string(ReplyTrafficMark),
+		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.EgressIPRerouteQoSRulePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 	})
 }
@@ -994,6 +1005,7 @@ func (oc *DefaultNetworkController) syncStaleEgressReroutePolicy(egressIPCache m
 		}
 		egressIPName := item.ExternalIDs["name"]
 		cacheEntry, exists := egressIPCache[egressIPName]
+		// sample match: "pkt.mark == %d && %s.src == %s" OR "%s.src == %s" so secondlast index is podIP still
 		splitMatch := strings.Split(item.Match, " ")
 		logicalIP := splitMatch[len(splitMatch)-1]
 		parsedLogicalIP := net.ParseIP(logicalIP)
@@ -1001,7 +1013,9 @@ func (oc *DefaultNetworkController) syncStaleEgressReroutePolicy(egressIPCache m
 		if exists {
 			// Since LRPs are created only for pods local to this zone
 			// we need to care about only those pods. Nexthop for them will
-			// either be transit switch IP or join switch IP.
+			// either be transit switch IP or join switch IP or mp0 IP.
+			// FIXME: LRPs are also created for remote pods to route them
+			// correctly but we do not handling cleaning for them now
 			for _, podIPs := range cacheEntry.egressLocalPods {
 				egressPodIPs.Insert(podIPs.UnsortedList()...)
 			}
@@ -1336,13 +1350,26 @@ func (oc *DefaultNetworkController) initClusterEgressPolicies(nodes []interface{
 	if err := InitClusterEgressPolicies(oc.nbClient, oc.addressSetFactory, oc.controllerName); err != nil {
 		return err
 	}
-
+	qoses, ops, err := createDefaultReRouteQoSRuleOps(oc.nbClient, oc.addressSetFactory, oc.controllerName)
+	if err != nil {
+		return fmt.Errorf("cannot create QoS rule ops: %v", err)
+	}
 	for _, node := range nodes {
 		node := node.(*kapi.Node)
-
 		if err := DeleteLegacyDefaultNoRerouteNodePolicies(oc.nbClient, node.Name); err != nil {
 			return err
 		}
+		if len(qoses) > 0 && oc.isLocalZoneNode(node) {
+			ops, err = libovsdbops.AddQoSesToLogicalSwitchOps(oc.nbClient, ops, node.Name, qoses...)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	// note that the qos rules are linked by reference, so if the qos rules get created but
+	// don't get attached to any switches they are garbage collected immediately.
+	if _, err := libovsdbops.TransactAndCheck(oc.nbClient, ops); err != nil {
+		return fmt.Errorf("unable to add EgressIP QoS to switch on zone %s, err: %v", oc.zone, err)
 	}
 	return nil
 }
@@ -1994,7 +2021,7 @@ func (oc *DefaultNetworkController) deletePodIPsFromAddressSet(addrSetIPs []net.
 }
 
 // createDefaultNoRerouteServicePolicies ensures service reachability from the
-// host network to any service backed by egress IP matching pods
+// host network to any service (except ETP=local) backed by egress IP matching pods
 func createDefaultNoRerouteServicePolicies(nbClient libovsdbclient.Client, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
 	for _, v4Subnet := range v4ClusterSubnet {
 		match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), config.Gateway.V4JoinSubnet)
@@ -2037,6 +2064,68 @@ func createDefaultNoReroutePodPolicies(nbClient libovsdbclient.Client, v4Cluster
 		if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, nil, nil); err != nil {
 			return fmt.Errorf("unable to create IPv6 no-reroute pod policies, err: %v", err)
 		}
+	}
+	return nil
+}
+
+// createDefaultReRouteQoSRule builds QoS rule ops to be created on every node's switch that let's us
+// mark packets that are tracked in conntrack and replies emerging from the pod.
+// This mark is then matched on the reroute policies to determine if its a reply packet
+// in which case we do not need to reRoute to other nodes and if its a service response it is
+// not rerouted since mark will be present.
+func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
+	controllerName string) ([]*nbdb.QoS, []ovsdb.Operation, error) {
+	// fetch the egressIP pods address-set
+	dbIDs := getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, controllerName)
+	var as addressset.AddressSet
+	var err error
+	var ops []ovsdb.Operation
+	qoses := []*nbdb.QoS{}
+	if as, err = addressSetFactory.GetAddressSet(dbIDs); err != nil {
+		return nil, nil, fmt.Errorf("cannot ensure that addressSet %s exists %v", EgressIPServedPodsAddrSetName, err)
+	}
+	ipv4EgressIPServedPodsAS, ipv6EgressIPServedPodsAS := as.GetASHashNames()
+	qosRule := nbdb.QoS{
+		Priority:  types.EgressIPRerouteQoSRulePriority,
+		Action:    map[string]int{"mark": types.EgressIPReplyTrafficConnectionMark},
+		Direction: nbdb.QoSDirectionFromLport,
+	}
+	if config.IPv4Mode {
+		qosV4Rule := qosRule
+		qosV4Rule.Match = fmt.Sprintf(`ip4.src == $%s && ct.trk && ct.rpl`, ipv4EgressIPServedPodsAS)
+		qosV4Rule.ExternalIDs = getEgressIPQoSRuleDbIDs(IPFamilyValueV4).GetExternalIDs()
+		ops, err = libovsdbops.CreateOrUpdateQoSesOps(nbClient, nil, &qosV4Rule)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cannot create QoS rule ops for egressIP feature on controller %s, %v", controllerName, err)
+		}
+		qoses = append(qoses, &qosV4Rule)
+	}
+	if config.IPv6Mode {
+		qosV6Rule := qosRule
+		qosV6Rule.Match = fmt.Sprintf(`ip6.src == $%s && ct.trk && ct.rpl`, ipv6EgressIPServedPodsAS)
+		qosV6Rule.ExternalIDs = getEgressIPQoSRuleDbIDs(IPFamilyValueV6).GetExternalIDs()
+		ops, err = libovsdbops.CreateOrUpdateQoSesOps(nbClient, ops, &qosV6Rule)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cannot create QoS rule ops for egressIP feature on controller %s, %v", controllerName, err)
+		}
+		qoses = append(qoses, &qosV6Rule)
+	}
+	return qoses, ops, nil
+}
+
+func (oc *DefaultNetworkController) ensureDefaultNoRerouteQoSRules(node *v1.Node) error {
+	qoses, ops, err := createDefaultReRouteQoSRuleOps(oc.nbClient, oc.addressSetFactory, oc.controllerName)
+	if err != nil {
+		return fmt.Errorf("cannot create QoS rule ops: %v", err)
+	}
+	if len(qoses) > 0 && oc.isLocalZoneNode(node) {
+		ops, err = libovsdbops.AddQoSesToLogicalSwitchOps(oc.nbClient, ops, node.Name, qoses...)
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := libovsdbops.TransactAndCheck(oc.nbClient, ops); err != nil {
+		return fmt.Errorf("unable to add EgressIP QoS to switch on zone %s, err: %v", oc.zone, err)
 	}
 	return nil
 }

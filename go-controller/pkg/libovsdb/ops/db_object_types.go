@@ -8,6 +8,7 @@ const (
 	dhcpOptions
 	portGroup
 	logicalRouterPolicy
+	qosRule
 )
 
 const (
@@ -288,6 +289,15 @@ var LogicalRouterPolicyEgressIP = newObjectIDsType(logicalRouterPolicy, EgressIP
 	PriorityKey,
 	// for the reroute policies it should be the "EIPName_Namespace/podName"
 	// for the no-reroute global policies it should be the unique global name
+	ObjectNameKey,
+	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
+	IPFamilyKey,
+})
+
+var QoSRuleEgressIP = newObjectIDsType(qosRule, EgressIPOwnerType, []ExternalIDKey{
+	// the priority of the QoSRule
+	PriorityKey,
+	// should be the unique global name
 	ObjectNameKey,
 	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
 	IPFamilyKey,
