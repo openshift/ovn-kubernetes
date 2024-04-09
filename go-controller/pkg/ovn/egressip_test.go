@@ -367,7 +367,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Priority: types.DefaultNoRereoutePriority,
 					Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 					Action:   nbdb.LogicalRouterPolicyActionAllow,
-					Options:  map[string]string{"pkt_mark": "1008"},
+					Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					UUID:     "no-reroute-node-UUID",
 				},
 				&nbdb.NAT{
@@ -555,7 +555,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Priority: types.DefaultNoRereoutePriority,
 					Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 					Action:   nbdb.LogicalRouterPolicyActionAllow,
-					Options:  map[string]string{"pkt_mark": "1008"},
+					Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					UUID:     "no-reroute-node-UUID",
 				},
 				&nbdb.LogicalRouter{
@@ -790,7 +790,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.NAT{
@@ -1125,7 +1125,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.NAT{
@@ -1507,7 +1507,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouter{
@@ -1842,7 +1842,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouter{
@@ -2226,7 +2226,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouter{
@@ -2561,7 +2561,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouterPolicy{
@@ -2705,7 +2705,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouterPolicy{
@@ -2996,7 +2996,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Priority: types.DefaultNoRereoutePriority,
 							Match:    "(ip4.src == $a4548040316634674295 || ip4.src == $a13607449821398607916) && ip4.dst == $a14918748166599097711",
 							Action:   nbdb.LogicalRouterPolicyActionAllow,
-							Options:  map[string]string{"pkt_mark": "1008"},
+							Options:  map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouterPolicy{
@@ -3933,7 +3933,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -3941,7 +3941,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouter{
 						Name: types.OVNClusterRouter,
@@ -5290,7 +5290,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 							Action:  nbdb.LogicalRouterPolicyActionAllow,
 							UUID:    "default-no-reroute-node-UUID",
-							Options: map[string]string{"pkt_mark": "1008"},
+							Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -5448,7 +5448,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 							Action:  nbdb.LogicalRouterPolicyActionAllow,
 							UUID:    "default-no-reroute-node-UUID",
-							Options: map[string]string{"pkt_mark": "1008"},
+							Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -5944,7 +5944,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -5952,7 +5952,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouter{
 						Name:     types.OVNClusterRouter,
@@ -6320,7 +6320,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -6428,7 +6428,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -6672,7 +6672,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -7178,7 +7178,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 							Action:  nbdb.LogicalRouterPolicyActionAllow,
 							UUID:    "default-no-reroute-node-UUID",
-							Options: map[string]string{"pkt_mark": "1008"},
+							Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 						},
 						&nbdb.LogicalSwitch{
 							UUID:  types.ExternalSwitchPrefix + node1Name + "-UUID",
@@ -7608,7 +7608,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -7616,7 +7616,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -7681,7 +7681,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -7689,7 +7689,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -7843,7 +7843,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -8018,7 +8018,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -8092,7 +8092,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -8312,7 +8312,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -8548,7 +8548,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "keep-me-UUID",
@@ -8760,7 +8760,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					podEIPSNAT, &nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -8904,7 +8904,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -8978,7 +8978,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -9062,7 +9062,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -9236,7 +9236,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -9311,7 +9311,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -9412,7 +9412,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -9635,7 +9635,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -9854,7 +9854,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					podEIPSNAT, &nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -9902,7 +9902,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10087,7 +10087,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10181,7 +10181,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10337,7 +10337,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10501,7 +10501,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10653,7 +10653,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10881,7 +10881,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10889,7 +10889,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPort{
 						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID",
@@ -10973,7 +10973,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -10981,7 +10981,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPort{
 						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID",
@@ -11083,7 +11083,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV4, egressSvcPodsV4, nodeIPsV4),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -11091,7 +11091,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							egressipPodsV6, egressSvcPodsV6, nodeIPsV6),
 						Action:  nbdb.LogicalRouterPolicyActionAllow,
 						UUID:    "default-v6-no-reroute-node-UUID",
-						Options: map[string]string{"pkt_mark": "1008"},
+						Options: map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
 					},
 					&nbdb.LogicalRouterPort{
 						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID",
