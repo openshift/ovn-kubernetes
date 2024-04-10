@@ -349,6 +349,11 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 // non-template per-node LBs.
 func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 	nodeIPv4Templates, nodeIPv6Templates *NodeIPsTemplates) []LB {
+	klog.Infof("[buildTemplateLBs, input params] service=%+v", service)
+	klog.Infof("[buildTemplateLBs, input params] configs=%+v", configs)
+	klog.Infof("[buildTemplateLBs, input params] nodes=%+v", nodes)
+	klog.Infof("[buildTemplateLBs, input params] nodeIPv4Templates=%+v", nodeIPv4Templates)
+	klog.Infof("[buildTemplateLBs, input params] nodeIPv6Templates=%+v", nodeIPv6Templates)
 
 	cbp := configsByProto(configs)
 	eids := util.ExternalIDsForObject(service)
@@ -408,16 +413,25 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 				for _, node := range nodes {
 
 					switchV4TargetIPs, switchV6TargetIPs, v4Changed, v6Changed := makeNodeSwitchTargetIPs(node.name, &config)
-					switchV4TargetNeedsTemplate = !switchV4TargetNeedsTemplate && v4Changed
-					switchV6TargetNeedsTemplate = !switchV6TargetNeedsTemplate && v6Changed
+					if !switchV4TargetNeedsTemplate && v4Changed {
+						switchV4TargetNeedsTemplate = true
+					}
+					if !switchV6TargetNeedsTemplate && v6Changed {
+						switchV6TargetNeedsTemplate = true
+					}
 
 					routerV4TargetIPs, routerV6TargetIPs, v4Changed, v6Changed := makeNodeRouterTargetIPs(
 						&node,
 						&config,
 						conf.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String(),
 						conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
-					routerV4TargetNeedsTemplate = !routerV4TargetNeedsTemplate && v4Changed
-					routerV6TargetNeedsTemplate = !routerV6TargetNeedsTemplate && v6Changed
+
+					if !routerV4TargetNeedsTemplate && v4Changed {
+						routerV4TargetNeedsTemplate = true
+					}
+					if !routerV6TargetNeedsTemplate && v6Changed {
+						routerV6TargetNeedsTemplate = true
+					}
 
 					switchV4TemplateTarget.Value[node.chassisID] = addrsToString(
 						joinHostsPort(switchV4TargetIPs, config.clusterEndpoints.Port))
