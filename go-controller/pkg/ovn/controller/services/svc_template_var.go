@@ -29,6 +29,16 @@ type Template struct {
 }
 
 type TemplateMap map[string]*Template
+
+// TODO Remove this; for debugging
+func (t TemplateMap) String() string {
+	s := "TemplateMap ciao "
+	for name, tmpl := range t {
+		s = fmt.Sprintf("key=%s, Template=%+v;", name, tmpl)
+	}
+	return s
+}
+
 type ChassisTemplateVarMap map[string]*nbdb.ChassisTemplateVar
 
 // toReferenceString returns the textual representation of a template
