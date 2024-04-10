@@ -1,19 +1,16 @@
 package apbroute
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -22,7 +19,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -33,7 +29,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -499,32 +494,32 @@ func (c *ExternalGatewayMasterController) processNextPodWorkItem(wg *sync.WaitGr
 // updateStatusAPBExternalRoute updates the CR with the current status of the CR instance, including errors captured while processing the CR during its lifetime
 func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(policyName string, gwIPs sets.Set[string],
 	processedError error) error {
-	if gwIPs == nil {
-		// policy doesn't exist anymore, nothing to do
-		return nil
-	}
+	// if gwIPs == nil {
+	// 	// policy doesn't exist anymore, nothing to do
+	// 	return nil
+	// }
 
-	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
-		routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), policyName, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				// policy doesn't exist, no need to update status
-				return nil
-			}
-			return err
-		}
+	// resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
+	// 	routePolicy, err := c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().Get(context.TODO(), policyName, metav1.GetOptions{})
+	// 	if err != nil {
+	// 		if apierrors.IsNotFound(err) {
+	// 			// policy doesn't exist, no need to update status
+	// 			return nil
+	// 		}
+	// 		return err
+	// 	}
 
-		updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
+	// 	updateStatus(routePolicy, strings.Join(sets.List(gwIPs), ","), processedError)
 
-		_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
-		if !apierrors.IsNotFound(err) {
-			return err
-		}
-		return nil
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update AdminPolicyBasedExternalRoutes %s status: %v", policyName, resultErr)
-	}
+	// 	_, err = c.apbRoutePolicyClient.K8sV1().AdminPolicyBasedExternalRoutes().UpdateStatus(context.TODO(), routePolicy, metav1.UpdateOptions{})
+	// 	if !apierrors.IsNotFound(err) {
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
+	// if resultErr != nil {
+	// 	return fmt.Errorf("failed to update AdminPolicyBasedExternalRoutes %s status: %v", policyName, resultErr)
+	// }
 	return nil
 }
 
