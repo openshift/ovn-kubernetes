@@ -131,10 +131,10 @@ func (c *Controller) syncNode(key string) error {
 
 	if n == nil {
 		if state != nil {
-			// The node was deleted or is no longer ready but had allocated services.
-			// We mark it as draining and remove all allocations from it,
-			// queuing them to attempt assigning a new node.
-			// Services can't be assigned to a node while it is in draining status.
+			// The node was deleted but had allocated services. We mark it as
+			// draining and remove all allocations from it, queuing them to
+			// attempt assigning a new node. Services can't be assigned to a
+			// node while it is in draining status.
 			state.draining = true
 			for svcKey, svcState := range state.allocations {
 				if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
@@ -147,16 +147,20 @@ func (c *Controller) syncNode(key string) error {
 		return nil
 	}
 
+	// we won't allocate egress services to unready nodes out of precaution but
+	// we won't deallocate from unready nodes either as they should still be
+	// serviced
+	nodeReady := nodeIsReady(n)
+	nodeLabels := n.Labels
 	healthState := c.healthStateProvider.GetHealthState(n.Name)
 	nodeAvailable := healthState <= healthcheck.AVAILABLE
 	nodeUnreachable := healthState == healthcheck.UNREACHABLE
-	nodeReady := nodeIsReady(n)
-	nodeLabels := n.Labels
 
 	if state == nil {
 		if nodeReady && nodeAvailable {
-			// The node has no allocated services and is ready, this means unallocated services whose labels match
-			// the node's labels can be allocated to it.
+			// The node has no allocated services, is available and ready, this
+			// means unallocated services whose labels match the node's labels
+			// can be allocated to it.
 			for svcKey, selector := range c.unallocatedServices {
 				if selector.Matches(labels.Set(nodeLabels)) {
 					c.egressServiceQueue.Add(svcKey)
@@ -174,19 +178,6 @@ func (c *Controller) syncNode(key string) error {
 			return c.kubeOVN.SetLabelsOnNode(n.Name, labelsToRemove)
 		}
 
-		return nil
-	}
-
-	if !nodeReady {
-		// The node is not ready but had allocated services, we drain it
-		// and attempt reallocating its services, deleting it from our cache
-		// because we don't care about its reachability status until it becomes ready.
-		for svcKey, svcState := range state.allocations {
-			if err := c.clearServiceResourcesAndRequeue(svcKey, svcState, noHost); err != nil {
-				return err
-			}
-		}
-		delete(c.nodes, nodeName)
 		return nil
 	}
 

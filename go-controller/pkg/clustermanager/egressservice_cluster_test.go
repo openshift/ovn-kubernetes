@@ -1215,13 +1215,8 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
-				ginkgo.By("updating the first node's to be not ready the resources of first service will be deleted")
-				node1.Status.Conditions = []v1.NodeCondition{
-					{
-						Type:   v1.NodeReady,
-						Status: v1.ConditionFalse,
-					},
-				}
+				ginkgo.By("updating the first node's labels to not match the first service its resources will be deleted")
+				node1.Labels["home"] = "earth"
 				node1.ResourceVersion = "2"
 				node1, err := fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node1, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -1243,7 +1238,7 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					}
 
 					node1ExpectedLabels := map[string]string{
-						"home": "pineapple",
+						"home": "earth",
 					}
 
 					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
@@ -1304,7 +1299,7 @@ var _ = ginkgo.Describe("Cluster manager Egress Service operations", func() {
 					}
 
 					node1ExpectedLabels := map[string]string{
-						"home": "pineapple",
+						"home": "earth",
 					}
 
 					node1, err = fakeCM.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
