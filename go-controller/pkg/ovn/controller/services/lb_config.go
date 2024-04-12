@@ -55,17 +55,16 @@ func makeNodeSwitchTargetIPs(service *v1.Service, node string, c *lbConfig) (tar
 	targetIPsV4 = c.clusterEndpoints.V4IPs
 	targetIPsV6 = c.clusterEndpoints.V6IPs
 
-	localIPsV4 := []string{}
-	localIPsV6 := []string{}
-	if localEndpoints, ok := c.nodeEndpoints[node]; ok {
-		localIPsV4 = localEndpoints.V4IPs
-		localIPsV6 = localEndpoints.V6IPs
-	}
-
 	if c.externalTrafficLocal || c.internalTrafficLocal {
 		// For ExternalTrafficPolicy=Local, remove non-local endpoints from the router/switch targets
 		// NOTE: on the switches, filtered eps are used only by masqueradeVIP
 		// for InternalTrafficPolicy=Local, remove non-local endpoints from the switch targets only
+		localIPsV4 := []string{}
+		localIPsV6 := []string{}
+		if localEndpoints, ok := c.nodeEndpoints[node]; ok {
+			localIPsV4 = localEndpoints.V4IPs
+			localIPsV6 = localEndpoints.V6IPs
+		}
 		targetIPsV4 = localIPsV4
 		targetIPsV6 = localIPsV6
 	}
@@ -94,16 +93,15 @@ func makeNodeRouterTargetIPs(service *v1.Service, node *nodeInfo, c *lbConfig, h
 	targetIPsV4 = c.clusterEndpoints.V4IPs
 	targetIPsV6 = c.clusterEndpoints.V6IPs
 
-	localIPsV4 := []string{}
-	localIPsV6 := []string{}
-	if localEndpoints, ok := c.nodeEndpoints[node.name]; ok {
-		localIPsV4 = localEndpoints.V4IPs
-		localIPsV6 = localEndpoints.V6IPs
-	}
-
 	if c.externalTrafficLocal {
 		// For ExternalTrafficPolicy=Local, remove non-local endpoints from the router/switch targets
 		// NOTE: on the switches, filtered eps are used only by masqueradeVIP
+		localIPsV4 := []string{}
+		localIPsV6 := []string{}
+		if localEndpoints, ok := c.nodeEndpoints[node.name]; ok {
+			localIPsV4 = localEndpoints.V4IPs
+			localIPsV6 = localEndpoints.V6IPs
+		}
 		targetIPsV4 = localIPsV4
 		targetIPsV6 = localIPsV6
 	}
