@@ -53,7 +53,7 @@ type lbEndpoints struct {
 
 func makeNodeSwitchTargetIPs(service *v1.Service, node string, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
 	targetIPsV4 = c.clusterEndpoints.V4IPs
-	targetIPsV6 = c.clusterEndpoints.V4IPs
+	targetIPsV6 = c.clusterEndpoints.V6IPs
 
 	localIPsV4 := []string{}
 	localIPsV6 := []string{}

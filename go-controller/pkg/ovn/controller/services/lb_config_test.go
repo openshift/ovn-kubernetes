@@ -1449,15 +1449,20 @@ func Test_buildClusterLBs(t *testing.T) {
 func Test_buildPerNodeLBs(t *testing.T) {
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	oldGwMode := globalconfig.Gateway.Mode
+	oldServiceCIDRs := globalconfig.Kubernetes.ServiceCIDRs
 	defer func() {
 		globalconfig.Gateway.Mode = oldGwMode
 		globalconfig.Default.ClusterSubnets = oldClusterSubnet
+		globalconfig.Kubernetes.ServiceCIDRs = oldServiceCIDRs
 	}()
+
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00::/64")
 	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
-	_, svcCIDRs, _ := net.ParseCIDR("192.168.0.0/24")
-	globalconfig.Kubernetes.ServiceCIDRs = []*net.IPNet{svcCIDRs}
+	_, svcCIDRv4, _ := net.ParseCIDR("192.168.0.0/24")
+	_, svcCIDRv6, _ := net.ParseCIDR("fd92::0/80")
+
+	globalconfig.Kubernetes.ServiceCIDRs = []*net.IPNet{svcCIDRv4}
 
 	name := "foo"
 	namespace := "testns"
@@ -1485,6 +1490,25 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			gatewayRouterName:  "gr-node-b",
 			switchName:         "switch-node-b",
 			podSubnets:         []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
+		},
+	}
+
+	defaultNodesV6 := []nodeInfo{
+		{
+			name:               nodeA,
+			l3gatewayAddresses: []net.IP{net.ParseIP("fd00::1")},
+			hostAddresses:      []net.IP{net.ParseIP("fd00::1"), net.ParseIP("fd00::111")},
+			gatewayRouterName:  "gr-node-a",
+			switchName:         "switch-node-a",
+			podSubnets:         []net.IPNet{{IP: net.ParseIP("fe00:0:0:0:1::0"), Mask: net.CIDRMask(64, 64)}},
+		},
+		{
+			name:               nodeB,
+			l3gatewayAddresses: []net.IP{net.ParseIP("fd00::2")},
+			hostAddresses:      []net.IP{net.ParseIP("fd00::2")},
+			gatewayRouterName:  "gr-node-b",
+			switchName:         "switch-node-b",
+			podSubnets:         []net.IPNet{{IP: net.ParseIP("fe00:0:0:0:2::0"), Mask: net.CIDRMask(64, 64)}},
 		},
 	}
 
@@ -2823,6 +2847,248 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			},
 		},
 	}
+
+	// needs separate configuration variables for a V6 cluster
+	tcV6 := []struct {
+		name           string
+		service        *v1.Service
+		configs        []lbConfig
+		expectedShared []LB
+		expectedLocal  []LB
+	}{
+		// exactly the same as the v4 test under the same name
+		{
+			name:    "ipv6, nodeport service, standard pod",
+			service: defaultService,
+			configs: []lbConfig{
+				{
+					vips:     []string{"node"},
+					protocol: v1.ProtocolTCP,
+					inport:   80,
+					clusterEndpoints: lbEndpoints{
+						V6IPs: []string{"fe00:0:0:0:1::2"},
+						Port:  8080,
+					},
+					nodeEndpoints: map[string]lbEndpoints{
+						nodeA: {V6IPs: []string{"fe00:0:0:0:1::2"}, Port: 8080},
+					},
+				},
+			},
+			expectedShared: []LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Switches:    []string{"switch-node-a"},
+					Protocol:    "TCP",
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd00::1", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+						{
+							Source:  Addr{IP: "fd00::111", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+					},
+					Opts: defaultOpts,
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
+					Switches:    []string{"switch-node-b"},
+					Protocol:    "TCP",
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd00::2", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+					},
+					Opts: defaultOpts,
+				},
+			},
+			expectedLocal: []LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Switches:    []string{"switch-node-a"},
+					Protocol:    "TCP",
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd00::1", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+						{
+							Source:  Addr{IP: "fd00::111", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+					},
+					Opts: defaultOpts,
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
+					Switches:    []string{"switch-node-b"},
+					Protocol:    "TCP",
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd00::2", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+					},
+					Opts: defaultOpts,
+				},
+			},
+		},
+		{
+			// exactly the same as last test case for IPv4 but IPv6
+			name:    "IPv6, LB service with NodePort, standard pods on different nodes, ExternalTrafficPolicy=local, one endpoint is ready, the other one is terminating and serving",
+			service: defaultService,
+			configs: []lbConfig{
+				{
+					vips:                 []string{"node"},
+					protocol:             v1.ProtocolTCP,
+					inport:               5, // nodePort
+					hasNodePort:          true,
+					externalTrafficLocal: true,
+					clusterEndpoints: lbEndpoints{
+						V6IPs: []string{"fe00:0:0:0:1::2"},
+						Port:  8080,
+					},
+					nodeEndpoints: map[string]lbEndpoints{
+						nodeA: {V6IPs: []string{"fe00:0:0:0:1::2"}, Port: 8080},
+						nodeB: {V6IPs: []string{"fe00:0:0:0:2::2"}, Port: 8080},
+					},
+				},
+				{
+					vips:                 []string{"cafe::2", "abcd::5"}, // externalIP + LB IP
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					hasNodePort:          false,
+					externalTrafficLocal: true,
+					clusterEndpoints: lbEndpoints{
+						V6IPs: []string{"fe00:0:0:0:1::2"},
+						Port:  8080,
+					},
+					nodeEndpoints: map[string]lbEndpoints{
+						nodeA: {V6IPs: []string{"fe00:0:0:0:1::2"}, Port: 8080},
+						nodeB: {V6IPs: []string{"fe00:0:0:0:2::2"}, Port: 8080},
+					},
+				},
+			},
+			expectedShared: []LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
+					Protocol:    "TCP",
+					ExternalIDs: defaultExternalIDs,
+					Opts:        LBOpts{SkipSNAT: true, Reject: true},
+
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd00::1", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // local endpoint
+						},
+						{
+							Source:  Addr{IP: "fd00::111", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // local endpoint
+						},
+						{
+							Source:  Addr{IP: "cafe::2", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // local endpoint
+						},
+						{
+							Source:  Addr{IP: "abcd::5", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // local endpoint
+						},
+					},
+					Routers: []string{"gr-node-a"},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-a",
+					Protocol:    "TCP",
+					ExternalIDs: defaultExternalIDs,
+					Opts:        defaultOpts,
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd69::3", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+						{
+							Source:  Addr{IP: "fd00::1", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // prefer endpoint on node1 since it's ready
+						},
+						{
+							Source:  Addr{IP: "fd69::3", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}},
+						},
+						{
+							Source:  Addr{IP: "fd00::111", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // prefer endpoint on node1 since it's ready
+						},
+						{
+							Source:  Addr{IP: "cafe::2", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // prefer endpoint on node1 since it's ready
+						},
+						{
+							Source:  Addr{IP: "abcd::5", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // prefer endpoint on node1 since it's ready
+						},
+					},
+					Switches: []string{"switch-node-a"},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_local_router_node-b",
+					Protocol:    "TCP",
+					ExternalIDs: defaultExternalIDs,
+					Opts:        LBOpts{SkipSNAT: true, Reject: true},
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd00::2", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:2::2", Port: 8080}}, // local endpoint (fallback to terminating and serving)
+						},
+						{
+							Source:  Addr{IP: "cafe::2", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:2::2", Port: 8080}}, // local endpoint (fallback to terminating and serving)
+						},
+						{
+							Source:  Addr{IP: "abcd::5", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:2::2", Port: 8080}}, // local endpoint (fallback to terminating and serving)
+						},
+					},
+					Routers: []string{"gr-node-b"},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					Protocol:    "TCP",
+					ExternalIDs: defaultExternalIDs,
+					Opts:        defaultOpts,
+					Rules: []LBRule{
+						{
+							Source:  Addr{IP: "fd69::3", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:2::2", Port: 8080}},
+						},
+						{
+							Source:  Addr{IP: "fd00::2", Port: 5},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // prefer endpoint on node1 since it's ready
+						},
+						{
+							Source:  Addr{IP: "cafe::2", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // prefer endpoint on node1 since it's ready
+						},
+						{
+							Source:  Addr{IP: "abcd::5", Port: 80},
+							Targets: []Addr{{IP: "fe00:0:0:0:1::2", Port: 8080}}, // prefer endpoint on node1 since it's ready
+						},
+					},
+					Switches: []string{"switch-node-b"},
+				},
+			},
+		},
+	}
+	// v4
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
 
@@ -2840,6 +3106,27 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 		})
 	}
+
+	// v6
+	globalconfig.Kubernetes.ServiceCIDRs = []*net.IPNet{svcCIDRv6}
+	for i, tt := range tcV6 {
+		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
+
+			if tt.expectedShared != nil {
+				globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
+				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6)
+				assert.Equal(t, tt.expectedShared, actual, "shared gateway mode not as expected")
+			}
+
+			if tt.expectedLocal != nil {
+				globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
+				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6)
+				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
+			}
+
+		})
+	}
+
 }
 
 func Test_idledServices(t *testing.T) {
