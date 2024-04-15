@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +13,7 @@ import (
 )
 
 // OCP hack begin
+
 func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	oldGwMode := globalconfig.Gateway.Mode
@@ -37,14 +37,14 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:              "node-a",
+			name:              nodeA,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
-			name:              "node-b",
+			name:              nodeB,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
@@ -76,7 +76,7 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 					vips:     []string{"192.168.1.1"},
 					protocol: v1.ProtocolTCP,
 					inport:   80,
-					eps: util.LbEndpoints{
+					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
 						Port:  8080,
 					},
@@ -188,14 +188,14 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 
 	defaultNodes := []nodeInfo{
 		{
-			name:              "node-a",
+			name:              nodeA,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.1")},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
-			name:              "node-b",
+			name:              nodeB,
 			hostAddresses:     []net.IP{net.ParseIP("10.0.0.2")},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
@@ -227,10 +227,13 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					inport:               5, // node port
 					externalTrafficLocal: true,
 					hasNodePort:          true,
-					eps: util.LbEndpoints{
+					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
 						Port:  outport,
+					},
+					nodeEndpoints: map[string]lbEndpoints{
+						nodeA: {V4IPs: []string{"10.128.0.2"}, Port: outport},
+						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
 					},
 				},
 				{
@@ -238,10 +241,13 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					protocol:             v1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
-					eps: util.LbEndpoints{
+					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
 						Port:  outport,
+					},
+					nodeEndpoints: map[string]lbEndpoints{
+						nodeA: {V4IPs: []string{"10.128.0.2"}, Port: outport},
+						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
 					},
 				},
 			},
@@ -320,10 +326,12 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					inport:               5, // node port
 					externalTrafficLocal: true,
 					hasNodePort:          true,
-					eps: util.LbEndpoints{
+					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.1.2"}, // only endpoint on node-b is running
-						V6IPs: []string{},
 						Port:  outport,
+					},
+					nodeEndpoints: map[string]lbEndpoints{
+						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
 					},
 				},
 				{
@@ -331,10 +339,12 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					protocol:             v1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
-					eps: util.LbEndpoints{
+					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.1.2"},
-						V6IPs: []string{},
 						Port:  outport,
+					},
+					nodeEndpoints: map[string]lbEndpoints{
+						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
 					},
 				},
 			},
