@@ -150,6 +150,7 @@ func (c *Controller) ensureAdminNetworkPolicy(anp *anpapi.AdminNetworkPolicy) er
 		// since transact was successful we can finally populate the cache
 		c.anpCache[anp.Name] = desiredANPState
 		metrics.IncrementANPCount()
+		updateANPRuleCountMetric(desiredANPState, false)
 		return nil
 	}
 	// ANP state existed in the cache, which means its either an ANP update or pod/namespace add/update/delete
@@ -404,6 +405,7 @@ func (c *Controller) clearAdminNetworkPolicy(anpName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete address-sets for ANP %s/%d: %w", anp.name, anp.anpPriority, err)
 	}
+	updateANPRuleCountMetric(anp, false)
 	// we can delete the object from the cache now.
 	delete(c.anpPriorityMap, anp.anpPriority)
 	delete(c.anpCache, anpName)
@@ -547,6 +549,11 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 		ops, err = libovsdbops.UpdatePortGroupSetACLsOps(c.nbClient, ops, portGroupName, desiredACLs)
 		if err != nil {
 			return fmt.Errorf("failed to create ACL-on-PG update ops for anp %s: %v", desiredANPState.name, err)
+		}
+		if fullPeerRecompute || atLeastOneRuleUpdated {
+			// this means either rules were inserted or deleted or the actions on the rules were updated
+			// let's update the rule count metrics
+			updateANPRuleCountMetric(desiredANPState, isBanp)
 		}
 	}
 

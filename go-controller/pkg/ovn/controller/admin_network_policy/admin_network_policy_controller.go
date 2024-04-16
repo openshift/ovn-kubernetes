@@ -41,7 +41,7 @@ type Controller struct {
 	// name of the controller that starts the ANP controller
 	// (values are default-network-controller, secondary-network-controller etc..)
 	controllerName string
-	sync.Mutex
+	sync.RWMutex
 	anpClientSet anpclientset.Interface
 
 	// libovsdb northbound client interface
@@ -206,6 +206,7 @@ func NewController(
 
 	// TODO(tssurya): We don't use recorder now but will add events in future iterations
 	c.eventRecorder = recorder
+	c.initMetricsCollector()
 
 	return c, nil
 }
