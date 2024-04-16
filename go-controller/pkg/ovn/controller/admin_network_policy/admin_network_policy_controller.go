@@ -206,6 +206,7 @@ func NewController(
 
 	// TODO(tssurya): We don't use recorder now but will add events in future iterations
 	c.eventRecorder = recorder
+	c.initMetricsCollector()
 
 	return c, nil
 }
