@@ -284,6 +284,28 @@ var metricBANPCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of baseline admin network policies (0 or 1) in the cluster",
 })
 
+var metricANPRuleCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policy_rules", // doing a sum across all ANPs will give the absolute count in the cluster
+	Help:      "The total number of rules in a given admin network policy in the cluster"},
+	[]string{
+		"direction", // direction is either "ingress" or "egress"; so cardinality is max 2 for this label
+		"action",    // action is either "Pass" or "Allow" or "Deny"; so cardinality is max 3 for this label
+	},
+)
+
+var metricBANPRuleCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policy_rules",
+	Help:      "The total number of rules in a given baseline admin network policy in the cluster"},
+	[]string{
+		"direction", // direction is either "ingress" or "egress"; so cardinality is max 2 for this label
+		"action",    // action is either "Allow" or "Deny"; so cardinality is max 2 for this label
+	},
+)
+
 /** AdminNetworkPolicyMetrics End**/
 
 // metricFirstSeenLSPLatency is the time between a pod first seen in OVN-Kubernetes and its Logical Switch Port is created
@@ -425,6 +447,8 @@ func RegisterOVNKubeControllerFunctional() {
 	prometheus.MustRegister(metricEgressRoutingViaHost)
 	prometheus.MustRegister(metricANPCount)
 	prometheus.MustRegister(metricBANPCount)
+	prometheus.MustRegister(metricANPRuleCount)
+	prometheus.MustRegister(metricBANPRuleCount)
 	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 			panic(err)
@@ -616,6 +640,16 @@ func IncrementBANPCount() {
 // DecrementBANPCount decrements the number of Baseline Admin Network Policies
 func DecrementBANPCount() {
 	metricBANPCount.Dec()
+}
+
+// UpdateANPRuleCount records the number of AdminNetworkPolicy rules.
+func UpdateANPRuleCount(direction, action string, count float64) {
+	metricANPRuleCount.WithLabelValues(direction, action).Set(count)
+}
+
+// UpdateBANPRuleCount records the number of BaselineAdminNetworkPolicy rules.
+func UpdateBANPRuleCount(direction, action string, count float64) {
+	metricBANPRuleCount.WithLabelValues(direction, action).Set(count)
 }
 
 type (
