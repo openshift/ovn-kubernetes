@@ -2693,7 +2693,7 @@ func createAPBExternalRouteCRWithStaticHop(policyName, namespaceName string, bfd
 	createAPBExternalRouteCRWithStaticHopAndStatus(policyName, namespaceName, bfd, "Success", gateways...)
 	gwIPs := sets.NewString(gateways...).List()
 	gomega.Eventually(func() string {
-		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
+		lastMsg, err := framework.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		return lastMsg
 	}, time.Minute, 1).Should(gomega.Equal(fmt.Sprintf("Configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
