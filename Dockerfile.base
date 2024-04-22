@@ -15,7 +15,7 @@ RUN dnf install -y --nodocs \
 ARG ovsver=3.1.0-73.el9fdp
 ARG ovnver=23.09.0-139.el9fdp
 
-RUN INSTALL_PKGS="iptables" && \
+RUN INSTALL_PKGS="iptables nftables" && \
 	ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
 	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
