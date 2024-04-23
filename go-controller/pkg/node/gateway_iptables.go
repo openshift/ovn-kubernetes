@@ -506,8 +506,8 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
 	svcTypeIsITPLocal := util.ServiceInternalTrafficPolicyLocal(service)
-	klog.Warningf("riccardo: [getGatewayIPTRules] svc %s/%s, ETPlocal=%t, ITlocal=%t, service=%+v",
-		service.Namespace, service.Name, svcTypeIsETPLocal, svcTypeIsITPLocal, service)
+	klog.Warningf("riccardo: [getGatewayIPTRules] svc %s/%s, localEndpoints=%v, svcHasLocalHostNetEndPnt=%t, ETPlocal=%t, ITlocal=%t, service=%+v",
+		service.Namespace, service.Name, localEndpoints, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal, svcTypeIsITPLocal, service)
 	for _, svcPort := range service.Spec.Ports {
 		if util.ServiceTypeHasNodePort(service) {
 			klog.Warningf("riccardo: [getGatewayIPTRules] svc %s/%s, service has nodeport",

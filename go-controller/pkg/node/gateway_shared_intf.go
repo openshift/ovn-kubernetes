@@ -745,6 +745,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		nodeIPs := npw.nodeIPManager.ListAddresses()
 		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(epSlices, nodeIPs)
 		localEndPoints := npw.GetLocalEndpointAddresses(epSlices, service)
+		klog.Infof("riccardo::[ (npw *nodePortWatcher) SyncServices] nodeIPs=%v, localEndPoints=%v, hasLocalHostNetworkEp=%t", nodeIPs, localEndPoints, hasLocalHostNetworkEp)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndPoints)
 		// Delete OF rules for service if they exist
 		if err = npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp); err != nil {
@@ -755,6 +756,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		}
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
+			// TODO gets called from here
 			klog.Infof("riccardo:[ (npw *nodePortWatcher) SyncServices] calling getGatewayIPTRules for %s/ %s", service.Namespace, service.Name)
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndPoints), hasLocalHostNetworkEp)...)
 		}
