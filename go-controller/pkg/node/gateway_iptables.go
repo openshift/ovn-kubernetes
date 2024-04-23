@@ -258,6 +258,7 @@ func getITPLocalIPTRules(svcPort kapi.ServicePort, clusterIP string, svcHasLocal
 // `targetIP` corresponds to svc.spec.ClusterIP
 // This function returns a RETURN rule in iptableMgmPortChain to prevent SNAT of sourceIP
 func getNodePortETPLocalIPTRules(svcPort kapi.ServicePort, targetIP string) []iptRule {
+	klog.Warningf("riccardo: [getNodePortETPLocalIPTRules] targetIP=%s", targetIP)
 	return []iptRule{
 		{
 			table: "nat",
@@ -505,8 +506,12 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
 	svcTypeIsITPLocal := util.ServiceInternalTrafficPolicyLocal(service)
+	klog.Warningf("riccardo: [getGatewayIPTRules] svc %s/%s, ETPlocal=%t, ITlocal=%t, service=%+v",
+		service.Namespace, service.Name, svcTypeIsETPLocal, svcTypeIsITPLocal)
 	for _, svcPort := range service.Spec.Ports {
 		if util.ServiceTypeHasNodePort(service) {
+			klog.Warningf("riccardo: [getGatewayIPTRules] svc %s/%s, service has nodeport",
+				service.Namespace, service.Name)
 			err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort)
 			if err != nil {
 				klog.Errorf("Skipping service: %s, invalid service NodePort: %v", svcPort.Name, err)
@@ -518,6 +523,8 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 				continue
 			}
 			for _, clusterIP := range clusterIPs {
+				klog.Warningf("riccardo: [getGatewayIPTRules] svc %s/%s, processing clusterIP=%s",
+					service.Namespace, service.Name, clusterIP)
 				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
 					klog.Warningf("riccardo: [getGatewayIPTRules, service=%s/%s]  svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt", service.Namespace, service.Name)
 					// case1 (see function description for details)

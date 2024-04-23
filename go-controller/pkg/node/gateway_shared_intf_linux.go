@@ -60,6 +60,7 @@ func deleteLocalNodeAccessBridge() error {
 
 // addGatewayIptRules adds the necessary iptable rules for a service on the node
 func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
+	klog.Infof("riccardo:[addGatewayIptRules] calling getGatewayIPTRules for %s/ %s", service.Namespace, service.Name)
 	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
 
 	if err := insertIptRules(rules); err != nil {
@@ -71,6 +72,7 @@ func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLo
 
 // delGatewayIptRules removes the iptable rules for a service from the node
 func delGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
+	klog.Infof("riccardo:[delGatewayIptRules] calling getGatewayIPTRules for %s/ %s", service.Namespace, service.Name)
 	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
 
 	if err := delIptRules(rules); err != nil {

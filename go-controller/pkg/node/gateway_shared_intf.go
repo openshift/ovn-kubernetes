@@ -755,6 +755,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		}
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
+			klog.Infof("riccardo:[ (npw *nodePortWatcher) SyncServices] calling getGatewayIPTRules for %s/ %s", service.Namespace, service.Name)
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndPoints), hasLocalHostNetworkEp)...)
 		}
 
@@ -1088,6 +1089,8 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		}
 		// Add correct iptables rules.
 		// TODO: ETP and ITP is not implemented for smart NIC mode.
+		klog.Infof("riccardo:[ (npw *nodePortWatcherIptables) SyncServices] calling getGatewayIPTRules for %s/ %s", service.Namespace, service.Name)
+
 		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
 	}
 
