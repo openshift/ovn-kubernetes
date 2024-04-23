@@ -314,6 +314,7 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 			},
 		}, iptRules...)
 	}
+	klog.Warningf("riccardo: [generateIPTRulesForLoadBalancersWithoutNodePorts] iptRules=%+v", iptRules)
 	return iptRules
 }
 
@@ -518,6 +519,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 			}
 			for _, clusterIP := range clusterIPs {
 				if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
+					klog.Warningf("riccardo: [getGatewayIPTRules, service=%s/%s]  svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt", service.Namespace, service.Name)
 					// case1 (see function description for details)
 					// A DNAT rule to masqueradeIP is added that takes priority over DNAT to clusterIP.
 					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)

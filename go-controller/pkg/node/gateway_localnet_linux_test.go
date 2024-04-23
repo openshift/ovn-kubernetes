@@ -2221,7 +2221,7 @@ var _ = Describe("Node Operations", func() {
 					Port: &epPortValue,
 				}
 				// endpointSlice.Endpoints is ovn-networked so this will
-				// come under !hasLocalHostNetEp case
+				// come under !hasLocalHostNetEp case // TODO is this true????
 				endpointSlice := *newEndpointSlice(
 					"service1",
 					"namespace1",
@@ -2264,7 +2264,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
+						"OVN-KUBE-SNAT-MGMTPORT": []string{}, // TODO error here, I got: [-p TCP --dport 31111 -j RETURN]
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
 						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
