@@ -904,7 +904,8 @@ create_ovn_kube_manifests() {
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --enable-multi-external-gateway=true \
-    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}"
+    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
+    --enable-persistent-ips=true
   popd
 }
 
@@ -989,8 +990,8 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressservices.yaml
   run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
   # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
-  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
-  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.3/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
   run_kubectl apply -f ovn-setup.yaml
   run_kubectl apply -f rbac-ovnkube-identity.yaml
   run_kubectl apply -f rbac-ovnkube-cluster-manager.yaml
@@ -1181,6 +1182,12 @@ install_mpolicy_crd() {
   echo "Installing multi-network-policy CRD ..."
   mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
   run_kubectl apply -f "$mpolicy_manifest"
+}
+
+install_ipamclaim_crd() {
+  echo "Installing IPAMClaim CRD ..."
+  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
+  run_kubectl apply -f "$ipamclaims_manifest"
 }
 
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
@@ -1480,6 +1487,7 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
+  install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods
