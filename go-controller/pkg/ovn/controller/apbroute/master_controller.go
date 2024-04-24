@@ -516,7 +516,7 @@ func (c *ExternalGatewayMasterController) updateStatusAPBExternalRoute(policyNam
 	}
 	successMessage := fmt.Sprintf("Configured external gateway IPs: %s", strings.Join(sets.List(gwIPs), ","))
 	var lastMessage, failedMessage string
-	if !status.LastTransitionTime.Time.IsZero() {
+	if len(status.Messages)>0 {
 		lastMessage = status.Messages[len(status.Messages)-1]
 	}
 	if processedError != nil {
