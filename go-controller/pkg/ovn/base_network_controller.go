@@ -20,6 +20,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -86,6 +87,8 @@ type BaseNetworkController struct {
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryNetworkPolicies *ovnretry.RetryFramework
+	// retry framework for IPAMClaims
+	retryIPAMClaims *ovnretry.RetryFramework
 
 	// pod events factory handler
 	podHandler *factory.Handler
@@ -93,12 +96,16 @@ type BaseNetworkController struct {
 	nodeHandler *factory.Handler
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
+	// ipam claims events factory Handler
+	ipamClaimsHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
 
 	// An utility to allocate the PodAnnotation to pods
 	podAnnotationAllocator *pod.PodAnnotationAllocator
+
+	ipamClaimsReconciler *persistentips.IPAMClaimReconciler
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -520,7 +527,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 	}
 	if nsInfo.addressSet != nil {
 		// Empty the address set, then delete it after an interval.
-		if err := nsInfo.addressSet.SetIPs(nil); err != nil {
+		if err := nsInfo.addressSet.SetAddresses(nil); err != nil {
 			klog.Errorf("Warning: failed to empty address set for deleted NS %s: %v", ns, err)
 		}
 

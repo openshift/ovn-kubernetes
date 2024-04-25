@@ -185,6 +185,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 			EgressServiceClient:  ovnClient.EgressServiceClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 			EgressQoSClient:      ovnClient.EgressQoSClient,
+			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
 		},
 		stopChan:     make(chan struct{}),
 		watchFactory: wf,
@@ -234,7 +235,7 @@ func (cm *NetworkControllerManager) configureSvcTemplateSupport() {
 
 func (cm *NetworkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.RegisterOVNKubeControllerPerformance(cm.nbClient)
-	metrics.RegisterOVNKubeControllerFunctional()
+	metrics.RegisterOVNKubeControllerFunctional(stopChan)
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
 	metrics.MonitorIPSec(cm.nbClient)
 }

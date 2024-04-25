@@ -2,7 +2,9 @@ package clustermanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 
@@ -13,12 +15,17 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -30,7 +37,7 @@ import (
 // level to support the necessary configuration for the cluster networks.
 type networkClusterController struct {
 	watchFactory *factory.WatchFactory
-	kube         kube.Interface
+	kube         kube.InterfaceOVN
 	stopChan     chan struct{}
 	wg           *sync.WaitGroup
 
@@ -44,16 +51,25 @@ type networkClusterController struct {
 	podHandler *factory.Handler
 	retryPods  *objretry.RetryFramework
 
-	podAllocator       *pod.PodAllocator
-	nodeAllocator      *node.NodeAllocator
-	networkIDAllocator idallocator.NamedAllocator
+	// retry framework for persistent ip allocation
+	ipamClaimHandler *factory.Handler
+	retryIPAMClaims  *objretry.RetryFramework
+
+	podAllocator        *pod.PodAllocator
+	nodeAllocator       *node.NodeAllocator
+	networkIDAllocator  idallocator.NamedAllocator
+	ipamClaimReconciler *persistentips.IPAMClaimReconciler
+	subnetAllocator     subnet.Allocator
 
 	util.NetInfo
 }
 
 func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
-	kube := &kube.Kube{
-		KClient: ovnClient.KubeClient,
+	kube := &kube.KubeOVN{
+		Kube: kube.Kube{
+			KClient: ovnClient.KubeClient,
+		},
+		IPAMClaimsClient: ovnClient.IPAMClaimsClient,
 	}
 
 	wg := &sync.WaitGroup{}
@@ -116,6 +132,13 @@ func (ncc *networkClusterController) hasNodeAllocation() bool {
 	}
 }
 
+func (ncc *networkClusterController) allowPersistentIPs() bool {
+	return config.OVNKubernetesFeature.EnablePersistentIPs &&
+		ncc.NetInfo.AllowsPersistentIPs() &&
+		util.DoesNetworkRequireIPAM(ncc.NetInfo) &&
+		(ncc.NetInfo.TopologyType() == types.Layer2Topology || ncc.NetInfo.TopologyType() == types.LocalnetTopology)
+}
+
 func (ncc *networkClusterController) init() error {
 	networkID, err := ncc.networkIDAllocator.AllocateID()
 	if err != nil {
@@ -134,10 +157,36 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasPodAllocation() {
 		ncc.retryPods = ncc.newRetryFramework(factory.PodType, true)
-
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, ncc.watchFactory.PodCoreInformer().Lister(), ncc.kube)
-		err := ncc.podAllocator.Init()
+		ipAllocator, err := newIPAllocatorForNetwork(ncc.NetInfo)
 		if err != nil {
+			return fmt.Errorf("could not initialize the IP allocator for network %q: %w", ncc.NetInfo.GetNetworkName(), err)
+		}
+		ncc.subnetAllocator = ipAllocator
+
+		var (
+			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
+			ipamClaimsReconciler   persistentips.PersistentAllocations
+		)
+
+		if ncc.allowPersistentIPs() {
+			ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
+			ncc.ipamClaimReconciler = persistentips.NewIPAMClaimReconciler(
+				ncc.kube,
+				ncc.NetInfo,
+				ncc.watchFactory.IPAMClaimsInformer().Lister(),
+			)
+			ipamClaimsReconciler = ncc.ipamClaimReconciler
+		}
+
+		podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocator(
+			ncc.NetInfo,
+			ncc.watchFactory.PodCoreInformer().Lister(),
+			ncc.kube,
+			ipamClaimsReconciler,
+		)
+
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator, ipamClaimsReconciler)
+		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
 	}
@@ -148,6 +197,7 @@ func (ncc *networkClusterController) init() error {
 // Start the network cluster controller. Depending on the cluster configuration
 // and type of network, it does the following:
 //   - initializes the node allocator and starts listening to node events
+//   - initializes the persistent ip allocator and starts listening to IPAMClaim events
 //   - initializes the pod ip allocator and starts listening to pod events
 func (ncc *networkClusterController) Start(ctx context.Context) error {
 	err := ncc.init()
@@ -164,6 +214,16 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 	}
 
 	if ncc.hasPodAllocation() {
+		if ncc.allowPersistentIPs() {
+			// we need to start listening to IPAMClaim events before pod events, to
+			// ensure we don't start processing pod allocations before having the
+			// existing IPAMClaim allocations reserved in the in-memory IP pool.
+			ipamClaimHandler, err := ncc.retryIPAMClaims.WatchResource()
+			if err != nil {
+				return fmt.Errorf("unable to watch IPAMClaims: %w", err)
+			}
+			ncc.ipamClaimHandler = ipamClaimHandler
+		}
 		podHandler, err := ncc.retryPods.WatchResource()
 		if err != nil {
 			return fmt.Errorf("unable to watch pods: %w", err)
@@ -177,6 +237,10 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 func (ncc *networkClusterController) Stop() {
 	close(ncc.stopChan)
 	ncc.wg.Wait()
+
+	if ncc.ipamClaimHandler != nil {
+		ncc.watchFactory.RemoveIPAMClaimsHandler(ncc.ipamClaimHandler)
+	}
 
 	if ncc.nodeHandler != nil {
 		ncc.watchFactory.RemoveNodeHandler(ncc.nodeHandler)
@@ -257,6 +321,8 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 			return err
 		}
 		h.clearInitialNodeNetworkUnavailableCondition(node)
+	case factory.IPAMClaimsType:
+		return nil
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -295,6 +361,8 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 			return err
 		}
 		h.clearInitialNodeNetworkUnavailableCondition(node)
+	case factory.IPAMClaimsType:
+		return nil
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -321,6 +389,20 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
 		return h.ncc.nodeAllocator.HandleDeleteNode(node)
+	case factory.IPAMClaimsType:
+		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
+		}
+
+		ipAllocator := h.ncc.subnetAllocator.ForSubnet(h.ncc.NetInfo.GetNetworkName())
+		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, ipAllocator)
+		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return fmt.Errorf("error deleting IPAMClaim: %w", err)
+		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return nil // let's avoid the log below, since nothing was released.
+		}
+		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 	}
 	return nil
 }
@@ -337,6 +419,13 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = h.ncc.podAllocator.Sync
 		case factory.NodeType:
 			syncFunc = h.ncc.nodeAllocator.Sync
+		case factory.IPAMClaimsType:
+			syncFunc = func(claims []interface{}) error {
+				return h.ncc.ipamClaimReconciler.Sync(
+					claims,
+					h.ncc.subnetAllocator.ForSubnet(h.ncc.NetInfo.GetNetworkName()),
+				)
+			}
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
@@ -368,7 +457,7 @@ func (h *networkClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 inte
 	return false, nil
 }
 
-// getResourceFromInformerCache returns the latest state of the object from the informers cache
+// GetResourceFromInformerCache returns the latest state of the object from the informers cache
 // given an object key and its type
 func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	var obj interface{}
@@ -385,6 +474,8 @@ func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key 
 		obj, err = h.ncc.watchFactory.GetNode(name)
 	case factory.PodType:
 		obj, err = h.ncc.watchFactory.GetPod(namespace, name)
+	case factory.IPAMClaimsType:
+		obj, err = h.ncc.watchFactory.GetIPAMClaim(namespace, name)
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
 			h.objType)
@@ -438,4 +529,26 @@ func (h *networkClusterControllerEventHandler) clearInitialNodeNetworkUnavailabl
 	} else if cleared {
 		klog.Infof("Cleared node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
 	}
+}
+
+// newIPAllocatorForNetwork returns an initialized subnet allocator for the
+// subnets / excluded subnets provided in `netInfo`
+func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
+	ipAllocator := subnet.NewAllocator()
+
+	subnets := netInfo.Subnets()
+	ipNets := make([]*net.IPNet, 0, len(subnets))
+	for _, subnet := range subnets {
+		ipNets = append(ipNets, subnet.CIDR)
+	}
+
+	if err := ipAllocator.AddOrUpdateSubnet(
+		netInfo.GetNetworkName(),
+		ipNets,
+		netInfo.ExcludeSubnets()...,
+	); err != nil {
+		return nil, err
+	}
+
+	return ipAllocator, nil
 }

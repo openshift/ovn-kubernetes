@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -156,8 +158,35 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 	return coverageShowMetricsMap, nil
 }
 
-// coverageShowMetricsUpdater updates the metric
-// by obtaining values from getCoverageShowOutputMap for specified component.
+// ovnKubeLogFileSizeMetricsUpdater updates the metrics that obtains the
+// size of ovnkube process' logfile
+func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
+	stopChan <-chan struct{}) {
+	ticker := time.NewTicker(metricsUpdateInterval)
+	defer ticker.Stop()
+
+	logfile := config.Logging.File
+	fileName := path.Base(logfile)
+	for {
+		select {
+		case <-ticker.C:
+			fileInfo, err := os.Stat(logfile)
+			if err != nil {
+				klog.Errorf("Failed to get the logfile size for %s: %v", fileName, err)
+			} else {
+				ovnKubeLogFileMetric.WithLabelValues(fileName).Set(float64(fileInfo.Size()))
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+// coverageShowMetricsUpdater updates the metric by obtaining values from
+// getCoverageShowOutputMap for specified component. The counters displayed
+// by coverage/show output are called events. It could be that the event never
+// happened, and therefore there will be no counter for it in the output. In such
+// cases the default value of the counter will be 0.
 func coverageShowMetricsUpdater(component string, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(metricsUpdateInterval)
 	defer ticker.Stop()
