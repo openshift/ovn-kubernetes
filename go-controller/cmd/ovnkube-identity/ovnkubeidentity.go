@@ -21,7 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
@@ -340,10 +339,9 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 	klog.Infof("Waiting for caches to sync")
 	cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
 
-	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 	podWebhook := admission.WithCustomValidator(
 		&corev1.Pod{},
-		ovnwebhook.NewPodAdmissionWebhook(nodeLister, cliCfg.podAdmissionConditions, cliCfg.extraAllowedUsers.Value()...),
+		ovnwebhook.NewPodAdmissionWebhook(cliCfg.podAdmissionConditions, cliCfg.extraAllowedUsers.Value()...),
 	).WithRecoverPanic(true)
 	podHandler, err := admission.StandaloneWebhook(
 		podWebhook,

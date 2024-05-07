@@ -130,11 +130,10 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			padm := NewPodAdmissionWebhook(&fakeNodeLister{
-				nodes: map[string]*corev1.Node{tt.node.Name: tt.node},
-			}, []PodAdmissionConditionOption{
-				additionalPodAdmissions,
-			})
+			padm := NewPodAdmissionWebhook(
+				[]PodAdmissionConditionOption{
+					additionalPodAdmissions,
+				})
 			err := padm.ValidateUpdate(tt.ctx, tt.oldObj, tt.newObj)
 			if !reflect.DeepEqual(err, tt.expectedErr) {
 				t.Errorf("ValidateUpdate() error = %v, expectedErr %v", err, tt.expectedErr)

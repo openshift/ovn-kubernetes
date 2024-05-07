@@ -53,16 +53,12 @@ func InitPodAdmissionConditionOptions(fileName string) (podAdmissions []PodAdmis
 }
 
 type PodAdmission struct {
-	nodeLister        listers.NodeLister
-	annotations       map[string]checkPodAnnot
-	annotationKeys    sets.Set[string]
 	extraAllowedUsers sets.Set[string]
 	podAdmissions     []PodAdmissionConditionOption
 }
 
-func NewPodAdmissionWebhook(nodeLister listers.NodeLister, podAdmissions []PodAdmissionConditionOption, extraAllowedUsers ...string) *PodAdmission {
+func NewPodAdmissionWebhook(podAdmissions []PodAdmissionConditionOption, extraAllowedUsers ...string) *PodAdmission {
 	return &PodAdmission{
-		nodeLister:        nodeLister,
 		extraAllowedUsers: sets.New[string](extraAllowedUsers...),
 		podAdmissions:     podAdmissions,
 	}
@@ -98,14 +94,6 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 		// additional acceptance condition check
 		if !podAdmission.AllowedPodAnnotationKeys.HasAll(changedKeys...) {
 			return fmt.Errorf("%s node: %q is not allowed to set the following annotations on pod: %q: %v", podAdmission.CommonNamePrefix, nodeName, newPod.Name, sets.New[string](changedKeys...).Difference(podAdmission.AllowedPodAnnotationKeys).UnsortedList())
-		}
-	}
-
-	for _, key := range changedKeys {
-		if check := p.annotations[key]; check != nil {
-			if err := check(p.nodeLister, changes[key], newPod, nodeName); err != nil {
-				return fmt.Errorf("user: %q is not allowed to set %s on pod %q: %v", req.UserInfo.Username, key, newPod.Name, err)
-			}
 		}
 	}
 
