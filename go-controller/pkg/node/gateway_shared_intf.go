@@ -1808,19 +1808,6 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		}
 	}
 
-	// OCP HACK -- block MCS ports
-	rules := []nodeipt.Rule{}
-	if config.IPv4Mode {
-		generateBlockMCSRules(&rules, iptables.ProtocolIPv4)
-	}
-	if config.IPv6Mode {
-		generateBlockMCSRules(&rules, iptables.ProtocolIPv6)
-	}
-	if err := insertIptRules(rules); err != nil {
-		return nil, fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
-	}
-	// END OCP HACK
-
 	gw.initFunc = func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
@@ -1881,6 +1868,19 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			// no service OpenFlows, request to sync flows now.
 			gw.openflowManager.requestFlowSync()
 		}
+
+		// OCP HACK -- block MCS ports
+		rules := []nodeipt.Rule{}
+		if config.IPv4Mode {
+			generateBlockMCSRules(&rules, iptables.ProtocolIPv4)
+		}
+		if config.IPv6Mode {
+			generateBlockMCSRules(&rules, iptables.ProtocolIPv6)
+		}
+		if err := insertIptRules(rules); err != nil {
+			return fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
+		}
+		// END OCP HACK
 
 		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing")
