@@ -89,17 +89,15 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime
 	changes := mapDiff(oldPod.Annotations, newPod.Annotations)
 	changedKeys := maps.Keys(changes)
 
-	// user is in additional acceptance condition list
-	if podAdmission != nil {
-		// additional acceptance condition check
-		if !podAdmission.AllowedPodAnnotationKeys.HasAll(changedKeys...) {
-			return fmt.Errorf("%s node: %q is not allowed to set the following annotations on pod: %q: %v", podAdmission.CommonNamePrefix, nodeName, newPod.Name, sets.New[string](changedKeys...).Difference(podAdmission.AllowedPodAnnotationKeys).UnsortedList())
-		}
-	}
-
 	// if there is no matched acceptanceCondition as well as ovnkube-node, then skip following check
 	if podAdmission == nil {
 		return nil
+	}
+
+	// user is in additional acceptance condition list
+	// additional acceptance condition check
+	if !podAdmission.AllowedPodAnnotationKeys.HasAll(changedKeys...) {
+		return fmt.Errorf("%s node: %q is not allowed to set the following annotations on pod: %q: %v", podAdmission.CommonNamePrefix, nodeName, newPod.Name, sets.New[string](changedKeys...).Difference(podAdmission.AllowedPodAnnotationKeys).UnsortedList())
 	}
 
 	prefixName := podAdmission.CommonNamePrefix
