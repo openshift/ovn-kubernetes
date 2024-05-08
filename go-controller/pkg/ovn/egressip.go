@@ -424,6 +424,9 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 }
 
 func (oc *DefaultNetworkController) reconcileEgressIPNamespace(old, new *v1.Namespace) error {
+	oc.eIPC.egressIPAssignmentMutex.Lock()
+	defer oc.eIPC.egressIPAssignmentMutex.Unlock()
+
 	// Same as for reconcileEgressIP: labels play nicely with empty object, not
 	// nil ones.
 	oldNamespace, newNamespace := &v1.Namespace{}, &v1.Namespace{}
@@ -452,14 +455,21 @@ func (oc *DefaultNetworkController) reconcileEgressIPNamespace(old, new *v1.Name
 	if err != nil {
 		return err
 	}
+	allocations := oc.getEgressIPAllocations()
 	for _, egressIP := range egressIPs {
 		namespaceSelector, _ := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
 		if namespaceSelector.Matches(oldLabels) && !namespaceSelector.Matches(newLabels) {
+			if err := validateEgressIPNodeAssignment(egressIP.Name, allocations, egressIP.Status.Items); err != nil {
+				return err
+			}
 			if err := oc.deleteNamespaceEgressIPAssignment(egressIP.Name, egressIP.Status.Items, oldNamespace, egressIP.Spec.PodSelector); err != nil {
 				return err
 			}
 		}
 		if !namespaceSelector.Matches(oldLabels) && namespaceSelector.Matches(newLabels) {
+			if err := validateEgressIPNodeAssignment(egressIP.Name, allocations, egressIP.Status.Items); err != nil {
+				return err
+			}
 			if err := oc.addNamespaceEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newNamespace, egressIP.Spec.PodSelector); err != nil {
 				return err
 			}
@@ -469,6 +479,8 @@ func (oc *DefaultNetworkController) reconcileEgressIPNamespace(old, new *v1.Name
 }
 
 func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
+	oc.eIPC.egressIPAssignmentMutex.Lock()
+	defer oc.eIPC.egressIPAssignmentMutex.Unlock()
 	oldPod, newPod := &v1.Pod{}, &v1.Pod{}
 	namespace := &v1.Namespace{}
 	if old != nil {
@@ -510,6 +522,8 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 	if err != nil {
 		return err
 	}
+
+	allocations := oc.getEgressIPAllocations()
 	for _, egressIP := range egressIPs {
 		namespaceSelector, _ := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
 		if namespaceSelector.Matches(namespaceLabels) {
@@ -532,6 +546,11 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 				if !newMatches && !oldMatches {
 					continue
 				}
+
+				if err := validateEgressIPNodeAssignment(egressIP.Name, allocations, egressIP.Status.Items); err != nil {
+					return err
+				}
+
 				// Check if the pod stopped matching. If the pod was deleted,
 				// "new" will be nil, so this must account for that case.
 				if !newMatches && oldMatches {
@@ -552,6 +571,11 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 				}
 				continue
 			}
+
+			if err := validateEgressIPNodeAssignment(egressIP.Name, allocations, egressIP.Status.Items); err != nil {
+				return err
+			}
+
 			// If the podSelector is empty (i.e: the EgressIP object is intended
 			// to match all pods in the namespace) and the pod has been deleted:
 			// "new" will be nil and we need to remove the setup
@@ -3168,4 +3192,29 @@ func ipStringToCloudPrivateIPConfigName(ipString string) (name string) {
 		}
 	}
 	return
+}
+
+// getEgressIPAllocations returns a map of all allocations found in the cache
+func (oc *DefaultNetworkController) getEgressIPAllocations() map[string]egressIPNodeStatus {
+	allAllocations := make(map[string]egressIPNodeStatus)
+	for _, eNode := range oc.eIPC.allocator.cache {
+		for ip, eipName := range eNode.allocations {
+			allAllocations[ip] = egressIPNodeStatus{Node: eNode.name, Name: eipName}
+		}
+	}
+	return allAllocations
+}
+
+// validateEgressIPNodeAssignment ensures that the provided status items match the cache (allocations map)
+// If the status item doesn't exist in the cache it is skipped.
+func validateEgressIPNodeAssignment(egressIPName string, allocations map[string]egressIPNodeStatus, egressIPStatuses []egressipv1.EgressIPStatusItem) error {
+	for _, eip := range egressIPStatuses {
+		if alloc, exists := allocations[eip.EgressIP]; exists {
+			if eip.Node != alloc.Node {
+				return fmt.Errorf("EgressIP %s(%s) status cache missmatch. status node: %s, cache node: %s",
+					egressIPName, eip.EgressIP, eip.Node, alloc.Node)
+			}
+		}
+	}
+	return nil
 }
