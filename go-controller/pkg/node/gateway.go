@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -140,8 +139,6 @@ func (g *gateway) DeleteService(svc *kapi.Service) error {
 
 func (g *gateway) SyncServices(objs []interface{}) error {
 	var err error
-	klog.Infof("Starting gateway service sync")
-	start := time.Now()
 	if g.portClaimWatcher != nil {
 		err = g.portClaimWatcher.SyncServices(objs)
 	}
@@ -157,7 +154,6 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 	if err != nil {
 		return fmt.Errorf("gateway sync services failed: %v", err)
 	}
-	klog.Infof("Gateway service sync done. Time taken: %s", time.Since(start))
 	return nil
 }
 
