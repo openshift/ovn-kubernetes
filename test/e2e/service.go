@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 )
 
 var _ = ginkgo.Describe("Services", func() {
@@ -52,6 +54,41 @@ var _ = ginkgo.Describe("Services", func() {
 
 	udpPort := int32(rand.Intn(1000) + 10000)
 	udpPortS := fmt.Sprintf("%d", udpPort)
+
+	ginkgo.It("Allow connection to an external IP using a source port that is equal to a node port", func() {
+		const (
+			nodePort    = 31990
+			connTimeout = "2"
+			dstIPv4     = "1.1.1.1"
+			dstPort     = "80"
+		)
+		if IsIPv6Cluster(f.ClientSet) {
+			e2eskipper.Skipf("Test requires IPv4 or IPv4 primary dualstack cluster")
+		}
+		ginkgo.By("create node port service")
+		jig := e2eservice.NewTestJig(cs, f.Namespace.Name, serviceName)
+		_, err := jig.CreateTCPService(func(svc *v1.Service) {
+			svc.Spec.Type = v1.ServiceTypeNodePort
+			svc.Spec.Ports[0].NodePort = nodePort
+		})
+		framework.ExpectNoError(err, "failed to create TCP node port service")
+		ginkgo.By("create pod selected by node port service")
+		serverPod := e2epod.NewAgnhostPod(f.Namespace.Name, "svc-backend", nil, nil, nil)
+		serverPod.Labels = jig.Labels
+		serverPod, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(context.TODO(), serverPod, metav1.CreateOptions{})
+		framework.ExpectNoError(err, "failed to create pod")
+		ginkgo.By("create pod which will connect externally")
+		clientPod := e2epod.NewAgnhostPod(f.Namespace.Name, "client-for-external", nil, nil, nil)
+		serverPod, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(context.TODO(), clientPod, metav1.CreateOptions{})
+		err = e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, serverPod.GetName(), serverPod.GetNamespace(), 60*time.Second)
+		framework.ExpectNoError(err, "server pod failed to become ready")
+		err = e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, clientPod.GetName(), clientPod.GetNamespace(), 60*time.Second)
+		framework.ExpectNoError(err, "client pod failed to become ready")
+		ginkgo.By("connect externally pinning the source port to equal the node port")
+		_, err = framework.RunKubectl(clientPod.Namespace, "exec", clientPod.Name, "--", "nc",
+			"-p", strconv.Itoa(nodePort), "-z", "-w", connTimeout, dstIPv4, dstPort)
+		framework.ExpectNoError(err, "expected connection to succeed using source port identical to node port")
+	})
 
 	ginkgo.It("Creates a host-network service, and ensures that host-network pods can connect to it", func() {
 		namespace := f.Namespace.Name
