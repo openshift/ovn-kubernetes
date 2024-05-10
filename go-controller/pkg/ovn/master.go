@@ -927,7 +927,11 @@ func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *kap
 
 	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
 	if err != nil {
-		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
+		parsedErr := err
+		if !oc.isLocalZoneNode(node) {
+			parsedErr = types.NewSuppressedError(err)
+		}
+		return fmt.Errorf("error parsing annotation for node %s: %w", node.Name, parsedErr)
 	}
 
 	// add the host network IPs for this node to host network namespace's address set
@@ -959,6 +963,11 @@ func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *k
 
 	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
 	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// if annotation is not set for node subnet or node GW router LRP IP address, we can assume nothing was added to the
+			// host network namespace address set. We depend on both annotations to be set before configuring the address set.
+			return nil
+		}
 		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
 	}
 
