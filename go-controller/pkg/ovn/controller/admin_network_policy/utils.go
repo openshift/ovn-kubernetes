@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -167,4 +168,33 @@ func getACLLoggingLevelsForANP(annotations map[string]string) (*libovsdbutil.ACL
 		aclLogLevels.Pass = ""
 	}
 	return aclLogLevels, apierrors.NewAggregate(errors)
+}
+
+func updateANPRuleCountMetric(desiredState *adminNetworkPolicyState, isBanp bool) {
+	updateANPGressRuleCountMetric(string(libovsdbutil.ACLIngress), desiredState.ingressRules, isBanp)
+	updateANPGressRuleCountMetric(string(libovsdbutil.ACLEgress), desiredState.egressRules, isBanp)
+}
+
+func updateANPGressRuleCountMetric(direction string, rules []*gressRule, isBanp bool) {
+	var passCount, allowCount, denyCount int
+	for _, rule := range rules {
+		switch rule.action {
+		case nbdb.ACLActionAllowRelated:
+			allowCount++
+		case nbdb.ACLActionDrop:
+			denyCount++
+		case nbdb.ACLActionPass:
+			passCount++
+		default:
+			panic(fmt.Sprintf("Failed to count rule type: unknown acl action %s", rule.action))
+		}
+	}
+	if isBanp {
+		metrics.UpdateBANPRuleCount(direction, string(anpapi.BaselineAdminNetworkPolicyRuleActionAllow), float64(allowCount))
+		metrics.UpdateBANPRuleCount(direction, string(anpapi.BaselineAdminNetworkPolicyRuleActionDeny), float64(denyCount))
+	} else {
+		metrics.UpdateANPRuleCount(direction, string(anpapi.AdminNetworkPolicyRuleActionAllow), float64(allowCount))
+		metrics.UpdateANPRuleCount(direction, string(anpapi.AdminNetworkPolicyRuleActionDeny), float64(denyCount))
+		metrics.UpdateANPRuleCount(direction, string(anpapi.AdminNetworkPolicyRuleActionPass), float64(passCount))
+	}
 }
