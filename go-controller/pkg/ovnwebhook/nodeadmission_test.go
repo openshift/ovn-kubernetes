@@ -20,8 +20,6 @@ import (
 )
 
 func TestNewNodeAdmissionWebhook(t *testing.T) {
-	icAnnotations := make(map[string]checkNodeAnnot)
-	maps.Copy(icAnnotations, commonNodeAnnotationChecks)
 	hoAnnotations := make(map[string]checkNodeAnnot)
 	maps.Copy(hoAnnotations, commonNodeAnnotationChecks)
 	maps.Copy(hoAnnotations, hybridOverlayNodeAnnotationChecks)
@@ -32,12 +30,8 @@ func TestNewNodeAdmissionWebhook(t *testing.T) {
 		expectedKeys []string
 	}{
 		{
-			name:         "should only contain common annotation in non-IC",
+			name:         "should only contain common annotations",
 			expectedKeys: maps.Keys(commonNodeAnnotationChecks),
-		},
-		{
-			name:         "should contain common and IC annotations in IC",
-			expectedKeys: maps.Keys(icAnnotations),
 		},
 		{
 			name:                "should contain common and hybrid overlay annotations in hybrid overlay ",
