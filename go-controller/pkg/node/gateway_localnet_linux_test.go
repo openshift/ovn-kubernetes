@@ -352,7 +352,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -429,7 +429,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -508,7 +508,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -602,7 +602,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -698,7 +698,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -802,7 +802,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -937,7 +937,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%d -m statistic --mode random --probability 1.0000000000", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1041,7 +1041,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1159,7 +1159,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1265,7 +1265,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1362,7 +1362,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1454,7 +1454,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1535,7 +1535,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1623,7 +1623,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1662,7 +1662,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1745,7 +1745,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1851,7 +1851,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1890,7 +1890,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -1985,7 +1985,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2026,7 +2026,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2125,7 +2125,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ITP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2171,7 +2171,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2271,7 +2271,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2318,7 +2318,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ITP":           []string{},
 						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2416,7 +2416,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2464,7 +2464,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2563,7 +2563,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %d -j REDIRECT --to-port %d", service.Spec.Ports[0].Protocol, service.Spec.ClusterIP, service.Spec.Ports[0].Port, int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
 						"OVN-KUBE-ETP":        []string{},
-						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC": []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2610,7 +2610,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ITP":           []string{},
 						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {
@@ -2733,7 +2733,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ETP": []string{},
 						"OVN-KUBE-ITP": []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{
-							"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN",
+							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
 							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
 						},
 					},
@@ -2774,7 +2774,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment Do not SNAT to SVC VIP -j RETURN"},
+						"OVN-KUBE-EGRESS-SVC":    []string{"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN"},
 					},
 					"filter": {},
 					"mangle": {

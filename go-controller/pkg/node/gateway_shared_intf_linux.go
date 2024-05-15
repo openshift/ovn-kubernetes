@@ -5,6 +5,7 @@ package node
 
 import (
 	"fmt"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -73,7 +74,7 @@ func addGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLo
 func delGatewayIptRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) error {
 	rules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
 
-	if err := delIptRules(rules); err != nil {
+	if err := nodeipt.DelRules(rules); err != nil {
 		return fmt.Errorf("failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 	return nil
@@ -139,7 +140,7 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 
 	// Delete rules for endpoints that should not have one.
 	delRules := egressSVCIPTRulesForEndpoints(svc, v4ToDelete, v6ToDelete)
-	if err := delIptRules(delRules); err != nil {
+	if err := nodeipt.DelRules(delRules); err != nil {
 		return fmt.Errorf("failed to delete iptables rules for service %s/%s during update: %v",
 			svc.Namespace, svc.Name, err)
 	}
@@ -169,7 +170,7 @@ func delAllEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 	}
 
 	delRules := egressSVCIPTRulesForEndpoints(svc, v4ToDelete, v6ToDelete)
-	if err := delIptRules(delRules); err != nil {
+	if err := nodeipt.DelRules(delRules); err != nil {
 		return fmt.Errorf("failed to delete iptables rules for service %s/%s: %v", svc.Namespace, svc.Name, err)
 	}
 
