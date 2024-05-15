@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"io/ioutil"
 	"net"
 	"strconv"
@@ -915,7 +916,7 @@ func upgradeServiceRoute(bridgeName string) error {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}
 		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
-		if err := delIptRules(rules); err != nil {
+		if err := nodeipt.DelRules(rules); err != nil {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
 		}
 	}

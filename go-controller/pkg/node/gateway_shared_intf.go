@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"hash/fnv"
 	"net"
 	"reflect"
@@ -690,7 +691,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []iptRule{}
+	keepIPTRules := []nodeipt.Rule{}
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
 
@@ -1040,7 +1041,7 @@ func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) erro
 func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []iptRule{}
+	keepIPTRules := []nodeipt.Rule{}
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -1654,14 +1655,14 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	}
 
 	// OCP HACK -- block MCS ports
-	rules := []iptRule{}
+	rules := []nodeipt.Rule{}
 	if config.IPv4Mode {
 		generateBlockMCSRules(&rules, iptables.ProtocolIPv4)
 	}
 	if config.IPv6Mode {
 		generateBlockMCSRules(&rules, iptables.ProtocolIPv6)
 	}
-	if err := addIptRules(rules); err != nil {
+	if err := insertIptRules(rules); err != nil {
 		return nil, fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
 	}
 	// END OCP HACK

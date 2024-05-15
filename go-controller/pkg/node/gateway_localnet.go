@@ -5,6 +5,7 @@ package node
 
 import (
 	"fmt"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"net"
 	"strings"
 
@@ -49,14 +50,14 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	}
 
 	// OCP HACK -- block MCS ports https://github.com/openshift/ovn-kubernetes/pull/170
-	rules := []iptRule{}
+	rules := []nodeipt.Rule{}
 	if config.IPv4Mode {
 		generateBlockMCSRules(&rules, iptables.ProtocolIPv4)
 	}
 	if config.IPv6Mode {
 		generateBlockMCSRules(&rules, iptables.ProtocolIPv6)
 	}
-	if err := addIptRules(rules); err != nil {
+	if err := insertIptRules(rules); err != nil {
 		return nil, fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
 	}
 	// END OCP HACK
