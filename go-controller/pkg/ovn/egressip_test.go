@@ -2479,10 +2479,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 						//FIXME(mk) test server error - it should cleanup rtoj switch port but it doesnt. Remove when that is fixed.
 						&nbdb.LogicalSwitchPort{
-							UUID:    "etor-uuid",
-							Name:    "etor-GR_node1",
-							Type:    "router",
-							Options: map[string]string{"router-port": "rtoe-GR_node1"},
+							UUID: "etor-uuid",
+							Name: "etor-GR_node1",
+							Type: "router",
+							Options: map[string]string{
+								"router-port":               "rtoe-GR_node1",
+								"nat-addresses":             "router",
+								"exclude-lb-vips-from-garp": "true",
+							},
 						},
 					}
 					if node2Zone != "remote" {
