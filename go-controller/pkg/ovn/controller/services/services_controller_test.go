@@ -31,6 +31,9 @@ import (
 var alwaysReady = func() bool { return true }
 var FakeGRs = "GR_1 GR_2"
 
+var outport int32 = int32(3456)
+var tcp v1.Protocol = v1.ProtocolTCP
+
 type serviceController struct {
 	*Controller
 	serviceStore       cache.Store
@@ -97,13 +100,11 @@ func TestSyncServices(t *testing.T) {
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00::/64")
 	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
-
-	outport := int32(3456)
-	tcp := v1.ProtocolTCP
-
+	var (
+		nodeA = "node-a"
+		nodeB = "node-b"
+	)
 	const (
-		nodeA           = "node-a"
-		nodeB           = "node-b"
 		nodeAEndpointIP = "10.128.0.2"
 		nodeBEndpointIP = "10.128.1.2"
 		nodeAHostIP     = "10.0.0.1"
@@ -334,6 +335,7 @@ func TestSyncServices(t *testing.T) {
 							Ready: utilpointer.BoolPtr(true),
 						},
 						Addresses: []string{"10.128.0.2", "10.128.1.2"},
+						NodeName:  &nodeA,
 					},
 				},
 			},
@@ -416,6 +418,7 @@ func TestSyncServices(t *testing.T) {
 							Ready: utilpointer.BoolPtr(true),
 						},
 						Addresses: []string{"10.128.0.2", "10.128.1.2"},
+						NodeName:  &nodeA,
 					},
 				},
 			},
