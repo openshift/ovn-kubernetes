@@ -5,19 +5,17 @@ package node
 
 import (
 	"fmt"
-	"net"
-	"strings"
-
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"net"
 )
 
 const (
@@ -55,126 +53,65 @@ func getMasqueradeVIP(ip string) string {
 	return types.V4HostETPLocalMasqueradeIP
 }
 
-type iptRule struct {
-	table    string
-	chain    string
-	args     []string
-	protocol iptables.Protocol
-}
-
-func addIptRules(rules []iptRule, append bool) error {
-	addErrors := errors.New("")
-	var err error
-	var ipt util.IPTablesHelper
-	var exists bool
-	for _, r := range rules {
-		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
-			r.table, r.chain, strings.Join(r.args, " "), r.protocol)
-		if ipt, err = util.GetIPTablesHelper(r.protocol); err != nil {
-			addErrors = errors.Wrapf(addErrors,
-				"Failed to add iptables %s/%s rule %q: %v", r.table, r.chain, strings.Join(r.args, " "), err)
-			continue
-		}
-		if err = ipt.NewChain(r.table, r.chain); err != nil {
-			klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation: %v",
-				r.chain, r.table, err)
-		}
-		exists, err = ipt.Exists(r.table, r.chain, r.args...)
-		if !exists && err == nil {
-			if append {
-				err = ipt.Append(r.table, r.chain, r.args...)
-			} else {
-				err = ipt.Insert(r.table, r.chain, 1, r.args...)
-			}
-		}
-		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "failed to add iptables %s/%s rule %q: %v",
-				r.table, r.chain, strings.Join(r.args, " "), err)
-		}
-	}
-	if addErrors.Error() == "" {
-		addErrors = nil
-	}
-	return addErrors
-}
-
 // insertIptRules adds the provided rules in an insert fashion
 // i.e each rule gets added at the first position in the chain
-func insertIptRules(rules []iptRule) error {
-	return addIptRules(rules, false)
+func insertIptRules(rules []nodeipt.Rule) error {
+	return nodeipt.AddRules(rules, false)
+}
+
+// restoreIptRulesFiltered restores the provided rules in an insert fashion with a filter for table/chain
+// i.e each rule gets added at the first position in the chain
+// filter is defined as a map of table/chains. Only rules matching this filter will be restored.
+// If no rules match the filter, the chain will still be restored as empty as specified in the filter.
+func restoreIptRulesFiltered(rules []nodeipt.Rule, filter map[string]map[string]struct{}) error {
+	return nodeipt.RestoreRulesFiltered(rules, filter)
 }
 
 // appendIptRules adds the provided rules in an append fashion
 // i.e each rule gets added at the last position in the chain
-func appendIptRules(rules []iptRule) error {
-	return addIptRules(rules, true)
+func appendIptRules(rules []nodeipt.Rule) error {
+	return nodeipt.AddRules(rules, true)
 }
 
-func delIptRules(rules []iptRule) error {
-	delErrors := errors.New("")
-	var err error
-	var ipt util.IPTablesHelper
-	for _, r := range rules {
-		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
-			r.table, r.chain, strings.Join(r.args, " "), r.protocol)
-		if ipt, err = util.GetIPTablesHelper(r.protocol); err != nil {
-			delErrors = errors.Wrapf(delErrors,
-				"Failed to delete iptables %s/%s rule %q: %v", r.table, r.chain, strings.Join(r.args, " "), err)
-			continue
-		}
-		if exists, err := ipt.Exists(r.table, r.chain, r.args...); err == nil && exists {
-			err := ipt.Delete(r.table, r.chain, r.args...)
-			if err != nil {
-				delErrors = errors.Wrapf(delErrors, "failed to delete iptables %s/%s rule %q: %v",
-					r.table, r.chain, strings.Join(r.args, " "), err)
-			}
-		}
-	}
-	if delErrors.Error() == "" {
-		delErrors = nil
-	}
-	return delErrors
-}
-
-func getGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
-	iptRules := []iptRule{}
+func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
+	iptRules := []nodeipt.Rule{}
 	if chain == iptableESVCChain {
-		return []iptRule{
+		return []nodeipt.Rule{
 			{
-				table:    "nat",
-				chain:    "POSTROUTING",
-				args:     []string{"-j", chain},
-				protocol: proto,
+				Table:    "nat",
+				Chain:    "POSTROUTING",
+				Args:     []string{"-j", chain},
+				Protocol: proto,
 			},
 			egressSVCIPTDefaultReturnRule(),
 		}
 	}
 	if chain == iptableITPChain {
 		iptRules = append(iptRules,
-			iptRule{
-				table:    "mangle",
-				chain:    "OUTPUT",
-				args:     []string{"-j", chain},
-				protocol: proto,
+			nodeipt.Rule{
+				Table:    "mangle",
+				Chain:    "OUTPUT",
+				Args:     []string{"-j", chain},
+				Protocol: proto,
 			},
 		)
 	} else {
 		iptRules = append(iptRules,
-			iptRule{
-				table:    "nat",
-				chain:    "PREROUTING",
-				args:     []string{"-j", chain},
-				protocol: proto,
+			nodeipt.Rule{
+				Table:    "nat",
+				Chain:    "PREROUTING",
+				Args:     []string{"-j", chain},
+				Protocol: proto,
 			},
 		)
 	}
 	if chain != iptableETPChain { // ETP chain only meant for external traffic
 		iptRules = append(iptRules,
-			iptRule{
-				table:    "nat",
-				chain:    "OUTPUT",
-				args:     []string{"-j", chain},
-				protocol: proto,
+			nodeipt.Rule{
+				Table:    "nat",
+				Chain:    "OUTPUT",
+				Args:     []string{"-j", chain},
+				Protocol: proto,
 			},
 		)
 	}
@@ -191,18 +128,18 @@ func getGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
-func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32, svcHasLocalHostNetEndPnt, isETPLocal bool) []iptRule {
+func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
 	chainName := iptableNodePortChain
 	if !svcHasLocalHostNetEndPnt && isETPLocal {
 		// DNAT it to the masqueradeIP:nodePort instead of clusterIP:targetPort
 		targetIP = getMasqueradeVIP(targetIP)
 		chainName = iptableETPChain
 	}
-	return []iptRule{
+	return []nodeipt.Rule{
 		{
-			table: "nat",
-			chain: chainName,
-			args: []string{
+			Table: "nat",
+			Chain: chainName,
+			Args: []string{
 				"-p", string(svcPort.Protocol),
 				"-m", "addrtype",
 				"--dst-type", "LOCAL",
@@ -210,7 +147,7 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort i
 				"-j", "DNAT",
 				"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
 			},
-			protocol: getIPTablesProtocol(targetIP),
+			Protocol: getIPTablesProtocol(targetIP),
 		},
 	}
 }
@@ -220,64 +157,86 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort i
 // `clusterIP` is clusterIP is the VIP of the service to match on
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // NOTE: Currently invoked only for Internal Traffic Policy
-func getITPLocalIPTRules(svcPort kapi.ServicePort, clusterIP string, svcHasLocalHostNetEndPnt bool) []iptRule {
+func getITPLocalIPTRules(svcPort kapi.ServicePort, clusterIP string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
 	if svcHasLocalHostNetEndPnt {
-		return []iptRule{
+		return []nodeipt.Rule{
 			{
-				table: "nat",
-				chain: iptableITPChain,
-				args: []string{
+				Table: "nat",
+				Chain: iptableITPChain,
+				Args: []string{
 					"-p", string(svcPort.Protocol),
 					"-d", clusterIP,
 					"--dport", fmt.Sprintf("%v", svcPort.Port),
 					"-j", "REDIRECT",
 					"--to-port", fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
 				},
-				protocol: getIPTablesProtocol(clusterIP),
+				Protocol: getIPTablesProtocol(clusterIP),
 			},
 		}
 	}
-	return []iptRule{
+	return []nodeipt.Rule{
 		{
-			table: "mangle",
-			chain: iptableITPChain,
-			args: []string{
+			Table: "mangle",
+			Chain: iptableITPChain,
+			Args: []string{
 				"-p", string(svcPort.Protocol),
 				"-d", string(clusterIP),
 				"--dport", fmt.Sprintf("%d", svcPort.Port),
 				"-j", "MARK",
 				"--set-xmark", string(ovnkubeITPMark),
 			},
-			protocol: getIPTablesProtocol(clusterIP),
+			Protocol: getIPTablesProtocol(clusterIP),
 		},
 	}
 }
 
-// getNodePortETPLocalIPTRules returns the IPTable REDIRECT or RETURN rules for a service of type nodePort if ETP=local
+// getNodePortETPLocalIPTRule returns the IPTable REDIRECT or RETURN rules for a service of type nodePort if ETP=local
 // `svcPort` corresponds to port details for this service as specified in the service object
 // `targetIP` corresponds to svc.spec.ClusterIP
 // This function returns a RETURN rule in iptableMgmPortChain to prevent SNAT of sourceIP
-func getNodePortETPLocalIPTRules(svcPort kapi.ServicePort, targetIP string) []iptRule {
-	return []iptRule{
-		{
-			table: "nat",
-			chain: iptableMgmPortChain,
-			args: []string{
-				"-p", string(svcPort.Protocol),
-				"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-				"-j", "RETURN",
-			},
-			protocol: getIPTablesProtocol(targetIP),
-		},
+func getNodePortETPLocalIPTRule(svcPort kapi.ServicePort, targetIP string) nodeipt.Rule {
+	return getSkipMgmtSNATRule(string(svcPort.Protocol), fmt.Sprintf("%d", svcPort.NodePort), "", getIPTablesProtocol(targetIP))
+}
+
+// getSkipMgmtSNATRule generates the return iptables rule for avoiding SNAT to mgmt port
+func getSkipMgmtSNATRule(protocol, port, destIP string, ipFamily iptables.Protocol) nodeipt.Rule {
+	args := make([]string, 0, 8)
+	args = append(args, "-p", protocol)
+	if len(destIP) > 0 {
+		args = append(args, "-d", destIP)
 	}
+	args = append(args, "--dport", port, "-j", "RETURN")
+	n := nodeipt.Rule{
+		Table:    "nat",
+		Chain:    iptableMgmPortChain,
+		Args:     args,
+		Protocol: ipFamily,
+	}
+	return n
 }
 
 func computeProbability(n, i int) string {
 	return fmt.Sprintf("%0.10f", 1.0/float64(n-i+1))
 }
 
-func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, externalIP string, service *kapi.Service, localEndpoints []string) []iptRule {
-	var iptRules []iptRule
+func generateSkipMgmtForLocalEndpoints(svcPort kapi.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
+	iptRules := make([]nodeipt.Rule, 0, len(localEndpoints))
+	for _, localEndpoint := range localEndpoints {
+		if len(localEndpoint) == 0 {
+			continue
+		}
+		iptRules = append([]nodeipt.Rule{getSkipMgmtSNATRule(
+			string(svcPort.Protocol),
+			fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
+			localEndpoint,
+			getIPTablesProtocol(externalIP),
+		)}, iptRules...)
+	}
+	return iptRules
+}
+
+func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
+	iptRules := make([]nodeipt.Rule, 0, len(localEndpoints))
 	if len(localEndpoints) == 0 {
 		// either its smart nic mode; etp&itp not implemented, OR
 		// fetching endpointSlices error-ed out prior to reaching here so nothing to do
@@ -285,11 +244,11 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 	}
 	numLocalEndpoints := len(localEndpoints)
 	for i, ip := range localEndpoints {
-		iptRules = append([]iptRule{
+		iptRules = append([]nodeipt.Rule{
 			{
-				table: "nat",
-				chain: iptableETPChain,
-				args: []string{
+				Table: "nat",
+				Chain: iptableETPChain,
+				Args: []string{
 					"-p", string(svcPort.Protocol),
 					"-d", externalIP,
 					"--dport", fmt.Sprintf("%v", svcPort.Port),
@@ -299,18 +258,7 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 					"--mode", "random",
 					"--probability", computeProbability(numLocalEndpoints, i+1),
 				},
-				protocol: getIPTablesProtocol(externalIP),
-			},
-			{
-				table: "nat",
-				chain: iptableMgmPortChain,
-				args: []string{
-					"-p", string(svcPort.Protocol),
-					"-d", ip,
-					"--dport", fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
-					"-j", "RETURN",
-				},
-				protocol: getIPTablesProtocol(externalIP),
+				Protocol: getIPTablesProtocol(externalIP),
 			},
 		}, iptRules...)
 	}
@@ -327,7 +275,7 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
-func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svcHasLocalHostNetEndPnt, isETPLocal bool) []iptRule {
+func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
 	targetPort := svcPort.Port
 	chainName := iptableExternalIPChain
 	if !svcHasLocalHostNetEndPnt && isETPLocal {
@@ -336,76 +284,76 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svc
 		targetPort = svcPort.NodePort
 		chainName = iptableETPChain
 	}
-	return []iptRule{
+	return []nodeipt.Rule{
 		{
-			table: "nat",
-			chain: chainName,
-			args: []string{
+			Table: "nat",
+			Chain: chainName,
+			Args: []string{
 				"-p", string(svcPort.Protocol),
 				"-d", externalIP,
 				"--dport", fmt.Sprintf("%v", svcPort.Port),
 				"-j", "DNAT",
 				"--to-destination", util.JoinHostPortInt32(dstIP, targetPort),
 			},
-			protocol: getIPTablesProtocol(externalIP),
+			Protocol: getIPTablesProtocol(externalIP),
 		},
 	}
 }
 
-func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
+func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	protocol := getIPTablesProtocol(cidr.IP.String())
 	masqueradeIP := types.V4OVNMasqueradeIP
 	if protocol == iptables.ProtocolIPv6 {
 		masqueradeIP = types.V6OVNMasqueradeIP
 	}
-	return []iptRule{
+	return []nodeipt.Rule{
 		{
-			table: "filter",
-			chain: "FORWARD",
-			args: []string{
+			Table: "filter",
+			Chain: "FORWARD",
+			Args: []string{
 				"-i", ifname,
 				"-j", "ACCEPT",
 			},
-			protocol: protocol,
+			Protocol: protocol,
 		},
 		{
-			table: "filter",
-			chain: "FORWARD",
-			args: []string{
+			Table: "filter",
+			Chain: "FORWARD",
+			Args: []string{
 				"-o", ifname,
 				"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
 				"-j", "ACCEPT",
 			},
-			protocol: protocol,
+			Protocol: protocol,
 		},
 		{
-			table: "filter",
-			chain: "INPUT",
-			args: []string{
+			Table: "filter",
+			Chain: "INPUT",
+			Args: []string{
 				"-i", ifname,
 				"-m", "comment", "--comment", "from OVN to localhost",
 				"-j", "ACCEPT",
 			},
-			protocol: protocol,
+			Protocol: protocol,
 		},
 		{
-			table: "nat",
-			chain: "POSTROUTING",
-			args: []string{
+			Table: "nat",
+			Chain: "POSTROUTING",
+			Args: []string{
 				"-s", cidr.String(),
 				"-j", "MASQUERADE",
 			},
-			protocol: protocol,
+			Protocol: protocol,
 		},
 		{
-			table: "nat",
-			chain: "POSTROUTING",
-			args: []string{
+			Table: "nat",
+			Chain: "POSTROUTING",
+			Args: []string{
 				"-s", masqueradeIP,
 				"-j", "MASQUERADE",
 			},
-			protocol: protocol,
+			Protocol: protocol,
 		},
 	}
 }
@@ -421,8 +369,8 @@ func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
 	}
 }
 
-func handleGatewayIPTables(iptCallback func(rules []iptRule) error, genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
-	rules := make([]iptRule, 0)
+func handleGatewayIPTables(iptCallback func(rules []nodeipt.Rule) error, genGatewayChainRules func(chain string, proto iptables.Protocol) []nodeipt.Rule) error {
+	rules := make([]nodeipt.Rule, 0)
 	// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
 	for _, chain := range []string{iptableITPChain, iptableESVCChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 		for _, proto := range clusterIPTablesProtocols() {
@@ -471,20 +419,13 @@ func cleanupSharedGatewayIPTChains() {
 	}
 }
 
-func recreateIPTRules(table, chain string, keepIPTRules []iptRule) error {
+func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 	var errors []error
 	var err error
-	var ipt util.IPTablesHelper
-	for _, proto := range clusterIPTablesProtocols() {
-		if ipt, err = util.GetIPTablesHelper(proto); err != nil {
-			errors = append(errors, err)
-			continue
-		}
-		if err = ipt.ClearChain(table, chain); err != nil {
-			errors = append(errors, fmt.Errorf("error clearing chain: %s in table: %s, err: %v", chain, table, err))
-		}
-	}
-	if err = insertIptRules(keepIPTRules); err != nil {
+	klog.Infof("Recreating iptables rules for table: %s, chain: %s", table, chain)
+	// filter is a map of the table/chain to program rules for, as all rules are included in keepIPTRules
+	filter := map[string]map[string]struct{}{table: {chain: {}}}
+	if err = restoreIptRulesFiltered(keepIPTRules, filter); err != nil {
 		errors = append(errors, err)
 	}
 	return apierrors.NewAggregate(errors)
@@ -499,8 +440,8 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) error {
 // case3: if svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that redirects clusterIP traffic to host targetPort is added.
 //
 //	if !svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that marks clusterIP traffic to steer it to ovn-k8s-mp0 is added.
-func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []iptRule {
-	rules := make([]iptRule, 0)
+func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
+	rules := make([]nodeipt.Rule, 0)
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
 	svcTypeIsITPLocal := util.ServiceInternalTrafficPolicyLocal(service)
@@ -522,7 +463,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 					// A DNAT rule to masqueradeIP is added that takes priority over DNAT to clusterIP.
 					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.NodePort, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
 					// add a skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT to preserve sourceIP for etp=local traffic.
-					rules = append(rules, getNodePortETPLocalIPTRules(svcPort, clusterIP)...)
+					rules = append(rules, getNodePortETPLocalIPTRule(svcPort, clusterIP))
 				}
 				// case2 (see function description for details)
 				rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, false)...)
@@ -531,6 +472,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 
 		externalIPs := util.GetExternalAndLBIPs(service)
 
+		snatRulesCreated := false
 		for _, externalIP := range externalIPs {
 			err := util.ValidatePort(svcPort.Protocol, svcPort.Port)
 			if err != nil {
@@ -543,7 +485,12 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 					// DNAT traffic to masqueradeIP:nodePort instead of clusterIP:Port. We are leveraging the existing rules for NODEPORT
 					// service so no need to add skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT since the corresponding nodePort svc would have one.
 					if !util.ServiceTypeHasNodePort(service) {
-						rules = append(rules, generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort, externalIP, service, localEndpoints)...)
+						rules = append(rules, generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort, externalIP, localEndpoints)...)
+						// These rules are per endpoint and should only be created one time per endpoint and port combination
+						if !snatRulesCreated {
+							rules = append(rules, generateSkipMgmtForLocalEndpoints(svcPort, externalIP, localEndpoints)...)
+							snatRulesCreated = true
+						}
 					} else {
 						rules = append(rules, getExternalIPTRules(svcPort, externalIP, "", svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
 					}
@@ -563,8 +510,8 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 }
 
 // Returns all of the SNAT rules that should be created for an egress service with the given endpoints.
-func egressSVCIPTRulesForEndpoints(svc *kapi.Service, v4Eps, v6Eps []string) []iptRule {
-	rules := []iptRule{}
+func egressSVCIPTRulesForEndpoints(svc *kapi.Service, v4Eps, v6Eps []string) []nodeipt.Rule {
+	rules := []nodeipt.Rule{}
 
 	comment, _ := cache.MetaNamespaceKeyFunc(svc)
 	for _, lb := range svc.Status.LoadBalancer.Ingress {
@@ -576,16 +523,16 @@ func egressSVCIPTRulesForEndpoints(svc *kapi.Service, v4Eps, v6Eps []string) []i
 		}
 
 		for _, ep := range epsForProto {
-			rules = append(rules, iptRule{
-				table: "nat",
-				chain: iptableESVCChain,
-				args: []string{
+			rules = append(rules, nodeipt.Rule{
+				Table: "nat",
+				Chain: iptableESVCChain,
+				Args: []string{
 					"-s", ep,
 					"-m", "comment", "--comment", comment,
 					"-j", "SNAT",
 					"--to-source", lbIPStr,
 				},
-				protocol: lbProto,
+				Protocol: lbProto,
 			})
 		}
 	}
@@ -593,13 +540,13 @@ func egressSVCIPTRulesForEndpoints(svc *kapi.Service, v4Eps, v6Eps []string) []i
 	return rules
 }
 
-func egressSVCIPTDefaultReturnRule() iptRule {
-	return iptRule{
-		table: "nat",
-		chain: iptableESVCChain,
-		args: []string{
+func egressSVCIPTDefaultReturnRule() nodeipt.Rule {
+	return nodeipt.Rule{
+		Table: "nat",
+		Chain: iptableESVCChain,
+		Args: []string{
 			"-m", "mark", "--mark", string(ovnKubeNodeSNATMark),
-			"-m", "comment", "--comment", "Do not SNAT to SVC VIP",
+			"-m", "comment", "--comment", "DoNotSNAT",
 			"-j", "RETURN",
 		},
 	}

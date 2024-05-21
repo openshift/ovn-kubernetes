@@ -112,6 +112,7 @@ require (
 
 replace (
 	github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
+	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 	github.com/vishvananda/netlink => github.com/jcaamano/netlink v1.1.1-0.20220831114501-3a761ed61db6
 	k8s.io/api => k8s.io/api v0.26.0
