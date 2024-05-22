@@ -110,6 +110,7 @@ func (e *EgressDNS) Delete(namespace string) error {
 			// the dnsEntry appears in no other namespace, so delete the address_set
 			err := dnsEntry.dnsAddressSet.Destroy()
 			if err != nil {
+				e.lock.Unlock()
 				return fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
 			}
 			// the dnsEntry is no longer needed because nothing references it, so delete it
