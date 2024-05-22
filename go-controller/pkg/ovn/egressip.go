@@ -101,6 +101,7 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 	// Initialize a sets.String which holds egress IPs that were not fully assigned
 	// but are allocated and they are meant to be removed.
 	staleEgressIPs := sets.NewString()
+	oldEIPStatus := make(map[string]egressipv1.EgressIPStatusItem, 0)
 	if old != nil {
 		oldEIP = old
 		oldNamespaceSelector, err = metav1.LabelSelectorAsSelector(&oldEIP.Spec.NamespaceSelector)
@@ -108,9 +109,12 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 			return fmt.Errorf("invalid old namespaceSelector, err: %v", err)
 		}
 		name = oldEIP.Name
-		status = oldEIP.Status.Items
 		staleEgressIPs.Insert(oldEIP.Spec.EgressIPs...)
+		for _, status := range oldEIP.Status.Items {
+			oldEIPStatus[status.EgressIP] = status
+		}
 	}
+	newEIPStatus := make(map[string]egressipv1.EgressIPStatusItem, 0)
 	if new != nil {
 		newEIP = new
 		newNamespaceSelector, err = metav1.LabelSelectorAsSelector(&newEIP.Spec.NamespaceSelector)
@@ -125,6 +129,23 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 					staleEgressIPs.Delete(egressIP)
 				}
 			}
+		}
+		for _, status := range newEIP.Status.Items {
+			newEIPStatus[status.EgressIP] = status
+		}
+	}
+
+	// only delete items that were in the oldSpec but cannot be found in the newSpec
+	statusToDelete := make([]egressipv1.EgressIPStatusItem, 0)
+	for eIP, oldStatus := range oldEIPStatus {
+		if newStatus, ok := newEIPStatus[eIP]; ok && newStatus.Node == oldStatus.Node {
+			continue
+		}
+		statusToDelete = append(statusToDelete, oldStatus)
+	}
+	if len(statusToDelete) > 0 {
+		if err := oc.deleteEgressIPAssignments(old.Name, statusToDelete); err != nil {
+			return err
 		}
 	}
 
@@ -2679,7 +2700,8 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 
 	routerName := util.GetGatewayRouterFromNode(status.Node)
 	natPred := func(nat *nbdb.NAT) bool {
-		return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
+		// We should delete NATs only from the status.Node that was passed into this function
+		return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP && nat.LogicalPort != nil && *nat.LogicalPort == types.K8sPrefix+status.Node
 	}
 	nats, err := libovsdbops.FindNATsWithPredicate(e.nbClient, natPred) // save the nats to get the podIPs before that nats get deleted
 	if err != nil {
