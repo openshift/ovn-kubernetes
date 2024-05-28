@@ -15,10 +15,8 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
-	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -1346,17 +1344,6 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	}
 
 	return kerrors.NewAggregate(errs)
-}
-
-func (oc *Controller) recordNodeErrorEvent(node *kapi.Node, nodeErr error) {
-	nodeRef, err := ref.GetReference(scheme.Scheme, node)
-	if err != nil {
-		klog.Errorf("Couldn't get a reference to node %s to post an event: %v", node.Name, err)
-		return
-	}
-
-	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
-	oc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
 
 func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
