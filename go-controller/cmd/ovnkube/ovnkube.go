@@ -271,6 +271,19 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
+	ovnKubeStartWg := &sync.WaitGroup{}
+	defer func() {
+		// make sure everything stops and wait
+		cancel()
+		ovnKubeStartWg.Wait()
+	}()
+
+	if config.Kubernetes.BootstrapKubeconfig != "" {
+		if err := util.StartNodeCertificateManager(ctx.Context, ovnKubeStartWg, os.Getenv("K8S_NODE"), &config.Kubernetes); err != nil {
+			return fmt.Errorf("failed to start the node certificate manager: %w", err)
+		}
+	}
+
 	ovnClientset, err := util.NewOVNClientset(&config.Kubernetes)
 	if err != nil {
 		return err
@@ -282,13 +295,6 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	}
 
 	eventRecorder := util.EventRecorder(ovnClientset.KubeClient)
-
-	ovnKubeStartWg := &sync.WaitGroup{}
-	defer func() {
-		// make sure everything stops and wait
-		cancel()
-		ovnKubeStartWg.Wait()
-	}()
 
 	// Start metric server for master and node. Expose the metrics HTTP endpoint if configured.
 	// Non LE master instances also are required to expose the metrics server.
