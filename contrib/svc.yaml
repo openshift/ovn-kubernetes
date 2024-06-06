@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: null
+  labels:
+    k8s-app: kube-dns
+    kubernetes.io/cluster-service: "true"
+    kubernetes.io/name: CoreDNS
+  name: kube-dns-ext
+  namespace: kube-system
+spec:
+  externalIPs:
+  - 192.168.100.101
+  ports:
+  - name: port-1-udp
+    port: 53
+    protocol: UDP
+    targetPort: 53
+  - name: port-1-tcp
+    port: 53
+    protocol: TCP
+    targetPort: 53
+  - name: port-2
+    port: 9153
+    protocol: TCP
+    targetPort: 9153
+  selector:
+    k8s-app: kube-dns
+status:
+  loadBalancer: {}
