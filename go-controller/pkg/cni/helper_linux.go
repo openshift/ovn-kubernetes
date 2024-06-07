@@ -285,52 +285,64 @@ func generateIfName(containerID string) string {
 }
 
 // Setup sriov interface in the pod
-func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string) (*current.Interface, *current.Interface, error) {
+func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string, isVFIO bool) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	netdevice := ifInfo.NetdevName
 
-	// 1. Move netdevice to Container namespace
-	if len(netdevice) != 0 {
-		newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
-		if err != nil {
-			return nil, nil, err
+	// 0. init contIface for VFIO
+	if isVFIO {
+		if util.IsAuxDeviceName(deviceID) {
+			return nil, nil, fmt.Errorf("VFIO not supported for device %s", deviceID)
 		}
-		err = netns.Do(func(hostNS ns.NetNS) error {
-			contIface.Name = ifName
-			err = renameLink(newNetdevName, contIface.Name)
+		// if the SR-IOV device is bound to VFIO, then there is nothing
+		// to do as it will be passed to the KVM VM directly
+		contIface.Name = ifName
+		contIface.Mac = ifInfo.MAC.String()
+		contIface.Sandbox = netns.Path()
+	} else {
+		// 1. Move netdevice to Container namespace
+		if len(netdevice) != 0 {
+			newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
-			link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetUp(link)
-			if err != nil {
-				return err
-			}
+			err = netns.Do(func(hostNS ns.NetNS) error {
+				contIface.Name = ifName
+				err = renameLink(newNetdevName, contIface.Name)
+				if err != nil {
+					return err
+				}
+				link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetUp(link)
+				if err != nil {
+					return err
+				}
 
-			err = setupNetwork(link, ifInfo)
+				err = setupNetwork(link, ifInfo)
+				if err != nil {
+					return err
+				}
+
+				contIface.Mac = ifInfo.MAC.String()
+				contIface.Sandbox = netns.Path()
+
+				return nil
+			})
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
-
-			contIface.Mac = ifInfo.MAC.String()
-			contIface.Sandbox = netns.Path()
-
-			return nil
-		})
-		if err != nil {
-			return nil, nil, err
 		}
 	}
 
@@ -341,7 +353,13 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 			return nil, nil, err
 		}
 
-		// 3. make sure it's not a port managed by OVS to avoid conflicts
+		if isVFIO {
+			// 3. it's not possible to set mac address within container netns for VFIO case, hence set it through VF representor
+			if err := util.SetVFHardwreAddress(deviceID, ifInfo.MAC); err != nil {
+				return nil, nil, err
+			}
+		}
+		// 4. make sure it's not a port managed by OVS to avoid conflicts
 		_, err = ovsExec("--if-exists", "del-port", hostRepName)
 		if err != nil {
 			return nil, nil, err
@@ -369,9 +387,42 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	return hostIface, contIface, nil
 }
 
+func getPfEncapIP(deviceID string) (string, error) {
+	stdout, err := ovsGet("Open_vSwitch", ".", "external_ids", "ovn-pf-encap-ip-mapping")
+	if err != nil {
+		return "", fmt.Errorf("failed to get ovn-pf-encap-ip-mapping, error: %v", err)
+	}
+
+	if len(stdout) == 0 {
+		return "", nil
+	}
+
+	encapIpMapping := map[string]string{}
+	mappings := strings.Split(stdout, ",")
+	for _, mapping := range mappings {
+		tokens := strings.Split(mapping, ":")
+		if len(tokens) != 2 {
+			return "", fmt.Errorf("bad ovn-pf-encap-ip-mapping config: %s", stdout)
+		}
+
+		encapIpMapping[tokens[0]] = tokens[1]
+	}
+
+	uplinkRepName, err := util.GetUplinkRepresentorName(deviceID)
+	if err != nil {
+		// FIXME(leih): unlikely to happen, treat this as a valid case and ignore for now.
+		klog.Errorf("Failed to get uplink representor for VF PCI address %s: %v",
+			deviceID, err)
+		return "", nil
+	}
+
+	encapIP := encapIpMapping[uplinkRepName]
+	return encapIP, nil
+}
+
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
-	ifInfo *PodInterfaceInfo, sandboxID string, getter PodInfoGetter) error {
+	ifInfo *PodInterfaceInfo, sandboxID, deviceID string, getter PodInfoGetter) error {
 
 	ifaceID := util.GetIfaceId(namespace, podName)
 	if ifInfo.NetName != types.DefaultNetworkName {
@@ -383,8 +434,13 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ipStrs[i] = ip.String()
 	}
 
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v",
-		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
+	br_type, err := getDatapathType("br-int")
+	if err != nil {
+		return fmt.Errorf("failed to get datapath type for bridge br-int : %v", err)
+	}
+
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, PCI device ID: %s, UID: %q, MAC: %s, IPs: %v",
+		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, deviceID, initialPodUID, ifInfo.MAC, ipStrs)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -423,18 +479,47 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	// Add the new sandbox's OVS port, tag the port as transient so stale
 	// pod ports are scrubbed on hard reboot
 	ovsArgs := []string{
-		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
-		"interface", hostIfaceName,
+		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true",
+		"--", "set", "interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
 	}
 
+	// In case of multi-vtep, host has multipe NICs and each NIC has a VTEP interface, the mapping
+	// of VTEP IP to NIC is stored in Open_vSwitch table's `external_ids:ovn-pf-encap-ip-mapping`,
+	// the value's format is:
+	//   enp1s0f0:<vtep-ip1>,enp193s0f0:<vtep-ip2>,enp197s0f0:<vtep-ip3>
+	// Here configure the OVS Interface's encap-ip according to the mapping.
+	if deviceID != "" {
+		encapIP, err := getPfEncapIP(deviceID)
+		if err != nil {
+			return err
+		}
+		if len(encapIP) > 0 {
+			ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:encap-ip=%s", encapIP))
+		}
+	}
+
 	// IPAM is optional for secondary flatL2 networks; thus, the ifaces may not
 	// have IP addresses.
 	if len(ifInfo.IPs) > 0 {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")))
+	}
+
+	if br_type == types.DatapathUserspace {
+		_, err := util.GetSriovnetOps().GetRepresentorPortFlavour(hostIfaceName)
+		if err != nil {
+			// The error is not important: the given port is not a switchdev one and won't
+			// be used with DPDK. It can happen for legitimate reason. Keep a trace of the
+			// event and continue configuring OVS.
+			klog.Infof("Port %s cannot be used with DPDK, will use netlink interface in OVS",
+				hostIfaceName)
+		} else {
+			dpdkArgs := []string{"type=dpdk"}
+			ovsArgs = append(ovsArgs, dpdkArgs...)
+		}
 	}
 
 	if len(ifInfo.NetdevName) != 0 {
@@ -497,7 +582,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
-		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
+		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID, pr.IsVFIO)
 	} else {
 		if ifInfo.IsDPUHostMode {
 			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
@@ -521,7 +606,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	// END OCP HACK
 
 	if !ifInfo.IsDPUHostMode {
-		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, getter)
+		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, pr.CNIConf.DeviceID, getter)
 		if err != nil {
 			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
@@ -545,7 +630,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 			break
 		}
 	}
-	if haveV6 {
+	if haveV6 && !pr.IsVFIO {
 		err = netns.Do(func(hostNS ns.NetNS) error {
 			// deny IPv6 neighbor solicitations
 			dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
@@ -577,16 +662,21 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s NAD %s", pr.PodNamespace, pr.PodName, pr.nadName)
 	klog.V(5).Infof("Tear down interface (%+v) %s", *pr, podDesc)
-	if pr.CNIConf.DeviceID == "" && ifInfo.IsDPUHostMode {
-		klog.Warningf("Unexpected configuration %s, Device ID must be present for pod request on smart-nic host", podDesc)
-		return nil
+	if ifInfo.IsDPUHostMode {
+		if pr.CNIConf.DeviceID == "" {
+			klog.Warningf("Unexpected configuration %s, pod request on DPU host. device ID must be provided", podDesc)
+			return nil
+		}
+		// nothing else to do in DPUHostMode for VFIO device
+		if pr.IsVFIO {
+			return nil
+		}
+		// in the case of VF, we need to rename the container interface to VF name and move it to host
 	}
-	// 1. For SRIOV case, we'd need to move the netdevice from container namespace back to the host namespace
-	// 2. If it is secondary network and non-dpu mode, then get the container interface index
-	//    so that we know the host-side interface name.
+
 	ifnameSuffix := ""
-	isSecondary := pr.netName != types.DefaultNetworkName
-	if pr.CNIConf.DeviceID != "" || (isSecondary && !ifInfo.IsDPUHostMode) {
+	// nothing needs to be done for the VFIO case in the container namespace
+	if !pr.IsVFIO {
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
 			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
@@ -599,6 +689,10 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		}
 		defer hostNS.Close()
 
+		// 1. For SRIOV case, we'd need to move device from container namespace back to the host namespace
+		// 2. If it is secondary network and not dpu-host mode, then get the container interface index
+		//    so that we know the host-side interface name.
+		isSecondary := pr.netName != types.DefaultNetworkName
 		err = netns.Do(func(_ ns.NetNS) error {
 			// container side interface deletion
 			link, err := util.GetNetLinkOps().LinkByName(pr.IfName)
@@ -630,7 +724,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 						pr.IfName, podDesc, err)
 				}
 			}
-			if isSecondary && !ifInfo.IsDPUHostMode {
+			if isSecondary {
 				ifnameSuffix = fmt.Sprintf("_%d", link.Attrs().Index)
 			}
 			return nil
@@ -640,19 +734,26 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
-	if ifInfo.IsDPUHostMode {
-		// there is nothing else to do in the DPU-Host mode
-		return nil
+	if !ifInfo.IsDPUHostMode {
+		var err error
+		// host side interface deletion
+		hostIfName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
+		if pr.CNIConf.DeviceID != "" {
+			hostIfName, err = util.GetFunctionRepresentorName(pr.CNIConf.DeviceID)
+			if err != nil {
+				klog.Errorf("Failed to get the representor name for DeviceID %s for pod %s: %v",
+					pr.CNIConf.DeviceID, podDesc, err)
+			}
+		}
+		if hostIfName != "" {
+			pr.deletePorts(hostIfName, pr.PodNamespace, pr.PodName)
+		}
+		err = clearPodBandwidth(pr.SandboxID)
+		if err != nil {
+			klog.Errorf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
+		}
+		pr.deletePodConntrack()
 	}
-
-	// host side deletion of OVS port and kernel interface
-	ifName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
-	pr.deletePorts(ifName, pr.PodNamespace, pr.PodName)
-
-	if err := clearPodBandwidth(pr.SandboxID); err != nil {
-		klog.Warningf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
-	}
-	pr.deletePodConntrack()
 	return nil
 }
 

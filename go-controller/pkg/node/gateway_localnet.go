@@ -14,7 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kerrors2 "k8s.io/apimachinery/pkg/util/errors"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -87,7 +87,11 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			}
 			if config.Gateway.DisableForwarding {
 				if err := initExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
-					return fmt.Errorf("failed to add forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
+					return fmt.Errorf("failed to add drop rules in forwarding table for bridge %s: err %v", exGwBridge.bridgeName, err)
+				}
+			} else {
+				if err := delExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
+					return fmt.Errorf("failed to delete drop rules in forwarding table for bridge %s: err %v", exGwBridge.bridgeName, err)
 				}
 			}
 		}
@@ -119,7 +123,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			// Services create OpenFlow flows as well, need to update them all
 			if gw.servicesRetryFramework != nil {
 				if errs := gw.addAllServices(); errs != nil {
-					err := kerrors2.NewAggregate(errs)
+					err := utilerrors.Join(errs...)
 					klog.Errorf("Failed to sync all services after node IP change: %v", err)
 				}
 			}
