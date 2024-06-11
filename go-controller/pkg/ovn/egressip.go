@@ -2703,7 +2703,8 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 
 	routerName := util.GetGatewayRouterFromNode(status.Node)
 	natPred := func(nat *nbdb.NAT) bool {
-		return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
+		// We should delete NATs only from the status.Node that was passed into this function
+		return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP && nat.LogicalPort != nil && *nat.LogicalPort == types.K8sPrefix+status.Node
 	}
 	nats, err := libovsdbops.FindNATsWithPredicate(e.nbClient, natPred) // save the nats to get the podIPs before that nats get deleted
 	if err != nil {
