@@ -6,6 +6,8 @@ package util
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -13,9 +15,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	PcidevPrefix = "device"
+	NetSysDir    = "/sys/class/net"
+)
+
 type SriovnetOps interface {
 	GetNetDevicesFromPci(pciAddress string) ([]string, error)
 	GetNetDevicesFromAux(auxDev string) ([]string, error)
+	GetPciFromNetDevice(name string) (string, error)
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
@@ -26,8 +34,11 @@ type SriovnetOps interface {
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	GetPfPciFromAux(auxDev string) (string, error)
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
+	IsVfPciVfioBound(pciAddr string) bool
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
+	GetPCIFromDeviceName(netdevName string) (string, error)
+	GetPortIndexFromRepresentor(name string) (int, error)
 }
 
 type defaultSriovnetOps struct {
@@ -51,6 +62,10 @@ func (defaultSriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, err
 
 func (defaultSriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
 	return sriovnet.GetNetDevicesFromAux(auxDev)
+}
+
+func (defaultSriovnetOps) GetPciFromNetDevice(name string) (string, error) {
+	return sriovnet.GetPciFromNetDevice(name)
 }
 
 func (defaultSriovnetOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
@@ -99,6 +114,10 @@ func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.Hardw
 
 func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
 	return sriovnet.GetRepresentorPortFlavour(netdev)
+}
+
+func (defaultSriovnetOps) GetPortIndexFromRepresentor(name string) (int, error) {
+	return sriovnet.GetPortIndexFromRepresentor(name)
 }
 
 // GetFunctionRepresentorName returns representor name for passed device ID. Supported devices are Virtual Function
@@ -175,4 +194,66 @@ func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (s
 		return "", fmt.Errorf("failed to get one netdevice interface (count %d) per Device ID %s", numNetDevices, deviceId)
 	}
 	return netdevices[0], nil
+}
+
+func (defaultSriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
+	return sriovnet.IsVfPciVfioBound(pciAddr)
+}
+
+// SetVFHardwreAddress sets mac address for a VF interface
+func SetVFHardwreAddress(deviceID string, mac net.HardwareAddr) error {
+	// get uplink netdevice name and its netlink object
+	uplink, err := GetSriovnetOps().GetUplinkRepresentor(deviceID)
+	if err != nil {
+		return err
+	}
+	uplinkObj, err := GetNetLinkOps().LinkByName(uplink)
+	if err != nil {
+		return err
+	}
+	// get VF index from PCI
+	vfIndex, err := GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
+	if err != nil {
+		return err
+	}
+	// set MAC address through VF representor
+	if err := GetNetLinkOps().LinkSetVfHardwareAddr(uplinkObj, vfIndex, mac); err != nil {
+		return err
+	}
+	return nil
+}
+
+// From sriovnet, ideally should export from the lib and use it here.
+func readPCIsymbolicLink(symbolicLink string) (string, error) {
+	pciDevDir, err := os.Readlink(symbolicLink)
+	//nolint:gomnd
+	if len(pciDevDir) <= 3 {
+		return "", fmt.Errorf("could not find PCI Address")
+	}
+
+	return pciDevDir[9:], err
+}
+
+func (defaultSriovnetOps) GetPCIFromDeviceName(netdevName string) (string, error) {
+	symbolicLink := filepath.Join(NetSysDir, netdevName, PcidevPrefix)
+	pciAddress, err := readPCIsymbolicLink(symbolicLink)
+	if err != nil {
+		err = fmt.Errorf("%v for netdevice %s", err, netdevName)
+	}
+	return pciAddress, err
+}
+
+// GetUplinkRepresentorName returns uplink representor name for passed device ID.
+// Supported devices are Virtual Function or Scalable Function
+func GetUplinkRepresentorName(deviceID string) (string, error) {
+	var uplink string
+	var err error
+
+	if IsPCIDeviceName(deviceID) { // PCI device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentor(deviceID)
+	} else if IsAuxDeviceName(deviceID) { // Auxiliary device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentorFromAux(deviceID)
+	}
+
+	return uplink, err
 }

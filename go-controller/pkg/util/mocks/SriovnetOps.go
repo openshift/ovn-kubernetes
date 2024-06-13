@@ -15,6 +15,48 @@ type SriovnetOps struct {
 	mock.Mock
 }
 
+// GetPciFromNetDevice provides a mock function with given fields: name
+func (_m *SriovnetOps) GetPciFromNetDevice(name string) (string, error) {
+	ret := _m.Called(name)
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(name)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetPortIndexFromRepresentor provides a mock function with given fields: name
+func (_m *SriovnetOps) GetPortIndexFromRepresentor(name string) (int, error) {
+	ret := _m.Called(name)
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(string) int); ok {
+		r0 = rf(name)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNetDevicesFromAux provides a mock function with given fields: auxDev
 func (_m *SriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
 	ret := _m.Called(auxDev)
@@ -60,6 +102,30 @@ func (_m *SriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, error)
 
 	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(pciAddress)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetPCIFromDeviceName provides a mock function with given fields: netdevName
+func (_m *SriovnetOps) GetPCIFromDeviceName(netdevName string) (string, error) {
+	ret := _m.Called(netdevName)
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(netdevName)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(netdevName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(netdevName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -355,6 +421,20 @@ func (_m *SriovnetOps) GetVfRepresentorDPU(pfID string, vfIndex string) (string,
 	}
 
 	return r0, r1
+}
+
+// IsVfPciVfioBound provides a mock function with given fields: pciAddr
+func (_m *SriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
+	ret := _m.Called(pciAddr)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(pciAddr)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
 }
 
 type mockConstructorTestingTNewSriovnetOps interface {
