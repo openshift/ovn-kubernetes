@@ -86,8 +86,7 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 	// Validate the egress firewall rule destination and update the appropriate
 	// fields of efr.
 	var err error
-	efr.to.cidrSelector, efr.to.dnsName, efr.to.clusterSubnetIntersection, efr.to.nodeSelector, err =
-		util.ValidateAndGetEgressFirewallDestination(rawEgressFirewallRule.To)
+	efr.to.cidrSelector, efr.to.dnsName, efr.to.clusterSubnetIntersection, efr.to.nodeSelector, err = util.ValidateAndGetEgressFirewallDestination(rawEgressFirewallRule.To)
 	if err != nil {
 		return efr, err
 	}
@@ -144,7 +143,7 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 		return err
 	}
 
-	var deletedNSACLs = map[string][]*nbdb.ACL{}
+	deletedNSACLs := map[string][]*nbdb.ACL{}
 	for _, acl := range efACLs {
 		namespace := acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]
 		if !existingEFNamespaces[namespace] {
@@ -362,7 +361,8 @@ func (oc *DefaultNetworkController) deleteEgressFirewall(egressFirewallObj *egre
 }
 
 func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, pgName string,
-	aclLogging *libovsdbutil.ACLLoggingLevels, ruleIDs ...int) error {
+	aclLogging *libovsdbutil.ACLLoggingLevels, ruleIDs ...int,
+) error {
 	var ops []libovsdb.Operation
 	var err error
 	for _, rule := range ef.egressRules {
@@ -733,7 +733,6 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 }
 
 func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode *kapi.Node) error {
-
 	var addressesToAdd []string
 	var addressesToRemove []string
 	var err error
@@ -774,8 +773,10 @@ func (oc *DefaultNetworkController) updateEgressFirewallForNode(oldNode, newNode
 			// matches or not we shouldn't have those addresses anymore
 			rule.to.nodeAddrs.Delete(addressesToRemove...)
 			// check if selector matches
-			if selector.Matches(labels.Set(newNode.Labels)) {
-				rule.to.nodeAddrs.Insert(addressesToAdd...)
+			if newNode != nil {
+				if selector.Matches(labels.Set(newNode.Labels)) {
+					rule.to.nodeAddrs.Insert(addressesToAdd...)
+				}
 			}
 			modifiedRuleIDs = append(modifiedRuleIDs, rule.id)
 		}
