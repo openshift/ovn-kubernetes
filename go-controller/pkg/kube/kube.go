@@ -75,7 +75,7 @@ func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[st
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Pods(namespace).Patch(context.TODO(), podName, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = k.KClient.CoreV1().Pods(namespace).Patch(context.TODO(), podName, types.MergePatchType, patchData, metav1.PatchOptions{}, "status")
 	if err != nil {
 		klog.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
 	}
@@ -101,7 +101,7 @@ func (k *Kube) SetAnnotationsOnNode(nodeName string, annotations map[string]inte
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = k.KClient.CoreV1().Nodes().PatchStatus(context.TODO(), nodeName, patchData)
 	if err != nil {
 		klog.Errorf("Error in setting annotation on node %s: %v", nodeName, err)
 	}
@@ -127,7 +127,7 @@ func (k *Kube) SetAnnotationsOnNamespace(namespaceName string, annotations map[s
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Namespaces().Patch(context.TODO(), namespaceName, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = k.KClient.CoreV1().Namespaces().Patch(context.TODO(), namespaceName, types.MergePatchType, patchData, metav1.PatchOptions{}, "status")
 	if err != nil {
 		klog.Errorf("Error in setting annotation on namespace %s: %v", namespaceName, err)
 	}
