@@ -143,7 +143,7 @@ github.com/google/gnostic/extensions
 github.com/google/gnostic/jsonschema
 github.com/google/gnostic/openapiv2
 github.com/google/gnostic/openapiv3
-# github.com/google/go-cmp v0.5.8
+# github.com/google/go-cmp v0.5.9
 ## explicit; go 1.13
 github.com/google/go-cmp/cmp
 github.com/google/go-cmp/cmp/internal/diff
@@ -190,6 +190,9 @@ github.com/mailru/easyjson/jwriter
 # github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369
 ## explicit; go 1.9
 github.com/matttproud/golang_protobuf_extensions/pbutil
+# github.com/mdlayher/ndp v1.0.0
+## explicit; go 1.18
+github.com/mdlayher/ndp
 # github.com/miekg/dns v1.1.31
 ## explicit; go 1.12
 github.com/miekg/dns
@@ -358,6 +361,7 @@ golang.org/x/net/html/charset
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
+golang.org/x/net/icmp
 golang.org/x/net/idna
 golang.org/x/net/internal/iana
 golang.org/x/net/internal/socket
