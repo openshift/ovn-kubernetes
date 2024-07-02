@@ -44,6 +44,7 @@ type networkAttachmentConfigParams struct {
 	networkName        string
 	vlanID             int
 	allowPersistentIPs bool
+	role               string
 }
 
 type networkAttachmentConfig struct {
@@ -78,7 +79,8 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "mtu": 1300,
         "netAttachDefName": %q,
         "vlanID": %d,
-        "allowPersistentIPs": %t
+        "allowPersistentIPs": %t,
+        "role": %q
 }
 `,
 		config.networkName,
@@ -88,6 +90,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		namespacedName(config.namespace, config.name),
 		config.vlanID,
 		config.allowPersistentIPs,
+		config.role,
 	)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }

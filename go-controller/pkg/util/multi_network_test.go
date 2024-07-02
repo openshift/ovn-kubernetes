@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func TestParseSubnets(t *testing.T) {
@@ -133,8 +134,6 @@ func TestParseNetconf(t *testing.T) {
 	type testConfig struct {
 		desc                        string
 		inputNetAttachDefConfigSpec string
-		name                        string
-		namespace                   string
 		expectedNetConf             *ovncnitypes.NetConf
 		expectedError               error
 		unsupportedReason           string
@@ -337,6 +336,98 @@ func TestParseNetconf(t *testing.T) {
 `,
 			expectedError: fmt.Errorf("layer3 topology does not allow persistent IPs"),
 		},
+		{
+			desc: "valid attachment definition for a layer2 topology with role:primary",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+			"subnets": "192.168.200.0/16",
+			"role": "primary",
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology: "layer2",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				Role:     "primary",
+				Subnets:  "192.168.200.0/16",
+				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "valid attachment definition for a layer3 topology with role:primary",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"role": "primary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology: "layer3",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				Role:     "primary",
+				Subnets:  "192.168.200.0/16",
+				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "valid attachment definition for a layer3 topology with role:secondary",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"role": "secondary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology: "layer3",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				Role:     "secondary",
+				Subnets:  "192.168.200.0/16",
+				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+			},
+		},
+		{
+			desc: "invalid attachment definition for a layer3 topology with role:Primary",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenant-red",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+			"subnets": "192.168.200.0/16",
+			"role": "Primary",
+			"netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedError: fmt.Errorf("invalid network role value Primary"),
+		},
+		{
+			desc: "invalid attachment definition for a localnet topology with role:primary",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+			"subnets": "192.168.200.0/16",
+			"role": "primary",
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedError: fmt.Errorf("unexpected network field \"role\" primary for \"localnet\" topology, " +
+				"localnet topology does not allow network roles to be set since its always a secondary network"),
+		},
 	}
 
 	for _, test := range tests {
@@ -353,10 +444,161 @@ func TestParseNetconf(t *testing.T) {
 				})
 			if test.expectedError != nil {
 				_, err := ParseNetConf(networkAttachmentDefinition)
-				g.Expect(err).To(gomega.MatchError(test.expectedError))
+				g.Expect(err).To(gomega.MatchError(test.expectedError.Error()))
 			} else {
 				g.Expect(ParseNetConf(networkAttachmentDefinition)).To(gomega.Equal(test.expectedNetConf))
 			}
+		})
+	}
+}
+
+func TestIsPrimaryNetwork(t *testing.T) {
+	type testConfig struct {
+		desc            string
+		inputNetConf    *ovncnitypes.NetConf
+		expectedPrimary bool
+	}
+
+	tests := []testConfig{
+		{
+			desc: "defaultNetInfo with role unspecified",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "defaultNetInfo with role set to primary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "defaultNetInfo with role set to secondary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRoleSecondary,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "secondaryNetInfoL3 with role unspecified",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "secondaryNetInfoL3 with role set to primary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			expectedPrimary: true,
+		},
+		{
+			desc: "secondaryNetInfoL3 with role set to secondary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRoleSecondary,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "secondaryNetInfoL2 with role unspecified",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l2-network"},
+				Topology: ovntypes.Layer2Topology,
+			},
+			expectedPrimary: false,
+		},
+		{
+			desc: "secondaryNetInfoL2 with role set to primary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l2-network"},
+				Topology: ovntypes.Layer2Topology,
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			expectedPrimary: true,
+		},
+		{
+			desc: "secondaryNetInfoL2 with role set to secondary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l2-network"},
+				Topology: ovntypes.Layer2Topology,
+				Role:     ovntypes.NetworkRoleSecondary,
+			},
+			expectedPrimary: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			g.Expect(netInfo.IsPrimaryNetwork()).To(gomega.Equal(test.expectedPrimary))
+		})
+	}
+}
+
+func TestIsDefault(t *testing.T) {
+	type testConfig struct {
+		desc               string
+		inputNetConf       *ovncnitypes.NetConf
+		expectedDefaultVal bool
+	}
+
+	tests := []testConfig{
+		{
+			desc: "defaultNetInfo",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedDefaultVal: true,
+		},
+		{
+			desc: "secondaryNetInfoL3 with role unspecified",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedDefaultVal: false,
+		},
+		{
+			desc: "secondaryNetInfoL2 with role set to primary",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l2-network"},
+				Topology: ovntypes.Layer2Topology,
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			expectedDefaultVal: false,
+		},
+		{
+			desc: "secondaryNetInfoLocalNet with role unspecified",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "localnet-network"},
+				Topology: ovntypes.LocalnetTopology,
+			},
+			expectedDefaultVal: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			g.Expect(netInfo.IsDefault()).To(gomega.Equal(test.expectedDefaultVal))
 		})
 	}
 }
