@@ -31,6 +31,11 @@ func TestMarshalPodAnnotation(t *testing.T) {
 			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":""}}`},
 		},
 		{
+			desc:           "PodAnnotation instance when role is set to primary",
+			inpPodAnnot:    PodAnnotation{Role: types.NetworkRolePrimary},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","role":"primary"}}`},
+		},
+		{
 			desc: "single IP assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
 			inpPodAnnot: PodAnnotation{
 				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
@@ -54,8 +59,9 @@ func TestMarshalPodAnnotation(t *testing.T) {
 				Gateways: []net.IP{
 					net.ParseIP("192.168.0.1"),
 				},
+				Role: types.NetworkRoleSecondary,
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1","role":"secondary"}}`},
 		},
 		{
 			desc:     "verify error thrown when number of gateways greater than one for a single-stack network",
@@ -89,8 +95,9 @@ func TestMarshalPodAnnotation(t *testing.T) {
 						NextHop: net.ParseIP("192.168.1.1"),
 					},
 				},
+				Role: types.NetworkRoleInfrastructure,
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}]}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"role":"infrastructure-locked"}}`},
 		},
 		{
 			desc: "next hop not set for route",
@@ -195,6 +202,10 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 		{
 			desc:        "verify successful unmarshal of pod annotation",
 			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+		},
+		{
+			desc:        "verify successful unmarshal of pod annotation when role field is set",
+			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1","role":"primary"}}`},
 		},
 		{
 			desc:        "verify successful unmarshal of pod annotation when *only* the MAC address is present",
@@ -357,6 +368,6 @@ func newDummyNetInfo(namespace, networkName string) NetInfo {
 	netInfo, _ := newLayer2NetConfInfo(&ovncnitypes.NetConf{
 		NetConf: cnitypes.NetConf{Name: networkName},
 	})
-	netInfo.AddNAD(GetNADName(namespace, networkName))
+	netInfo.AddNADs(GetNADName(namespace, networkName))
 	return netInfo
 }
