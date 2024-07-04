@@ -310,6 +310,8 @@ parse_args() {
                                                 ;;
             -mne | --multi-network-enable )     ENABLE_MULTI_NET=true
                                                 ;;
+            -nse | --network-segmentation-enable) ENABLE_NETWORK_SEGMENTATION=true
+                                                  ;;
             -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
                                                 ;;
             --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
@@ -391,6 +393,7 @@ print_params() {
      echo "OVN_METRICS_SCALE_ENABLE = $OVN_METRICS_SCALE_ENABLE"
      echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
+     echo "ENABLE_NETWORK_SEGMENTATION= $ENABLE_NETWORK_SEGMENTATION"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
@@ -589,6 +592,7 @@ set_default_params() {
     OVN_GATEWAY_OPTS="--allow-no-uplink --gateway-interface=br-ex"
   fi
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
+  ENABLE_NETWORK_SEGMENTATION=${ENABLE_NETWORK_SEGMENTATION:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
@@ -739,9 +743,9 @@ create_kind_cluster() {
 set_ovn_image() {
   # if we're using the local registry and still need to build, push to local registry
   if [ "$KIND_LOCAL_REGISTRY" == true ];then
-    OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
+    OVN_IMAGE="localhost:5000/ovn-daemonset-fedora:latest"
   else
-    OVN_IMAGE="localhost/ovn-daemonset-f:dev"
+    OVN_IMAGE="localhost/ovn-daemonset-fedora:dev"
   fi
 }
 
@@ -829,6 +833,7 @@ create_ovn_kube_manifests() {
     --v6-transit-switch-subnet="${TRANSIT_SWITCH_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
+    --network-segmentation-enable="${ENABLE_NETWORK_SEGMENTATION}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
@@ -846,9 +851,9 @@ install_ovn_image() {
   else
     if [ "$OCI_BIN" == "podman" ]; then
       # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
-      rm -f /tmp/ovn-kube-f.tar
-      podman save -o /tmp/ovn-kube-f.tar "${OVN_IMAGE}"
-      kind load image-archive /tmp/ovn-kube-f.tar --name "${KIND_CLUSTER_NAME}"
+      rm -f /tmp/ovn-kube-fedora.tar
+      podman save -o /tmp/ovn-kube-fedora.tar "${OVN_IMAGE}"
+      kind load image-archive /tmp/ovn-kube-fedora.tar --name "${KIND_CLUSTER_NAME}"
     else
       kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
     fi
@@ -1193,5 +1198,5 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
-  install_kubevirt_ipam_claims
+  install_kubevirt_ipam_controller
 fi
