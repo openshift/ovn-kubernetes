@@ -223,7 +223,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	}
 
 	// Create a single common distributed router for the cluster.
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	logicalRouter := nbdb.LogicalRouter{
 		Name: logicalRouterName,
 		ExternalIDs: map[string]string{
@@ -284,7 +284,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	}
 
 	switchName := bnc.GetNetworkScopedName(node.Name)
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
@@ -317,7 +317,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
-	switchName := bnc.GetNetworkScopedName(nodeName)
+	switchName := bnc.GetNetworkScopedSwitchName(nodeName)
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
@@ -432,7 +432,7 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}
 
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.RouterToSwitchPrefix + switchName,
@@ -619,6 +619,17 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
 
+func (bnc *BaseNetworkController) recordPodErrorEvent(pod *kapi.Pod, podErr error) {
+	podRef, err := ref.GetReference(scheme.Scheme, pod)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
+			pod.Namespace, pod.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
+		bnc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorReconcilingPod", podErr.Error())
+	}
+}
+
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
 }
@@ -681,6 +692,68 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 	}
 	/** HACK END **/
 	return util.GetNodeZone(node) == bnc.zone
+}
+
+// getActiveNetworkForNamespace returns the active network for the given namespace
+// and is a wrapper around util.GetActiveNetworkForNamespace
+func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (string, error) {
+	return util.GetActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
+}
+
+// GetNetworkRole returns the role of this controller's
+// network for the given pod
+// Expected values are:
+// (1) "primary" if this network is the primary network of the pod.
+//
+//	The "default" network is the primary network of any pod usually
+//	unless user-defined-network-segmentation feature has been activated.
+//	If network segmentation feature is enabled then any user defined
+//	network can be the primary network of the pod.
+//
+// (2) "secondary" if this network is the secondary network of the pod.
+//
+//	Only user defined networks can be secondary networks for a pod.
+//
+// (3) "infrastructure-locked" is applicable only to "default" network if
+//
+//	a user defined network is the "primary" network for this pod. This
+//	signifies the "default" network is only used for probing and
+//	is otherwise locked for all intents and purposes.
+//
+// NOTE: Like in other places, expectation is this function is always called
+// from controller's that have some relation to the given pod, unrelated
+// networks are treated as secondary networks so caller has to be careful
+func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default" and
+		// pod's secondary network is not its NOT primary network
+		if bnc.IsDefault() {
+			return types.NetworkRolePrimary, nil
+		}
+		return types.NetworkRoleSecondary, nil
+	}
+	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return "", err
+	}
+	if activeNetwork == types.UnknownNetworkName {
+		err := fmt.Errorf("unable to determine what is the"+
+			"primary network for this pod %s; please remove multiple primary network"+
+			"NADs from namespace %s", pod.Name, pod.Namespace)
+		bnc.recordPodErrorEvent(pod, err)
+		return "", err
+	}
+	if activeNetwork == bnc.GetNetworkName() {
+		return types.NetworkRolePrimary, nil
+	}
+	if bnc.IsDefault() {
+		// if default network was not the primary network,
+		// then when UDN is turned on, default network is the
+		// infrastructure-locked network forthis pod
+		return types.NetworkRoleInfrastructure, nil
+	}
+	return types.NetworkRoleSecondary, nil
 }
 
 func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
