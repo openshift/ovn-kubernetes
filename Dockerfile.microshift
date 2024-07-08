@@ -13,6 +13,7 @@
 # ovn-kube-util, hybrid-overlay-node.exe, ovndbchecker and ovnkube-trace
 
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.22-openshift-4.17 AS builder
+LABEL "testing"
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .

@@ -6,6 +6,7 @@
 
 # Build RHEL-9 binaries
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.22-openshift-4.17 AS builder
+LABEL "testing"
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
