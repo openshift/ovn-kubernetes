@@ -694,7 +694,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing egressnode operations to fail
 				// there is a chance that both egressnode events(node1 removal and node2 update) will end up in the same event queue
 				// sleep for double the time to allow for two consecutive TransactWithRetry timeouts
-				time.Sleep(2 * (types.OVSDBTimeout + time.Second))
+				time.Sleep(2 * (config.Default.OVSDBTxnTimeout + time.Second))
 				// check to see if the retry cache has an entry
 				key1 := node1.Name
 				ginkgo.By("retry entry: old obj should not be nil, new obj should be nil")
@@ -715,7 +715,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Not(gomega.BeNil()), // config should not be nil
 				)
 
-				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 				retry.SetRetryObjWithNoBackoff(key1, fakeOvn.controller.retryEgressNodes)
@@ -1871,7 +1871,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}).Should(gomega.BeFalse())
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				time.Sleep(types.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 				// check to see if the retry cache has an entry
 				var key string
 				key, err = retry.GetResourceKey(podUpdate)
@@ -1886,7 +1886,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					gomega.Not(gomega.BeNil()), // config should not be nil
 				)
 
-				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
@@ -2497,13 +2497,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// sleep long enough for TransactWithRetry to fail, causing egressnode operations to fail
-				time.Sleep(types.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 				// check to see if the retry cache has an entry
 				key, err := retry.GetResourceKey(&eIP)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(key, true, fakeOvn.controller.retryEgressIPs)
 
-				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryEgressIPs)
@@ -3614,7 +3614,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing egressnode operations to fail
 				// there is a chance that both egressnode events(node1 removal and node2 update) will end up in the same event queue
 				// sleep for double the time to allow for two consecutive TransactWithRetry timeouts
-				time.Sleep(2 * (types.OVSDBTimeout + time.Second))
+				time.Sleep(2 * (config.Default.OVSDBTxnTimeout + time.Second))
 				// check to see if the retry cache has an entry
 				key, err := retry.GetResourceKey(&node)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3630,7 +3630,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node.Labels = map[string]string{}
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryEgressNodes)

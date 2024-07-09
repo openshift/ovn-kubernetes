@@ -167,7 +167,7 @@ func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
 }
 
 func getLogicalSwitchUUID(client libovsdbclient.Client, name string) string {
-	ctext, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	ctext, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	lsl := []nbdb.LogicalSwitch{}
 	err := client.WhereCache(
@@ -294,7 +294,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 
-				ctext, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+				ctext, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				lsl := []nbdb.LogicalSwitch{}
 				err := fakeOvn.controller.nbClient.WhereCache(
@@ -818,11 +818,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// sleep long enough for TransactWithRetry to fail, causing pod add to fail
-				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 
 				// check to see if the pod retry cache has an entry for this policy
 				retry.CheckRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
-				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
@@ -893,11 +893,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// sleep long enough for TransactWithRetry to fail, causing pod delete to fail
-				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 
 				// check to see if the pod retry cache has an entry for this pod
 				retry.CheckRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
-				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
@@ -964,7 +964,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// sleep long enough for TransactWithRetry to fail, causing pod add to fail
-				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 
 				// wait until retry entry appears
 
@@ -998,7 +998,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// restore nbdb, trigger a retry and verify that the retry entry gets deleted
 				// because it reached retry.MaxFailedAttempts and the corresponding pod has NOT been added to OVN
-				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
@@ -1079,7 +1079,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// sleep long enough for TransactWithRetry to fail, causing pod delete to fail
-				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 
 				// wait until retry entry appears and check that it is marked for deletion
 				retry.CheckRetryObjectMultipleFieldsEventually(
@@ -1108,7 +1108,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// restore nbdb and verify that the retry entry gets deleted because it reached
 				// retry.MaxFailedAttempts and the corresponding pod has NOT been deleted from OVN
-				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
