@@ -275,6 +275,23 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
 				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
 			}
+		} else {
+			// Set src_valid_mark back to "0" for cases when the mode is changed from GatewayModeLocal to
+			// GatewayModeShared.
+			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=0")
+			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 0" {
+				klog.Warning("Failed to set sysctl net.ipv4.conf.all.src_valid_mark to 0")
+			}
+			// And clean up iptables and ip rules.
+			if err := c.ruleManager.Delete(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
+				klog.Warningf("Failed to delete IPv4 rule for node IPs: %v", err)
+			}
+			if err := c.iptablesManager.DeleteRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptRestoreMarkRule); err != nil {
+				klog.Warningf("Failed to delete rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
+			}
+			if err := c.iptablesManager.DeleteRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv4, iptSaveMarkRule); err != nil {
+				klog.Warningf("Failed to delete rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
+			}
 		}
 	}
 	if c.v6 {
@@ -297,6 +314,18 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			// src_valid_mark is not applicable to ipv6
 			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V6)); err != nil {
 				return fmt.Errorf("failed to create IPv6 rule for node IPs: %v", err)
+			}
+		} else {
+			// For cases when the mode is changed from GatewayModeLocal to GatewayModeShared, clean up iptables and ip
+			// rules.
+			if err := c.ruleManager.Delete(getNodeIPFwMarkIPRule(netlink.FAMILY_V6)); err != nil {
+				klog.Warningf("Failed to delete IPv6 rule for node IPs: %v", err)
+			}
+			if err := c.iptablesManager.DeleteRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptSaveMarkRule); err != nil {
+				klog.Warningf("Failed to delete rule in chain %s to save pkt marking: %v", utiliptables.ChainPrerouting, err)
+			}
+			if err := c.iptablesManager.DeleteRule(utiliptables.TableMangle, utiliptables.ChainPrerouting, utiliptables.ProtocolIPv6, iptRestoreMarkRule); err != nil {
+				klog.Warningf("Failed to delete rule in chain %s to restore pkt marking: %v", utiliptables.ChainPrerouting, err)
 			}
 		}
 	}
