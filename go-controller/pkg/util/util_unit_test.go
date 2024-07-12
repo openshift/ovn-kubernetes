@@ -14,7 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/apimachinery/pkg/labels"
 
-	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/listers/k8s.cni.cncf.io/v1"
+	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
@@ -282,8 +282,15 @@ func TestGetActiveNetworkForNamespace(t *testing.T) {
 			nads: []*nadapi.NetworkAttachmentDefinition{
 				ovntest.GenerateNAD("surya", "quique", "ns1",
 					types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary),
-				ovntest.GenerateNAD("surya", "quique", "ns2",
+				ovntest.GenerateNAD("surya", "quique1", "ns1",
 					types.Layer2Topology, "10.100.200.0/24", types.NetworkRoleSecondary),
+				ovntest.GenerateNADWithConfig("quique2", "ns1", `
+{
+        "cniVersion": "whocares",
+        "nme": bad,
+        "typ": bad,
+}
+`),
 			},
 			expectedErr:           nil,
 			namespace:             "ns1",
@@ -334,4 +341,9 @@ func TestGenerateId(t *testing.T) {
 	assert.Equal(t, 10, len(id))
 	matchesPattern, _ := regexp.MatchString("([a-zA-Z0-9-]*)", id)
 	assert.True(t, matchesPattern)
+}
+
+func TestGetNetworkScopedK8sMgmtHostIntfName(t *testing.T) {
+	intfName := GetNetworkScopedK8sMgmtHostIntfName(1245678)
+	assert.Equal(t, "ovn-k8s-mp12456", intfName)
 }
