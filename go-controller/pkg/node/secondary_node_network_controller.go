@@ -31,8 +31,14 @@ type SecondaryNodeNetworkController struct {
 // NewSecondaryNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for the given secondary network. It supports layer3, layer2 and
 // localnet topology types.
-func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
-	vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller, defaultNetworkGateway Gateway) (*SecondaryNodeNetworkController, error) {
+func NewSecondaryNodeNetworkController(
+	cnnci *CommonNodeNetworkControllerInfo,
+	netInfo util.NetInfo,
+	vrfManager *vrfmanager.Controller,
+	ruleManager *iprulemanager.Controller,
+	defaultNetworkGateway Gateway,
+) (*SecondaryNodeNetworkController, error) {
+
 	snnc := &SecondaryNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
@@ -114,4 +120,8 @@ func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
 		}
 	}
 	return *oc.networkID, nil
+}
+
+func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	return util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
 }

@@ -179,6 +179,26 @@ func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
 }
 
+func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	err := util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		return err
+	}
+
+	isPodNetworkAdvertisedAtNode := oc.isPodNetworkAdvertisedAtNode()
+
+	if oc.Gateway != nil {
+		oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+		oc.Gateway.Reconcile()
+	}
+
+	return nil
+}
+
+func (oc *DefaultNodeNetworkController) isPodNetworkAdvertisedAtNode() bool {
+	return util.IsPodNetworkAdvertisedAtNode(oc, oc.name)
+}
+
 func clearOVSFlowTargets() error {
 	_, _, err := util.RunOVSVsctl(
 		"--",

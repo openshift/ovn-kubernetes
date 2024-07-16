@@ -450,6 +450,10 @@ func (ncc *networkClusterController) Cleanup() error {
 	return nil
 }
 
+func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
+	return util.ReconcileNetwork(ncc.ReconcilableNetInfo, netInfo)
+}
+
 // networkClusterControllerEventHandler object handles the events
 // from retry framework.
 type networkClusterControllerEventHandler struct {

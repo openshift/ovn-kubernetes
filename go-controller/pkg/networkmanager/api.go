@@ -50,10 +50,17 @@ type ControllerManager interface {
 	CleanupStaleNetworks(validNetworks ...util.NetInfo) error
 }
 
-// BaseNetworkController is a network controller that can be started and
+// ReconcilableNetworkController is a network controller that can reconcile
+// certain network configuration changes.
+type ReconcilableNetworkController interface {
+	util.NetInfo
+	Reconcile(util.NetInfo) error
+}
+
+// BaseNetworkController is a ReconcilableNetworkController that can be started and
 // stopped.
 type BaseNetworkController interface {
-	util.NetInfo
+	ReconcilableNetworkController
 	Start(ctx context.Context) error
 	Stop()
 }
