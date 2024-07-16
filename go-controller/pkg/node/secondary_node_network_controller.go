@@ -57,3 +57,8 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 func (nc *SecondaryNodeNetworkController) Cleanup() error {
 	return nil
 }
+
+func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	oc.SetNADs(netInfo.GetNADs()...)
+	return nil
+}

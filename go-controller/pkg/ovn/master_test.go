@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -1252,20 +1251,33 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedNBDatabaseState = append(expectedNBDatabaseState,
+			expectedNBDatabaseStateWithPodSNATs := append(expectedNBDatabaseState,
 				newNodeSNAT("stale-nodeNAT-UUID-3", "10.0.0.3", externalIP.String()), // won't be deleted since pod exists on this node
-				newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"))       // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
-			newNodeSNAT("nat-join-0-UUID", node1.LrpIP, externalIP.String()) // join subnet SNAT won't be affected by sync
+				newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"),       // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
+			)
+			GR = nil
 			for _, testObj := range expectedNBDatabaseState {
-				uuid := reflect.ValueOf(testObj).Elem().FieldByName("UUID").Interface().(string)
-				if uuid == types.GWRouterPrefix+node1.Name+"-UUID" {
-					GR := testObj.(*nbdb.LogicalRouter)
-					GR.Nat = []string{"stale-nodeNAT-UUID-3", "stale-nodeNAT-UUID-4", "nat-join-0-UUID"}
-					*testObj.(*nbdb.LogicalRouter) = *GR
+				if router, ok := testObj.(*nbdb.LogicalRouter); ok && router.UUID == types.GWRouterPrefix+node1.Name+"-UUID" {
+					GR = router
 					break
 				}
 			}
-			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
+			gomega.Expect(GR).NotTo(gomega.BeNil())
+			originalNATs := GR.Nat
+			GR.Nat = append(GR.Nat, "stale-nodeNAT-UUID-3", "stale-nodeNAT-UUID-4")
+			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseStateWithPodSNATs))
+
+			// test that all pod SNATs are considered stale when DisableSNATMultipleGWs=false
+			config.Gateway.DisableSNATMultipleGWs = false
+			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedNBDatabaseStateWithoutPodSNATs := append(expectedNBDatabaseState,
+				newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"),            // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
+				newNodeSNAT("cluster-subnet-snat-UUID", clusterCIDR, externalIP.String()), // won't be deleted as this is the cluster subnet SNAT used when DisableSNATMultipleGWs=false
+			)
+			GR.Nat = append(originalNATs, "stale-nodeNAT-UUID-4", "cluster-subnet-snat-UUID")
+			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseStateWithoutPodSNATs))
 
 			return nil
 		}
