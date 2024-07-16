@@ -82,7 +82,7 @@ type BaseNetworkController struct {
 	controllerName string
 
 	// network information
-	util.NetInfo
+	util.ReconcilableNetInfo
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
@@ -367,7 +367,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		Name: switchName,
 	}
 
-	logicalSwitch.ExternalIDs = util.GenerateExternalIDsForSwitchOrRouter(bnc.NetInfo)
+	logicalSwitch.ExternalIDs = util.GenerateExternalIDsForSwitchOrRouter(bnc.GetNetInfo())
 	var v4Gateway, v6Gateway net.IP
 	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
@@ -741,14 +741,14 @@ func (bnc *BaseNetworkController) recordPodErrorEvent(pod *kapi.Pod, podErr erro
 }
 
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
-	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
+	return util.DoesNetworkRequireIPAM(bnc.GetNetInfo())
 }
 
 func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 	if !bnc.IsSecondary() {
 		return []string{types.DefaultNetworkName}
 	}
-	podNadNames, _ := util.PodNadNames(pod, bnc.NetInfo)
+	podNadNames, _ := util.PodNadNames(pod, bnc.GetNetInfo())
 	return podNadNames
 }
 
@@ -857,7 +857,7 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 }
 
 func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
-	return config.OVNKubernetesFeature.EnableInterconnect && bnc.NetInfo.TopologyType() == types.Layer2Topology
+	return config.OVNKubernetesFeature.EnableInterconnect && bnc.TopologyType() == types.Layer2Topology
 }
 
 func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool, netName string) bool {
@@ -873,7 +873,7 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 	}
 
 	// NodeGatewayRouterLRPAddrsAnnotationChanged would not affect local, nor localnet secondary network
-	if !newNodeIsLocalZone && bnc.NetInfo.TopologyType() != types.LocalnetTopology && joinCIDRChanged(oldNode, newNode, netName) {
+	if !newNodeIsLocalZone && bnc.TopologyType() != types.LocalnetTopology && joinCIDRChanged(oldNode, newNode, netName) {
 		return true
 	}
 
