@@ -65,10 +65,13 @@ func testNetworkKey(nInfo util.NetInfo) string {
 
 type testControllerManager struct {
 	sync.Mutex
-	controllers map[string]NetworkController
-	started     []string
-	stopped     []string
-	cleaned     []string
+
+	defaultNetwork *testNetworkController
+	controllers    map[string]NetworkController
+
+	started []string
+	stopped []string
+	cleaned []string
 
 	valid []util.NetInfo
 }
@@ -87,6 +90,10 @@ func (tcm *testControllerManager) NewNetworkController(netInfo util.NetInfo) (Ne
 func (tcm *testControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	tcm.valid = validNetworks
 	return nil
+}
+
+func (tcm *testControllerManager) GetDefaultNetworkController() ReconcilableNetworkController {
+	return tcm.defaultNetwork
 }
 
 func TestNADController(t *testing.T) {
@@ -129,9 +136,8 @@ func TestNADController(t *testing.T) {
 	}
 
 	networkDefault := &ovncnitypes.NetConf{
-		Topology: types.Layer3Topology,
 		NetConf: cnitypes.NetConf{
-			Name: "default",
+			Name: types.DefaultNetworkName,
 			Type: "ovn-k8s-cni-overlay",
 		},
 		MTU: 1400,
@@ -152,14 +158,19 @@ func TestNADController(t *testing.T) {
 		expected []expected
 	}{
 		{
-			name: "NAD on default network should be skipped",
+			name: "NAD on default network is tracked with default controller",
 			args: []args{
 				{
 					nad:     "test/nad_1",
 					network: networkDefault,
 				},
 			},
-			expected: []expected{},
+			expected: []expected{
+				{
+					network: networkDefault,
+					nads:    []string{"test/nad_1"},
+				},
+			},
 		},
 		{
 			name: "NAD added",
@@ -432,12 +443,16 @@ func TestNADController(t *testing.T) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			tcm := &testControllerManager{
 				controllers: map[string]NetworkController{},
+				defaultNetwork: &testNetworkController{
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
 			}
 			nadController := &nadController{
 				nads:              map[string]string{},
-				networkController: newNetworkController("", tcm),
 				primaryNADs:       map[string]string{},
+				networkController: newNetworkController("", "", "", tcm, nil),
 			}
+			netController := nadController.networkController
 
 			g.Expect(nadController.networkController.Start()).To(gomega.Succeed())
 			defer nadController.networkController.Stop()
@@ -462,6 +477,9 @@ func TestNADController(t *testing.T) {
 			}
 
 			meetsExpectations := func(g gomega.Gomega) {
+				// test that the manager has all the desired networks
+				g.Expect(netController.getAllNetworks()).To(gomega.HaveLen(len(tt.expected)))
+
 				var expectRunning []string
 				for _, expected := range tt.expected {
 					netInfo, err := util.NewNetInfo(expected.network)
@@ -470,16 +488,30 @@ func TestNADController(t *testing.T) {
 					name := netInfo.GetNetworkName()
 					testNetworkKey := testNetworkKey(netInfo)
 					func() {
+						netController.Lock()
+						defer netController.Unlock()
 						tcm.Lock()
 						defer tcm.Unlock()
-						// test that the controller have the expected config and NADs
-						g.Expect(tcm.controllers).To(gomega.HaveKey(testNetworkKey))
-						g.Expect(util.AreNetworksCompatible(tcm.controllers[testNetworkKey], netInfo)).To(gomega.BeTrue(),
+
+						// test that the desired networks have the expected
+						// config and NADs, including the default network which
+						// could have had NAD/Advertisement changes as well
+						g.Expect(netController.networks).To(gomega.HaveKey(name))
+						g.Expect(util.AreNetworksCompatible(netController.networks[name], netInfo)).To(gomega.BeTrue(),
 							fmt.Sprintf("matching network config for network %s", name))
-						g.Expect(tcm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
+						g.Expect(netController.networks[name].GetNADs()).To(gomega.ConsistOf(expected.nads),
 							fmt.Sprintf("matching NADs for network %s", name))
+
+						// test that the actual controllers have the expected config and NADs
+						if !netInfo.IsDefault() {
+							g.Expect(tcm.controllers).To(gomega.HaveKey(testNetworkKey))
+							g.Expect(util.AreNetworksCompatible(tcm.controllers[testNetworkKey], netInfo)).To(gomega.BeTrue(),
+								fmt.Sprintf("matching network config for network %s", name))
+							g.Expect(tcm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
+								fmt.Sprintf("matching NADs for network %s", name))
+							expectRunning = append(expectRunning, testNetworkKey)
+						}
 					}()
-					expectRunning = append(expectRunning, testNetworkKey)
 					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
 						key := expected.nads[0]
 						namespace, _, err := cache.SplitMetaNamespaceKey(key)
@@ -565,7 +597,7 @@ func TestSyncAll(t *testing.T) {
 			tcm := &testControllerManager{
 				controllers: map[string]NetworkController{},
 			}
-			controller, err := newController(
+			controller, err := NewForCluster(
 				"SUT",
 				tcm,
 				wf,
@@ -618,7 +650,7 @@ func TestSyncAll(t *testing.T) {
 				g.Expect(util.AreNetworksCompatible(actualNetworks[name], network)).To(gomega.BeTrue())
 			}
 
-			actualPrimaryNetwork, err := controller.GetActiveNetworkForNamespace("test")
+			actualPrimaryNetwork, err := controller.Interface().GetActiveNetworkForNamespace("test")
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			g.Expect(expectedPrimaryNetworks).To(gomega.HaveKey(actualPrimaryNetwork.GetNetworkName()))
 			expectedPrimaryNetwork := expectedPrimaryNetworks[actualPrimaryNetwork.GetNetworkName()]
