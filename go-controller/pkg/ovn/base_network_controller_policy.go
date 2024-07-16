@@ -223,7 +223,7 @@ func (bnc *BaseNetworkController) syncNetworkPolicies(networkPolicies []interfac
 	// FIXME: For primary user defined networks, we need the hairpin allow ACL.
 	// The port group is not found error is thrown at line 269. Is that expected ?
 	// (or) should this be fixed https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/pkg/ovn/base_network_controller.go#L632 ?
-	if bnc.NetInfo.IsSecondary() {
+	if bnc.IsSecondary() {
 		return nil
 	}
 
@@ -1005,7 +1005,7 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		for i, ingressJSON := range policy.Spec.Ingress {
 			klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
-			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, bnc.controllerName, statelessNetPol, bnc.NetInfo)
+			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, bnc.controllerName, statelessNetPol, bnc.GetNetInfo())
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.ingressPolicies = append(np.ingressPolicies, ingress)
@@ -1031,7 +1031,7 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 		for i, egressJSON := range policy.Spec.Egress {
 			klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
-			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, bnc.controllerName, statelessNetPol, bnc.NetInfo)
+			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, bnc.controllerName, statelessNetPol, bnc.GetNetInfo())
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.egressPolicies = append(np.egressPolicies, egress)
