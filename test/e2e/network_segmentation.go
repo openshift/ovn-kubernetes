@@ -6,11 +6,13 @@ import (
 	"strings"
 	"time"
 
-	iputils "github.com/containernetworking/plugins/pkg/ip"
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	iputils "github.com/containernetworking/plugins/pkg/ip"
+
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -110,12 +112,10 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"client-pod",
-					nadName,
 					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -132,12 +132,10 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"client-pod",
-					nadName,
 					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -334,7 +332,6 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"udn-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -351,7 +348,6 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"udn-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -364,10 +360,9 @@ var _ = Describe("Network Segmentation", func() {
 
 type podOption func(*podConfiguration)
 
-func podConfig(podName, nadName string, opts ...podOption) *podConfiguration {
+func podConfig(podName string, opts ...podOption) *podConfiguration {
 	pod := &podConfiguration{
-		attachments: []nadapi.NetworkSelectionElement{{Name: nadName}},
-		name:        podName,
+		name: podName,
 	}
 	for _, opt := range opts {
 		opt(pod)
