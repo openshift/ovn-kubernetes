@@ -811,3 +811,7 @@ func getEndpointsFromEndpointSlices(endpointSlices []*discovery.EndpointSlice) [
 	}
 	return endpoints
 }
+
+func GetConntrackZone() int {
+	return config.Default.ConntrackZone
+}
