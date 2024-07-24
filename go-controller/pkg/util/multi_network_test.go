@@ -11,6 +11,9 @@ import (
 
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -345,16 +348,18 @@ func TestParseNetconf(t *testing.T) {
             "topology": "layer2",
 			"subnets": "192.168.200.0/16",
 			"role": "primary",
-            "netAttachDefName": "ns1/nad1"
+            "netAttachDefName": "ns1/nad1",
+			"joinSubnet": "100.66.0.0/16,fd99::/64"
     }
 `,
 			expectedNetConf: &ovncnitypes.NetConf{
-				Topology: "layer2",
-				NADName:  "ns1/nad1",
-				MTU:      1400,
-				Role:     "primary",
-				Subnets:  "192.168.200.0/16",
-				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				Topology:   "layer2",
+				NADName:    "ns1/nad1",
+				MTU:        1400,
+				Role:       "primary",
+				Subnets:    "192.168.200.0/16",
+				NetConf:    cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				JoinSubnet: "100.66.0.0/16,fd99::/64",
 			},
 		},
 		{
@@ -366,16 +371,18 @@ func TestParseNetconf(t *testing.T) {
             "topology": "layer3",
 			"subnets": "192.168.200.0/16",
 			"role": "primary",
-			"netAttachDefName": "ns1/nad1"
+			"netAttachDefName": "ns1/nad1",
+			"joinSubnet": "100.66.0.0/16"
     }
 `,
 			expectedNetConf: &ovncnitypes.NetConf{
-				Topology: "layer3",
-				NADName:  "ns1/nad1",
-				MTU:      1400,
-				Role:     "primary",
-				Subnets:  "192.168.200.0/16",
-				NetConf:  cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				Topology:   "layer3",
+				NADName:    "ns1/nad1",
+				MTU:        1400,
+				Role:       "primary",
+				Subnets:    "192.168.200.0/16",
+				NetConf:    cnitypes.NetConf{Name: "tenant-red", Type: "ovn-k8s-cni-overlay"},
+				JoinSubnet: "100.66.0.0/16",
 			},
 		},
 		{
@@ -428,6 +435,20 @@ func TestParseNetconf(t *testing.T) {
 			expectedError: fmt.Errorf("unexpected network field \"role\" primary for \"localnet\" topology, " +
 				"localnet topology does not allow network roles to be set since its always a secondary network"),
 		},
+		{
+			desc: "invalid attachment definition for a localnet topology with joinsubnet provided",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+			"subnets": "192.168.200.0/16",
+			"joinSubnet": "100.66.0.0/16",
+            "netAttachDefName": "ns1/nad1"
+    }
+`,
+			expectedError: fmt.Errorf("localnet topology does not allow specifying join-subnet as services are not supported"),
+		},
 	}
 
 	for _, test := range tests {
@@ -447,6 +468,119 @@ func TestParseNetconf(t *testing.T) {
 				g.Expect(err).To(gomega.MatchError(test.expectedError.Error()))
 			} else {
 				g.Expect(ParseNetConf(networkAttachmentDefinition)).To(gomega.Equal(test.expectedNetConf))
+			}
+		})
+	}
+}
+
+func TestJoinSubnets(t *testing.T) {
+	type testConfig struct {
+		desc            string
+		inputNetConf    *ovncnitypes.NetConf
+		expectedSubnets []*net.IPNet
+	}
+
+	tests := []testConfig{
+		{
+			desc: "defaultNetInfo with default join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(config.Gateway.V4JoinSubnet),
+				ovntest.MustParseIPNet(config.Gateway.V6JoinSubnet),
+			},
+		},
+		{
+			desc: "secondaryL3NetInfo with default join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "blue-network"},
+				Topology: ovntypes.Layer3Topology,
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6),
+			},
+		},
+		{
+			desc: "secondaryL2NetInfo with default join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "blue-network"},
+				Topology: ovntypes.Layer2Topology,
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6),
+			},
+		},
+		{
+			desc: "secondaryLocalNetInfo with nil join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "blue-network"},
+				Topology: ovntypes.LocalnetTopology,
+			},
+			expectedSubnets: nil,
+		},
+		{
+			desc: "secondaryL2NetInfo with user configured v4 join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer2Topology,
+				JoinSubnet: "100.68.0.0/16",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet("100.68.0.0/16"),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6), // given user only provided v4, we set v6 to default value
+			},
+		},
+		{
+			desc: "secondaryL3NetInfo with user configured v6 join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer3Topology,
+				JoinSubnet: "2001:db8:abcd:1234::/64",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet("2001:db8:abcd:1234::/64"), // given user only provided v4, we set v6 to default value
+			},
+		},
+		{
+			desc: "secondaryL3NetInfo with user configured v4&&v6 join subnet",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer3Topology,
+				JoinSubnet: "100.68.0.0/16,2001:db8:abcd:1234::/64",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet("100.68.0.0/16"),
+				ovntest.MustParseIPNet("2001:db8:abcd:1234::/64"), // given user only provided v4, we set v6 to default value
+			},
+		},
+		{
+			desc: "secondaryL2NetInfo with user configured empty join subnet value takes default value",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:    cnitypes.NetConf{Name: "blue-network"},
+				Topology:   ovntypes.Layer2Topology,
+				JoinSubnet: "",
+			},
+			expectedSubnets: []*net.IPNet{
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV4),
+				ovntest.MustParseIPNet(ovntypes.UserDefinedPrimaryNetworkJoinSubnetV6), // given user only provided v4, we set v6 to default value
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			g.Expect(netInfo.JoinSubnets()).To(gomega.Equal(test.expectedSubnets))
+			if netInfo.TopologyType() != ovntypes.LocalnetTopology {
+				g.Expect(netInfo.JoinSubnetV4()).To(gomega.Equal(test.expectedSubnets[0]))
+				g.Expect(netInfo.JoinSubnetV6()).To(gomega.Equal(test.expectedSubnets[1]))
 			}
 		})
 	}
@@ -599,6 +733,102 @@ func TestIsDefault(t *testing.T) {
 			netInfo, err := NewNetInfo(test.inputNetConf)
 			g.Expect(err).To(gomega.BeNil())
 			g.Expect(netInfo.IsDefault()).To(gomega.Equal(test.expectedDefaultVal))
+		})
+	}
+}
+
+func TestGetPodNADToNetworkMapping(t *testing.T) {
+	const (
+		attachmentName = "attachment1"
+		namespaceName  = "ns1"
+		networkName    = "l3-network"
+	)
+
+	type testConfig struct {
+		desc                          string
+		inputNamespace                string
+		inputNetConf                  *ovncnitypes.NetConf
+		inputPodAnnotations           map[string]string
+		expectedError                 error
+		expectedIsAttachmentRequested bool
+	}
+
+	tests := []testConfig{
+		{
+			desc:                "Looking for a network *not* present in the pod's attachment requests",
+			inputNamespace:      namespaceName,
+			inputPodAnnotations: map[string]string{nadv1.NetworkAttachmentAnnot: "[]"},
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			expectedIsAttachmentRequested: false,
+		},
+		{
+			desc: "Looking for a network present in the pod's attachment requests",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, attachmentName),
+			},
+			expectedIsAttachmentRequested: true,
+		},
+		{
+			desc:           "Multiple attachments to the same network in the same pod are not supported",
+			inputNamespace: namespaceName,
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: fmt.Sprintf("%[1]s,%[1]s", GetNADName(namespaceName, attachmentName)),
+			},
+			expectedError: fmt.Errorf("unexpected error: more than one of the same NAD ns1/attachment1 specified for pod ns1/test-pod"),
+		},
+		{
+			desc:           "Attaching to a secondary network to a user defined primary network is not supported",
+			inputNamespace: namespaceName,
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: "l3-network"},
+				Topology: ovntypes.Layer3Topology,
+				Role:     ovntypes.NetworkRolePrimary,
+				NADName:  GetNADName(namespaceName, attachmentName),
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, attachmentName),
+			},
+			expectedError: fmt.Errorf("unexpected primary network \"l3-network\" specified with a NetworkSelectionElement &{Name:attachment1 Namespace:ns1 IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}"),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netInfo, err := NewNetInfo(test.inputNetConf)
+			g.Expect(err).To(gomega.BeNil())
+			if test.inputNetConf.NADName != "" {
+				netInfo.AddNADs(test.inputNetConf.NADName)
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-pod",
+					Namespace:   test.inputNamespace,
+					Annotations: test.inputPodAnnotations,
+				},
+			}
+
+			isAttachmentRequested, _, err := GetPodNADToNetworkMapping(pod, netInfo)
+
+			if err != nil {
+				g.Expect(err).To(gomega.MatchError(test.expectedError))
+			}
+			g.Expect(isAttachmentRequested).To(gomega.Equal(test.expectedIsAttachmentRequested))
 		})
 	}
 }
