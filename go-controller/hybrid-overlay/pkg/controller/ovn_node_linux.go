@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -499,11 +501,20 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 		return nil
 	}
 	if n.gwLRPIP == nil {
-		gwLRPIP, err := util.ParseNodeGatewayRouterLRPAddr(node)
+		gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
 		}
-		n.gwLRPIP = gwLRPIP
+		for _, ipAddr := range gwLRPIPs {
+			x := ipAddr.IP
+			if utilnet.IsIPv4(x) {
+				n.gwLRPIP = x
+				break
+			}
+		}
+		if n.gwLRPIP == nil {
+			return errors.New("unable to find valid IPv4 address in Gateway Router Join IP annotation")
+		}
 	}
 
 	subnet, err := getLocalNodeSubnet(n.nodeName)
