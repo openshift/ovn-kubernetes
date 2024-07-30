@@ -1,12 +1,8 @@
 package cni
 
 import (
-	"context"
 	"fmt"
 	"net"
-	"time"
-
-	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -14,8 +10,6 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
-	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -106,9 +100,6 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Response, error) {
-	return pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientset, getCNIResult)
-}
-func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientset *ClientSet, getCNIResultFn getCNIResultFunc) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -140,12 +131,8 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-
-	primaryUDN := udn.NewPrimaryNetwork(clientset.nadLister)
-	if util.IsNetworkSegmentationSupportEnabled() {
-		annotCondFn = primaryUDN.WaitForPrimaryAnnotationFn(namespace, annotCondFn)
-	}
-	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName, pr.nadName, annotCondFn)
+	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName,
+		pr.nadName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -153,7 +140,8 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 		return nil, err
 	}
 
-	podInterfaceInfo, err := pr.buildPodInterfaceInfo(annotations, podNADAnnotation, netdevName)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, pr.PodUID, netdevName,
+		pr.nadName, pr.netName, pr.CNIConf.MTU)
 	if err != nil {
 		return nil, err
 	}
@@ -162,21 +150,9 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(kubeAuth *KubeAPIAuth, clientse
 
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
-		//TODO: There is nothing technical to run this at unprivileged mode but
-		//      we will tackle that later on.
-		response.Result, err = getCNIResultFn(pr, clientset, podInterfaceInfo)
+		response.Result, err = pr.getCNIResult(clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
-		}
-		if primaryUDN.Found() {
-			primaryUDNPodRequest := pr.buildPrimaryUDNPodRequest(pod, primaryUDN)
-			primaryUDNPodInfo, err := primaryUDNPodRequest.buildPodInterfaceInfo(annotations, primaryUDN.Annotation(), primaryUDN.NetworkDevice())
-			if err != nil {
-				return nil, err
-			}
-			if _, err := getCNIResultFn(primaryUDNPodRequest, clientset, primaryUDNPodInfo); err != nil {
-				return nil, err
-			}
 		}
 	} else {
 		response.PodIFInfo = podInterfaceInfo
@@ -316,7 +292,7 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 // PodInfoGetter is used to check if sandbox is still valid for the current
 // instance of the pod in the apiserver, see checkCancelSandbox for more info.
 // If kube api is not available from the CNI, pass nil to skip this check.
-func getCNIResult(pr *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+func (pr *PodRequest) getCNIResult(getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
 	interfacesArray, err := pr.ConfigureInterface(getter, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
@@ -352,43 +328,4 @@ func getCNIResult(pr *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInt
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
-}
-
-func (pr *PodRequest) buildPrimaryUDNPodRequest(
-	pod *kapi.Pod,
-	primaryUDN *udn.UserDefinedPrimaryNetwork,
-) *PodRequest {
-	req := &PodRequest{
-		Command:      pr.Command,
-		PodNamespace: pod.Namespace,
-		PodName:      pod.Name,
-		PodUID:       string(pod.UID),
-		SandboxID:    pr.SandboxID,
-		Netns:        pr.Netns,
-		IfName:       primaryUDN.InterfaceName(),
-		CNIConf: &ovncnitypes.NetConf{
-			// primary UDN MTU will be taken from config.Default.MTU
-			// if not specified at the NAD
-			MTU: primaryUDN.MTU(),
-		},
-		timestamp:  time.Now(),
-		IsVFIO:     pr.IsVFIO,
-		netName:    primaryUDN.NetworkName(),
-		nadName:    primaryUDN.NADName(),
-		deviceInfo: v1.DeviceInfo{},
-	}
-	req.ctx, req.cancel = context.WithTimeout(context.Background(), 2*time.Minute)
-	return req
-}
-
-func (pr *PodRequest) buildPodInterfaceInfo(annotations map[string]string, podAnnotation *util.PodAnnotation, netDevice string) (*PodInterfaceInfo, error) {
-	return PodAnnotation2PodInfo(
-		annotations,
-		podAnnotation,
-		pr.PodUID,
-		netDevice,
-		pr.nadName,
-		pr.netName,
-		pr.CNIConf.MTU,
-	)
 }

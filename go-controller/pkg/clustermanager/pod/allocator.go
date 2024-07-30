@@ -100,7 +100,7 @@ func (a *PodAllocator) Init() error {
 
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
-func (a *PodAllocator) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+func (a *PodAllocator) getActiveNetworkForNamespace(namespace string) (string, error) {
 	return util.GetActiveNetworkForNamespace(namespace, a.nadLister)
 }
 
@@ -139,11 +139,16 @@ func (a *PodAllocator) GetNetworkRole(pod *corev1.Pod) (string, error) {
 	}
 	activeNetwork, err := a.getActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
-		// FIXME(tssurya) emit event here if util.IsUnknownActiveNetworkError; add support for
-		// recorder in the NCM controller
 		return "", err
 	}
-	if activeNetwork.GetNetworkName() == a.netInfo.GetNetworkName() {
+	if activeNetwork == types.UnknownNetworkName {
+		// FIXME(tssurya) emit event here; add support for
+		// recorder in the NCM controller
+		return "", fmt.Errorf("unable to determine what is the"+
+			"primary network for this pod %s; please remove multiple primary network"+
+			"NADs from namespace %s", pod.Name, pod.Namespace)
+	}
+	if activeNetwork == a.netInfo.GetNetworkName() {
 		return types.NetworkRolePrimary, nil
 	}
 	if a.netInfo.IsDefault() {
@@ -201,12 +206,7 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 		return nil
 	}
 
-	activeNetwork, err := a.getActiveNetworkForNamespace(pod.Namespace)
-	if err != nil {
-		return fmt.Errorf("failed looking for an active network: %w", err)
-	}
-
-	onNetwork, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, a.netInfo, activeNetwork)
+	onNetwork, networkMap, err := util.GetPodNADToNetworkMapping(pod, a.netInfo)
 	if err != nil {
 		return fmt.Errorf("failed to get NAD to network mapping: %w", err)
 	}

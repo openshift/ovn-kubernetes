@@ -71,10 +71,6 @@ func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface
 		handlePodRequestFunc: HandlePodRequest,
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() {
-		s.clientSet.nadLister = factory.NADInformer().Lister()
-	}
-
 	if len(config.Kubernetes.CAData) > 0 {
 		s.kubeAuth.KubeCAData = base64.StdEncoding.EncodeToString(config.Kubernetes.CAData)
 	}

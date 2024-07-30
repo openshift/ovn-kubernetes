@@ -28,6 +28,9 @@ const (
 	// ovnNodeIDAnnotaton is the node annotation name used to store the node id.
 	ovnNodeIDAnnotaton = "k8s.ovn.org/node-id"
 
+	// ovnNodeGRLRPAddrAnnotaton is the node annotation name used to store the node gateway router port ips.
+	ovnNodeGRLRPAddrAnnotaton = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
+
 	// ovnTransitSwitchPortAddrAnnotation is the node annotation name to store the transit switch port ips.
 	ovnTransitSwitchPortAddrAnnotation = "k8s.ovn.org/node-transit-switch-port-ifaddr"
 
@@ -292,7 +295,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.2.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.2/16\"}",
-						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
+						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.2/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
 				},
@@ -310,7 +313,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.3.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.3/16\"}",
-						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}",
+						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.3/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
 				},
@@ -328,7 +331,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.4.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.4/16\"}",
-						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.4/16\"}}",
+						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.4/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
 				},
@@ -588,7 +591,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.2.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.2/16\"}",
-						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
+						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.2/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
 				},
@@ -606,7 +609,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.3.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.3/16\"}",
-						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}",
+						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.3/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
 				},
@@ -624,7 +627,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.4.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.4/16\"}",
-						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.4/16\"}}",
+						ovnNodeGRLRPAddrAnnotaton:          "{\"ipv4\":\"100.64.0.4/16\"}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
 				},
@@ -802,7 +805,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to parse node node4 GR IPs annotation")
 
 				// Set node ovn-gw-router-port-ips annotation
-				testNode4.Annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.5/16\"}}"
+				testNode4.Annotations[ovnNodeGRLRPAddrAnnotaton] = "{\"ipv4\":\"100.64.0.5/16\"}"
 				err = zoneICHandler.AddLocalZoneNode(&testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -905,7 +908,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to parse node node4 GR IPs annotation")
 
 				// Set node ovn-gw-router-port-ips annotation
-				testNode4.Annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.5/16\"}}"
+				testNode4.Annotations[ovnNodeGRLRPAddrAnnotaton] = "{\"ipv4\":\"100.64.0.5/16\"}"
 				err = zoneICHandler.AddRemoteZoneNode(&testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNodesRouteInfo = map[string]map[string]string{

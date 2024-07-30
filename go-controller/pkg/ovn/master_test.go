@@ -73,7 +73,10 @@ type tNode struct {
 
 const (
 	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
-	ovnNodeID            = "k8s.ovn.org/node-id"
+	ovnNodeID = "k8s.ovn.org/node-id"
+
+	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
+	ovnNodeGRLRPAddr     = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
 	ovnNodePrimaryIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 	ovnNodeSubnets       = "k8s.ovn.org/node-subnets"
 )
@@ -83,10 +86,10 @@ func (n tNode) k8sNode(nodeID string) v1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: n.Name,
 			Annotations: map[string]string{
-				ovnNodeID:              nodeID,
-				util.OVNNodeGRLRPAddrs: "{\"default\":{\"ipv4\": \"100.64.0." + nodeID + "/16\"}}",
-				util.OVNNodeHostCIDRs:  fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
-				ovnNodePrimaryIfAddr:   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
+				ovnNodeID:             nodeID,
+				ovnNodeGRLRPAddr:      "{\"ipv4\": \"100.64.0." + nodeID + "/16\"}",
+				util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
+				ovnNodePrimaryIfAddr:  fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
 			},
 		},
 		Status: v1.NodeStatus{
@@ -1601,9 +1604,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":    fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
-						"k8s.ovn.org/node-chassis-id": "2",
-						util.OVNNodeGRLRPAddrs:        "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
+						"k8s.ovn.org/node-subnets":                   fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
+						"k8s.ovn.org/node-chassis-id":                "2",
+						"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\":\"100.64.0.2/16\"}",
 					},
 				},
 			}
@@ -1790,7 +1793,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			mgmt_ips := util.GetNodeManagementIfAddr(hostSubnets[0])
 			ips = append(ips, mgmt_ips.IP.String())
-			lrpips, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, types.DefaultNetworkName)
+			lrpips, err := util.ParseNodeGatewayRouterLRPAddrs(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			lrpip, _, _ := net.ParseCIDR(lrpips[0].String())
 			ips = append(ips, lrpip.String())

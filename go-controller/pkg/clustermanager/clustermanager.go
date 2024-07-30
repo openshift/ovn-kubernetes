@@ -8,7 +8,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -38,9 +37,8 @@ type ClusterManager struct {
 	secondaryNetClusterManager  *secondaryNetworkClusterManager
 	// Controller used for programming node allocation for egress IP
 	// The OVN DB setup is handled by egressIPZoneController that runs in ovnkube-controller
-	eIPC                          *egressIPClusterController
-	egressServiceController       *egressservice.Controller
-	endpointSliceMirrorController *endpointslicemirror.Controller
+	eIPC                    *egressIPClusterController
+	egressServiceController *egressservice.Controller
 	// Controller used for maintaining dns name resolver objects
 	dnsNameResolverController *dnsnameresolver.Controller
 	// event recorder used to post events to k8s
@@ -109,12 +107,6 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			return nil, err
 		}
 	}
-	if util.IsNetworkSegmentationSupportEnabled() {
-		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf)
-		if err != nil {
-			return nil, err
-		}
-	}
 	if config.Kubernetes.OVNEmptyLbEvents {
 		if _, err := unidling.NewUnidledAtController(&kube.Kube{KClient: ovnClient.KubeClient}, wf.ServiceInformer()); err != nil {
 			return nil, err
@@ -161,11 +153,6 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() {
-		if err := cm.endpointSliceMirrorController.Start(ctx, 1); err != nil {
-			return err
-		}
-	}
 	if err := cm.statusManager.Start(); err != nil {
 		return err
 	}
@@ -191,9 +178,6 @@ func (cm *ClusterManager) Stop() {
 	}
 	if config.OVNKubernetesFeature.EnableEgressService {
 		cm.egressServiceController.Stop()
-	}
-	if util.IsNetworkSegmentationSupportEnabled() {
-		cm.endpointSliceMirrorController.Stop()
 	}
 	cm.statusManager.Stop()
 	if util.IsDNSNameResolverEnabled() {
