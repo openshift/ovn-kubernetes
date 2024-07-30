@@ -2,7 +2,7 @@
 
 -----------------------
 
-![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.0.0](https://img.shields.io/badge/AppVersion-1.0.0-informational?style=flat-square)
+![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.16.0](https://img.shields.io/badge/AppVersion-1.16.0-informational?style=flat-square)
 
 **Homepage:** <https://ovn-kubernetes.io/>
 
@@ -154,23 +154,10 @@ false
 			<td>Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws</td>
 		</tr>
 		<tr>
-			<td>global.dockerConfigSecret</td>
-			<td>object</td>
-			<td><pre lang="json">
-{
-  "auth": "blah_blah_blah",
-  "create": false,
-  "registry": "ghcr.io"
-}
-</pre>
-</td>
-			<td>The secret used for pulling image. Use only if needed. Set create to have have secret created by helm</td>
-		</tr>
-		<tr>
 			<td>global.egressIpHealthCheckPort</td>
-			<td>int</td>
+			<td>string</td>
 			<td><pre lang="json">
-9107
+""
 </pre>
 </td>
 			<td>Configure EgressIP node reachability using gRPC on this TCP port</td>
@@ -186,9 +173,9 @@ false
 		</tr>
 		<tr>
 			<td>global.enableAdminNetworkPolicy</td>
-			<td>bool</td>
+			<td>string</td>
 			<td><pre lang="json">
-false
+""
 </pre>
 </td>
 			<td>Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes</td>
@@ -213,36 +200,36 @@ false
 		</tr>
 		<tr>
 			<td>global.enableEgressFirewall</td>
-			<td>bool</td>
+			<td>string</td>
 			<td><pre lang="json">
-true
+""
 </pre>
 </td>
 			<td>Configure to use EgressFirewall CRD feature with ovn-kubernetes</td>
 		</tr>
 		<tr>
 			<td>global.enableEgressIp</td>
-			<td>bool</td>
+			<td>string</td>
 			<td><pre lang="json">
-true
+""
 </pre>
 </td>
 			<td>Configure to use EgressIP CRD feature with ovn-kubernetes</td>
 		</tr>
 		<tr>
 			<td>global.enableEgressQos</td>
-			<td>bool</td>
+			<td>string</td>
 			<td><pre lang="json">
-true
+""
 </pre>
 </td>
 			<td>Configure to use EgressQoS CRD feature with ovn-kubernetes</td>
 		</tr>
 		<tr>
 			<td>global.enableEgressService</td>
-			<td>bool</td>
+			<td>string</td>
 			<td><pre lang="json">
-true
+""
 </pre>
 </td>
 			<td>Configure to use EgressService CRD feature with ovn-kubernetes</td>
@@ -296,7 +283,7 @@ true
 			<td>global.enableMultiExternalGateway</td>
 			<td>bool</td>
 			<td><pre lang="json">
-true
+false
 </pre>
 </td>
 			<td>Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes</td>
@@ -327,15 +314,6 @@ true
 </pre>
 </td>
 			<td>Whether or not enable ovnkube identity webhook</td>
-		</tr>
-		<tr>
-			<td>global.enablePersistentIPs</td>
-			<td>bool</td>
-			<td><pre lang="json">
-false
-</pre>
-</td>
-			<td>Configure to use the IPAMClaims CRD feature with ovn-kubernetes, thus granting persistent IPs across restarts / migration for KubeVirt VMs</td>
 		</tr>
 		<tr>
 			<td>global.enableSsl</td>
@@ -435,15 +413,6 @@ true
 </pre>
 </td>
 			<td>Specify image tag to run</td>
-		</tr>
-		<tr>
-			<td>global.imagePullSecretName</td>
-			<td>string</td>
-			<td><pre lang="json">
-""
-</pre>
-</td>
-			<td>The name of secret used for pulling image. Use only if needed</td>
 		</tr>
 		<tr>
 			<td>global.ipfixCacheActiveTimeout</td>
@@ -635,30 +604,6 @@ false
 			<td>Endpoint of Kubernetes api server</td>
 		</tr>
 		<tr>
-			<td>monitoring</td>
-			<td>object</td>
-			<td><pre lang="json">
-{
-  "commonServiceMonitorSelectorLabels": {
-    "release": "kube-prometheus-stack"
-  }
-}
-</pre>
-</td>
-			<td>prometheus monitoring related fields</td>
-		</tr>
-		<tr>
-			<td>monitoring.commonServiceMonitorSelectorLabels</td>
-			<td>object</td>
-			<td><pre lang="json">
-{
-  "release": "kube-prometheus-stack"
-}
-</pre>
-</td>
-			<td>specify the labels for serviceMonitors to be selected for target discovery. Prometheus operator defines what namespaces and what servicemonitors within these namespaces must be selected for target discovery. The fields defined below helps in defining that.</td>
-		</tr>
-		<tr>
 			<td>mtu</td>
 			<td>int</td>
 			<td><pre lang="json">
@@ -680,7 +625,7 @@ false
 			<td>podNetwork</td>
 			<td>string</td>
 			<td><pre lang="json">
-"10.244.0.0/16/24"
+"10.128.0.0/14/23"
 </pre>
 </td>
 			<td>IP range for Kubernetes pods, /14 is the top level range, under which each /23 range will be assigned to a node</td>
@@ -689,7 +634,7 @@ false
 			<td>serviceNetwork</td>
 			<td>string</td>
 			<td><pre lang="json">
-"10.96.0.0/16"
+"172.30.0.0/16"
 </pre>
 </td>
 			<td>A comma-separated set of CIDR notation IP ranges from which k8s assigns service cluster IPs. This should be the same as the value provided for kube-apiserver "--service-cluster-ip-range" option</td>

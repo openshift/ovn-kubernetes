@@ -27,7 +27,7 @@ spec:
         kubernetes.io/os: "linux"
       annotations:
     spec:
-      {{- if .Values.global.imagePullSecretName }}
+      {{- if hasKey .Values.global "imagePullSecretName" }}
       imagePullSecrets:
       - name: {{ .Values.global.imagePullSecretName }}
       {{- end }}

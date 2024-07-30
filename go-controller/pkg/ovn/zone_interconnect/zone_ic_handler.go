@@ -446,7 +446,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 
 	// Its possible that node is moved from a remote zone to the local zone. Check and delete the remote zone routes
 	// for this node as it's no longer needed.
-	return zic.deleteLocalNodeStaticRoutes(node, nodeTransitSwitchPortIPs)
+	return zic.deleteLocalNodeStaticRoutes(node, nodeID, nodeTransitSwitchPortIPs)
 }
 
 // createRemoteZoneNodeResources creates the remote zone node resources
@@ -668,17 +668,9 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 		return nil
 	}
 
-	nodeGRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+	nodeGRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
 	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// FIXME(tssurya): This is present for backwards compatibility
-			// Remove me a few months from now
-			var err1 error
-			nodeGRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err1 != nil {
-				return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
-			}
-		}
+		return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err)
 	}
 
 	nodeGRPIPStaticRoutes := zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true)
@@ -693,7 +685,7 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 }
 
 // deleteLocalNodeStaticRoutes deletes the static routes added by the function addRemoteNodeStaticRoutes
-func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Node, nodeTransitSwitchPortIPs []*net.IPNet) error {
+func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Node, nodeID int, nodeTransitSwitchPortIPs []*net.IPNet) error {
 	deleteRoute := func(prefix, nexthop string) error {
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
 			return lrsr.IPPrefix == prefix &&
@@ -726,17 +718,9 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 	}
 
 	// Clear the routes connecting to the GW Router for the default network
-	nodeGRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+	nodeGRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
 	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// FIXME(tssurya): This is present for backwards compatibility
-			// Remove me a few months from now
-			var err1 error
-			nodeGRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err1 != nil {
-				return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
-			}
-		}
+		return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err)
 	}
 
 	nodenodeGRPIPStaticRoutes := zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true)

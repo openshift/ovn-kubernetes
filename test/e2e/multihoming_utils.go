@@ -118,9 +118,7 @@ type podConfiguration struct {
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec := e2epod.NewAgnhostPod(config.namespace, config.name, nil, nil, nil, config.containerCmd...)
-	if len(config.attachments) > 0 {
-		podSpec.Annotations = networkSelectionElements(config.attachments...)
-	}
+	podSpec.Annotations = networkSelectionElements(config.attachments...)
 	podSpec.Spec.NodeSelector = config.nodeSelector
 	podSpec.Labels = config.labels
 	if config.isPrivileged {

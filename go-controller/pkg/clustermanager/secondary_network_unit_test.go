@@ -316,7 +316,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				err = oc.init()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				err = sncm.CleanupDeletedNetworks(oc)
+				nadControllers := []nad.NetworkController{oc}
+				err = sncm.CleanupDeletedNetworks(nadControllers)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Clean up the red network
@@ -328,7 +329,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 				// Now call CleanupDeletedNetworks() with empty nad controllers.
 				// Blue network should also be cleared.
-				err = sncm.CleanupDeletedNetworks()
+				err = sncm.CleanupDeletedNetworks([]nad.NetworkController{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				expectBlueCleanup = true

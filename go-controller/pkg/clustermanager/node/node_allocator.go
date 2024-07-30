@@ -11,12 +11,9 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ipgenerator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -36,9 +33,6 @@ type NodeAllocator struct {
 
 	clusterSubnetAllocator       SubnetAllocator
 	hybridOverlaySubnetAllocator SubnetAllocator
-	// node gateway router port IP generators (connecting to the join switch)
-	nodeGWRouterLRPIPv4Generator *ipgenerator.IPGenerator
-	nodeGWRouterLRPIPv6Generator *ipgenerator.IPGenerator
 
 	// unique id of the network
 	networkID int
@@ -68,24 +62,6 @@ func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.No
 }
 
 func (na *NodeAllocator) Init() error {
-	if na.hasJoinSubnetAllocation() {
-		if config.IPv4Mode {
-			nodeGWRouterLRPIPv4Generator, err := ipgenerator.NewIPGenerator(na.netInfo.JoinSubnetV4().String())
-			if err != nil {
-				return fmt.Errorf("error creating IP Generator for v4 join subnet %s: %w", na.netInfo.JoinSubnetV4().String(), err)
-			}
-			na.nodeGWRouterLRPIPv4Generator = nodeGWRouterLRPIPv4Generator
-		}
-
-		if config.IPv6Mode {
-			nodeGWRouterLRPIPv6Generator, err := ipgenerator.NewIPGenerator(na.netInfo.JoinSubnetV6().String())
-			if err != nil {
-				return fmt.Errorf("error creating IP Generator for v6 join subnet %s: %w", na.netInfo.JoinSubnetV6().String(), err)
-			}
-			na.nodeGWRouterLRPIPv6Generator = nodeGWRouterLRPIPv6Generator
-		}
-	}
-
 	if !na.hasNodeSubnetAllocation() {
 		return nil
 	}
@@ -209,47 +185,7 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	}
 
 	updatedSubnetsMap := map[string][]*net.IPNet{}
-	var validExistingSubnets, allocatedSubnets, allocatedJoinSubnets []*net.IPNet
-	if na.hasJoinSubnetAllocation() {
-		var joinAddr []*net.IPNet
-		existingSubnets, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
-		if err != nil && !util.IsAnnotationNotSetError(err) {
-			// Log the error and try to allocate new subnets
-			klog.Warningf("Failed to get node %s join subnets annotations for network %s: %v", node.Name, networkName, err)
-		}
-		// Allocate the IP address(es) for the node Gateway router port connecting
-		// to the Join switch
-		nodeID := util.GetNodeID(node)
-		if nodeID == -1 {
-			// Don't consider this node as cluster-manager has not allocated node id yet.
-			return fmt.Errorf("failed to get node id for node - %s", node.Name)
-		}
-
-		if config.IPv4Mode {
-			joinV4Addr, err := na.nodeGWRouterLRPIPv4Generator.GenerateIP(nodeID)
-			if err != nil {
-				return fmt.Errorf("failed to generate gateway router port IPv4 address for node %s : err - %w", node.Name, err)
-			}
-			joinAddr = append(joinAddr, joinV4Addr)
-		}
-
-		if config.IPv6Mode {
-			joinV6Addr, err := na.nodeGWRouterLRPIPv6Generator.GenerateIP(nodeID)
-			if err != nil {
-				return fmt.Errorf("failed to generate gateway router port IPv6 address for node %s : err - %w", node.Name, err)
-			}
-			joinAddr = append(joinAddr, joinV6Addr)
-		}
-		// If the existing subnets weren't OK, or new ones were allocated, update the node annotation.
-		// This happens in a couple cases:
-		// 1) new node: no existing subnets and one or more new subnets were allocated
-		// 2) dual-stack/single-stack conversion: two existing subnets but only one will be valid, and no allocated subnets
-		// 3) bad subnet annotation: one more existing subnets will be invalid and might have allocated a correct one; let us reset it
-		lessIPNet := func(a, b net.IPNet) bool { return a.String() < b.String() }
-		if !cmp.Equal(existingSubnets, joinAddr, cmpopts.SortSlices(lessIPNet)) {
-			allocatedJoinSubnets = joinAddr
-		}
-	}
+	var validExistingSubnets, allocatedSubnets []*net.IPNet
 	if na.hasNodeSubnetAllocation() {
 		existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, networkName)
 		if err != nil && !util.IsAnnotationNotSetError(err) {
@@ -278,8 +214,8 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	}
 
 	// Also update the node annotation if the networkID doesn't match
-	if len(updatedSubnetsMap) > 0 || na.networkID != networkID || len(allocatedJoinSubnets) > 0 {
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, na.networkID, allocatedJoinSubnets)
+	if len(updatedSubnetsMap) > 0 || na.networkID != networkID {
+		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, na.networkID)
 		if err != nil {
 			if errR := na.clusterSubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); errR != nil {
 				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
@@ -351,7 +287,7 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 }
 
 // updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation
-func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId int, joinAddr []*net.IPNet) error {
+func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId int) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -372,12 +308,6 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 		}
 
 		networkName := na.netInfo.GetNetworkName()
-
-		cnode.Annotations, err = util.UpdateNodeGatewayRouterLRPAddrsAnnotation(cnode.Annotations, joinAddr, networkName)
-		if err != nil {
-			return fmt.Errorf("failed to update node %q annotation LRPAddrAnnotation %s",
-				node.Name, util.JoinIPNets(joinAddr, ","))
-		}
 
 		cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, networkName, networkId)
 		if err != nil {
@@ -414,7 +344,7 @@ func (na *NodeAllocator) Cleanup() error {
 
 		hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
 		// passing util.InvalidNetworkID deletes the network id annotation for the network.
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidNetworkID, nil)
+		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidNetworkID)
 		if err != nil {
 			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
 				node.Name, networkName)
@@ -537,9 +467,4 @@ func (na *NodeAllocator) allocateNodeSubnets(allocator SubnetAllocator, nodeName
 func (na *NodeAllocator) hasNodeSubnetAllocation() bool {
 	// we only allocate subnets for L3 secondary network or default network
 	return na.netInfo.TopologyType() == types.Layer3Topology || !na.netInfo.IsSecondary()
-}
-
-func (na *NodeAllocator) hasJoinSubnetAllocation() bool {
-	// we allocate join subnets for L3/L2 primary user defined networks or default network
-	return na.netInfo.IsDefault() || (util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork())
 }
