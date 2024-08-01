@@ -5,7 +5,6 @@ import "time"
 const (
 	// Default network name
 	DefaultNetworkName    = "default"
-	UnknownNetworkName    = "unknown"
 	K8sPrefix             = "k8s-"
 	HybridOverlayPrefix   = "int-"
 	HybridOverlayGRSubfix = "-gr"
@@ -110,19 +109,23 @@ const (
 	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10
 
+	// EndpointSliceMirrorControllerName mirror EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
+	EndpointSliceMirrorControllerName = "endpointslice-mirror-controller.k8s.ovn.org"
+	// EndpointSliceDefaultControllerName default kubernetes EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
+	EndpointSliceDefaultControllerName = "endpointslice-controller.k8s.io"
+	// LabelUserDefinedEndpointSliceNetwork label key used in mirrored EndpointSlices that contains the current primary user defined network name
+	LabelUserDefinedEndpointSliceNetwork = "k8s.ovn.org/endpointslice-network"
+	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
+	LabelUserDefinedServiceName = "k8s.ovn.org/service-name"
+
 	// Packet marking
 	EgressIPNodeConnectionMark         = "1008"
 	EgressIPReplyTrafficConnectionMark = 42
 
-	V6NodeLocalNATSubnet           = "fd99::/64"
-	V6NodeLocalNATSubnetPrefix     = 64
-	V6NodeLocalNATSubnetNextHop    = "fd99::1"
-	V6NodeLocalDistributedGWPortIP = "fd99::2"
-
-	V4NodeLocalNATSubnet           = "169.254.0.0/20"
-	V4NodeLocalNATSubnetPrefix     = 20
-	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
-	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
+	// primary user defined network's default join subnet value
+	// users can configure custom values using NADs
+	UserDefinedPrimaryNetworkJoinSubnetV4 = "100.65.0.0/16"
+	UserDefinedPrimaryNetworkJoinSubnetV6 = "fd99::/64"
 
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
