@@ -26,6 +26,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 )
 
 func (bsnc *BaseSecondaryNetworkController) getPortInfoForSecondaryNetwork(pod *kapi.Pod) map[string]*lpInfo {
@@ -235,8 +236,14 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return err
 	}
 
-	on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
+		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	}
+
+	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
+	if err != nil {
+		bsnc.recordPodErrorEvent(pod, err)
 		// configuration error, no need to retry, do not return error
 		klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
 			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
@@ -409,13 +416,20 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 	if portInfoMap == nil {
 		portInfoMap = map[string]*lpInfo{}
 	}
+
+	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	}
+
 	for nadName := range podNetworks {
 		if !bsnc.HasNAD(nadName) {
 			continue
 		}
 
-		_, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 		if err != nil {
+			bsnc.recordPodErrorEvent(pod, err)
 			return err
 		}
 
@@ -487,10 +501,17 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
-		on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+
+		activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+		}
+
+		on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
 		if err != nil || !on {
 			if err != nil {
-				klog.Warningf("Failed to determine if pod %s/%s needs to be plumb interface on network %s: %v",
+				bsnc.recordPodErrorEvent(pod, err)
+				klog.Errorf("Failed to determine if pod %s/%s needs to be plumb interface on network %s: %v",
 					pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
 			}
 			continue
@@ -679,4 +700,19 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
 		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
+}
+
+func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
+	if oc.networkID == nil || *oc.networkID == util.InvalidNetworkID {
+		oc.networkID = ptr.To(util.InvalidNetworkID)
+		nodes, err := oc.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidNetworkID, err
+		}
+		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		if err != nil {
+			return util.InvalidNetworkID, err
+		}
+	}
+	return *oc.networkID, nil
 }

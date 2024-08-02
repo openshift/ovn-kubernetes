@@ -12,7 +12,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	annotatorMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -411,12 +413,13 @@ func TestNodeL3GatewayAnnotationChanged(t *testing.T) {
 	}
 }
 
-func TestParseNodeManagementPortMACAddress(t *testing.T) {
+func TestParseNodeManagementPortMACAddresses(t *testing.T) {
 	tests := []struct {
 		desc        string
 		inpNode     v1.Node
 		errExpected bool
 		expOutput   bool
+		netName     string
 	}{
 		{
 			desc:      "mac address annotation not found for node, however, does not return error",
@@ -424,28 +427,50 @@ func TestParseNodeManagementPortMACAddress(t *testing.T) {
 			expOutput: false,
 		},
 		{
-			desc: "success: parse mac address",
+			desc: "success: parse mac address for given netName",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-address": "96:8f:e8:25:a2:e5"},
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:e5\",\"blue\":\"d6:bc:85:32:30:fb\",\"red\":\"4a:ea:1d:8d:8f:8c\"}"},
 				},
 			},
 			expOutput: true,
+			netName:   types.DefaultNetworkName,
 		},
 		{
 			desc: "error: parse mac address error",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-address": "96:8f:e8:25:a2:"},
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:\",\"blue\":\"1\",\"red\":\"2\"}"},
 				},
 			},
 			errExpected: true,
+			netName:     types.DefaultNetworkName,
+		},
+		{
+			desc: "error: parse mac address error since value of secondary network is invalid",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:\",\"blue\":\"1\",\"red\":\"2\"}"},
+				},
+			},
+			errExpected: true,
+			netName:     "blue",
+		},
+		{
+			desc: "error: parse mac address error since network doesn't exist on the annotation",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-mgmt-port-mac-addresses": "{\"default\":\"96:8f:e8:25:a2:\",\"blue\":\"1\",\"red\":\"2\"}"},
+				},
+			},
+			errExpected: true,
+			netName:     "yello",
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			cfg, e := ParseNodeManagementPortMACAddress(&tc.inpNode)
+			cfg, e := ParseNodeManagementPortMACAddresses(&tc.inpNode, tc.netName)
 			if tc.errExpected {
 				t.Log(e)
 				assert.Error(t, e)
@@ -509,6 +534,126 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 			}
 			if tc.expOutput {
 				assert.NotNil(t, cfg)
+			}
+		})
+	}
+}
+
+func TestParseNodeGatewayRouterJoinAddrs(t *testing.T) {
+	tests := []struct {
+		desc        string
+		inpNode     v1.Node
+		netName     string
+		errExpected bool
+		expOutput   bool
+	}{
+		{
+			desc:      "Gateway router LPR IP address annotation not found for node, however, does not return error",
+			inpNode:   v1.Node{},
+			expOutput: false,
+		},
+		{
+			desc: "success: Gateway router parse LPR IP address",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.4/16"}}`},
+				},
+			},
+			netName:   types.DefaultNetworkName,
+			expOutput: true,
+		},
+		{
+			desc: "success: Gateway router parse LPR IP address dual stack",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"}}`},
+				},
+			},
+			netName:   types.DefaultNetworkName,
+			expOutput: true,
+		},
+		{
+			desc: "success: Gateway router parse LPR IP address dual stack for the right network name",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"},"l3-network":{"ipv4":"100.65.0.5/16","ipv6":"fd:99::/64"}}`},
+				},
+			},
+			netName:   "l3-network",
+			expOutput: true,
+		},
+		{
+			desc: "error: Gateway router parse LPR IP address dual stack cannot find the requested network name",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"},"l3-network":{"ipv4":"100.65.0.5/16","ipv6":"fd:99::/64"}}`},
+				},
+			},
+			netName:     "l2-network",
+			errExpected: true,
+		},
+		{
+			desc: "error: Gateway router parse LPR IP address error",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5"}}`},
+				},
+			},
+			netName:     types.DefaultNetworkName,
+			errExpected: true,
+		},
+	}
+	config.IPv4Mode = true
+	config.IPv6Mode = true
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			cfg, e := ParseNodeGatewayRouterJoinAddrs(&tc.inpNode, tc.netName)
+			if tc.errExpected {
+				t.Log(e)
+				assert.Error(t, e)
+				assert.Nil(t, cfg)
+			}
+			if tc.expOutput {
+				assert.NotNil(t, cfg)
+			}
+		})
+	}
+}
+
+func TestCreateNodeGatewayRouterLRPAddrsAnnotation(t *testing.T) {
+	tests := []struct {
+		desc            string
+		inpDefSubnetIps []*net.IPNet
+		outExp          map[string]string
+		errExp          bool
+	}{
+		{
+			desc:            "success path, valid default subnets",
+			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24"),
+			outExp: map[string]string{
+				"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{\"default\":{\"ipv4\":\"192.168.1.12/24\"}}",
+			},
+		},
+		{
+			desc:            "success path, valid default dualstack subnets",
+			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24", "fd:98::5/64"),
+			outExp: map[string]string{
+				"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{\"default\":{\"ipv4\":\"192.168.1.12/24\",\"ipv6\":\"fd:98::5/64\"}}",
+			},
+		},
+		{
+			desc:   "success path, inpDefSubnetIps is nil",
+			outExp: map[string]string{},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res, err := UpdateNodeGatewayRouterLRPAddrsAnnotation(nil, tc.inpDefSubnetIps, types.DefaultNetworkName)
+			t.Log(res, err)
+			if tc.errExp {
+				assert.NotNil(t, err)
+			} else {
+				assert.True(t, reflect.DeepEqual(res, tc.outExp))
 			}
 		})
 	}
@@ -613,6 +758,70 @@ func TestParseNodeGatewayMTUSupport(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			res := ParseNodeGatewayMTUSupport(tc.inpNode)
 			assert.Equal(t, tc.res, res)
+		})
+	}
+}
+
+func TestGetNetworkID(t *testing.T) {
+	tests := []struct {
+		desc              string
+		nodes             []*corev1.Node
+		netInfo           NetInfo
+		expectedError     error
+		expectedNetworkID int
+	}{
+		{
+			desc:              "with no nodes should return and error and invalid network ID",
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedError:     fmt.Errorf("missing network id for network 'bluenet'"),
+			expectedNetworkID: InvalidNetworkID,
+		},
+		{
+			desc: "with bad network ID annotations should return and error and invalid network ID",
+			nodes: []*corev1.Node{
+				&v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": "not a map",
+						},
+					},
+				},
+			},
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedError:     fmt.Errorf("could not parse"),
+			expectedNetworkID: InvalidNetworkID,
+		},
+		{
+			desc: "with multiple networks annotation should return expected network ID and no error",
+			nodes: []*corev1.Node{
+				&v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": `{"rednet": "5"}`,
+						},
+					},
+				},
+				&v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": `{"yellownet": "6", "bluenet": "3"}`,
+						},
+					},
+				},
+			},
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedNetworkID: 3,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			obtainedNetworkID, obtainedError := GetNetworkID(tc.nodes, tc.netInfo)
+			if tc.expectedError != nil {
+				assert.Contains(t, obtainedError.Error(), tc.expectedError.Error())
+			} else {
+				assert.NoError(t, obtainedError)
+			}
+			assert.Equal(t, obtainedNetworkID, tc.expectedNetworkID)
 		})
 	}
 }

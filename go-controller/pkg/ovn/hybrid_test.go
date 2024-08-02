@@ -311,7 +311,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator,
+				ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -580,7 +581,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator,
+				ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
@@ -778,7 +780,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator,
+				ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1064,7 +1067,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode1, nodeAnnotator,
+				ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1267,7 +1271,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator,
+				ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1450,7 +1455,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator,
+				ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1638,10 +1644,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 			testNode := node1.k8sNode("2")
 			testNode.Annotations = map[string]string{
-				hotypes.HybridOverlayDRIP:                    nodeHOIP,
-				hotypes.HybridOverlayDRMAC:                   nodeHOMAC,
-				"k8s.ovn.org/ovn-node-id":                    "2",
-				"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\": \"100.64.0.2/16\"}"}
+				hotypes.HybridOverlayDRIP:  nodeHOIP,
+				hotypes.HybridOverlayDRMAC: nodeHOMAC,
+				"k8s.ovn.org/ovn-node-id":  "2",
+				util.OVNNodeGRLRPAddrs:     "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}"}
 
 			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
@@ -1664,7 +1670,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator,
+				ovntest.MustParseMAC(node1.NodeMgmtPortMAC), types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

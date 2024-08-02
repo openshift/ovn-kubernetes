@@ -36,6 +36,8 @@ import (
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 )
 
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
@@ -160,12 +162,19 @@ type BaseNetworkController struct {
 	// might have been already be released on startup
 	releasedPodsBeforeStartup  map[string]sets.Set[string]
 	releasedPodsOnStartupMutex sync.Mutex
+
+	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
+	// connecting to the join switch
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
 // configuration for secondary network controller
 type BaseSecondaryNetworkController struct {
 	BaseNetworkController
+
+	networkID *int
+
 	// multi-network policy events factory handler
 	policyHandler *factory.Handler
 }
@@ -252,6 +261,30 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	}
 
 	return &logicalRouter, nil
+}
+
+// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
+// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
+// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
+// always be the first IP from these subnets.
+func (bnc *BaseNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
+	joinSubnetsConfig := []*net.IPNet{}
+	if config.IPv4Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, bnc.JoinSubnetV4())
+	}
+	if config.IPv6Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, bnc.JoinSubnetV6())
+	}
+	for _, joinSubnet := range joinSubnetsConfig {
+		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
+		ipnet := &net.IPNet{
+			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
+			Mask: joinSubnet.Mask,
+		}
+		gwLRPIPs = append(gwLRPIPs, ipnet)
+	}
+
+	return gwLRPIPs, nil
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
@@ -592,7 +625,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 }
 
 func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName string, hostSubnets []*net.IPNet, routeHostSubnets bool) ([]net.IP, error) {
-	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
+	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, bnc.GetNetworkName())
 	if err != nil {
 		return nil, err
 	}
@@ -769,8 +802,12 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 
 // getActiveNetworkForNamespace returns the active network for the given namespace
 // and is a wrapper around util.GetActiveNetworkForNamespace
-func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (string, error) {
-	return util.GetActiveNetworkForNamespace(namespace, bnc.watchFactory.NADInformer().Lister())
+func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+	var nadLister nadlister.NetworkAttachmentDefinitionLister
+	if util.IsNetworkSegmentationSupportEnabled() {
+		nadLister = bnc.watchFactory.NADInformer().Lister()
+	}
+	return util.GetActiveNetworkForNamespace(namespace, nadLister)
 }
 
 // GetNetworkRole returns the role of this controller's
@@ -808,16 +845,12 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 	}
 	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
+		if util.IsUnknownActiveNetworkError(err) {
+			bnc.recordPodErrorEvent(pod, err)
+		}
 		return "", err
 	}
-	if activeNetwork == types.UnknownNetworkName {
-		err := fmt.Errorf("unable to determine what is the"+
-			"primary network for this pod %s; please remove multiple primary network"+
-			"NADs from namespace %s", pod.Name, pod.Namespace)
-		bnc.recordPodErrorEvent(pod, err)
-		return "", err
-	}
-	if activeNetwork == bnc.GetNetworkName() {
+	if activeNetwork.GetNetworkName() == bnc.GetNetworkName() {
 		return types.NetworkRolePrimary, nil
 	}
 	if bnc.IsDefault() {
@@ -845,8 +878,8 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 		return true
 	}
 
-	// NodeGatewayRouterLRPAddrAnnotationChanged would not affect local, nor layer3 secondary network
-	if !newNodeIsLocalZone && !bnc.IsSecondary() && util.NodeGatewayRouterLRPAddrAnnotationChanged(oldNode, newNode) {
+	// NodeGatewayRouterLRPAddrsAnnotationChanged would not affect local, nor localnet secondary network
+	if !newNodeIsLocalZone && bnc.NetInfo.TopologyType() != types.LocalnetTopology && util.NodeGatewayRouterLRPAddrsAnnotationChanged(oldNode, newNode) {
 		return true
 	}
 

@@ -14,8 +14,11 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -580,7 +583,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 	}
 }
 
-func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, waiter *startupWaiter,
+func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
 	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
@@ -598,7 +601,7 @@ func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, wa
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(routeManager, nodeAnnotator, waiter)
+		config, err := port.Create(routeManager, node, nodeLister, kubeInterface, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -821,7 +824,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nodeAnnotator, waiter, subnets, nc.routeManager)
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
+		nc.Kube, waiter, subnets, nc.routeManager)
 	if err != nil {
 		return err
 	}
@@ -1222,6 +1226,16 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 
 }
 func (nc *DefaultNodeNetworkController) WatchEndpointSlices() error {
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+		if err != nil {
+			return err
+		}
+		_, err = nc.retryEndpointSlices.WatchResourceFiltered("", labels.NewSelector().Add(*req))
+		return err
+	}
 	_, err := nc.retryEndpointSlices.WatchResource()
 	return err
 }

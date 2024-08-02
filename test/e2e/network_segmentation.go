@@ -3,14 +3,17 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
-	iputils "github.com/containernetworking/plugins/pkg/ip"
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	iputils "github.com/containernetworking/plugins/pkg/ip"
+
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -18,6 +21,7 @@ import (
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -110,12 +114,10 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"client-pod",
-					nadName,
 					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -132,12 +134,10 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"client-pod",
-					nadName,
 					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -152,6 +152,13 @@ var _ = Describe("Network Segmentation", func() {
 				netConfigParams networkAttachmentConfigParams,
 				udnPodConfig podConfiguration,
 			) {
+				if !isInterconnectEnabled() {
+					const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4528"
+					e2eskipper.Skipf(
+						"These tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+					)
+				}
+
 				By("Creating second namespace for default network pods")
 				defaultNetNamespace := f.Namespace.Name + "-default"
 				_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
@@ -320,7 +327,7 @@ var _ = Describe("Network Segmentation", func() {
 				for _, kapiIP := range kapi.Spec.ClusterIPs {
 					By("checking the UDN pod can't reach kapi service on IP " + kapiIP)
 					Consistently(func() bool {
-						return connectToServer(udnPodConfig, kapiIP, int(kapi.Spec.Ports[0].Port)) != nil
+						return connectToServerViaDefaultNetwork(udnPodConfig, kapiIP, int(kapi.Spec.Ports[0].Port)) != nil
 					}, 5*time.Second).Should(BeTrue())
 				}
 			},
@@ -334,7 +341,6 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"udn-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -351,7 +357,6 @@ var _ = Describe("Network Segmentation", func() {
 				},
 				*podConfig(
 					"udn-pod",
-					nadName,
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
@@ -364,10 +369,9 @@ var _ = Describe("Network Segmentation", func() {
 
 type podOption func(*podConfiguration)
 
-func podConfig(podName, nadName string, opts ...podOption) *podConfiguration {
+func podConfig(podName string, opts ...podOption) *podConfiguration {
 	pod := &podConfiguration{
-		attachments: []nadapi.NetworkSelectionElement{{Name: nadName}},
-		name:        podName,
+		name: podName,
 	}
 	for _, opt := range opts {
 		opt(pod)
@@ -449,4 +453,21 @@ func runUDNPod(cs clientset.Interface, namespace string, serverPodConfig podConf
 		return updatedPod.Status.Phase
 	}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
 	return updatedPod
+}
+
+// connectToServerViaDefaultNetwork sends the traffic via the pod's default interface
+func connectToServerViaDefaultNetwork(clientPodConfig podConfiguration, serverIP string, port int) error {
+	_, err := e2ekubectl.RunKubectl(
+		clientPodConfig.namespace,
+		"exec",
+		clientPodConfig.name,
+		"--",
+		"curl",
+		"--connect-timeout",
+		"2",
+		"--interface",
+		"eth0",
+		net.JoinHostPort(serverIP, fmt.Sprintf("%d", port)),
+	)
+	return err
 }
