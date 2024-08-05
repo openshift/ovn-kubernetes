@@ -112,6 +112,7 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	// make sure we clean up after ourselves on failure
 	defer func() {
 		if err != nil {
+			klog.Infof("OCPBUGS-37685 nodeNetworkControllerManager stop err: %v", err)
 			ncm.Stop()
 		}
 	}()
@@ -137,6 +138,8 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
 	}
+
+	klog.Infof("OCPBUGS-37685 nodeNetworkControllerManager started err: %v", err)
 
 	return err
 }
