@@ -512,7 +512,8 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			defer ovnkubeControllerWG.Done()
 			err = networkControllerManager.Start(ctx)
 			if err != nil {
-				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)
+				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)				
+				klog.Infof("OCPBUGS-37685 routine ovnkubeControllerStartErr: %v", ovnkubeControllerStartErr)
 				return
 			}
 			// record delay until ready
@@ -522,6 +523,8 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		// Stop() only makes sense to call if Start() succeeded.
 		defer func() {
 			ovnkubeControllerWG.Wait()
+			klog.Infof("OCPBUGS-37685 defer ovnkubeControllerStartErr: %v", ovnkubeControllerStartErr)
+
 			if ovnkubeControllerStartErr == nil {
 				networkControllerManager.Stop()
 			}
@@ -556,7 +559,10 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		if err != nil {
 			return fmt.Errorf("failed to start node network manager: %w", err)
 		}
-		defer ncm.Stop()
+		defer func () {
+			klog.Infof("OCPBUGS-37685 defer stop")
+			ncm.Stop()
+		}()
 
 		// record delay until ready
 		metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
@@ -566,6 +572,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.ovnkubeController {
 		ovnkubeControllerWG.Wait()
 		if ovnkubeControllerStartErr != nil {
+			klog.Infof("OCPBUGS-37685 ovnkubeControllerStartErr: %v", ovnkubeControllerStartErr)
 			return ovnkubeControllerStartErr
 		}
 	}
@@ -583,6 +590,9 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	// run until cancelled
 	<-ctx.Done()
+
+	klog.Infof("OCPBUGS-37685 ctx Done: %v", ctx.Err())
+
 	return nil
 }
 

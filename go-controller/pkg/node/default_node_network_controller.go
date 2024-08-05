@@ -1174,6 +1174,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 // deleteLogicalEntities will never be true for default network
 func (nc *DefaultNodeNetworkController) Stop() {
+	klog.Infof("OCPBUGS-37685 DefaultNodeNetworkController.Stop")
 	close(nc.stopChan)
 	nc.wg.Wait()
 }
