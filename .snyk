@@ -1,0 +1,25 @@
+ignore:
+  8a304114-31bb-4235-b9c0-aee78c3804d3:
+    - '*':
+      reason: 'Ignore use of hardcoded credentials'
+      expires: '2024-07-19T00:00:00Z'
+  a54613fe-5f83-41a5-a09f-f4e1334ba88a:
+    - '*':
+      reason: 'Ignore use of hardcoded credentials'
+      expires: '2024-07-19T00:00:00Z'
+  d6f7a227-63f1-494d-ab83-23b766cb148c:
+    - '*':
+      reason: 'Ignore use of hardcoded credentials'
+      expires: '2024-07-19T00:00:00Z'
+  f093ab7b-09e1-4c3c-80a9-1cc8a1163b11:
+    - '*':
+      reason: 'Ignore generation of Error msg having Sensitive Information'
+      expires: '2024-07-19T00:00:00Z'
+  2f8ba2c4-25db-44ee-8012-4a21a0661138:
+    - '*':
+      reason: 'Ignore improper Certificate Validation'
+      expires: '2024-07-19T00:00:00Z'
+  34c78580-3e8c-4bd6-a07a-bbabae89fa2a:
+    - '*':
+      reason: 'Ignore improper Certificate Validation'
+      expires: '2024-07-19T00:00:00Z'
