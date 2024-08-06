@@ -433,7 +433,8 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 			allV6TargetIPs := config.clusterEndpoints.V6IPs
 
 			for range config.vips {
-				klog.V(5).Infof("buildTemplateLBs() service %s/%s adding rules", service.Namespace, service.Name)
+				klog.V(5).Infof("buildTemplateLBs() service %s/%s adding rules for network=%s",
+					service.Namespace, service.Name, netInfo.GetNetworkName())
 
 				// If all targets have exactly the same IPs on all nodes there's
 				// no need to use a template, just use the same list of explicit
@@ -596,9 +597,9 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 
 	merged := mergeLBs(out)
 	if len(merged) != len(out) {
-		klog.V(5).Infof("Service %s/%s merged %d LBs to %d",
+		klog.V(5).Infof("Service %s/%s merged %d LBs to %d for network=%s",
 			service.Namespace, service.Name,
-			len(out), len(merged))
+			len(out), len(merged), netInfo.GetNetworkName())
 	}
 
 	return merged
@@ -804,9 +805,9 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo, 
 
 	merged := mergeLBs(out)
 	if len(merged) != len(out) {
-		klog.V(5).Infof("Service %s/%s merged %d LBs to %d",
+		klog.V(5).Infof("Service %s/%s merged %d LBs to %d for network=%s",
 			service.Namespace, service.Name,
-			len(out), len(merged))
+			len(out), len(merged), netInfo.GetNetworkName())
 	}
 
 	return merged
@@ -1027,7 +1028,8 @@ func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Servi
 			}
 		}
 	}
-	klog.V(5).Infof("Cluster endpoints for %s/%s are: %v", service.Namespace, service.Name, portToLBEndpoints)
+	klog.V(5).Infof("Cluster endpoints for %s/%s for network=%s are: %v",
+		service.Namespace, service.Name, networkName, portToLBEndpoints)
 
 	for port, nodeToEndpoints := range portToNodeToEndpoints {
 		for node, endpoints := range nodeToEndpoints {
@@ -1049,7 +1051,8 @@ func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Servi
 	}
 
 	if requiresLocalEndpoints {
-		klog.V(5).Infof("Local endpoints for %s/%s are: %v", service.Namespace, service.Name, portToNodeToLBEndpoints)
+		klog.V(5).Infof("Local endpoints for %s/%s for network=%s are: %v",
+			service.Namespace, service.Name, networkName, portToNodeToLBEndpoints)
 	}
 
 	return portToLBEndpoints, portToNodeToLBEndpoints
