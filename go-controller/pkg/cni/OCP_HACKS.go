@@ -30,7 +30,7 @@ func doNFTablesRules(platformType string) error {
 	tx.Add(&knftables.Rule{
 		Chain: "block",
 		Rule: knftables.Concat(
-			"tcp dport { 22623, 22624 } tcp flags syn",
+			"tcp dport { 22623, 22624 } tcp flags syn / fin,syn,rst,ack",
 			"reject",
 		),
 	})
