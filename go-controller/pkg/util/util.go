@@ -125,6 +125,10 @@ func GetNetworkScopedK8sMgmtHostIntfName(networkID uint) string {
 	return intfName
 }
 
+func GetVRFDeviceNameForUDN(networkID int) string {
+	return fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, networkID, types.UDNVRFDeviceSuffix)
+}
+
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
 func GetWorkerFromGatewayRouter(gr string) string {
 	return strings.TrimPrefix(gr, types.GWRouterPrefix)
@@ -138,6 +142,18 @@ func GetGatewayRouterFromNode(node string) string {
 // GetGatewayRouterFromNode determines a node's corresponding gateway router name
 func GetExtSwitchFromNode(node string) string {
 	return types.ExternalSwitchPrefix + node
+}
+
+// GetExtPortName determines the name of a node's logical port to the external
+// bridge.
+func GetExtPortName(bridgeID, nodeName string) string {
+	return bridgeID + "_" + nodeName
+}
+
+// GetPatchPortName determines the name of the patch port on the external
+// bridge, which connects to br-int
+func GetPatchPortName(bridgeID, nodeName string) string {
+	return types.PatchPortPrefix + GetExtPortName(bridgeID, nodeName) + types.PatchPortSuffix
 }
 
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined

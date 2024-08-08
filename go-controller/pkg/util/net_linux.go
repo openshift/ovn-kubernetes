@@ -28,11 +28,14 @@ type NetLinkOps interface {
 	LinkByName(ifaceName string) (netlink.Link, error)
 	LinkByIndex(index int) (netlink.Link, error)
 	LinkSetDown(link netlink.Link) error
+	LinkAdd(link netlink.Link) error
 	LinkDelete(link netlink.Link) error
 	LinkSetName(link netlink.Link, newName string) error
 	LinkSetUp(link netlink.Link) error
 	LinkSetNsFd(link netlink.Link, fd int) error
 	LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error
+	LinkSetMaster(link netlink.Link, master netlink.Link) error
+	LinkSetNoMaster(link netlink.Link) error
 	LinkSetMTU(link netlink.Link, mtu int) error
 	LinkSetTxQLen(link netlink.Link, qlen int) error
 	IsLinkNotFoundError(err error) bool
@@ -88,6 +91,10 @@ func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
 	return netlink.LinkSetDown(link)
 }
 
+func (defaultNetLinkOps) LinkAdd(link netlink.Link) error {
+	return netlink.LinkAdd(link)
+}
+
 func (defaultNetLinkOps) LinkDelete(link netlink.Link) error {
 	return netlink.LinkDel(link)
 }
@@ -106,6 +113,14 @@ func (defaultNetLinkOps) LinkSetNsFd(link netlink.Link, fd int) error {
 
 func (defaultNetLinkOps) LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error {
 	return netlink.LinkSetHardwareAddr(link, hwaddr)
+}
+
+func (defaultNetLinkOps) LinkSetMaster(link netlink.Link, master netlink.Link) error {
+	return netlink.LinkSetMaster(link, master)
+}
+
+func (defaultNetLinkOps) LinkSetNoMaster(link netlink.Link) error {
+	return netlink.LinkSetNoMaster(link)
 }
 
 func (defaultNetLinkOps) LinkSetMTU(link netlink.Link, mtu int) error {
@@ -180,6 +195,15 @@ func getFamily(ip net.IP) int {
 	}
 }
 
+// LinkByName returns the netlink device
+func LinkByName(interfaceName string) (netlink.Link, error) {
+	link, err := netLinkOps.LinkByName(interfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %w", interfaceName, err)
+	}
+	return link, nil
+}
+
 // LinkSetUp returns the netlink device with its state marked up
 func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	link, err := netLinkOps.LinkByName(interfaceName)
@@ -240,6 +264,21 @@ func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 	return false, nil
 }
 
+// LinkAddrGetIPNet returns IPNet given the IP of an address present on given link
+func LinkAddrGetIPNet(link netlink.Link, ip net.IP) (*net.IPNet, error) {
+	addrs, err := netLinkOps.AddrList(link, getFamily(ip))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses for the link %s: %v",
+			link.Attrs().Name, err)
+	}
+	for _, addr := range addrs {
+		if addr.IPNet.IP.Equal(ip) {
+			return addr.IPNet, nil
+		}
+	}
+	return nil, nil
+}
+
 // LinkAddrAdd adds a new address. If both preferredLifetime & validLifetime,
 // are zero, then they are not applied, but if either parameters are not zero, both are applied.
 func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags, preferredLifetime, validLifetime int) error {
@@ -247,6 +286,7 @@ func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags, preferredLifetime
 	if err != nil {
 		return fmt.Errorf("failed to add address %s on link %s: %v", address.String(), link.Attrs().Name, err)
 	}
+
 	return nil
 }
 

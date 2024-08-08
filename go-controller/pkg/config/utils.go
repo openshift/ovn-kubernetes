@@ -96,6 +96,10 @@ func ParseClusterSubnetEntriesWithDefaults(clusterSubnetCmd string, ipv4HostLeng
 				return nil, fmt.Errorf("IPv6 only supports /64 host subnets")
 			}
 
+			if !ipv6 && parsedClusterEntry.HostSubnetLength > 32 {
+				return nil, fmt.Errorf("invalid host subnet, IPv4 subnet must be < 32")
+			}
+
 			if parsedClusterEntry.HostSubnetLength <= entryMaskLength {
 				return nil, fmt.Errorf("cannot use a host subnet length mask shorter than or equal to the cluster subnet mask. "+
 					"host subnet length: %d, cluster subnet length: %d", parsedClusterEntry.HostSubnetLength, entryMaskLength)
@@ -292,7 +296,7 @@ type MasqueradeIPsConfig struct {
 // allocateV4/6MasqueradeIPs allocates the masqueradeIPs based off of the passed in masqueradeSubnet (.0)
 // it does this by cascading down from the initial ip down to the .5 currently (more masqueradeIps may be added in the future)
 
-func allocateV4MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIPs *MasqueradeIPsConfig) error {
+func AllocateV4MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIPs *MasqueradeIPsConfig) error {
 	masqueradeIPs.V4OVNMasqueradeIP = iputils.NextIP(masqueradeSubnetNetworkAddress)
 	if masqueradeIPs.V4OVNMasqueradeIP == nil {
 		return fmt.Errorf("error setting V4OVNMasqueradeIP: %s", masqueradeSubnetNetworkAddress)
@@ -316,7 +320,7 @@ func allocateV4MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIP
 	return nil
 }
 
-func allocateV6MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIPs *MasqueradeIPsConfig) error {
+func AllocateV6MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIPs *MasqueradeIPsConfig) error {
 	masqueradeIPs.V6OVNMasqueradeIP = iputils.NextIP(masqueradeSubnetNetworkAddress)
 	if masqueradeIPs.V6OVNMasqueradeIP == nil {
 		return fmt.Errorf("error setting V6OVNMasqueradeIP: %s", masqueradeSubnetNetworkAddress)
