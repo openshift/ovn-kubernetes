@@ -1229,11 +1229,6 @@ func Test_buildClusterLBs(t *testing.T) {
 		},
 	}
 
-	defaultExternalIDs := map[string]string{
-		types.LoadBalancerKindExternalID:  "Service",
-		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
-	}
-
 	defaultRouters := []string{}
 	defaultSwitches := []string{}
 	defaultGroups := []string{"clusterLBGroup"}
@@ -1286,7 +1281,7 @@ func Test_buildClusterLBs(t *testing.T) {
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_TCP_cluster", namespace, name),
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Rules: []LBRule{
 						{
 							Source:  Addr{IP: "1.2.3.4", Port: 80},
@@ -1345,7 +1340,7 @@ func Test_buildClusterLBs(t *testing.T) {
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_TCP_cluster", namespace, name),
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Rules: []LBRule{
 						{
 							Source:  Addr{IP: "1.2.3.4", Port: 80},
@@ -1361,7 +1356,7 @@ func Test_buildClusterLBs(t *testing.T) {
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_UDP_cluster", namespace, name),
 					Protocol:    "UDP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Rules: []LBRule{
 						{
 							Source:  Addr{IP: "1.2.3.4", Port: 443},
@@ -1422,7 +1417,7 @@ func Test_buildClusterLBs(t *testing.T) {
 				{
 					Name:        fmt.Sprintf("Service_%s/%s_TCP_cluster", namespace, name),
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Rules: []LBRule{
 						{
 							Source:  Addr{IP: "1.2.3.4", Port: 80},
@@ -1524,10 +1519,6 @@ func Test_buildPerNodeLBs(t *testing.T) {
 		},
 	}
 
-	defaultExternalIDs := map[string]string{
-		types.LoadBalancerKindExternalID:  "Service",
-		types.LoadBalancerOwnerExternalID: fmt.Sprintf("%s/%s", namespace, name),
-	}
 	defaultOpts := LBOpts{Reject: true}
 
 	//defaultRouters := []string{"gr-node-a", "gr-node-b"}
@@ -1563,7 +1554,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1576,7 +1567,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a_merged",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-a", "switch-node-b"},
 					Protocol:    "TCP",
@@ -1610,7 +1601,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
@@ -1628,7 +1619,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
@@ -1644,7 +1635,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
@@ -1662,7 +1653,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
@@ -1714,7 +1705,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1735,7 +1726,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1756,7 +1747,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
@@ -1776,7 +1767,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1797,7 +1788,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1818,7 +1809,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
@@ -1881,7 +1872,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				// switch clusterip + nodeport
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1894,7 +1885,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Protocol:    "TCP",
@@ -1911,7 +1902,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1945,7 +1936,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				// switch clusterip + nodeport
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -1962,7 +1953,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2030,7 +2021,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a_merged",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a", "gr-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2047,7 +2038,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2064,7 +2055,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2083,7 +2074,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a_merged",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a", "gr-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2100,7 +2091,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2117,7 +2108,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2181,7 +2172,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2198,7 +2189,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2215,7 +2206,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2232,7 +2223,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2251,7 +2242,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2268,7 +2259,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2285,7 +2276,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2302,7 +2293,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2363,7 +2354,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2376,7 +2367,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Protocol:    "TCP",
@@ -2393,7 +2384,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2422,7 +2413,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2439,7 +2430,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2462,7 +2453,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2475,7 +2466,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Protocol:    "TCP",
@@ -2492,7 +2483,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2521,7 +2512,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2538,7 +2529,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []LBRule{
@@ -2611,7 +2602,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 
 					Rules: []LBRule{
@@ -2637,7 +2628,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        defaultOpts,
 					Rules: []LBRule{
 						{
@@ -2670,7 +2661,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-b",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Rules: []LBRule{
 						{
@@ -2691,7 +2682,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        defaultOpts,
 					Rules: []LBRule{
 						{
@@ -2754,7 +2745,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 
 					Rules: []LBRule{
@@ -2780,7 +2771,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        defaultOpts,
 					Rules: []LBRule{
 						{
@@ -2813,7 +2804,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-b",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Rules: []LBRule{
 						{
@@ -2834,7 +2825,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        defaultOpts,
 					Rules: []LBRule{
 						{
@@ -2889,7 +2880,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedShared: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
@@ -2907,7 +2898,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
@@ -2923,7 +2914,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			expectedLocal: []LB{
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
@@ -2941,7 +2932,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
@@ -2995,7 +2986,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 
 					Rules: []LBRule{
@@ -3021,7 +3012,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        defaultOpts,
 					Rules: []LBRule{
 						{
@@ -3054,7 +3045,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_local_router_node-b",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        LBOpts{SkipSNAT: true, Reject: true},
 					Rules: []LBRule{
 						{
@@ -3075,7 +3066,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-b",
 					Protocol:    "TCP",
-					ExternalIDs: defaultExternalIDs,
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(namespace, name)),
 					Opts:        defaultOpts,
 					Rules: []LBRule{
 						{
