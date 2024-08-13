@@ -898,7 +898,8 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 				!strings.HasPrefix(pod.Name, "ovnkube-identity") &&
 				!strings.HasPrefix(pod.Name, "ovs-node") {
 				framework.Logf("%q", pod.Namespace)
-				deletePodWithWaitByName(context.TODO(), f.ClientSet, pod.Name, ovnNamespace)
+				err = deletePodWithWaitByName(context.TODO(), f.ClientSet, pod.Name, ovnNamespace)
+				framework.ExpectNoError(err, fmt.Sprintf("failed to delete pod %s", pod.Name))
 				framework.Logf("Deleted control plane pod %q", pod.Name)
 			}
 		}
@@ -931,7 +932,8 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		for _, pod := range podList.Items {
 			if strings.HasPrefix(pod.Name, controlPlanePodName) && !strings.HasPrefix(pod.Name, "ovs-node") {
 				framework.Logf("%q", pod.Namespace)
-				deletePodWithWaitByName(context.TODO(), f.ClientSet, pod.Name, ovnNamespace)
+				err = deletePodWithWaitByName(context.TODO(), f.ClientSet, pod.Name, ovnNamespace)
+				framework.ExpectNoError(err, fmt.Sprintf("failed to delete pod %s", pod.Name))
 				framework.Logf("Deleted control plane pod %q", pod.Name)
 			}
 		}
@@ -2186,8 +2188,10 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		var (
 			command = []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=" + port)}
 		)
-		createGenericPod(f, pod1Name, node1Name, f.Namespace.Name, command)
-		createGenericPod(f, pod2Name, node2Name, f.Namespace.Name, command)
+		_, err := createGenericPod(f, pod1Name, node1Name, f.Namespace.Name, command)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
+		_, err = createGenericPod(f, pod2Name, node2Name, f.Namespace.Name, command)
+		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
 
 		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
 
@@ -2340,7 +2344,8 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		}
 
 		framework.Logf("wait for all the Deployment to become ready again after pod deletion")
-		e2edeployment.WaitForDeploymentComplete(f.ClientSet, dbDeployment)
+		err = e2edeployment.WaitForDeploymentComplete(f.ClientSet, dbDeployment)
+		framework.ExpectNoError(err, "failed to wait for DB deployment to complete")
 
 		framework.Logf("all the pods finish full restart")
 
