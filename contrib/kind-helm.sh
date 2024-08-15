@@ -31,6 +31,10 @@ set_default_params() {
   # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
 
+  # Validated params that work
+  export MASQUERADE_SUBNET_IPV4=${MASQUERADE_SUBNET_IPV4:-169.254.0.0/17}
+  export MASQUERADE_SUBNET_IPV6=${MASQUERADE_SUBNET_IPV6:-fd69::/112}
+
   # Input not currently validated. Modify outside script at your own risk.
   # These are the same values defaulted to in KIND code (kind/default.go).
   # NOTE: KIND NET_CIDR_IPV6 default use a /64 but OVN have a /64 per host
@@ -43,8 +47,6 @@ set_default_params() {
   export SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
   export JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
   export JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
-  export MASQUERADE_SUBNET_IPV4=${MASQUERADE_SUBNET_IPV4:-169.254.169.0/29}
-  export MASQUERADE_SUBNET_IPV6=${MASQUERADE_SUBNET_IPV6:-fd69::/125}
   export TRANSIT_SWITCH_SUBNET_IPV4=${TRANSIT_SWITCH_SUBNET_IPV4:-100.88.0.0/16}
   export TRANSIT_SWITCH_SUBNET_IPV6=${TRANSIT_SWITCH_SUBNET_IPV6:-fd97::/64}
   export METALLB_CLIENT_NET_SUBNET_IPV4=${METALLB_CLIENT_NET_SUBNET_IPV4:-172.22.0.0/16}
@@ -57,6 +59,8 @@ set_default_params() {
 
   # Hard code ipv4 support until IPv6 is implemented
   export KIND_IPV4_SUPPORT=true
+
+  export OVN_ENABLE_DNSNAMERESOLVER=${OVN_ENABLE_DNSNAMERESOLVER:-false}
 }
 
 usage() {
@@ -92,6 +96,7 @@ usage() {
     echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled"
     echo "-wk  | --num-workers                Number of worker nodes. DEFAULT: 2 workers"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
+    echo "-dns | --enable-dnsnameresolver     Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
     echo ""
 
 }
@@ -144,6 +149,8 @@ parse_args() {
                                                 # Setup KUBECONFIG
                                                 set_default_params
                                                 ;;
+            -dns | --enable-dnsnameresolver )   OVN_ENABLE_DNSNAMERESOLVER=true
+                                                ;;
             * )                                 usage
                                                 exit 1
         esac
@@ -170,6 +177,7 @@ print_params() {
      echo "OVN_IMAGE = $OVN_IMAGE"
      echo "KIND_NUM_MASTER = $KIND_NUM_MASTER"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
      echo ""
 }
 
@@ -311,8 +319,11 @@ create_ovn_kubernetes() {
         --set global.enableMultiNetwork=$(if [ "${ENABLE_MULTI_NET}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.enableHybridOverlay=$(if [ "${OVN_HYBRID_OVERLAY_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set global.emptyLbEvents=$(if [ "${OVN_EMPTY_LB_EVENTS}" == "true" ]; then echo "true"; else echo "false"; fi) \
+        --set global.enableDNSNameResolver=$(if [ "${OVN_ENABLE_DNSNAMERESOLVER}" == "true" ]; then echo "true"; else echo "false"; fi) \
         --set tags.ovnkube-db-raft=$(if [ "${OVN_HA}" == "true" ]; then echo "true"; else echo "false"; fi) \
-        --set tags.ovnkube-db=$(if [ "${OVN_HA}" == "false" ]; then echo "true"; else echo "false"; fi)
+        --set tags.ovnkube-db=$(if [ "${OVN_HA}" == "false" ]; then echo "true"; else echo "false"; fi) \
+        --set global.v4MasqueradeSubnet=${MASQUERADE_SUBNET_IPV4} \
+        --set global.v6MasqueradeSubnet=${MASQUERADE_SUBNET_IPV6}
 }
 
 delete() {
@@ -339,6 +350,14 @@ create_kind_cluster
 detect_apiserver_url
 docker_disable_ipv6
 coredns_patch
+if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    build_dnsnameresolver_images
+    install_dnsnameresolver_images
+    install_dnsnameresolver_operator
+    update_clusterrole_coredns
+    add_ocp_dnsnameresolver_to_coredns_config
+    update_coredns_deployment_image
+fi
 create_ovn_kubernetes
 
 install_online_ovn_kubernetes_crds
@@ -351,6 +370,9 @@ if [ "$ENABLE_MULTI_NET" == true ]; then
 fi
 
 kubectl_wait_pods
+if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    kubectl_wait_dnsnameresolver_pods
+fi
 sleep_until_pods_settle
 
 if [ "$KIND_INSTALL_METALLB" == true ]; then
