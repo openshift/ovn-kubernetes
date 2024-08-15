@@ -28,13 +28,17 @@ type Controller struct {
 
 // NewController creates a new linux IP rule manager
 func NewController(v4, v6 bool) *Controller {
-	return &Controller{
+	nc := &Controller{
 		mu:            &sync.Mutex{},
 		rules:         make([]ipRule, 0),
 		ownPriorities: make(map[int]bool, 0),
 		v4:            v4,
 		v6:            v6,
 	}
+	if err := nc.loadHostRules(); err != nil {
+		klog.Warningf("Could not load ip rules from host, err: %q", err)
+	}
+	return nc
 }
 
 // Run starts manages linux IP rules
@@ -61,13 +65,9 @@ func (rm *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 func (rm *Controller) Add(rule netlink.Rule) error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-	// check if we are already managing this route and if so, no-op
-	for _, existingRule := range rm.rules {
-		if areNetlinkRulesEqual(existingRule.rule, &rule) {
-			return nil
-		}
+	if err := rm.add(rule); err != nil {
+		return err
 	}
-	rm.rules = append(rm.rules, ipRule{rule: &rule})
 	return rm.reconcile()
 }
 
@@ -102,16 +102,8 @@ func (rm *Controller) reconcile() error {
 	defer func() {
 		klog.V(5).Infof("Reconciling IP rules took %v", time.Since(start))
 	}()
-	var family int
-	if rm.v4 && rm.v6 {
-		family = netlink.FAMILY_ALL
-	} else if rm.v4 {
-		family = netlink.FAMILY_V4
-	} else if rm.v6 {
-		family = netlink.FAMILY_V6
-	}
 
-	rulesFound, err := netlink.RuleList(family)
+	rulesFound, err := rm.getNetlinkRules()
 	if err != nil {
 		return err
 	}
@@ -183,4 +175,48 @@ func isNetlinkRuleInSlice(rules []netlink.Rule, candidate *netlink.Rule) (bool, 
 		}
 	}
 	return false, netlink.NewRule()
+}
+
+// add adds an IP rule to the in memory list of rules.
+func (rm *Controller) add(rule netlink.Rule) error {
+	// check if we are already managing this route and if so, no-op
+	for _, existingRule := range rm.rules {
+		if areNetlinkRulesEqual(existingRule.rule, &rule) {
+			return nil
+		}
+	}
+	rm.rules = append(rm.rules, ipRule{rule: &rule})
+	return nil
+}
+
+// getNetlinkRules retrieves all ip rules via netlink for this manager's IP address families.
+func (rm *Controller) getNetlinkRules() ([]netlink.Rule, error) {
+	var family int
+	if rm.v4 && rm.v6 {
+		family = netlink.FAMILY_ALL
+	} else if rm.v4 {
+		family = netlink.FAMILY_V4
+	} else if rm.v6 {
+		family = netlink.FAMILY_V6
+	}
+
+	return netlink.RuleList(family)
+}
+
+// loadHostRules retrieves all ip rules via netlink for this manager's IP address families and adds them to the in
+// memory list of rules.
+func (rm *Controller) loadHostRules() error {
+	rules, err := rm.getNetlinkRules()
+	if err != nil {
+		return err
+	}
+
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	for _, rule := range rules {
+		if err := rm.add(rule); err != nil {
+			return err
+		}
+	}
+	return nil
 }
