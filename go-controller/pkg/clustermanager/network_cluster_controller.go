@@ -317,8 +317,7 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		}
 		err := h.ncc.podAllocator.Reconcile(nil, pod)
 		if err != nil {
-			klog.Infof("Pod add failed for %s/%s, will try again later: %v",
-				pod.Namespace, pod.Name, err)
+			return err
 		}
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -357,8 +356,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		}
 		err := h.ncc.podAllocator.Reconcile(old, new)
 		if err != nil {
-			klog.Infof("Pod update failed for %s/%s, will try again later: %v",
-				new.Namespace, new.Name, err)
+			return err
 		}
 	case factory.NodeType:
 		node, ok := newObj.(*corev1.Node)
@@ -390,8 +388,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		err := h.ncc.podAllocator.Reconcile(pod, nil)
 		if err != nil {
-			klog.Infof("Pod delete failed for %s/%s, will try again later: %v",
-				pod.Namespace, pod.Name, err)
+			return err
 		}
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
