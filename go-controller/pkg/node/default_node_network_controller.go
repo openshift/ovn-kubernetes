@@ -54,6 +54,8 @@ type CommonNodeNetworkControllerInfo struct {
 	recorder               record.EventRecorder
 	name                   string
 	apbExternalRouteClient adminpolicybasedrouteclientset.Interface
+	// route manager that creates and manages routes
+	routeManager *routemanager.Controller
 }
 
 // BaseNodeNetworkController structure per-network fields and network specific configuration
@@ -76,7 +78,7 @@ type BaseNodeNetworkController struct {
 }
 
 func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface,
-	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
+	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string, routeManager *routemanager.Controller) *CommonNodeNetworkControllerInfo {
 
 	return &CommonNodeNetworkControllerInfo{
 		client:                 kubeClient,
@@ -85,20 +87,21 @@ func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kub
 		watchFactory:           wf,
 		name:                   name,
 		recorder:               eventRecorder,
+		routeManager:           routeManager,
 	}
 }
 
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
 func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory,
-	eventRecorder record.EventRecorder, name string) *CommonNodeNetworkControllerInfo {
-	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name)
+	eventRecorder record.EventRecorder, name string, routeManager *routemanager.Controller) *CommonNodeNetworkControllerInfo {
+	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name, routeManager)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
 type DefaultNodeNetworkController struct {
 	BaseNodeNetworkController
 
-	gateway Gateway
+	Gateway Gateway
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
 	routeManager  *routemanager.Controller
@@ -112,7 +115,7 @@ type DefaultNodeNetworkController struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
 
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
@@ -121,7 +124,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
-		routeManager: routemanager.NewController(),
+		routeManager: routeManager,
 	}
 }
 
@@ -130,7 +133,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -701,11 +704,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
-	nc.wg.Add(1)
-	go func() {
-		defer nc.wg.Done()
-		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
-	}()
 
 	if err = configureGlobalForwarding(); err != nil {
 		return err
@@ -988,7 +986,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
-	nc.gateway.Start()
+	nc.Gateway.Start()
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
@@ -996,7 +994,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		bridgeName := ""
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			bridgeName = nc.gateway.GetGatewayBridgeIface()
+			bridgeName = nc.Gateway.GetGatewayBridgeIface()
 			// Configure route for svc towards shared gw bridge
 			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
 			if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {

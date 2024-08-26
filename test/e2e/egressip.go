@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/dsl/table"
@@ -304,7 +303,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		targetSecondaryNodeName string = "egressSecondaryTargetNode-allowed"
 		egressIPYaml            string = "egressip.yaml"
 		egressFirewallYaml      string = "egressfirewall.yaml"
-		waitInterval                   = 3 * time.Second
 		ciNetworkName                  = "kind"
 		retryTimeout                   = 3 * retryTimeout // Boost the retryTimeout for EgressIP tests.
 	)
@@ -2534,6 +2532,9 @@ spec:
 	// 4. Create a pod matching the EgressIP
 	// 5. Check connectivity from a pod to an external "node" hosted on a secondary host network and verify the expected IP
 	ginkgo.It("[secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave", func() {
+		if !isKernelModuleLoaded(egress1Node.name, "vrf") {
+			ginkgo.Skip("Node doesn't have VRF kernel module loaded")
+		}
 		var egressIP1 string
 		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
 			egressIP1 = "2001:db8:abcd:1234:c001::"

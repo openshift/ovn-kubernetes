@@ -8,6 +8,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -158,7 +159,6 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	const (
 		svcname              string = "igmp-test"
 		ovnNs                string = "ovn-kubernetes"
-		port                 string = "8080"
 		ovnWorkerNode        string = "ovn-worker"
 		ovnWorkerNode2       string = "ovn-worker2"
 		mcastGroup           string = "224.1.1.1"
@@ -231,5 +231,4 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 			framework.Failf("failed to retrieve multicast IGMP query: igmp messages on the tcpdump logfile not found")
 		}
 	})
-
 })
