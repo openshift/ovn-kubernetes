@@ -383,6 +383,10 @@ func IsUnknownActiveNetworkError(err error) bool {
 	return errors.As(err, &unknownActiveNetworkError)
 }
 
+func NewUnknownActiveNetworkError(namespace string) *UnknownActiveNetworkError {
+	return &UnknownActiveNetworkError{namespace: namespace}
+}
+
 // GetActiveNetworkForNamespace returns the NetInfo struct of the active network
 // for the given namespace based on the NADs present in that namespace.
 // active network here means the network managing this namespace and responsible for

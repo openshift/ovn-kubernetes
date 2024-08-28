@@ -16,7 +16,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -29,14 +31,12 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	apitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-	v1nadmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 )
 
@@ -522,7 +522,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				nads: []*nadapi.NetworkAttachmentDefinition{
 					ovntest.GenerateNAD("surya", "miguel", "namespace",
 						types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary),
-					ovntest.GenerateNAD("surya", "miguel", "namespace",
+					ovntest.GenerateNAD("surya1", "miguel", "namespace",
 						types.Layer2Topology, "10.100.200.0/24", types.NetworkRolePrimary),
 				},
 			},
@@ -594,16 +594,21 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				ipamClaimsReconciler,
 			)
 
-			nadLister := v1nadmocks.NetworkAttachmentDefinitionLister{}
-			nadNamespaceLister := v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
-			nadLister.On("NetworkAttachmentDefinitions", "namespace").Return(&nadNamespaceLister)
-			mockedNADs := []*nadapi.NetworkAttachmentDefinition{}
+			primaryNetworks := syncmap.NewSyncMap[map[string]util.NetInfo]()
+			nadNetworks := map[string]util.NetInfo{}
+			testNs := "namespace"
 			for _, nad := range tt.args.nads {
-				if nad.Namespace == "namespace" {
-					mockedNADs = append(mockedNADs, nad)
+				if nad.Namespace == testNs {
+					nadNetwork, _ := util.ParseNADInfo(nad)
+					if nadNetwork.IsPrimaryNetwork() {
+						nadNetworks[nadNetwork.GetNetworkName()] = nadNetwork
+					}
 				}
 			}
-			nadNamespaceLister.On("List", labels.Everything()).Return(mockedNADs, nil)
+			primaryNetworks.Store("namespace", nadNetworks)
+
+			nadController := &nad.NetAttachDefinitionController{}
+			nadController.SetPrimaryNetworksForTest(primaryNetworks)
 
 			fakeRecorder := record.NewFakeRecorder(10)
 
@@ -619,7 +624,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				releasedPodsMutex:      sync.Mutex{},
 				ipamClaimsReconciler:   ipamClaimsReconciler,
 				recorder:               fakeRecorder,
-				nadLister:              &nadLister,
+				nadController:          nadController,
 			}
 
 			var old, new *corev1.Pod

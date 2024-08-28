@@ -17,6 +17,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
@@ -36,8 +37,6 @@ import (
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 )
 
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
@@ -157,6 +156,9 @@ type BaseNetworkController struct {
 	// Interconnect resources are Transit switch and logical ports connecting this transit switch
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
+
+	// nadController used for getting network information for UDNs
+	nadController *nad.NetAttachDefinitionController
 
 	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
 	// might have been already be released on startup
@@ -761,13 +763,9 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 }
 
 // getActiveNetworkForNamespace returns the active network for the given namespace
-// and is a wrapper around util.GetActiveNetworkForNamespace
+// and is a wrapper around GetActiveNetworkForNamespace
 func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	var nadLister nadlister.NetworkAttachmentDefinitionLister
-	if util.IsNetworkSegmentationSupportEnabled() {
-		nadLister = bnc.watchFactory.NADInformer().Lister()
-	}
-	return util.GetActiveNetworkForNamespace(namespace, nadLister)
+	return bnc.nadController.GetActiveNetworkForNamespace(namespace)
 }
 
 // GetNetworkRole returns the role of this controller's
