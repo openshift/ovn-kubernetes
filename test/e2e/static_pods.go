@@ -8,6 +8,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -66,7 +67,6 @@ func removeStaticPodFile(nodeName string, podFile string) {
 var _ = ginkgo.Describe("Creating a static pod on a node", func() {
 
 	const (
-		podName      string = "static-pod"
 		podFile      string = "static-pod.yaml"
 		agnhostImage string = "registry.k8s.io/e2e-test-images/agnhost:2.26"
 	)
