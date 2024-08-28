@@ -49,7 +49,7 @@ RUN INSTALL_PKGS=" \
 	openshift-clients \
 	" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
-	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
+	eval "dnf install -y --nodocs --nobest $(cat /more-pkgs)" && \
 	dnf clean all && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
