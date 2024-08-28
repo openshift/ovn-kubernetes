@@ -1231,13 +1231,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					Create(context.TODO(), networkPolicy2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
-				time.Sleep(types.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
 				key, err := retry.GetResourceKey(networkPolicy2)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
 
-				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
@@ -1286,7 +1286,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
-				time.Sleep(types.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 				// create second networkpolicy with the same name, but different tcp port
 				networkPolicy2 := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum+1)
 				// check retry entry for this policy
@@ -1299,7 +1299,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					gomega.Not(gomega.BeNil()), // oldObj should not be nil
 					gomega.BeNil(),             // newObj should be nil
 				)
-				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
@@ -1601,13 +1601,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
-				time.Sleep(types.OVSDBTimeout + time.Second)
+				time.Sleep(config.Default.OVSDBTxnTimeout + time.Second)
 
 				// check to see if the retry cache has an entry for this policy
 				key, err := retry.GetResourceKey(networkPolicy)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
-				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)

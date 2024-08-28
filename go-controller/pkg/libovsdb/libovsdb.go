@@ -145,7 +145,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout*2)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout*2)
 	go func() {
 		<-stopCh
 		cancel()
@@ -209,7 +209,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout*2)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout*2)
 	go func() {
 		<-stopCh
 		cancel()
