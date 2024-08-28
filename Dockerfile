@@ -32,6 +32,9 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+RUN dnf install openshift-clients jq -y
+RUN oc image info -o json registry.ci.openshift.org/ocp/4.18:ovn-kubernetes-base | jq .config.config.Labels
+
 # more-pkgs file is updated in Dockerfile.base
 # more-pkgs file contains the following ovs/ovn packages to be installed in this Dockerfile
 # - openvswitch-devel
