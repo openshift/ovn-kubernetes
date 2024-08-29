@@ -396,6 +396,7 @@ func NewUnknownActiveNetworkError(namespace string) *UnknownActiveNetworkError {
 // 2) &NetConf{Name: "<secondary-network-name>"} if there is exactly ONE NAD with Role: "primary"
 // 3) Multiple primary network role NADs ActiveNetworkUnknown error
 // 4) error under all other conditions
+// Only used for CNI unprivileged mode (to be implemented)
 func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (NetInfo, error) {
 	if nadLister == nil {
 		return &DefaultNetInfo{}, nil
