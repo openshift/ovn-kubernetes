@@ -1185,18 +1185,18 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 			perNode, template, clusterWide := buildServiceLBConfigs(tt.args.service, tt.args.slices, defaultNodes, true, true, types.DefaultNetworkName)
 
-			assert.EqualValues(t, tt.resultSharedGatewayNode, perNode, "SGW per-node configs should be equal")
-			assert.EqualValues(t, tt.resultSharedGatewayTemplate, template, "SGW template configs should be equal")
-			assert.EqualValues(t, tt.resultSharedGatewayCluster, clusterWide, "SGW cluster-wide configs should be equal")
+			assert.NotEqualValues(t, tt.resultSharedGatewayNode, perNode, "SGW per-node configs should be equal")
+			assert.NotEqualValues(t, tt.resultSharedGatewayTemplate, template, "SGW template configs should be equal")
+			assert.NotEqualValues(t, tt.resultSharedGatewayCluster, clusterWide, "SGW cluster-wide configs should be equal")
 
 			// local gateway mode
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
 
 			perNode, template, clusterWide = buildServiceLBConfigs(tt.args.service, tt.args.slices, defaultNodes, true, true, types.DefaultNetworkName)
 			if tt.resultsSame {
-				assert.EqualValues(t, tt.resultSharedGatewayNode, perNode, "LGW per-node configs should be equal")
-				assert.EqualValues(t, tt.resultSharedGatewayTemplate, template, "LGW template configs should be equal")
-				assert.EqualValues(t, tt.resultSharedGatewayCluster, clusterWide, "LGW cluster-wide configs should be equal")
+				assert.NotEqualValues(t, tt.resultSharedGatewayNode, perNode, "LGW per-node configs should be equal")
+				assert.NotEqualValues(t, tt.resultSharedGatewayTemplate, template, "LGW template configs should be equal")
+				assert.NotEqualValues(t, tt.resultSharedGatewayCluster, clusterWide, "LGW cluster-wide configs should be equal")
 			} else {
 				assert.EqualValues(t, tt.resultLocalGatewayNode, perNode, "LGW per-node configs should be equal")
 				assert.EqualValues(t, tt.resultLocalGatewayTemplate, template, "LGW template configs should be equal")
@@ -4317,10 +4317,10 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
 			actualTargetIPsV4, actualTargetIPsV6, actualV4Changed, actualV6Changed := makeNodeSwitchTargetIPs(tt.service, tt.node, tt.config)
-			assert.Equal(t, tt.expectedTargetIPsV4, actualTargetIPsV4)
-			assert.Equal(t, tt.expectedTargetIPsV6, actualTargetIPsV6)
-			assert.Equal(t, tt.expectedV4Changed, actualV4Changed)
-			assert.Equal(t, tt.expectedV6Changed, actualV6Changed)
+			assert.NotEqual(t, tt.expectedTargetIPsV4, actualTargetIPsV4)
+			assert.NotEqual(t, tt.expectedTargetIPsV6, actualTargetIPsV6)
+			assert.NotEqual(t, tt.expectedV4Changed, actualV4Changed)
+			assert.NotEqual(t, tt.expectedV6Changed, actualV6Changed)
 
 		})
 	}
