@@ -4216,7 +4216,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 		},
 		{
 			name:    "LB service with ETP=local, endpoint count changes",
-			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1),
+			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: v1.ProtocolTCP,
@@ -4244,7 +4244,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 		},
 		{
 			name:    "LB service with ETP=local, endpoint count is the same",
-			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1),
+			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: v1.ProtocolTCP,
@@ -4271,7 +4271,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 		},
 		{
 			name:    "LB service with ETP=local, no local endpoints left",
-			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1),
+			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: v1.ProtocolTCP,
@@ -4293,7 +4293,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 		// OCP HACK BEGIN
 		{
 			name:    "LB service with ETP=local, no local endpoints left, localWithFallback annotation",
-			service: addFallbackAnnotationToService(getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcpv1)),
+			service: addFallbackAnnotationToService(getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp)),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: v1.ProtocolTCP,
