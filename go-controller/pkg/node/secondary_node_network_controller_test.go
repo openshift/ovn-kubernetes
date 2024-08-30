@@ -67,8 +67,18 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ovntest.AddLink(gatewayInterface)
-			ovntest.AddLink(gatewayBridge)
+			link := ovntest.AddLink(gatewayBridge)
 			ovntest.AddLink(mgtPort)
+			addr, _ := netlink.ParseAddr("169.254.169.2/29")
+			err = netlink.AddrAdd(link, addr)
+			if err != nil {
+				return err
+			}
+			addr, _ = netlink.ParseAddr("10.0.0.5/24")
+			err = netlink.AddrAdd(link, addr)
+			if err != nil {
+				return err
+			}
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -203,7 +213,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).To(HaveOccurred()) // we don't have the gateway pieces setup so its expected to fail here
-		Expect(err.Error()).To(ContainSubstring("no annotation found"))
+		Expect(err.Error()).To(ContainSubstring("could not create management port"), err.Error())
 		Expect(controller.gateway).To(Not(BeNil()))
 	})
 	It("ensure UDNGateway is not invoked for Primary UDNs when feature gate is ON but network is not Primary", func() {
