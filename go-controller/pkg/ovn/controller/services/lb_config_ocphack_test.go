@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +28,8 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 
 	name := "dns-default"
 	namespace := "openshift-dns"
+
+	UDNNetInfo := getSampleUDNNetInfo(namespace)
 
 	defaultService := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -56,6 +59,8 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 		"k8s.ovn.org/kind":  "Service",
 		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
 	}
+
+	UDNExternalIDs := loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), UDNNetInfo.GetNetworkName())
 
 	//defaultRouters := []string{"gr-node-a", "gr-node-b"}
 	//defaultSwitches := []string{"switch-node-a", "switch-node-b"}
@@ -130,12 +135,27 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
 
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
-			actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
+			actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes, &util.DefaultNetInfo{})
 			assert.Equal(t, tt.expected, actual, "shared gateway mode not as expected")
 
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
-			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
+			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, &util.DefaultNetInfo{})
 			assert.Equal(t, tt.expected, actual, "local gateway mode not as expected")
+
+			// UDN
+			for idx := range tt.expected {
+				tt.expected[idx].ExternalIDs = UDNExternalIDs
+				tt.expected[idx].Name = UDNNetInfo.GetNetworkScopedLoadBalancerName(tt.expected[idx].Name)
+
+			}
+			globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
+			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, UDNNetInfo)
+			assert.Equal(t, tt.expected, actual, "shared gateway mode not as expected")
+
+			globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
+			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, UDNNetInfo)
+			assert.Equal(t, tt.expected, actual, "local gateway mode not as expected")
+
 		})
 	}
 }
@@ -154,6 +174,8 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 	namespace := "openshift-ingress"
 	inport := int32(80)
 	outport := int32(8080)
+
+	UDNNetInfo := getSampleUDNNetInfo(namespace)
 
 	defaultService := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -207,6 +229,8 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 		"k8s.ovn.org/kind":  "Service",
 		"k8s.ovn.org/owner": fmt.Sprintf("%s/%s", namespace, name),
 	}
+
+	UDNExternalIDs := loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), UDNNetInfo.GetNetworkName())
 
 	defaultOpts := LBOpts{Reject: true}
 	noSNATOpts := LBOpts{SkipSNAT: true, Reject: true}
@@ -424,11 +448,25 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
 
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
-			actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
+			actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes, &util.DefaultNetInfo{})
 			assert.Equal(t, tt.expected, actual, "shared gateway mode not as expected")
 
 			globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
-			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
+			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, &util.DefaultNetInfo{})
+			assert.Equal(t, tt.expected, actual, "local gateway mode not as expected")
+
+			// UDN
+			for idx := range tt.expected {
+				tt.expected[idx].ExternalIDs = UDNExternalIDs
+				tt.expected[idx].Name = UDNNetInfo.GetNetworkScopedLoadBalancerName(tt.expected[idx].Name)
+
+			}
+			globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
+			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, UDNNetInfo)
+			assert.Equal(t, tt.expected, actual, "shared gateway mode not as expected")
+
+			globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
+			actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, UDNNetInfo)
 			assert.Equal(t, tt.expected, actual, "local gateway mode not as expected")
 		})
 	}
