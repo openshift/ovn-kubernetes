@@ -85,11 +85,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			if err != nil {
 				return err
 			}
-			if config.Gateway.DisableForwarding {
-				if err := initExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
-					return fmt.Errorf("failed to add forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
-				}
-			}
+
 		}
 
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
