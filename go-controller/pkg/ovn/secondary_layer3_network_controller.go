@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
@@ -156,8 +157,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode)
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.NetInfo.GetNetworkName())
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -285,7 +286,7 @@ type SecondaryLayer3NetworkController struct {
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLayer3NetworkController {
+func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController *nad.NetAttachDefinitionController) *SecondaryLayer3NetworkController {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -315,6 +316,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				localZoneNodes:              &sync.Map{},
 				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
+				nadController:               nadController,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},

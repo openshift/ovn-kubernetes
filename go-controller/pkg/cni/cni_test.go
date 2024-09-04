@@ -17,8 +17,11 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type podRequestInterfaceOpsStub struct {
@@ -117,7 +120,7 @@ var _ = Describe("Network Segmentation", func() {
 		})
 		It("should not fail at cmdAdd", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
+			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nil)).NotTo(BeNil())
 			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 		})
 		It("should not fail at cmdDel", func() {
@@ -141,9 +144,11 @@ var _ = Describe("Network Segmentation", func() {
 				},
 			}
 		})
+		nadController := &nad.NetAttachDefinitionController{}
+		nadController.SetPrimaryNetworksForTest(syncmap.NewSyncMap[map[string]util.NetInfo]())
 		It("should not fail at cmdAdd", func() {
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
-			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub)).NotTo(BeNil())
+			Expect(pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientSet, getCNIResultStub, nadController)).NotTo(BeNil())
 			Expect(obtainedPodIterfaceInfos).ToNot(BeEmpty())
 		})
 		It("should not fail at cmdDel", func() {

@@ -19,6 +19,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -166,11 +168,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			nonICClusterTestConfiguration(),
 		),
-
-		table.Entry("pod on a user defined primary network on an IC cluster",
-			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
-			icClusterTestConfiguration(),
-		),
 	)
 
 	table.DescribeTable(
@@ -184,6 +181,13 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				netConf := netInfo.netconf()
 				networkConfig, err := util.NewNetInfo(netConf)
 				Expect(err).NotTo(HaveOccurred())
+
+				nadController := &networkAttachDefController.NetAttachDefinitionController{}
+				nadNetworks := map[string]util.NetInfo{networkConfig.GetNetworkName(): networkConfig}
+
+				primaryNetworks := syncmap.NewSyncMap[map[string]util.NetInfo]()
+				primaryNetworks.Store(ns, nadNetworks)
+				nadController.SetPrimaryNetworksForTest(primaryNetworks)
 
 				nad, err := newNetworkAttachmentDefinition(
 					ns,
@@ -262,6 +266,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 						&secondaryNetController.bnc.CommonNetworkControllerInfo,
 						networkConfig,
 						nodeName,
+						nadController,
 					).Cleanup()).To(Succeed())
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{}))
 
@@ -444,8 +449,9 @@ func dummyLayer2PrimaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNet
 }
 
-func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer2NetworkController {
-	layer2NetworkController := NewSecondaryLayer2NetworkController(cnci, netInfo)
+func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string,
+	nadController *networkAttachDefController.NetAttachDefinitionController) *SecondaryLayer2NetworkController {
+	layer2NetworkController := NewSecondaryLayer2NetworkController(cnci, netInfo, nadController)
 	layer2NetworkController.gatewayManagers.Store(
 		nodeName,
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),

@@ -383,6 +383,10 @@ func IsUnknownActiveNetworkError(err error) bool {
 	return errors.As(err, &unknownActiveNetworkError)
 }
 
+func NewUnknownActiveNetworkError(namespace string) *UnknownActiveNetworkError {
+	return &UnknownActiveNetworkError{namespace: namespace}
+}
+
 // GetActiveNetworkForNamespace returns the NetInfo struct of the active network
 // for the given namespace based on the NADs present in that namespace.
 // active network here means the network managing this namespace and responsible for
@@ -392,6 +396,7 @@ func IsUnknownActiveNetworkError(err error) bool {
 // 2) &NetConf{Name: "<secondary-network-name>"} if there is exactly ONE NAD with Role: "primary"
 // 3) Multiple primary network role NADs ActiveNetworkUnknown error
 // 4) error under all other conditions
+// Only used for CNI unprivileged mode (to be implemented)
 func GetActiveNetworkForNamespace(namespace string, nadLister nadlister.NetworkAttachmentDefinitionLister) (NetInfo, error) {
 	if nadLister == nil {
 		return &DefaultNetInfo{}, nil

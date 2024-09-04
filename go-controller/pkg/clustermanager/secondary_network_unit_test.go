@@ -191,6 +191,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						sncm.ovnClient,
 						sncm.watchFactory,
 						sncm.recorder,
+						sncm.nadController,
 					)
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -317,6 +318,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					sncm.ovnClient,
 					sncm.watchFactory,
 					sncm.recorder,
+					sncm.nadController,
 				)
 				err = oc.init()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -407,6 +409,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -455,6 +458,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -504,6 +508,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -573,6 +578,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -645,6 +651,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -715,6 +722,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						sncm.ovnClient,
 						sncm.watchFactory,
 						sncm.recorder,
+						sncm.nadController,
 					)
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())

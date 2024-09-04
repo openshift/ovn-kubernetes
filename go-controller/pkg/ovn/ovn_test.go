@@ -31,6 +31,8 @@ import (
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -70,20 +72,21 @@ type secondaryControllerInfo struct {
 }
 
 type FakeOVN struct {
-	fakeClient   *util.OVNMasterClientset
-	watcher      *factory.WatchFactory
-	controller   *DefaultNetworkController
-	stopChan     chan struct{}
-	wg           *sync.WaitGroup
-	asf          *addressset.FakeAddressSetFactory
-	fakeRecorder *record.FakeRecorder
-	nbClient     libovsdbclient.Client
-	sbClient     libovsdbclient.Client
-	dbSetup      libovsdbtest.TestSetup
-	nbsbCleanup  *libovsdbtest.Context
-	egressQoSWg  *sync.WaitGroup
-	egressSVCWg  *sync.WaitGroup
-	anpWg        *sync.WaitGroup
+	fakeClient    *util.OVNMasterClientset
+	watcher       *factory.WatchFactory
+	controller    *DefaultNetworkController
+	stopChan      chan struct{}
+	wg            *sync.WaitGroup
+	asf           *addressset.FakeAddressSetFactory
+	fakeRecorder  *record.FakeRecorder
+	nbClient      libovsdbclient.Client
+	sbClient      libovsdbclient.Client
+	dbSetup       libovsdbtest.TestSetup
+	nbsbCleanup   *libovsdbtest.Context
+	egressQoSWg   *sync.WaitGroup
+	egressSVCWg   *sync.WaitGroup
+	anpWg         *sync.WaitGroup
+	nadController *nad.NetAttachDefinitionController
 
 	// information map of all secondary network controllers
 	secondaryControllers map[string]secondaryControllerInfo
@@ -103,6 +106,7 @@ func NewFakeOVN(useFakeAddressSet bool) *FakeOVN {
 		anpWg:        &sync.WaitGroup{},
 
 		secondaryControllers: map[string]secondaryControllerInfo{},
+		nadController:        &nad.NetAttachDefinitionController{},
 	}
 }
 
@@ -212,13 +216,27 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	setupCOPP := false
 	setupClusterController(o.controller, setupCOPP)
 
-	err = o.watcher.Start()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-	for _, nad := range nadList {
-		err := o.NewSecondaryNetworkController(&nad)
+	primaryNetworks := syncmap.NewSyncMap[map[string]util.NetInfo]()
+	for _, existingNAD := range nadList {
+		nadNetworks := map[string]util.NetInfo{}
+		if nets, loaded := primaryNetworks.Load(existingNAD.Namespace); loaded {
+			nadNetworks = nets
+		}
+		nadNetwork, _ := util.ParseNADInfo(&existingNAD)
+		nadNetwork.SetNADs(util.GetNADName(existingNAD.Namespace, existingNAD.Name))
+		if nadNetwork.IsPrimaryNetwork() {
+			nadNetworks[nadNetwork.GetNetworkName()] = nadNetwork
+		}
+		primaryNetworks.Store(existingNAD.Namespace, nadNetworks)
+		err := o.NewSecondaryNetworkController(&existingNAD)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
+
+	o.nadController.SetPrimaryNetworksForTest(primaryNetworks)
+	o.controller.nadController = o.nadController
+
+	err = o.watcher.Start()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	existingNodes, err := o.controller.kube.GetNodes()
 	if err == nil {
@@ -231,6 +249,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 			}
 		}
 	}
+
 }
 
 func setupClusterController(clusterController *DefaultNetworkController, setupCOPP bool) {
@@ -321,7 +340,9 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		return nil, err
 	}
 
-	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory)
+	nadController := &nad.NetAttachDefinitionController{}
+	nadController.SetPrimaryNetworksForTest(syncmap.NewSyncMap[map[string]util.NetInfo]())
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	if nbZoneFailed {
@@ -439,11 +460,11 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller := NewSecondaryLayer3NetworkController(cnci, nInfo)
+			l3Controller := NewSecondaryLayer3NetworkController(cnci, nInfo, o.nadController)
 			l3Controller.addressSetFactory = asf
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo)
+			l2Controller := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
 			l2Controller.addressSetFactory = asf
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:

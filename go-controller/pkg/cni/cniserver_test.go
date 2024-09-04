@@ -23,6 +23,7 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -48,7 +49,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, nadController *nad.NetAttachDefinitionController) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {

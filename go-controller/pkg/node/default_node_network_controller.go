@@ -112,6 +112,8 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+
+	cniServer *cni.Server
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -796,6 +798,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		nc.cniServer = cniServer
 	}
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
@@ -1082,8 +1085,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	} else {
 		// start the cni server
-		if err := cniServer.Start(cni.ServerRunDir); err != nil {
-			return err
+		if nc.cniServer != nil {
+			if err := nc.cniServer.Start(cni.ServerRunDir); err != nil {
+				return err
+			}
 		}
 
 		// Write CNI config file if it doesn't already exist
@@ -1141,6 +1146,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 // deleteLogicalEntities will never be true for default network
 func (nc *DefaultNodeNetworkController) Stop() {
+	nc.cniServer.Stop()
 	close(nc.stopChan)
 	nc.wg.Wait()
 }

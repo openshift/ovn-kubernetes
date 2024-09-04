@@ -18,6 +18,7 @@ import (
 	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -64,6 +65,9 @@ type NetAttachDefinitionController struct {
 
 	// nads to network mapping
 	nads map[string]string
+
+	// primaryNetworks holds a mapping of namespace to primary netInfos (map of netinfoNames to netinfos)
+	primaryNetworks *syncmap.SyncMap[map[string]util.NetInfo]
 }
 
 func NewNetAttachDefinitionController(
@@ -72,10 +76,14 @@ func NewNetAttachDefinitionController(
 	wf watchFactory,
 ) (*NetAttachDefinitionController, error) {
 	nadController := &NetAttachDefinitionController{
-		name:           fmt.Sprintf("[%s NAD controller]", name),
-		networkManager: newNetworkManager(name, ncm),
-		networks:       map[string]util.NetInfo{},
-		nads:           map[string]string{},
+		name:            fmt.Sprintf("[%s NAD controller]", name),
+		networks:        map[string]util.NetInfo{},
+		nads:            map[string]string{},
+		primaryNetworks: syncmap.NewSyncMap[map[string]util.NetInfo](),
+	}
+
+	if ncm != nil {
+		nadController.networkManager = newNetworkManager(name, ncm)
 	}
 
 	config := &controller.ControllerConfig[nettypes.NetworkAttachmentDefinition]{
@@ -113,9 +121,11 @@ func (nadController *NetAttachDefinitionController) Start() error {
 		return err
 	}
 
-	err = nadController.networkManager.Start()
-	if err != nil {
-		return err
+	if nadController.networkManager != nil {
+		err = nadController.networkManager.Start()
+		if err != nil {
+			return err
+		}
 	}
 
 	klog.Infof("%s: started", nadController.name)
@@ -125,7 +135,9 @@ func (nadController *NetAttachDefinitionController) Start() error {
 func (nadController *NetAttachDefinitionController) Stop() {
 	klog.Infof("%s: shutting down", nadController.name)
 	controller.Stop(nadController.controller)
-	nadController.networkManager.Stop()
+	if nadController.networkManager != nil {
+		nadController.networkManager.Stop()
+	}
 }
 
 func (nadController *NetAttachDefinitionController) syncAll() (err error) {
@@ -178,6 +190,11 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 	var nadNetworkName string
 	var nadNetwork, oldNetwork, ensureNetwork util.NetInfo
 	var err error
+
+	namespace, _, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return fmt.Errorf("%s: failed splitting key %s: %v", nadController.name, key, err)
+	}
 
 	if nad != nil {
 		nadNetwork, err = util.ParseNADInfo(nad)
@@ -234,10 +251,30 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 		oldNetworkName := oldNetwork.GetNetworkName()
 		oldNetwork.DeleteNADs(key)
 		if len(oldNetwork.GetNADs()) == 0 {
-			nadController.networkManager.DeleteNetwork(oldNetworkName)
+			if nadController.networkManager != nil {
+				nadController.networkManager.DeleteNetwork(oldNetworkName)
+			}
 			delete(nadController.networks, oldNetworkName)
 		} else {
-			nadController.networkManager.EnsureNetwork(oldNetwork)
+			if nadController.networkManager != nil {
+				nadController.networkManager.EnsureNetwork(oldNetwork)
+			}
+		}
+		// if oldNetwork is primary, and we are not going to update the active network, delete it
+		if oldNetwork.IsPrimaryNetwork() && ensureNetwork == nil {
+			nadController.primaryNetworks.LockKey(namespace)
+			primaryNetworks, loaded := nadController.primaryNetworks.Load(namespace)
+			if loaded {
+				if len(primaryNetworks) > 1 {
+					// multiple primary networks for this namespace, just remove the one
+					delete(primaryNetworks, oldNetworkName)
+					nadController.primaryNetworks.Store(namespace, primaryNetworks)
+				} else {
+					// only 1 network, delete the entire namespace from being tracked
+					nadController.primaryNetworks.Delete(namespace)
+				}
+			}
+			nadController.primaryNetworks.UnlockKey(namespace)
 		}
 	}
 
@@ -245,6 +282,18 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 	if ensureNetwork == nil {
 		delete(nadController.nads, key)
 		return err
+	} else if ensureNetwork.IsPrimaryNetwork() {
+		ensureNetwork.SetNADs(key)
+		nadController.primaryNetworks.LockKey(namespace)
+		var primaryNetInfos map[string]util.NetInfo
+		var loaded bool
+		if primaryNetInfos, loaded = nadController.primaryNetworks.Load(namespace); loaded {
+			primaryNetInfos[ensureNetwork.GetNetworkName()] = ensureNetwork
+		} else {
+			primaryNetInfos = map[string]util.NetInfo{ensureNetwork.GetNetworkName(): ensureNetwork}
+		}
+		nadController.primaryNetworks.Store(namespace, primaryNetInfos)
+		nadController.primaryNetworks.UnlockKey(namespace)
 	}
 
 	if ensureNetwork.IsDefault() {
@@ -255,7 +304,9 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 	// ensure the network associated with the NAD
 	ensureNetwork.AddNADs(key)
 	nadController.nads[key] = ensureNetwork.GetNetworkName()
-	nadController.networkManager.EnsureNetwork(ensureNetwork)
+	if nadController.networkManager != nil {
+		nadController.networkManager.EnsureNetwork(ensureNetwork)
+	}
 	return err
 }
 
@@ -271,4 +322,29 @@ func nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) bool {
 	}
 
 	return !reflect.DeepEqual(oldNAD.Spec, newNAD.Spec)
+}
+
+func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return &util.DefaultNetInfo{}, nil
+	}
+	nadController.primaryNetworks.LockKey(namespace)
+	defer nadController.primaryNetworks.UnlockKey(namespace)
+	primaryNetworks, _ := nadController.primaryNetworks.Load(namespace)
+	if len(primaryNetworks) > 1 {
+		return nil, util.NewUnknownActiveNetworkError(namespace)
+	} else if len(primaryNetworks) == 1 {
+		for _, netInfo := range primaryNetworks {
+			// only 1 value
+			return netInfo, nil
+		}
+	}
+
+	return &util.DefaultNetInfo{}, nil
+
+}
+
+// SetPrimaryNetworksForTest is used for testing purposes only
+func (nadController *NetAttachDefinitionController) SetPrimaryNetworksForTest(primaryNetworks *syncmap.SyncMap[map[string]util.NetInfo]) {
+	nadController.primaryNetworks = primaryNetworks
 }
