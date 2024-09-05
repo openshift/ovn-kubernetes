@@ -27,7 +27,6 @@ should provide Internet connection continuously when all ovnkube-control-plane p
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
-egress IP validation|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
@@ -154,7 +153,7 @@ fi
 
 # Only run network segmentation tests if they are explicitly requested
 NETWORK_SEGMENTATION_TESTS="Network Segmentation"
-if [ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}" ]; then
+if [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi
