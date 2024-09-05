@@ -830,7 +830,7 @@ func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnNodeGRLRPAddr)
 }
 
-func parseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
+func ParseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
 	var val primaryIfAddrAnnotation
 	joinSubnetMap, err := parseJoinSubnetAnnotation(node.Annotations, OVNNodeGRLRPAddrs)
 	if err != nil {
@@ -848,7 +848,7 @@ func parseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primary
 // ParseNodeGatewayRouterJoinIPv4 returns the IPv4 address for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, error) {
-	primaryIfAddr, err := parseNodeGatewayRouterJoinNetwork(node, netName)
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
 	if err != nil {
 		return nil, err
 	}
@@ -867,7 +867,7 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
-	primaryIfAddr, err := parseNodeGatewayRouterJoinNetwork(node, netName)
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
 	if err != nil {
 		return nil, err
 	}
@@ -1007,6 +1007,38 @@ func ParseNodeHostCIDRs(node *kapi.Node) (sets.Set[string], error) {
 			addrAnnotation, node.Name, err)
 	}
 
+	return sets.New(cfg...), nil
+}
+
+// ParseNodeHostIPDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
+func ParseNodeHostIPDropNetMask(node *kapi.Node) (sets.Set[string], error) {
+	nodeIfAddrAnnotation, ok := node.Annotations[OvnNodeIfAddr]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeIfAddr, node.Name)
+	}
+	nodeIfAddr := &primaryIfAddrAnnotation{}
+	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), nodeIfAddr); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", OvnNodeIfAddr, node.Name, err)
+	}
+
+	var cfg []string
+	if nodeIfAddr.IPv4 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv4)
+	}
+	if nodeIfAddr.IPv6 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv6)
+	}
+	if len(cfg) == 0 {
+		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
+	}
+
+	for i, cidr := range cfg {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil || ip == nil {
+			return nil, fmt.Errorf("failed to parse node host cidr: %v", err)
+		}
+		cfg[i] = ip.String()
+	}
 	return sets.New(cfg...), nil
 }
 
