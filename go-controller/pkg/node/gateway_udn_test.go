@@ -58,6 +58,13 @@ func getVRFCreationFakeOVSCommands(fexec *ovntest.FakeExec) {
 	})
 }
 
+func getRPFilterLooseModeFakeCommands(fexec *ovntest.FakeExec) {
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp3.rp_filter=2",
+		Output: "net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
+	})
+}
+
 func getDeletionFakeOVSCommands(fexec *ovntest.FakeExec, mgtPort string) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mgtPort,
@@ -151,10 +158,6 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
 		Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-breth0_worker1-to-br-int ofport",
-		Output: "5",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 ofport",
@@ -421,6 +424,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		setUpGatewayFakeOVSCommands(fexec)
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		getVRFCreationFakeOVSCommands(fexec)
+		getRPFilterLooseModeFakeCommands(fexec)
 		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -442,6 +446,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
+
+		_, _ = util.SetFakeIPTablesHelpers()
+
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
@@ -587,6 +594,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		setUpGatewayFakeOVSCommands(fexec)
 		getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		getVRFCreationFakeOVSCommands(fexec)
+		getRPFilterLooseModeFakeCommands(fexec)
 		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
@@ -609,6 +617,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			wg.Wait()
 		}()
 		err = wf.Start()
+
+		_, _ = util.SetFakeIPTablesHelpers()
+
 		Expect(err).NotTo(HaveOccurred())
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
@@ -816,6 +827,17 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(*routes[3].Dst).To(Equal(*cidr))
 			Expect(routes[3].LinkIndex).To(Equal(mplink.Attrs().Index))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+	ovntest.OnSupportedPlatformsIt("should set rp filer to loose mode for management port interface", func() {
+		getRPFilterLooseModeFakeCommands(fexec)
+		err := testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			err := addRPFilterLooseModeForManagementPort(mgtPort)
+			Expect(err).NotTo(HaveOccurred())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
