@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 source "$(dirname "${BASH_SOURCE}")/init.sh"
 
