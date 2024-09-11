@@ -83,7 +83,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					&v1.NodeList{Items: []v1.Node{*testNode}},
 					&v1.PodList{
 						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+							*newMultiHomedPod(podInfo, netInfo),
 						},
 					},
 					&nadapi.NetworkAttachmentDefinitionList{

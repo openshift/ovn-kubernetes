@@ -8,8 +8,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	iputils "github.com/containernetworking/plugins/pkg/ip"
-
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -341,7 +339,7 @@ func hostPhysicalIP(gwConfig util.L3GatewayConfig) string {
 
 func hostIPsFromGWConfig(gwConfig util.L3GatewayConfig) []string {
 	var hostIPs []string
-	for _, ip := range append(gwConfig.IPAddresses, dummyJoinIP()) {
+	for _, ip := range append(gwConfig.IPAddresses, dummyMasqueradeIP()) {
 		hostIPs = append(hostIPs, ip.IP.String())
 	}
 	return hostIPs
@@ -392,8 +390,8 @@ func nonICClusterTestConfiguration() testConfiguration {
 	return testConfiguration{}
 }
 
-func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
-	pod := newPod(namespace, name, node, podIP)
+func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
+	pod := newPod(testPod.namespace, testPod.podName, testPod.nodeName, testPod.podIP)
 	var secondaryNetworks []nadapi.NetworkSelectionElement
 	for _, multiHomingConf := range multiHomingConfigs {
 		nadNamePair := strings.Split(multiHomingConf.nadName, "/")
@@ -412,7 +410,7 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 	serializedNetworkSelectionElements, _ := json.Marshal(secondaryNetworks)
 	pod.Annotations = map[string]string{nadapi.NetworkAttachmentAnnot: string(serializedNetworkSelectionElements)}
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(multiHomingConfigs)
+		dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(testPod.secondaryPodInfos, multiHomingConfigs)
 		if dummyOVNNetAnnotations != "{}" {
 			pod.Annotations["k8s.ovn.org/pod-networks"] = dummyOVNNetAnnotations
 		}
@@ -420,7 +418,7 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 	return pod
 }
 
-func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string {
+func dummyOVNPodNetworkAnnotations(secondaryPodInfos map[string]*secondaryPodInfo, multiHomingConfigs []secondaryNetInfo) string {
 	var ovnPodNetworksAnnotations []byte
 	podAnnotations := map[string]podAnnotation{}
 	for i, netConfig := range multiHomingConfigs {
@@ -428,7 +426,8 @@ func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string
 		// for layer2 topology since allocating the annotation for this cluster configuration
 		// is performed by cluster manager - which doesn't exist in the unit tests.
 		if netConfig.topology == ovntypes.Layer2Topology {
-			podAnnotations[netConfig.nadName] = dummyOVNPodNetworkAnnotationForNetwork(netConfig, i+1)
+			portInfo := secondaryPodInfos[netConfig.netName].allportInfo[netConfig.nadName]
+			podAnnotations[netConfig.nadName] = dummyOVNPodNetworkAnnotationForNetwork(portInfo, netConfig, i+1)
 		}
 	}
 
@@ -440,35 +439,27 @@ func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string
 	return string(ovnPodNetworksAnnotations)
 }
 
-func dummyOVNPodNetworkAnnotationForNetwork(netConfig secondaryNetInfo, tunnelID int) podAnnotation {
+func dummyOVNPodNetworkAnnotationForNetwork(portInfo portInfo, netConfig secondaryNetInfo, tunnelID int) podAnnotation {
 	role := ovntypes.NetworkRoleSecondary
-	var (
-		gateways []string
-		ips      []string
-	)
+	var gateways []string
 	for _, subnetStr := range strings.Split(netConfig.subnets, ",") {
 		subnet := testing.MustParseIPNet(subnetStr)
-		ips = append(ips, GetWorkloadSecondaryNetworkDummyIP(subnet).String())
 		gateways = append(gateways, util.GetNodeGatewayIfAddr(subnet).IP.String())
 	}
+	ip := testing.MustParseIP(portInfo.podIP)
+	_, maskSize := util.GetIPFullMask(ip).Size()
+	ipNet := net.IPNet{
+		IP:   ip,
+		Mask: net.CIDRMask(portInfo.prefixLen, maskSize),
+	}
 	return podAnnotation{
-		IPs:      ips,
-		MAC:      util.IPAddrToHWAddr(testing.MustParseIPNet(ips[0]).IP).String(),
+		IPs:      []string{ipNet.String()},
+		MAC:      util.IPAddrToHWAddr(ip).String(),
 		Gateways: gateways,
 		Routes:   nil, // TODO: must add here the expected routes.
 		TunnelID: tunnelID,
 		Role:     role,
 	}
-}
-
-// GetWorkloadSecondaryNetworkDummyIP returns the workload logical switch port
-// address (the ".3" address), return nil if the subnet is invalid
-func GetWorkloadSecondaryNetworkDummyIP(subnet *net.IPNet) *net.IPNet {
-	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
-	if mgmtIfAddr == nil {
-		return nil
-	}
-	return &net.IPNet{IP: iputils.NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
 }
 
 // Internal struct used to marshal PodAnnotation to the pod annotationç

@@ -109,7 +109,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 					},
 					&v1.PodList{
 						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
+							*newMultiHomedPod(podInfo, netInfo),
 						},
 					},
 					&nadapi.NetworkAttachmentDefinitionList{
@@ -307,6 +307,14 @@ func dummyJoinIP() *net.IPNet {
 		Mask: net.CIDRMask(24, 32),
 	}
 }
+
+func dummyMasqueradeIP() *net.IPNet {
+	return &net.IPNet{
+		IP:   net.ParseIP("169.254.169.13"),
+		Mask: net.CIDRMask(24, 32),
+	}
+}
+
 func dummyMasqueradeSubnet() *net.IPNet {
 	return &net.IPNet{
 		IP:   net.ParseIP("169.254.169.0"),
