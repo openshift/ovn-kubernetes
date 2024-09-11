@@ -15,6 +15,8 @@ function gocmd {
 
 cd "${OVN_KUBE_ROOT}"
 
+PKGS=${PKGS//" /errors"/}
+
 PKGS=$(gocmd list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
 
 if [[ "$1" == "focus" && "$2" != "" ]]; then
