@@ -59,7 +59,7 @@ func newClientLogger(dbModelName string) (logger logr.Logger, err error) {
 		MaxAge:     config.Logging.LogFileMaxAge, // Days
 		Compress:   true,
 	}
-	klog.Infof("Client for %s using log verbosity %d with lumberjack %#v", dbModelName, config.Logging.Level, ll)
+	klog.Infof("JAMO: Client for %s using log verbosity %d with lumberjack %#v", dbModelName, config.Logging.Level, ll)
 	clientLog := log.New(ll, "", log.Ldate|log.Ltime|log.Lshortfile)
 	_ = stdr.SetVerbosity(config.Logging.Level)
 	logger = stdr.New(clientLog)
