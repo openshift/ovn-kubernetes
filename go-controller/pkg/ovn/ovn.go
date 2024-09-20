@@ -269,12 +269,10 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
 	}
 
-	if util.PodWantsHostNetwork(pod) {
-		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
-		if err := oc.deletePodExternalGW(pod); err != nil {
-			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
-				getPodNamespacedName(pod), err)
-		}
+	// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
+	if err := oc.deletePodExternalGW(pod); err != nil {
+		return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+			getPodNamespacedName(pod), err)
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {
