@@ -58,6 +58,9 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			podInfo := dummyL2TestPod(ns, netInfo)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
+				if testConfig.gatewayConfig != nil {
+					config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
+				}
 			}
 			app.Action = func(ctx *cli.Context) error {
 				By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
@@ -171,6 +174,10 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterTestConfiguration(),
 		),
+		table.Entry("pod on a user defined primary network on an IC cluster",
+			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterWithDisableSNATTestConfiguration(),
+		),
 	)
 
 	table.DescribeTable(
@@ -179,6 +186,9 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			podInfo := dummyTestPod(ns, netInfo)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
+				if testConfig.gatewayConfig != nil {
+					config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
+				}
 			}
 			app.Action = func(ctx *cli.Context) error {
 				netConf := netInfo.netconf()
@@ -277,16 +287,20 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterTestConfiguration(),
 		),
+		table.Entry("pod on a user defined primary network on an interconnect cluster",
+			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
+			icClusterWithDisableSNATTestConfiguration(),
+		),
 	)
 
 })
 
 func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNetInfo{
-		netName:  secondaryNetworkName,
-		nadName:  namespacedName(ns, nadName),
-		topology: ovntypes.Layer2Topology,
-		subnets:  subnets,
+		netName:        secondaryNetworkName,
+		nadName:        namespacedName(ns, nadName),
+		topology:       ovntypes.Layer2Topology,
+		clustersubnets: subnets,
 	}
 }
 
@@ -315,7 +329,7 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 		pod.addNetwork(
 			info.netName,
 			info.nadName,
-			info.subnets,
+			info.clustersubnets,
 			"",
 			"100.200.0.1",
 			"100.200.0.3/16",
@@ -339,7 +353,7 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 	pod.addNetwork(
 		info.netName,
 		info.nadName,
-		info.subnets,
+		info.clustersubnets,
 		"",
 		"",
 		"100.200.0.1/16",
@@ -351,11 +365,17 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 	return pod
 }
 
+func dummyL2TestPodAdditionalNetworkIP() string {
+	secNetInfo := dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16")
+	return dummyL2TestPod(ns, secNetInfo).getNetworkPortInfo(secNetInfo.netName, secNetInfo.nadName).podIP
+}
+
 func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayConfig, nodeName string) []libovsdbtest.TestData {
 	const (
 		nat1              = "nat1-UUID"
 		nat2              = "nat2-UUID"
 		nat3              = "nat3-UUID"
+		perPodSNAT        = "pod-snat-UUID"
 		sr1               = "sr1-UUID"
 		sr2               = "sr2-UUID"
 		routerPolicyUUID1 = "lrp1-UUID"
@@ -365,11 +385,17 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	gwRouterToNetworkSwitchPortName := ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName
 	gwRouterToExtSwitchPortName := fmt.Sprintf("%s%s", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
 
+	var nat []string
+	if config.Gateway.DisableSNATMultipleGWs {
+		nat = append(nat, perPodSNAT)
+	} else {
+		nat = append(nat, nat1, nat2, nat3)
+	}
 	expectedEntities := []libovsdbtest.TestData{
 		&nbdb.LogicalRouter{
 			Name:         gwRouterName,
 			UUID:         gwRouterName + "-UUID",
-			Nat:          []string{nat1, nat2, nat3},
+			Nat:          nat,
 			Ports:        []string{gwRouterToNetworkSwitchPortName + "-UUID", gwRouterToExtSwitchPortName + "-UUID"},
 			StaticRoutes: []string{sr1, sr2},
 			ExternalIDs:  gwRouterExternalIDs(netInfo, gwConfig),
@@ -379,11 +405,6 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		expectedGWToNetworkSwitchRouterPort(gwRouterToNetworkSwitchPortName, netInfo, gwRouterIPAddress(), layer2SubnetGWAddr()),
 		expectedGRStaticRoute(sr1, dummyMasqueradeSubnet().String(), nextHopMasqueradeIP().String(), nil, &staticRouteOutputPort, netInfo),
 		expectedGRStaticRoute(sr2, ipv4DefaultRoute().String(), nodeGateway().IP.String(), nil, &staticRouteOutputPort, netInfo),
-
-		newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)),
-		newNATEntry(nat2, dummyJoinIP().IP.String(), layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo)),
-		newNATEntry(nat3, dummyJoinIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)),
-
 		expectedGRToExternalSwitchLRP(gwRouterName, netInfo, nodePhysicalIPAddress(), udnGWSNATAddress()),
 		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
 
@@ -392,6 +413,13 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 
 	for _, entity := range expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName) {
 		expectedEntities = append(expectedEntities, entity)
+	}
+	if config.Gateway.DisableSNATMultipleGWs {
+		expectedEntities = append(expectedEntities, newNATEntry(perPodSNAT, dummyJoinIP().IP.String(), dummyL2TestPodAdditionalNetworkIP(), nil))
+	} else {
+		expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyJoinIP().IP.String(), layer2Subnet().String(), standardNonDefaultNetworkExtIDs(netInfo)))
+		expectedEntities = append(expectedEntities, newNATEntry(nat3, dummyJoinIP().IP.String(), layer2SubnetGWAddr().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)))
 	}
 	return expectedEntities
 }
@@ -431,10 +459,10 @@ func ipv4DefaultRoute() *net.IPNet {
 
 func dummyLayer2SecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNetInfo{
-		netName:  secondaryNetworkName,
-		nadName:  namespacedName(ns, nadName),
-		topology: ovntypes.Layer2Topology,
-		subnets:  subnets,
+		netName:        secondaryNetworkName,
+		nadName:        namespacedName(ns, nadName),
+		topology:       ovntypes.Layer2Topology,
+		clustersubnets: subnets,
 	}
 }
 

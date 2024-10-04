@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
 
@@ -30,7 +31,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	testutils "k8s.io/kubernetes/test/utils"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -86,23 +89,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		clientSet          kubernetes.Interface
 		// Systemd resolvd prevent resolving kube api service by fqdn, so
 		// we replace it here with NetworkManager
-		labelNode = func(nodeName, label string) error {
-			patch := fmt.Sprintf(`{"metadata": {"labels": {"%s": ""}}}`, label)
-			_, err := fr.ClientSet.CoreV1().Nodes().Patch(context.Background(), nodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
-			if err != nil {
-				return err
-			}
-			return nil
-		}
 
-		unlabelNode = func(nodeName, label string) error {
-			patch := fmt.Sprintf(`[{"op": "remove", "path": "/metadata/labels/%s"}]`, label)
-			_, err := clientSet.CoreV1().Nodes().Patch(context.Background(), nodeName, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
-			if err != nil {
-				return err
-			}
-			return nil
-		}
 		isDualStack = func() bool {
 			GinkgoHelper()
 			nodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
@@ -313,16 +300,30 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			}
 		}
 
-		httpServerTestPodsMultusNetworkIPs = func(netName string) map[string][]string {
+		checkPodRunningReady = func() func(Gomega, *corev1.Pod) {
+			return func(g Gomega, pod *corev1.Pod) {
+				ok, err := testutils.PodRunningReady(pod)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(ok).To(BeTrue())
+			}
+		}
+
+		httpServerTestPodsMultusNetworkIPs = func(nadName string) map[string][]string {
 			GinkgoHelper()
 			ips := map[string][]string{}
 			for _, pod := range httpServerTestPods {
-				netStatus, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
-					return status.Name == netName
-				})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(netStatus).To(HaveLen(1))
-				ips[pod.Name] = append(ips[pod.Name], netStatus[0].IPs...)
+				var ovnPodAnnotation *util.PodAnnotation
+				Eventually(func() (*util.PodAnnotation, error) {
+					var err error
+					ovnPodAnnotation, err = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+					return ovnPodAnnotation, err
+				}).
+					WithTimeout(5 * time.Second).
+					WithPolling(200 * time.Millisecond).
+					ShouldNot(BeNil())
+				for _, ipnet := range ovnPodAnnotation.IPs {
+					ips[pod.Name] = append(ips[pod.Name], ipnet.IP.String())
+				}
 			}
 			return ips
 		}
@@ -650,6 +651,19 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return addresses
 		}
 
+		virtualMachineAddressesFromGuest = func(vmi *kubevirtv1.VirtualMachineInstance) []string {
+			GinkgoHelper()
+			addresses := waitVirtualMachineAddresses(vmi)
+			ips := []string{}
+			for _, address := range addresses {
+				if net.ParseIP(address.Ip).IsLinkLocalUnicast() {
+					continue
+				}
+				ips = append(ips, address.Ip)
+			}
+			return ips
+		}
+
 		fcosVMI = func(idx int, labels map[string]string, annotations map[string]string, nodeSelector map[string]string, networkSource kubevirtv1.NetworkSource, butane string) (*kubevirtv1.VirtualMachineInstance, error) {
 			workingDirectory, err := os.Getwd()
 			if err != nil {
@@ -878,16 +892,16 @@ passwd:
 				by(vm.Name, "Live migrate for the second time to a node not owning the subnet")
 				// Remove the node selector label from original node to force
 				// live migration to a different one.
-				Expect(unlabelNode(originalNode, namespace)).To(Succeed())
+				e2enode.RemoveLabelOffNode(fr.ClientSet, originalNode, namespace)
 				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration for the second time to node not owning subnet")
 
 				by(vm.Name, "Live migrate for the third time to the node owning the subnet")
 				// Patch back the original node with the label and remove it
 				// from the rest of nodes to force live migration target to it.
-				Expect(labelNode(originalNode, namespace)).To(Succeed())
+				e2enode.AddOrUpdateLabelOnNode(fr.ClientSet, originalNode, namespace, "")
 				for _, selectedNode := range selectedNodes {
 					if selectedNode.Name != originalNode {
-						Expect(unlabelNode(selectedNode.Name, namespace)).To(Succeed())
+						e2enode.RemoveLabelOffNode(fr.ClientSet, selectedNode.Name, namespace)
 					}
 				}
 				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration to node owning the subnet")
@@ -997,7 +1011,7 @@ passwd:
 			// configure VM nodeSelector with it and live migration will take only
 			// them into consideration
 			for _, node := range selectedNodes {
-				Expect(labelNode(node.Name, namespace)).To(Succeed())
+				e2enode.AddOrUpdateLabelOnNode(fr.ClientSet, node.Name, namespace, "")
 			}
 
 			prepareHTTPServerPods(map[string]string{}, checkPodHasIPAtStatus)
@@ -1006,7 +1020,7 @@ passwd:
 
 		AfterEach(func() {
 			for _, node := range selectedNodes {
-				unlabelNode(node.Name, namespace)
+				e2enode.RemoveLabelOffNode(fr.ClientSet, node.Name, namespace)
 			}
 		})
 
@@ -1112,7 +1126,7 @@ passwd:
 			}),
 		)
 	})
-	Context("with secondary network and persistent ips configured", func() {
+	Context("with user defined networks and persistent ips configured", func() {
 		type testCommand struct {
 			description string
 			cmd         func()
@@ -1171,6 +1185,22 @@ passwd:
 				},
 			}
 
+			virtualMachineWithUDN = resourceCommand{
+				description: "VirtualMachine with interface binding for UDN",
+				cmd: func() string {
+					var err error
+					vm, err = fcosVM(1, nil /*labels*/, nil /*annotations*/, nil, /*nodeSelector*/
+						kubevirtv1.NetworkSource{
+							Pod: &kubevirtv1.PodNetwork{},
+						}, butane)
+					Expect(err).ToNot(HaveOccurred())
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "passt"}
+					createVirtualMachine(vm)
+					return vm.Name
+				},
+			}
+
 			virtualMachineInstance = resourceCommand{
 				description: "VirtualMachineInstance",
 				cmd: func() string {
@@ -1181,6 +1211,22 @@ passwd:
 						},
 					}, butane)
 					Expect(err).ToNot(HaveOccurred())
+					createVirtualMachineInstance(vmi)
+					return vmi.Name
+				},
+			}
+
+			virtualMachineInstanceWithUDN = resourceCommand{
+				description: "VirtualMachineInstance with interface binding for UDN",
+				cmd: func() string {
+					var err error
+					vmi, err = fcosVMI(1, nil /*labels*/, nil /*annotations*/, nil, /*nodeSelector*/
+						kubevirtv1.NetworkSource{
+							Pod: &kubevirtv1.PodNetwork{},
+						}, butane)
+					Expect(err).ToNot(HaveOccurred())
+					vmi.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "passt"}
 					createVirtualMachineInstance(vmi)
 					return vmi.Name
 				},
@@ -1206,6 +1252,7 @@ passwd:
 			resource    resourceCommand
 			test        testCommand
 			topology    string
+			role        string
 		}
 		DescribeTable("should keep ip", func(td testData) {
 			netConfig := newNetworkAttachmentConfig(
@@ -1213,8 +1260,9 @@ passwd:
 					namespace:          namespace,
 					name:               "net1",
 					topology:           td.topology,
-					cidr:               strings.Join([]string{cidrIPv4, cidrIPv6}, ","),
+					cidr:               correctCIDRFamily(cidrIPv4, cidrIPv6),
 					allowPersistentIPs: true,
+					role:               td.role,
 				})
 
 			if td.topology == "localnet" {
@@ -1237,9 +1285,19 @@ passwd:
 			Expect(err).ToNot(HaveOccurred())
 			selectedNodes = workerNodeList.Items
 			networkName := fmt.Sprintf("%s/%s", nad.Namespace, nad.Name)
-			prepareHTTPServerPods(map[string]string{
-				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(`[{"name": %q}]`, nad.Name),
-			}, checkPodHasIPsAtNetwork(networkName, 2 /*expectedNumberOfAddresses*/))
+			httpServerPodsAnnotations := map[string]string{}
+			if td.role != "primary" {
+				httpServerPodsAnnotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf(`[{"name": %q}]`, nad.Name)
+			}
+			var httpServerPodCondition func(Gomega, *corev1.Pod)
+			if td.role != "primary" {
+				expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
+				httpServerPodCondition = checkPodHasIPsAtNetwork(networkName, expectedNumberOfAddresses)
+			} else {
+				httpServerPodCondition = checkPodRunningReady()
+			}
+
+			prepareHTTPServerPods(httpServerPodsAnnotations, httpServerPodCondition)
 
 			vmiName := td.resource.cmd()
 			vmi = &kubevirtv1.VirtualMachineInstance{
@@ -1252,12 +1310,30 @@ passwd:
 			Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
 
 			step := by(vmi.Name, "Login to virtual machine for the first time")
-			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			expectedAddreses = virtualMachineAddressesFromStatus(vmi, 2 /*two addresses, dual stack*/)
+			Eventually(func() error {
+				if td.role != "primary" {
+					return kubevirt.LoginToFedora(vmi, "core", "fedora")
+				} else {
+					return kubevirt.LoginToFedoraWithHostname(vmi, "core", "fedora", "localhost")
+				}
+			}).
+				WithTimeout(5*time.Second).
+				WithPolling(time.Second).
+				Should(Succeed(), step)
+
+			step = by(vmi.Name, "Wait for addresses at the virtual machine")
+			if td.role != "primary" {
+				// expect 2 addresses on dual-stack deployments; 1 on single-stack
+				expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
+				expectedAddreses = virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			} else {
+				expectedAddreses = virtualMachineAddressesFromGuest(vmi)
+			}
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
 			testPodsIPs := httpServerTestPodsMultusNetworkIPs(networkName)
 
+			//TODO: We do support it with primary, since passt do support it
 			// kubevirt secondary IPAM do not support IPv6, so guest is not
 			// going to have an ipv6 address at the interface
 			testPodsIPs = filterOutIPv6(testPodsIPs)
@@ -1268,15 +1344,31 @@ passwd:
 			td.test.cmd()
 
 			step = by(vm.Name, fmt.Sprintf("Login to virtual machine after %s %s", td.resource.description, td.test.description))
-			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, 2 /*two addresses, dual stack*/)
+			if td.role != "primary" {
+				Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
+			} else {
+				Expect(kubevirt.LoginToFedoraWithHostname(vmi, "core", "fedora", "localhost")).To(Succeed(), step)
+			}
+			var obtainedAddresses []string
+
+			if td.role != "primary" { // expect 2 addresses on dual-stack deployments; 1 on single-stack
+				expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
+				obtainedAddresses = virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			} else {
+				obtainedAddresses = virtualMachineAddressesFromGuest(vmi)
+			}
+
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			checkEastWestTraffic(vmi, testPodsIPs, step)
 		},
 			func(td testData) string {
-				return fmt.Sprintf("after %s of %s with %s", td.test.description, td.resource.description, td.topology)
+				role := "secondary"
+				if td.role != "" {
+					role = td.role
+				}
+				return fmt.Sprintf("after %s of %s with %s/%s", td.test.description, td.resource.description, role, td.topology)
 			},
 			Entry(nil, testData{
 				resource: virtualMachine,
@@ -1289,6 +1381,12 @@ passwd:
 				topology: "layer2",
 			}),
 			Entry(nil, testData{
+				resource: virtualMachineWithUDN,
+				test:     restart,
+				topology: "layer2",
+				role:     "primary",
+			}),
+			Entry(nil, testData{
 				resource: virtualMachine,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1299,6 +1397,12 @@ passwd:
 				topology: "layer2",
 			}),
 			Entry(nil, testData{
+				resource: virtualMachineWithUDN,
+				test:     liveMigrate,
+				topology: "layer2",
+				role:     "primary",
+			}),
+			Entry(nil, testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1307,6 +1411,12 @@ passwd:
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "layer2",
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineInstanceWithUDN,
+				test:     liveMigrate,
+				topology: "layer2",
+				role:     "primary",
 			}),
 		)
 	})
