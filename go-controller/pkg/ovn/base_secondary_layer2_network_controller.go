@@ -34,8 +34,11 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	if oc.ipamClaimsHandler != nil {
 		oc.watchFactory.RemoveIPAMClaimsHandler(oc.ipamClaimsHandler)
 	}
-	if oc.policyHandler != nil {
-		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
+	if oc.netPolicyHandler != nil {
+		oc.watchFactory.RemovePolicyHandler(oc.netPolicyHandler)
+	}
+	if oc.multiNetPolicyHandler != nil {
+		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
 	}
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
@@ -101,16 +104,25 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		return err
 	}
 
-	// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
-	if err := oc.WatchMultiNetworkPolicy(); err != nil {
-		return err
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
+		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchMultiNetworkPolicy(); err != nil {
+			return err
+		}
+	}
+
+	if oc.IsPrimaryNetwork() {
+		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchNetworkPolicy(); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchName string, clusterSubnets []config.CIDRNetworkEntry,
-	excludeSubnets []*net.IPNet) (*nbdb.LogicalSwitch, error) {
+	excludeSubnets []*net.IPNet, clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
 		ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(oc.NetInfo),
@@ -132,6 +144,10 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if clusterLoadBalancerGroupUUID != "" && switchLoadBalancerGroupUUID != "" {
+		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)

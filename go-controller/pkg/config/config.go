@@ -60,19 +60,20 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:                   1400,
-		ConntrackZone:         64000,
-		EncapType:             "geneve",
-		EncapIP:               "",
-		EncapPort:             DefaultEncapPort,
-		InactivityProbe:       100000, // in Milliseconds
-		OpenFlowProbe:         180,    // in Seconds
-		OfctrlWaitBeforeClear: 0,      // in Milliseconds
-		MonitorAll:            true,
-		OVSDBTxnTimeout:       DefaultDBTxnTimeout,
-		LFlowCacheEnable:      true,
-		RawClusterSubnets:     "10.128.0.0/14/23",
-		Zone:                  types.OvnDefaultZone,
+		MTU:                       1400,
+		ConntrackZone:             64000,
+		EncapType:                 "geneve",
+		EncapIP:                   "",
+		EncapPort:                 DefaultEncapPort,
+		InactivityProbe:           100000, // in Milliseconds
+		OpenFlowProbe:             180,    // in Seconds
+		OfctrlWaitBeforeClear:     0,      // in Milliseconds
+		MonitorAll:                true,
+		OVSDBTxnTimeout:           DefaultDBTxnTimeout,
+		LFlowCacheEnable:          true,
+		RawClusterSubnets:         "10.128.0.0/14/23",
+		Zone:                      types.OvnDefaultZone,
+		UDNAllowedDefaultServices: *cli.NewStringSlice("default/kubernetes", "kube-system/kube-dns"),
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -110,13 +111,14 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer:            DefaultAPIServer,
-		RawServiceCIDRs:      "172.16.1.0/24",
-		OVNConfigNamespace:   "ovn-kubernetes",
-		HostNetworkNamespace: "",
-		PlatformType:         "",
-		DNSServiceNamespace:  "kube-system",
-		DNSServiceName:       "kube-dns",
+		APIServer:               DefaultAPIServer,
+		RawServiceCIDRs:         "172.16.1.0/24",
+		OVNConfigNamespace:      "ovn-kubernetes",
+		HostNetworkNamespace:    "",
+		DisableRequestedChassis: false,
+		PlatformType:            "",
+		DNSServiceNamespace:     "kube-system",
+		DNSServiceName:          "kube-dns",
 		// By default, use a short lifetime length for certificates to ensure that the automatic rotation works well,
 		// might revisit in the future to use a more sensible value
 		CertDuration: 10 * time.Minute,
@@ -280,6 +282,10 @@ type DefaultConfig struct {
 
 	// Zone name to which ovnkube-node/ovnkube-controller belongs to
 	Zone string `gcfg:"zone"`
+
+	// UDNAllowedDefaultServices holds a list of namespaced names of
+	// default cluster network services accessible from primary user-defined networks
+	UDNAllowedDefaultServices cli.StringSlice `gcfg:"udn-allowed-default-services"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -346,26 +352,27 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	BootstrapKubeconfig  string        `gcfg:"bootstrap-kubeconfig"`
-	CertDir              string        `gcfg:"cert-dir"`
-	CertDuration         time.Duration `gcfg:"cert-duration"`
-	Kubeconfig           string        `gcfg:"kubeconfig"`
-	CACert               string        `gcfg:"cacert"`
-	CAData               []byte
-	APIServer            string `gcfg:"apiserver"`
-	Token                string `gcfg:"token"`
-	TokenFile            string `gcfg:"tokenFile"`
-	CompatServiceCIDR    string `gcfg:"service-cidr"`
-	RawServiceCIDRs      string `gcfg:"service-cidrs"`
-	ServiceCIDRs         []*net.IPNet
-	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
-	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                string `gcfg:"pod-ip"` // UNUSED
-	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes    labels.Selector
-	HostNetworkNamespace string `gcfg:"host-network-namespace"`
-	PlatformType         string `gcfg:"platform-type"`
-	HealthzBindAddress   string `gcfg:"healthz-bind-address"`
+	BootstrapKubeconfig     string        `gcfg:"bootstrap-kubeconfig"`
+	CertDir                 string        `gcfg:"cert-dir"`
+	CertDuration            time.Duration `gcfg:"cert-duration"`
+	Kubeconfig              string        `gcfg:"kubeconfig"`
+	CACert                  string        `gcfg:"cacert"`
+	CAData                  []byte
+	APIServer               string `gcfg:"apiserver"`
+	Token                   string `gcfg:"token"`
+	TokenFile               string `gcfg:"tokenFile"`
+	CompatServiceCIDR       string `gcfg:"service-cidr"`
+	RawServiceCIDRs         string `gcfg:"service-cidrs"`
+	ServiceCIDRs            []*net.IPNet
+	OVNConfigNamespace      string `gcfg:"ovn-config-namespace"`
+	OVNEmptyLbEvents        bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                   string `gcfg:"pod-ip"` // UNUSED
+	RawNoHostSubnetNodes    string `gcfg:"no-hostsubnet-nodes"`
+	NoHostSubnetNodes       labels.Selector
+	HostNetworkNamespace    string `gcfg:"host-network-namespace"`
+	DisableRequestedChassis bool   `gcfg:"disable-requestedchassis"`
+	PlatformType            string `gcfg:"platform-type"`
+	HealthzBindAddress      string `gcfg:"healthz-bind-address"`
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
@@ -636,6 +643,7 @@ func PrepareTestConfig() error {
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
 	ClusterManager = savedClusterManager
+	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
 	Default.OVSDBTxnTimeout = 5 * time.Second
 
@@ -921,6 +929,14 @@ var CommonFlags = []cli.Flag{
 		Value:       Default.Zone,
 		Destination: &cliConfig.Default.Zone,
 	},
+	&cli.StringSliceFlag{
+		Name: "udn-allowed-default-services",
+		Usage: "a list of namespaced names of default cluster network services accessible from primary" +
+			"user-defined networks. If not specified defaults to [\"default/kubernetes\", \"kube-system/kube-dns\"]." +
+			"Only used when enable-network-segmentation is set",
+		Value:       &Default.UDNAllowedDefaultServices,
+		Destination: &cliConfig.Default.UDNAllowedDefaultServices,
+	},
 }
 
 // MonitoringFlags capture monitoring-related options
@@ -1183,6 +1199,12 @@ var K8sFlags = []cli.Flag{
 		Usage:       "specify a namespace which will be used to classify host network traffic for network policy",
 		Destination: &cliConfig.Kubernetes.HostNetworkNamespace,
 		Value:       Kubernetes.HostNetworkNamespace,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-requestedchassis",
+		Usage:       "If set to true, requested-chassis option will not be set during pod creation",
+		Destination: &cliConfig.Kubernetes.DisableRequestedChassis,
+		Value:       Kubernetes.DisableRequestedChassis,
 	},
 	&cli.StringFlag{
 		Name: "platform-type",

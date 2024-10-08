@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"net"
 	"os"
 	"strconv"
@@ -112,6 +113,10 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+
+	nadController *nad.NetAttachDefinitionController
+
+	cniServer *cni.Server
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -129,7 +134,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nadController *nad.NetAttachDefinitionController) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
@@ -152,6 +157,8 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 	if err != nil {
 		return nil, err
 	}
+
+	nc.nadController = nadController
 
 	nc.initRetryFrameworkForNode()
 
@@ -311,7 +318,6 @@ func setupOVNNode(node *kapi.Node) error {
 		// to finish computation specially with complex acl configuration with port range.
 		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
 			config.Default.OpenFlowProbe),
-		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		// If Interconnect feature is enabled, we want to tell ovn-controller to
 		// make this node/chassis as an interconnect gateway.
 		fmt.Sprintf("external_ids:ovn-is-interconn=%s", strconv.FormatBool(config.OVNKubernetesFeature.EnableInterconnect)),
@@ -332,6 +338,12 @@ func setupOVNNode(node *kapi.Node) error {
 		setExternalIdsCmd = append(setExternalIdsCmd,
 			fmt.Sprintf("external_ids:ovn-memlimit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
 		)
+	}
+
+	// In the case of DPU, the hostname should be that of the DPU and not
+	// the K8s Node's. So skip setting the incorrect hostname.
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
 	}
 
 	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
@@ -705,13 +717,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	if err = configureGlobalForwarding(); err != nil {
-		return err
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		if err = configureGlobalForwarding(); err != nil {
+			return err
+		}
 	}
 
-	// Bootstrap flows in OVS if just normal flow is present
-	if err := bootstrapOVSFlows(nc.name); err != nil {
-		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Bootstrap flows in OVS if just normal flow is present
+		if err := bootstrapOVSFlows(nc.name); err != nil {
+			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+		}
 	}
 
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
@@ -792,10 +808,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.nadController)
 		if err != nil {
 			return err
 		}
+		nc.cniServer = cniServer
 	}
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
@@ -1082,8 +1099,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	} else {
 		// start the cni server
-		if err := cniServer.Start(cni.ServerRunDir); err != nil {
-			return err
+		if nc.cniServer != nil {
+			if err := nc.cniServer.Start(cni.ServerRunDir); err != nil {
+				return err
+			}
 		}
 
 		// Write CNI config file if it doesn't already exist
