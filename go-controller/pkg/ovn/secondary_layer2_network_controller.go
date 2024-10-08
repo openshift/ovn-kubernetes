@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -16,7 +15,9 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneinterconnect "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
@@ -63,27 +64,22 @@ func (h *secondaryLayer2NetworkControllerEventHandler) GetResourceFromInformerCa
 
 // RecordAddEvent records the add event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
-	switch h.objType {
-	case factory.MultiNetworkPolicyType:
-		mnp := obj.(*mnpapi.MultiNetworkPolicy)
-		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
-	}
+	h.baseHandler.recordAddEvent(h.objType, obj)
 }
 
 // RecordUpdateEvent records the udpate event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
-	h.baseHandler.recordAddEvent(h.objType, obj)
+	h.baseHandler.recordUpdateEvent(h.objType, obj)
 }
 
 // RecordDeleteEvent records the delete event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
-	h.baseHandler.recordAddEvent(h.objType, obj)
+	h.baseHandler.recordDeleteEvent(h.objType, obj)
 }
 
 // RecordSuccessEvent records the success event on this given object.
 func (h *secondaryLayer2NetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
-	h.baseHandler.recordAddEvent(h.objType, obj)
+	h.baseHandler.recordSuccessEvent(h.objType, obj)
 }
 
 // RecordErrorEvent records the error event on this given object.
@@ -159,16 +155,18 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
-				// determine what actually changed in this update
-				syncMgmtPort := macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) || nodeSubnetChanged
-
+				// determine what actually changed in this update and combine that with what failed previously
+				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
+				shouldSyncMgmtPort := mgmtUpdateFailed ||
+					macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) ||
+					nodeSubnetChanged
 				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
 				shouldSyncGW := gwUpdateFailed ||
 					gatewayChanged(oldNode, newNode) ||
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 
-				nodeSyncsParam = &nodeSyncs{syncMgmtPort: syncMgmtPort, syncGw: shouldSyncGW}
+				nodeSyncsParam = &nodeSyncs{syncMgmtPort: shouldSyncMgmtPort, syncGw: shouldSyncGW}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
@@ -201,6 +199,9 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 
 		case factory.NamespaceType:
 			syncFunc = h.oc.syncNamespaces
+
+		case factory.PolicyType:
+			syncFunc = h.oc.syncNetworkPolicies
 
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
@@ -237,10 +238,25 @@ type SecondaryLayer2NetworkController struct {
 	defaultCOPPUUID string
 
 	gatewayManagers sync.Map
+
+	// Cluster wide Load_Balancer_Group UUID.
+	// Includes the cluster switch and all node gateway routers.
+	clusterLoadBalancerGroupUUID string
+
+	// Cluster wide switch Load_Balancer_Group UUID.
+	// Includes the cluster switch.
+	switchLoadBalancerGroupUUID string
+
+	// Cluster wide router Load_Balancer_Group UUID.
+	// Includes all node gateway routers.
+	routerLoadBalancerGroupUUID string
+
+	// Controller in charge of services
+	svcController *svccontroller.Controller
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLayer2NetworkController {
+func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer2NetworkController, error) {
 
 	stopChan := make(chan struct{})
 
@@ -251,6 +267,24 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	if netInfo.IsPrimaryNetwork() {
 		lsManagerFactoryFn = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork
 	}
+
+	var svcController *svccontroller.Controller
+	if util.IsNetworkSegmentationSupportEnabled() {
+		var err error
+		svcController, err = svccontroller.NewController(
+			cnci.client, cnci.nbClient,
+			cnci.watchFactory.ServiceCoreInformer(),
+			cnci.watchFactory.EndpointSliceCoreInformer(),
+			cnci.watchFactory.NodeCoreInformer(),
+			nadController,
+			cnci.recorder,
+			netInfo,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new service controller while creating new layer2 network controller: %w", err)
+		}
+	}
+
 	oc := &SecondaryLayer2NetworkController{
 		BaseSecondaryLayer2NetworkController: BaseSecondaryLayer2NetworkController{
 
@@ -271,11 +305,13 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					wg:                          &sync.WaitGroup{},
 					localZoneNodes:              &sync.Map{},
 					cancelableCtx:               util.NewCancelableContext(),
+					nadController:               nadController,
 				},
 			},
 		},
 		mgmtPortFailed:  sync.Map{},
 		gatewayManagers: sync.Map{},
+		svcController:   svcController,
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
@@ -305,7 +341,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	oc.multicastSupport = false
 
 	oc.initRetryFramework()
-	return oc
+	return oc, nil
 }
 
 // Start starts the secondary layer2 controller, handles all events and creates all needed logical entities
@@ -325,7 +361,22 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 }
 
 func (oc *SecondaryLayer2NetworkController) run() error {
-	return oc.BaseSecondaryLayer2NetworkController.run()
+	err := oc.BaseSecondaryLayer2NetworkController.run()
+	if err != nil {
+		return err
+	}
+	if oc.svcController != nil {
+		startSvc := time.Now()
+
+		err := oc.StartServiceController(oc.wg, true)
+		endSvc := time.Since(startSvc)
+
+		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service_" + oc.GetNetworkName()).Set(endSvc.Seconds())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
@@ -362,11 +413,25 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	}
 	oc.defaultCOPPUUID = defaultCOPPUUID
 
+	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+	if err != nil {
+		return err
+	}
+	oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
+	oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
+	oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
+
 	_, err = oc.initializeLogicalSwitch(
 		oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
 		oc.Subnets(),
 		oc.ExcludeSubnets(),
+		oc.clusterLoadBalancerGroupUUID,
+		oc.switchLoadBalancerGroupUUID,
 	)
+	if err != nil {
+		return err
+	}
+
 	return err
 }
 
@@ -382,12 +447,19 @@ func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
 	}
 
+	// When a user-defined network is enabled as a primary network for namespace,
+	// then watch for namespace and network policy events.
+	if oc.IsPrimaryNetwork() {
+		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+		oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
+	}
+
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled. We don't support
 	// multi-network policy for IPAM-less secondary networks either.
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
-		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
+		oc.retryMultiNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }
 
@@ -419,22 +491,6 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 	var errs []error
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if nSyncs.syncMgmtPort {
-			// Layer 2 networks have a single, large subnet, that's the one
-			// associated to the controller.  Take the management port IP from
-			// there.
-			subnets := oc.Subnets()
-			hostSubnets := make([]*net.IPNet, 0, len(subnets))
-			for _, subnet := range oc.Subnets() {
-				hostSubnets = append(hostSubnets, subnet.CIDR)
-			}
-			if _, err := oc.syncNodeManagementPortNoRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), hostSubnets); err != nil {
-				errs = append(errs, err)
-				oc.mgmtPortFailed.Store(node.Name, true)
-			} else {
-				oc.mgmtPortFailed.Delete(node.Name)
-			}
-		}
 		if nSyncs.syncGw {
 			gwManager := oc.gatewayManagerForNode(node.Name)
 			oc.gatewayManagers.Store(node.Name, gwManager)
@@ -467,6 +523,22 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 						}
 					}
 				}
+			}
+		}
+		if nSyncs.syncMgmtPort {
+			// Layer 2 networks have a single, large subnet, that's the one
+			// associated to the controller.  Take the management port IP from
+			// there.
+			subnets := oc.Subnets()
+			hostSubnets := make([]*net.IPNet, 0, len(subnets))
+			for _, subnet := range oc.Subnets() {
+				hostSubnets = append(hostSubnets, subnet.CIDR)
+			}
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
 			}
 		}
 	}
@@ -592,6 +664,7 @@ func (oc *SecondaryLayer2NetworkController) newGatewayManager(nodeName string) *
 		oc.nbClient,
 		oc.NetInfo,
 		oc.watchFactory,
+		oc.gatewayOptions()...,
 	)
 }
 
@@ -611,4 +684,31 @@ func (oc *SecondaryLayer2NetworkController) gatewayManagerForNode(nodeName strin
 		}
 		return gwManager
 	}
+}
+
+func (oc *SecondaryLayer2NetworkController) gatewayOptions() []GatewayOption {
+	var opts []GatewayOption
+	if oc.clusterLoadBalancerGroupUUID != "" {
+		opts = append(opts, WithLoadBalancerGroups(
+			oc.routerLoadBalancerGroupUUID,
+			oc.clusterLoadBalancerGroupUUID,
+			oc.switchLoadBalancerGroupUUID,
+		))
+	}
+	return opts
+}
+
+func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
+		// use 5 workers like most of the kubernetes controllers in the
+		// kubernetes controller-manager
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
+		if err != nil {
+			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+		}
+	}()
+	return nil
 }

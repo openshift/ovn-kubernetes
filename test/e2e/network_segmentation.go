@@ -31,6 +31,8 @@ import (
 	"k8s.io/utils/pointer"
 )
 
+const openDefaultPortsAnnotation = "k8s.ovn.org/open-default-ports"
+
 var _ = Describe("Network Segmentation", func() {
 	f := wrappedTestFramework("network-segmentation")
 
@@ -65,6 +67,61 @@ var _ = Describe("Network Segmentation", func() {
 
 		DescribeTableSubtree("created using",
 			func(createNetworkFn func(c networkAttachmentConfigParams) error) {
+
+				DescribeTable(
+					"creates a networkStatus Annotation with UDN interface",
+					func(netConfig networkAttachmentConfigParams) {
+						By("creating the network")
+						netConfig.namespace = f.Namespace.Name
+						Expect(createNetworkFn(netConfig)).To(Succeed())
+
+						By("creating a pod on the udn namespace")
+						podConfig := *podConfig("some-pod")
+						podConfig.namespace = f.Namespace.Name
+						pod := runUDNPod(cs, f.Namespace.Name, podConfig, nil)
+
+						By("asserting the pod UDN interface on the network-status annotation")
+						udnNetStat, err := podNetworkStatus(pod, func(status nadapi.NetworkStatus) bool {
+							return status.Default
+						})
+						Expect(err).NotTo(HaveOccurred())
+						const (
+							expectedDefaultNetStatusLen = 1
+							ovnUDNInterface             = "ovn-udn1"
+						)
+						Expect(udnNetStat).To(HaveLen(expectedDefaultNetStatusLen))
+						Expect(udnNetStat[0].Interface).To(Equal(ovnUDNInterface))
+
+						cidrs := strings.Split(netConfig.cidr, ",")
+						for i, serverIP := range udnNetStat[0].IPs {
+							cidr := cidrs[i]
+							if cidr != "" {
+								By("asserting the server pod has an IP from the configured range")
+								const netPrefixLengthPerNode = 24
+								By(fmt.Sprintf("asserting the pod IP %s is from the configured range %s/%d", serverIP, cidr, netPrefixLengthPerNode))
+								subnet, err := getNetCIDRSubnet(cidr)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(inRange(subnet, serverIP)).To(Succeed())
+							}
+						}
+					},
+					Entry("L2 primary UDN",
+						networkAttachmentConfigParams{
+							name:     nadName,
+							topology: "layer2",
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "primary",
+						},
+					),
+					Entry("L3 primary UDN",
+						networkAttachmentConfigParams{
+							name:     nadName,
+							topology: "layer3",
+							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:     "primary",
+						},
+					),
+				)
 
 				DescribeTable(
 					"can perform east/west traffic between nodes",
@@ -275,6 +332,21 @@ var _ = Describe("Network Segmentation", func() {
 						// TODO
 						//By("checking non-kubelet default network host process can't reach the UDN pod")
 
+						By("asserting UDN pod can reach the kapi service in the default network")
+						// Use the service name to get test the DNS access
+						Consistently(func() bool {
+							_, err := e2ekubectl.RunKubectl(
+								udnPodConfig.namespace,
+								"exec",
+								udnPodConfig.name,
+								"--",
+								"curl",
+								"--connect-timeout",
+								"2",
+								"--insecure",
+								"https://kubernetes.default/healthz")
+							return err == nil
+						}, 5*time.Second).Should(BeTrue())
 						By("asserting UDN pod can't reach host via default network interface")
 						// tweak pod route to use default network interface as default
 						podAnno, err := unmarshalPodAnnotation(udnPod.Annotations, "default")
@@ -327,7 +399,19 @@ var _ = Describe("Network Segmentation", func() {
 						for _, kapiIP := range kapi.Spec.ClusterIPs {
 							By("checking the UDN pod can't reach kapi service on IP " + kapiIP)
 							Consistently(func() bool {
-								return connectToServerViaDefaultNetwork(udnPodConfig, kapiIP, int(kapi.Spec.Ports[0].Port)) != nil
+								_, err := e2ekubectl.RunKubectl(
+									udnPodConfig.namespace,
+									"exec",
+									udnPodConfig.name,
+									"--",
+									"curl",
+									"--connect-timeout",
+									"2",
+									"--interface",
+									"eth0",
+									"--insecure",
+									fmt.Sprintf("https://%s/healthz", kapiIP))
+								return err != nil
 							}, 5*time.Second).Should(BeTrue())
 						}
 					},
@@ -697,12 +781,6 @@ var _ = Describe("Network Segmentation", func() {
 				DescribeTable(
 					"can be accessed to from the pods running in the Kubernetes cluster",
 					func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration) {
-						if netConfigParams.topology == "layer2" && IsGatewayModeLocal() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4686"
-							e2eskipper.Skipf(
-								"These tests are known to fail on Local Gateway deployments. Upstream issue: %s", upstreamIssue,
-							)
-						}
 						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
 							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
 							e2eskipper.Skipf(
@@ -778,6 +856,114 @@ var _ = Describe("Network Segmentation", func() {
 				return err
 			}),
 		)
+	})
+
+	Context("UDN Pod", func() {
+		const (
+			testUdnName = "test-net"
+			testPodName = "test-pod-udn"
+		)
+
+		var udnPod *v1.Pod
+
+		BeforeEach(func() {
+			By("create tests UserDefinedNetwork")
+			cleanup, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(testUdnName))
+			DeferCleanup(cleanup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, testUdnName, 5*time.Second)).To(Succeed())
+			By("create UDN pod")
+			cfg := podConfig(testPodName, withCommand(func() []string {
+				return httpServerContainerCmd(port)
+			}))
+			cfg.namespace = f.Namespace.Name
+			udnPod = runUDNPod(cs, f.Namespace.Name, *cfg, nil)
+		})
+
+		It("should react to k8s.ovn.org/open-default-ports annotations changes", func() {
+			By("Creating second namespace for default network pod")
+			defaultNetNamespace := f.Namespace.Name + "-default"
+			_, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultNetNamespace,
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				Expect(cs.CoreV1().Namespaces().Delete(context.Background(), defaultNetNamespace, metav1.DeleteOptions{})).To(Succeed())
+			}()
+
+			By("creating default network client pod")
+			defaultClientPod, err := createPod(f, "default-net-client-pod", workerOneNodeName,
+				defaultNetNamespace, []string{}, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			udnIPv4, udnIPv6, err := podIPsForDefaultNetwork(
+				cs,
+				f.Namespace.Name,
+				udnPod.GetName(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By(fmt.Sprintf("verify default network client pod can't access UDN pod on port %d", port))
+			for _, destIP := range []string{udnIPv4, udnIPv6} {
+				if destIP == "" {
+					continue
+				}
+				By("checking the default network pod can't reach UDN pod on IP " + destIP)
+				Consistently(func() bool {
+					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) != nil
+				}, 5*time.Second).Should(BeTrue())
+			}
+
+			By("Open UDN pod port")
+
+			udnPod.Annotations[openDefaultPortsAnnotation] = fmt.Sprintf(
+				`- protocol: tcp
+  port: %d`, port)
+			udnPod, err = cs.CoreV1().Pods(udnPod.Namespace).Update(context.Background(), udnPod, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By(fmt.Sprintf("verify default network client pod can access UDN pod on open port %d", port))
+			for _, destIP := range []string{udnIPv4, udnIPv6} {
+				if destIP == "" {
+					continue
+				}
+				By("checking the default network pod can't reach UDN pod on IP " + destIP)
+				Eventually(func() bool {
+					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) == nil
+				}, 5*time.Second).Should(BeTrue())
+			}
+
+			By("Update UDN pod port with the wrong syntax")
+			// this should clean up open ports and throw an event
+			udnPod.Annotations[openDefaultPortsAnnotation] = fmt.Sprintf(
+				`- protocol: ppp
+  port: %d`, port)
+			udnPod, err = cs.CoreV1().Pods(udnPod.Namespace).Update(context.Background(), udnPod, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By(fmt.Sprintf("verify default network client pod can't access UDN pod on port %d", port))
+			for _, destIP := range []string{udnIPv4, udnIPv6} {
+				if destIP == "" {
+					continue
+				}
+				By("checking the default network pod can't reach UDN pod on IP " + destIP)
+				Eventually(func() bool {
+					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) != nil
+				}, 5*time.Second).Should(BeTrue())
+			}
+			By("Verify syntax error is reported via event")
+			events, err := cs.CoreV1().Events(udnPod.Namespace).List(context.Background(), metav1.ListOptions{})
+			found := false
+			for _, event := range events.Items {
+				if event.Reason == "ErrorUpdatingResource" && strings.Contains(event.Message, "invalid protocol ppp") {
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue(), "should have found an event for invalid protocol")
+		})
 	})
 })
 
@@ -971,6 +1157,12 @@ func withCommand(cmdGenerationFn func() []string) podOption {
 func withNodeSelector(nodeSelector map[string]string) podOption {
 	return func(pod *podConfiguration) {
 		pod.nodeSelector = nodeSelector
+	}
+}
+
+func withLabels(labels map[string]string) podOption {
+	return func(pod *podConfiguration) {
+		pod.labels = labels
 	}
 }
 

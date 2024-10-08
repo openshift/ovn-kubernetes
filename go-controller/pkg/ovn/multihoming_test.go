@@ -184,13 +184,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 
-						// there are multiple GRs in the cluster, thus their names must be scoped with the node name
-						gwRouterName := fmt.Sprintf(
-							"%s%s",
-							ovntypes.GWRouterPrefix,
-							ocInfo.bnc.GetNetworkScopedName(nodeName),
-						)
-						networkSwitchToGWRouterLSPName := ovntypes.JoinSwitchToGWRouterPrefix + gwRouterName
+						networkSwitchToGWRouterLSPName := ovntypes.SwitchToRouterPrefix + switchName
 						networkSwitchToGWRouterLSPUUID := networkSwitchToGWRouterLSPName + "-UUID"
 
 						data = append(data, &nbdb.LogicalSwitchPort{
@@ -201,7 +195,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 								"k8s.ovn.org/topology": ocInfo.bnc.TopologyType(),
 								"k8s.ovn.org/network":  ocInfo.bnc.GetNetworkName(),
 							},
-							Options: map[string]string{"router-port": ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName},
+							Options: map[string]string{"router-port": ovntypes.RouterToSwitchPrefix + switchName},
 							Type:    "router",
 						})
 						nodeslsps[switchName] = append(nodeslsps[switchName], networkSwitchToGWRouterLSPUUID)
@@ -296,7 +290,6 @@ func newExpectedSwitchToRouterPort(lspUUID string, portName string, pod testPod,
 	lrp.ExternalIDs = nil
 	lrp.Options = map[string]string{
 		"router-port": "rtos-isolatednet_test-node",
-		"arp_proxy":   "0a:58:a9:fe:01:01 169.254.1.1 fe80::1 10.128.0.0/14",
 	}
 	lrp.PortSecurity = nil
 	lrp.Type = "router"

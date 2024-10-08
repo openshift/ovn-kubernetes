@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -15,6 +14,7 @@ import (
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
@@ -143,23 +143,20 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, observManager *observability.Manager) (*DefaultNetworkController, error) {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, nadController *nad.NetAttachDefinitionController,
+	observManager *observability.Manager) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, observManager)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, nadController, observManager)
 }
 
 func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory, observManager *observability.Manager) (*DefaultNetworkController, error) {
+	addressSetFactory addressset.AddressSetFactory, nadController *nad.NetAttachDefinitionController,
+	observManager *observability.Manager) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
-	}
-
-	var nadLister nadlister.NetworkAttachmentDefinitionLister
-	if util.IsNetworkSegmentationSupportEnabled() {
-		nadLister = cnci.watchFactory.NADInformer().Lister()
 	}
 
 	svcController, err := svccontroller.NewController(
@@ -167,7 +164,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
-		nadLister,
+		nadController,
 		cnci.recorder,
 		&util.DefaultNetInfo{},
 	)
@@ -216,6 +213,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
 			observManager:               observManager,
+			nadController:               nadController,
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
@@ -729,18 +727,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		}
 		return h.oc.ensurePod(nil, pod, true)
 
-	case factory.PolicyType:
-		np, ok := obj.(*knet.NetworkPolicy)
-		if !ok {
-			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
-		}
-
-		if err = h.oc.addNetworkPolicy(np); err != nil {
-			klog.Infof("Network Policy add failed for %s/%s, will try again later: %v",
-				np.Namespace, np.Name, err)
-			return err
-		}
-
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
@@ -846,10 +832,8 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		return h.oc.AddNamespace(ns)
 
 	default:
-		return fmt.Errorf("no add function for object type %s", h.objType)
+		return h.oc.AddResourceCommon(h.objType, obj)
 	}
-
-	return nil
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
@@ -1033,13 +1017,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return h.oc.removePod(pod, portInfo)
 
-	case factory.PolicyType:
-		knp, ok := obj.(*knet.NetworkPolicy)
-		if !ok {
-			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
-		}
-		return h.oc.deleteNetworkPolicy(knp)
-
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
@@ -1086,7 +1063,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		return h.oc.deleteNamespace(ns)
 
 	default:
-		return fmt.Errorf("object type %s not supported", h.objType)
+		return h.oc.DeleteResourceCommon(h.objType, obj)
 	}
 }
 

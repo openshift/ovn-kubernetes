@@ -176,6 +176,24 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 		}
 	}
 
+	// update open ports for UDN pods on pod update.
+	if util.IsNetworkSegmentationSupportEnabled() && !util.PodWantsHostNetwork(pod) && !addPort &&
+		pod != nil && oldPod != nil &&
+		pod.Annotations[util.UDNOpenPortsAnnotationName] != oldPod.Annotations[util.UDNOpenPortsAnnotationName] {
+		networkRole, err := oc.GetNetworkRole(pod)
+		if err != nil {
+			return err
+		}
+		if networkRole != ovntypes.NetworkRolePrimary {
+			// only update for non-default network pods
+			portName := oc.GetLogicalPortName(pod, oc.GetNetworkName())
+			err := oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, portName)
+			if err != nil {
+				return fmt.Errorf("failed to update UDN pod  %s/%s open ports: %w", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+
 	if kubevirt.IsPodLiveMigratable(pod) {
 		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName)
 	}
@@ -277,12 +295,10 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 // It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
 // its routes.
 func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
-	if util.PodWantsHostNetwork(pod) {
-		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
-		if err := oc.deletePodExternalGW(pod); err != nil {
-			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
-				getPodNamespacedName(pod), err)
-		}
+	// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
+	if err := oc.deletePodExternalGW(pod); err != nil {
+		return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+			getPodNamespacedName(pod), err)
 	}
 
 	// while this check is only intended for local pods, we also need it for
