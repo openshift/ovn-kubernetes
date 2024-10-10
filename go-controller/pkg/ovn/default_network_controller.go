@@ -15,7 +15,6 @@ import (
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -143,15 +142,15 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, observManager *observability.Manager) (*DefaultNetworkController, error) {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, observManager)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil)
 }
 
 func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory, observManager *observability.Manager) (*DefaultNetworkController, error) {
+	addressSetFactory addressset.AddressSetFactory) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
@@ -215,7 +214,6 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			localZoneNodes:              &sync.Map{},
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
-			observManager:               observManager,
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{

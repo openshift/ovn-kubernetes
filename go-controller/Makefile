@@ -22,8 +22,7 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-# FIXME(tssurya): In one week when OVN 24.09 is released change the schema version
-OVN_SCHEMA_VERSION ?= 8efac26f6637fc
+OVN_SCHEMA_VERSION ?= v24.03.1
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
 else
@@ -51,7 +50,7 @@ export NOROOT
 #       (disables symbol table and DWARF generation when building ovnk binaries)
 
 all build:
-	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity cmd/ovnkube-observ
+	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity
 
 windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node

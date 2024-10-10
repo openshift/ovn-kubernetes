@@ -8,8 +8,6 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
@@ -97,8 +95,6 @@ type Controller struct {
 	anpNodeLister corev1listers.NodeLister
 	anpNodeSynced cache.InformerSynced
 	anpNodeQueue  workqueue.RateLimitingInterface
-
-	observManager *observability.Manager
 }
 
 // NewController returns a new *Controller.
@@ -114,8 +110,7 @@ func NewController(
 	addressSetFactory addressset.AddressSetFactory,
 	isPodScheduledinLocalZone func(*v1.Pod) bool,
 	zone string,
-	recorder record.EventRecorder,
-	observManager *observability.Manager) (*Controller, error) {
+	recorder record.EventRecorder) (*Controller, error) {
 
 	c := &Controller{
 		controllerName:            controllerName,
@@ -127,7 +122,6 @@ func NewController(
 		anpCache:                  make(map[string]*adminNetworkPolicyState),
 		anpPriorityMap:            make(map[int32]string),
 		banpCache:                 &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
-		observManager:             observManager,
 	}
 
 	klog.V(5).Info("Setting up event handlers for Admin Network Policy")
@@ -593,11 +587,4 @@ func (c *Controller) onANPNodeDelete(obj interface{}) {
 	}
 	klog.V(5).Infof("Deleting Node Admin Network Policy %s", key)
 	c.anpNodeQueue.Add(key)
-}
-
-func (c *Controller) GetSamplingConfig() *libovsdbops.SamplingConfig {
-	if c.observManager != nil {
-		return c.observManager.SamplingConfig()
-	}
-	return nil
 }

@@ -420,11 +420,8 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
-	_, err := oc.getNetworkID()
-	if err != nil {
-		return fmt.Errorf("unable to set networkID on secondary L3 controller for network %s, err: %w", oc.GetNetworkName(), err)
-	}
-	if err = oc.Init(ctx); err != nil {
+
+	if err := oc.Init(ctx); err != nil {
 		return err
 	}
 
@@ -685,7 +682,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 					gwConfig.config,
 					gwConfig.hostSubnets,
 					gwConfig.hostAddrs,
-					gwConfig.clusterSubnets,
+					gwConfig.hostSubnets,
 					gwConfig.gwLRPIPs,
 					oc.SCTPSupport,
 					oc.ovnClusterLRPToJoinIfAddrs,
@@ -750,36 +747,6 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.
 	return err
 }
 
-// addNodeSubnetEgressSNAT adds the SNAT on each node's ovn-cluster-router in L3 networks
-// snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 10.128.0.0/24
-// snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 2010:100:200::/64
-// these SNATs are required for pod2Egress traffic in LGW mode and pod2SameNode traffic in SGW mode to function properly on UDNs
-// SNAT Breakdown:
-// match = "eth.dst == d6:cf:fd:2c:a6:44"; the MAC here is the mpX interface MAC address for this UDN
-// logicalIP = "10.128.0.0/24"; which is the podsubnet for this node in L3 UDN
-// externalIP = "169.254.0.12"; which is the masqueradeIP for this L3 UDN
-// so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
-// which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *kapi.Node) error {
-	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
-	if err != nil {
-		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
-			oc.GetNetworkName(), node.Name, err)
-	}
-	if len(nats) == 0 {
-		return nil // nothing to do
-	}
-	router := &nbdb.LogicalRouter{
-		Name: oc.GetNetworkScopedClusterRouterName(),
-	}
-	if err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, router, nats...); err != nil {
-		return fmt.Errorf("failed to update SNAT for node subnet on router: %q for network %q, error: %w",
-			oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkName(), err)
-	}
-	return nil
-}
-
 func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	// Node subnet for the secondary layer3 network is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
@@ -792,11 +759,6 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, oc.clusterLoadBalancerGroupUUID, oc.switchLoadBalancerGroupUUID)
 	if err != nil {
 		return nil, err
-	}
-	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
-			return nil, err
-		}
 	}
 	return hostSubnets, nil
 }
@@ -896,12 +858,11 @@ func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
 }
 
 type SecondaryL3GatewayConfig struct {
-	config         *util.L3GatewayConfig
-	hostSubnets    []*net.IPNet
-	clusterSubnets []*net.IPNet
-	gwLRPIPs       []*net.IPNet
-	hostAddrs      []string
-	externalIPs    []net.IP
+	config      *util.L3GatewayConfig
+	hostSubnets []*net.IPNet
+	gwLRPIPs    []*net.IPNet
+	hostAddrs   []string
+	externalIPs []net.IP
 }
 
 func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (*SecondaryL3GatewayConfig, error) {
@@ -937,16 +898,10 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		hostAddrs = append(hostAddrs, externalIP.String())
 	}
 
-	// Use the cluster subnets present in the network attachment definition.
-	clusterSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
+	// Use the host subnets present in the network attachment definition.
+	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
 	for _, subnet := range oc.Subnets() {
-		clusterSubnets = append(clusterSubnets, subnet.CIDR)
-	}
-
-	// Fetch the host subnets present in the node annotation for this network
-	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node %q subnet annotation for network %q: %v", node.Name, oc.GetNetworkName(), err)
+		hostSubnets = append(hostSubnets, subnet.CIDR)
 	}
 
 	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
@@ -958,12 +913,11 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 
 	return &SecondaryL3GatewayConfig{
-		config:         l3GatewayConfig,
-		hostSubnets:    hostSubnets,
-		clusterSubnets: clusterSubnets,
-		gwLRPIPs:       gwLRPIPs,
-		hostAddrs:      hostAddrs,
-		externalIPs:    externalIPs,
+		config:      l3GatewayConfig,
+		hostSubnets: hostSubnets,
+		gwLRPIPs:    gwLRPIPs,
+		hostAddrs:   hostAddrs,
+		externalIPs: externalIPs,
 	}, nil
 }
 

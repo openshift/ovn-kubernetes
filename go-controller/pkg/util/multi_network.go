@@ -700,32 +700,17 @@ func NewNetInfo(netconf *ovncnitypes.NetConf) (NetInfo, error) {
 	if netconf.Name == types.DefaultNetworkName {
 		return &DefaultNetInfo{}, nil
 	}
-	var ni NetInfo
-	var err error
 	switch netconf.Topology {
 	case types.Layer3Topology:
-		ni, err = newLayer3NetConfInfo(netconf)
+		return newLayer3NetConfInfo(netconf)
 	case types.Layer2Topology:
-		ni, err = newLayer2NetConfInfo(netconf)
+		return newLayer2NetConfInfo(netconf)
 	case types.LocalnetTopology:
-		ni, err = newLocalnetNetConfInfo(netconf)
+		return newLocalnetNetConfInfo(netconf)
 	default:
 		// other topology NAD can be supported later
 		return nil, fmt.Errorf("topology %s not supported", netconf.Topology)
 	}
-	if err != nil {
-		return nil, err
-	}
-	if ni.IsPrimaryNetwork() && ni.IsSecondary() {
-		ipv4Mode, ipv6Mode := ni.IPMode()
-		if ipv4Mode && !config.IPv4Mode {
-			return nil, fmt.Errorf("network %s is attempting to use ipv4 subnets but the cluster does not support ipv4", ni.GetNetworkName())
-		}
-		if ipv6Mode && !config.IPv6Mode {
-			return nil, fmt.Errorf("network %s is attempting to use ipv6 subnets but the cluster does not support ipv6", ni.GetNetworkName())
-		}
-	}
-	return ni, nil
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks
@@ -954,16 +939,8 @@ func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, ac
 		Name:      activeNetworkNADKey[1],
 	}
 
-	if nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo) {
-		ipamClaimName, wasPersistentIPRequested := pod.Annotations[OvnUDNIPAMClaimName]
-		if wasPersistentIPRequested {
-			networkSelections[activeNetworkNADs[0]].IPAMClaimReference = ipamClaimName
-		}
-	}
-
 	return true, networkSelections, nil
 }
-
 func IsMultiNetworkPoliciesSupportEnabled() bool {
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableMultiNetworkPolicy
 }
@@ -979,18 +956,4 @@ func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
 func DoesNetworkRequireTunnelIDs(netInfo NetInfo) bool {
 	// Layer2Topology with IC require that we allocate tunnel IDs for each pod
 	return netInfo.TopologyType() == types.Layer2Topology && config.OVNKubernetesFeature.EnableInterconnect
-}
-
-func AllowsPersistentIPs(netInfo NetInfo) bool {
-	switch {
-	case netInfo.IsPrimaryNetwork():
-		return netInfo.TopologyType() == types.Layer2Topology && netInfo.AllowsPersistentIPs()
-
-	case netInfo.IsSecondary():
-		return (netInfo.TopologyType() == types.Layer2Topology || netInfo.TopologyType() == types.LocalnetTopology) &&
-			netInfo.AllowsPersistentIPs()
-
-	default:
-		return false
-	}
 }

@@ -27,7 +27,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 )
 
@@ -774,8 +773,9 @@ func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
 
 func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 	return config.OVNKubernetesFeature.EnablePersistentIPs &&
+		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
-		util.AllowsPersistentIPs(oc.NetInfo)
+		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
 }
 
 func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
@@ -791,49 +791,4 @@ func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 		}
 	}
 	return *oc.networkID, nil
-}
-
-// buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
-// steer traffic correctly via mp0 when leaving OVN to the host
-func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string,
-	node *kapi.Node) ([]*nbdb.NAT, error) {
-	if len(localPodSubnets) == 0 {
-		return nil, nil // nothing to do
-	}
-	var snats []*nbdb.NAT
-	var masqIP *udn.MasqueradeIPs
-	var err error
-	networkID, err := bsnc.getNetworkID()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
-	}
-	dstMac, err := util.ParseNodeManagementPortMACAddresses(node, bsnc.GetNetworkName())
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse mac address annotation for network %q on node %q, err: %w",
-			bsnc.GetNetworkName(), node.Name, err)
-	}
-	extIDs := map[string]string{
-		types.NetworkExternalID:  bsnc.GetNetworkName(),
-		types.TopologyExternalID: bsnc.TopologyType(),
-	}
-	for _, localPodSubnet := range localPodSubnets {
-		if utilnet.IsIPv6CIDR(localPodSubnet) {
-			masqIP, err = udn.AllocateV6MasqueradeIPs(networkID)
-		} else {
-			masqIP, err = udn.AllocateV4MasqueradeIPs(networkID)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if masqIP == nil {
-			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
-		}
-		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
-			extIDs, getMasqueradeManagementIPSNATMatch(dstMac.String())))
-	}
-	return snats, nil
-}
-
-func getMasqueradeManagementIPSNATMatch(dstMac string) string {
-	return fmt.Sprintf("eth.dst == %s", dstMac)
 }

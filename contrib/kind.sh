@@ -79,7 +79,6 @@ usage() {
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [--isolated]"
     echo "                 [-dns | --enable-dnsnameresolver]"
-    echo "                 [-obs | --observability]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -142,7 +141,6 @@ usage() {
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
     echo "--add-nodes                         Adds nodes to an existing cluster. The number of nodes to be added is specified by --num-workers. Also use -ic if the cluster is using interconnect."
     echo "-dns | --enable-dnsnameresolver     Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
-    echo "-obs | --observability              Enable OVN Observability feature."
     echo ""
 }
 
@@ -164,8 +162,6 @@ parse_args() {
             -pl | --install-cni-plugins )       KIND_INSTALL_PLUGINS=true
                                                 ;;
             -ikv | --install-kubevirt)          KIND_INSTALL_KUBEVIRT=true
-                                                ;;
-            -nokvipam | --opt-out-kv-ipam)      KIND_OPT_OUT_KUBEVIRT_IPAM=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
@@ -202,8 +198,6 @@ parse_args() {
                                                 ;;
             -ifa | --ipfix-cache-active-timeout ) shift
                                                 OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=$1
-                                                ;;
-            -obs | --observability )            OVN_OBSERV_ENABLE=true
                                                 ;;
             -el | --ovn-empty-lb-events )       OVN_EMPTY_LB_EVENTS=true
                                                 ;;
@@ -340,8 +334,7 @@ parse_args() {
             -h | --help )                       usage
                                                 exit
                                                 ;;
-            * )                                 echo "Invalid option: $1"
-                                                usage
+            * )                                 usage
                                                 exit 1
         esac
         shift
@@ -357,7 +350,6 @@ print_params() {
      echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
      echo "KIND_INSTALL_PLUGINS = $KIND_INSTALL_PLUGINS"
      echo "KIND_INSTALL_KUBEVIRT = $KIND_INSTALL_KUBEVIRT"
-     echo "KIND_OPT_OUT_KUBEVIRT_IPAM = $KIND_OPT_OUT_KUBEVIRT_IPAM"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -385,7 +377,6 @@ print_params() {
      echo "OVN_IPFIX_SAMPLING = $OVN_IPFIX_SAMPLING"
      echo "OVN_IPFIX_CACHE_MAX_FLOWS = $OVN_IPFIX_CACHE_MAX_FLOWS"
      echo "OVN_IPFIX_CACHE_ACTIVE_TIMEOUT = $OVN_IPFIX_CACHE_ACTIVE_TIMEOUT"
-     echo "OVN_OBSERV_ENABLE = $OVN_OBSERV_ENABLE"
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
@@ -512,7 +503,6 @@ set_default_params() {
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
   KIND_INSTALL_KUBEVIRT=${KIND_INSTALL_KUBEVIRT:-false}
-  KIND_OPT_OUT_KUBEVIRT_IPAM=${KIND_OPT_OUT_KUBEVIRT_IPAM:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
@@ -614,7 +604,6 @@ set_default_params() {
   fi
   OVN_MTU=${OVN_MTU:-1400}
   OVN_ENABLE_DNSNAMERESOLVER=${OVN_ENABLE_DNSNAMERESOLVER:-false}
-  OVN_OBSERV_ENABLE=${OVN_OBSERV_ENABLE:-false}
 }
 
 check_ipv6() {
@@ -862,9 +851,7 @@ create_ovn_kube_manifests() {
     --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
     --enable-persistent-ips=true \
     --mtu="${OVN_MTU}" \
-    --enable-dnsnameresolver="${OVN_ENABLE_DNSNAMERESOLVER}" \
-    --mtu="${OVN_MTU}" \
-    --enable-observ="${OVN_OBSERV_ENABLE}"
+    --enable-dnsnameresolver="${OVN_ENABLE_DNSNAMERESOLVER}"
   popd
 }
 
@@ -1176,11 +1163,5 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
-  deploy_kubevirt_binding
-  deploy_passt_binary
-
-  install_cert_manager
-  if [ "$KIND_OPT_OUT_KUBEVIRT_IPAM" != true ]; then
-    install_kubevirt_ipam_controller
-  fi
+  install_kubevirt_ipam_controller
 fi

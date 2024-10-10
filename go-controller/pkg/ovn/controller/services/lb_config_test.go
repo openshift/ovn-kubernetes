@@ -1211,10 +1211,8 @@ func Test_buildClusterLBs(t *testing.T) {
 	namespace := "testns"
 
 	oldGwMode := globalconfig.Gateway.Mode
-	oldIPv4Mode := globalconfig.IPv4Mode
 	defer func() {
 		globalconfig.Gateway.Mode = oldGwMode
-		globalconfig.IPv4Mode = oldIPv4Mode
 	}()
 	globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 
@@ -1230,9 +1228,7 @@ func Test_buildClusterLBs(t *testing.T) {
 	defaultGroups := []string{types.ClusterLBGroupName}
 	defaultOpts := LBOpts{Reject: true}
 
-	globalconfig.IPv4Mode = true
-	UDNNetInfo, err := getSampleUDNNetInfo(namespace)
-	assert.Equal(t, err, nil)
+	UDNNetInfo := getSampleUDNNetInfo(namespace)
 	UDNGroups := []string{UDNNetInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)}
 
 	tc := []struct {
@@ -1470,9 +1466,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	oldGwMode := globalconfig.Gateway.Mode
 	oldServiceCIDRs := globalconfig.Kubernetes.ServiceCIDRs
-	oldIPv4Mode := globalconfig.IPv4Mode
 	defer func() {
-		globalconfig.IPv4Mode = oldIPv4Mode
 		globalconfig.Gateway.Mode = oldGwMode
 		globalconfig.Default.ClusterSubnets = oldClusterSubnet
 		globalconfig.Kubernetes.ServiceCIDRs = oldServiceCIDRs
@@ -1485,13 +1479,11 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	_, svcCIDRv6, _ := net.ParseCIDR("fd92::0/80")
 
 	globalconfig.Kubernetes.ServiceCIDRs = []*net.IPNet{svcCIDRv4}
-	globalconfig.IPv4Mode = true
 
 	name := "foo"
 	namespace := "testns"
 
-	UDNNetInfo, err := getSampleUDNNetInfo(namespace)
-	assert.Equal(t, nil, err)
+	UDNNetInfo := getSampleUDNNetInfo(namespace)
 
 	defaultService := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},

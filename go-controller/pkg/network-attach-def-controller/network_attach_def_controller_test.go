@@ -491,7 +491,6 @@ func TestSyncAll(t *testing.T) {
 				"SUT",
 				tncm,
 				wf,
-				nil,
 			)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 

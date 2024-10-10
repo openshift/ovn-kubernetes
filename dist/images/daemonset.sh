@@ -99,7 +99,6 @@ OVN_ENABLE_DNSNAMERESOLVER="false"
 IN_UPGRADE=
 # northd-backoff-interval, in ms
 OVN_NORTHD_BACKOFF_INTERVAL=
-OVN_OBSERV_ENABLE="false"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -355,9 +354,6 @@ while [ "$1" != "" ]; do
   --enable-dnsnameresolver)
     OVN_ENABLE_DNSNAMERESOLVER=$VALUE
     ;;
-  --enable-observ)
-    OVN_OBSERV_ENABLE=$VALUE
-    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -548,9 +544,6 @@ echo "ovn_enable_svc_template_support: ${ovn_enable_svc_template_support}"
 ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER}
 echo "ovn_enable_dnsnameresolver: ${ovn_enable_dnsnameresolver}"
 
-ovn_observ_enable=${OVN_OBSERV_ENABLE}
-echo "ovn_observ_enable: ${ovn_observ_enable}"
-
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -599,7 +592,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_observ_enable=${ovn_observ_enable} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -651,7 +643,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_observ_enable=${ovn_observ_enable} \
   ovnkube_app_name=ovnkube-node-dpu \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu.yaml
 
@@ -742,7 +733,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
-  ovn_observ_enable=${ovn_observ_enable} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \
@@ -784,7 +774,6 @@ ovn_image=${ovnkube_image} \
   ovn_v6_transit_switch_subnet=${ovn_v6_transit_switch_subnet} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
-  ovn_observ_enable=${ovn_observ_enable} \
   jinjanate ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
 
 ovn_image=${image} \
@@ -880,7 +869,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
-  ovn_observ_enable=${ovn_observ_enable} \
   jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${ovnkube_image} \
@@ -944,7 +932,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
-  ovn_observ_enable=${ovn_observ_enable} \
   jinjanate ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${image} \

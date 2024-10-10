@@ -1261,11 +1261,6 @@ func valueFromColumnKey(info *mapper.Info, columnKey model.ColumnKey) (interface
 			return "", fmt.Errorf("can't get key value from map: %v", err)
 		}
 	}
-	// if the value is a non-nil pointer of an optional, dereference
-	v := reflect.ValueOf(val)
-	if v.Kind() == reflect.Ptr && !v.IsNil() {
-		val = v.Elem().Interface()
-	}
 	return val, err
 }
 
