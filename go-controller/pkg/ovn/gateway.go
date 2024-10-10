@@ -143,72 +143,72 @@ func WithLoadBalancerGroups(routerLBGroup, clusterLBGroup, switchLBGroup string)
 	}
 }
 
-// cleanupStalePodSNATs removes SNATs against nodeIP for the given node if the SNAT.logicalIP isn't an active podIP on this node
-// We don't have to worry about missing SNATs that should be added because addLogicalPort takes care of this for all pods
-// when RequestRetryObjs is called for each node add.
-// This is executed only when disableSNATMultipleGateways = true
-// SNATs configured for the join subnet are ignored.
-//
-// NOTE: On startup libovsdb adds back all the pods and this should normally update all existing SNATs
-// accordingly. Due to a stale egressIP cache bug https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding
-// wrong pod->nodeSNATs which won't get cleared up unless explicitly deleted.
+// cleanupStalePodSNATs removes pod SNATs against nodeIP for the given node if
+// the SNAT.logicalIP isn't an active podIP, the pod network is being advertised
+// on this node or disableSNATMultipleGWs=false. We don't have to worry about
+// missing SNATs that should be added because addLogicalPort takes care of this
+// for all pods when RequestRetryObjs is called for each node add.
+// Other non-pod SNATs like join subnet SNATs are ignored.
+// NOTE: On startup libovsdb adds back all the pods and this should normally
+// update all existing SNATs accordingly. Due to a stale egressIP cache bug
+// https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding wrong
+// pod->nodeSNATs which won't get cleared up unless explicitly deleted.
 // NOTE2: egressIP SNATs are synced in EIP controller.
-// TODO (tssurya): Add support cleaning up even if disableSNATMultipleGWs=false, we'd need to remove the perPod
-// SNATs in case someone switches between these modes. See https://github.com/ovn-org/ovn-kubernetes/issues/3232
-func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.IPNet) error {
-	if !config.Gateway.DisableSNATMultipleGWs {
-		return nil
-	}
-
-	pods, err := gw.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-	})
-	if err != nil {
-		return fmt.Errorf("unable to list existing pods on node: %s, %w",
-			nodeName, err)
-	}
-
-	podIPsOnNode := sets.NewString() // collects all podIPs on node
-	for _, pod := range pods {
-		pod := *pod
-		if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
-			continue
+func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.IPNet, gwLRPIPs []net.IP) error {
+	// collect all the pod IPs for which we should be doing the SNAT; if the pod
+	// network is advertised or DisableSNATMultipleGWs==false we consider all
+	// the SNATs stale
+	podIPsWithSNAT := sets.New[string]()
+	if !gw.isRoutingAdvertised(nodeName) && config.Gateway.DisableSNATMultipleGWs {
+		pods, err := gw.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+		})
+		if err != nil {
+			return fmt.Errorf("unable to list existing pods on node: %s, %w",
+				nodeName, err)
 		}
-		if util.PodCompleted(&pod) {
-			collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
-			if err != nil {
-				return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
-			}
-			if collidingPod != nil { //if the ip is in use we should not remove the nat
+		for _, pod := range pods {
+			pod := *pod
+			if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
 				continue
 			}
-		}
-		podIPs, err := util.GetPodIPsOfNetwork(&pod, gw.netInfo)
-		if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
-			// It is possible that the pod is scheduled during this time, but the LSP add or
-			// IP Allocation has not happened and it is waiting for the WatchPods to start
-			// after WatchNodes completes (This function is called during syncNodes). So since
-			// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
-			// this pod from processing and move onto the next one.
-			klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-			continue // no-op
-		} else if err != nil {
-			return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-		for _, podIP := range podIPs {
-			podIPsOnNode.Insert(podIP.String())
+			if util.PodCompleted(&pod) {
+				collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
+				if err != nil {
+					return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
+				}
+				if collidingPod != nil { //if the ip is in use we should not remove the nat
+					continue
+				}
+			}
+			podIPs, err := util.GetPodIPsOfNetwork(&pod, gw.netInfo)
+			if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
+				// It is possible that the pod is scheduled during this time, but the LSP add or
+				// IP Allocation has not happened and it is waiting for the WatchPods to start
+				// after WatchNodes completes (This function is called during syncNodes). So since
+				// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
+				// this pod from processing and move onto the next one.
+				klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+				continue // no-op
+			} else if err != nil {
+				return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+			for _, podIP := range podIPs {
+				podIPsWithSNAT.Insert(podIP.String())
+			}
 		}
 	}
 
-	gatewayRouter := nbdb.LogicalRouter{
+	gatewayRouter := &nbdb.LogicalRouter{
 		Name: gw.gwRouterName,
 	}
-	routerNats, err := libovsdbops.GetRouterNATs(gw.nbClient, &gatewayRouter)
+	routerNats, err := libovsdbops.GetRouterNATs(gw.nbClient, gatewayRouter)
 	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("unable to get NAT entries for router %s on node %s: %w", gatewayRouter.Name, nodeName, err)
 	}
 
 	nodeIPset := sets.New(util.IPNetsIPToStringSlice(nodeIPs)...)
+	gwLRPIPset := sets.New(util.StringSlice(gwLRPIPs)...)
 	natsToDelete := []*nbdb.NAT{}
 	for _, routerNat := range routerNats {
 		routerNat := routerNat
@@ -218,25 +218,27 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 		if !nodeIPset.Has(routerNat.ExternalIP) {
 			continue
 		}
-		if podIPsOnNode.Has(routerNat.LogicalIP) {
+		if podIPsWithSNAT.Has(routerNat.LogicalIP) {
+			continue
+		}
+		if gwLRPIPset.Has(routerNat.LogicalIP) {
 			continue
 		}
 		logicalIP := net.ParseIP(routerNat.LogicalIP)
 		if logicalIP == nil {
-			// this is probably a CIDR so not a pod IP
-			continue
-		}
-		if gw.containsJoinIP(logicalIP) {
+			// this is probably a IPNet so can't be a pod IP
 			continue
 		}
 		natsToDelete = append(natsToDelete, routerNat)
 	}
+
 	if len(natsToDelete) > 0 {
-		err := libovsdbops.DeleteNATs(gw.nbClient, &gatewayRouter, natsToDelete...)
+		err := libovsdbops.DeleteNATs(gw.nbClient, gatewayRouter, natsToDelete...)
 		if err != nil {
 			return fmt.Errorf("unable to delete NATs %+v from node %s: %w", natsToDelete, nodeName, err)
 		}
 	}
+
 	return nil
 }
 
@@ -332,6 +334,15 @@ func (gw *GatewayManager) GatewayInit(
 
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + gatewayRouter
+
+	// In Layer2 networks there is no join switch and the gw.joinSwitchName points to the cluster switch.
+	// Ensure that the ports are named appropriately, this is important for the logical router policies
+	// created for local node access.
+	// TODO(kyrtapz): Clean this up for clarity as part of https://github.com/ovn-org/ovn-kubernetes/issues/4689
+	if gw.netInfo.TopologyType() == types.Layer2Topology {
+		gwSwitchPort = types.SwitchToRouterPrefix + gw.joinSwitchName
+		gwRouterPort = types.RouterToSwitchPrefix + gw.joinSwitchName
+	}
 
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      gwSwitchPort,
@@ -588,7 +599,7 @@ func (gw *GatewayManager) GatewayInit(
 			// management port interface for the hostSubnet prefix before adding the routes
 			// towards join switch.
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-			gw.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
+			gw.staticRouteCleanup([]net.IP{mgmtIfAddr.IP}, hostSubnet)
 
 			if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(
 				gw.nbClient,
@@ -601,10 +612,13 @@ func (gw *GatewayManager) GatewayInit(
 			}
 		} else if config.Gateway.Mode == config.GatewayModeLocal {
 			// If migrating from shared to local gateway, let's remove the static routes towards
-			// join switch for the hostSubnet prefix
+			// join switch for the hostSubnet prefix and any potential routes for UDN enabled services.
 			// Note syncManagementPort happens before gateway sync so only remove things pointing to join subnet
 			if gw.clusterRouterName != "" {
 				p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+					if _, ok := item.ExternalIDs[types.UDNEnabledServiceExternalID]; ok {
+						return true
+					}
 					return item.IPPrefix == lrsr.IPPrefix && item.Policy != nil && *item.Policy == *lrsr.Policy &&
 						gw.containsJoinIP(net.ParseIP(item.Nexthop))
 				}
@@ -637,6 +651,7 @@ func (gw *GatewayManager) GatewayInit(
 		if nat.Type != nbdb.NATTypeSNAT {
 			continue
 		}
+
 		// check external ip changed
 		for _, externalIP := range externalIPs {
 			oldExternalIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6(externalIP), oldExtIPs)
@@ -654,6 +669,7 @@ func (gw *GatewayManager) GatewayInit(
 			}
 
 		}
+
 		// note, nat.LogicalIP may be a CIDR or IP, we don't care unless it's an IP
 		parsedLogicalIP := net.ParseIP(nat.LogicalIP)
 		// check if join ip changed
@@ -711,7 +727,7 @@ func (gw *GatewayManager) GatewayInit(
 
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-	if !config.Gateway.DisableSNATMultipleGWs {
+	if !config.Gateway.DisableSNATMultipleGWs && !gw.isRoutingAdvertised(nodeName) {
 		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
 		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
 		for _, entry := range clusterIPSubnet {
@@ -720,7 +736,8 @@ func (gw *GatewayManager) GatewayInit(
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			nat = libovsdbops.BuildSNAT(&externalIP[0], entry, "", extIDs)
+
+			nat = libovsdbops.BuildSNATWithMatch(&externalIP[0], entry, "", extIDs, gw.netInfo.GetNetworkScopedClusterSubnetSNATMatch(nodeName))
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.CreateOrUpdateNATs(gw.nbClient, &logicalRouter, nats...)
@@ -730,7 +747,7 @@ func (gw *GatewayManager) GatewayInit(
 	} else {
 		// ensure we do not have any leftover SNAT entries after an upgrade
 		for _, logicalSubnet := range clusterIPSubnet {
-			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", extIDs)
+			nat = libovsdbops.BuildSNATWithMatch(nil, logicalSubnet, "", extIDs, gw.netInfo.GetNetworkScopedClusterSubnetSNATMatch(nodeName))
 			nats = append(nats, nat)
 		}
 		err := libovsdbops.DeleteNATs(gw.nbClient, &logicalRouter, nats...)
@@ -739,7 +756,7 @@ func (gw *GatewayManager) GatewayInit(
 		}
 	}
 
-	if err := gw.cleanupStalePodSNATs(nodeName, l3GatewayConfig.IPAddresses); err != nil {
+	if err := gw.cleanupStalePodSNATs(nodeName, l3GatewayConfig.IPAddresses, gwLRPIPs); err != nil {
 		return fmt.Errorf("failed to sync stale SNATs on node %s: %v", nodeName, err)
 	}
 
@@ -1001,6 +1018,17 @@ func (gw *GatewayManager) Cleanup() error {
 	var nextHops []net.IP
 
 	gwRouterToJoinSwitchPortName := types.GWRouterToJoinSwitchPrefix + gw.gwRouterName
+	portName := types.JoinSwitchToGWRouterPrefix + gw.gwRouterName
+
+	// In Layer2 networks there is no join switch and the gw.joinSwitchName points to the cluster switch.
+	// Ensure that the ports are named appropriately, this is important for the logical router policies
+	// created for local node access.
+	// TODO(kyrtapz): Clean this up for clarity as part of https://github.com/ovn-org/ovn-kubernetes/issues/4689
+	if gw.netInfo.TopologyType() == types.Layer2Topology {
+		gwRouterToJoinSwitchPortName = types.RouterToSwitchPrefix + gw.joinSwitchName
+		portName = types.SwitchToRouterPrefix + gw.joinSwitchName
+	}
+
 	gwIPAddrs, err := libovsdbutil.GetLRPAddrs(gw.nbClient, gwRouterToJoinSwitchPortName)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf(
@@ -1014,11 +1042,10 @@ func (gw *GatewayManager) Cleanup() error {
 	for _, gwIPAddr := range gwIPAddrs {
 		nextHops = append(nextHops, gwIPAddr.IP)
 	}
-	gw.staticRouteCleanup(nextHops)
+	gw.staticRouteCleanup(nextHops, nil)
 	gw.policyRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
-	portName := types.JoinSwitchToGWRouterPrefix + gw.gwRouterName
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
 	sw := nbdb.LogicalSwitch{Name: gw.joinSwitchName}
 	err = libovsdbops.DeleteLogicalSwitchPorts(gw.nbClient, &sw, &lsp)
@@ -1083,7 +1110,7 @@ func (gw *GatewayManager) delPbrAndNatRules(nodeName string) {
 	gw.removeLRPolicies(nodeName)
 }
 
-func (gw *GatewayManager) staticRouteCleanup(nextHops []net.IP) {
+func (gw *GatewayManager) staticRouteCleanup(nextHops []net.IP, ipPrefix *net.IPNet) {
 	if len(nextHops) == 0 {
 		return // if we do not have next hops, we do not have any routes to cleanup
 	}
@@ -1097,6 +1124,9 @@ func (gw *GatewayManager) staticRouteCleanup(nextHops []net.IP) {
 			networkName = types.DefaultNetworkName
 		}
 		if networkName != gw.netInfo.GetNetworkName() {
+			return false
+		}
+		if ipPrefix != nil && item.IPPrefix != ipPrefix.String() {
 			return false
 		}
 		return ips.Has(item.Nexthop)
@@ -1174,6 +1204,13 @@ func (gw *GatewayManager) containsJoinIP(ip net.IP) bool {
 	return util.IsContainedInAnyCIDR(ipNet, gw.netInfo.JoinSubnets()...)
 }
 
+func (gw *GatewayManager) isRoutingAdvertised(node string) bool {
+	if gw.netInfo.IsSecondary() {
+		return false
+	}
+	return util.IsRoutingAdvertised(gw.netInfo, node)
+}
+
 func (gw *GatewayManager) syncGatewayLogicalNetwork(
 	node *kapi.Node,
 	l3GatewayConfig *util.L3GatewayConfig,
@@ -1207,21 +1244,27 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		routerName = gw.gwRouterName
 	}
 	for _, subnet := range hostSubnets {
-		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-		if hostIfAddr == nil {
-			return fmt.Errorf("host interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
+		mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
+		if mgmtIfAddr == nil {
+			return fmt.Errorf("management interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
 		}
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(mgmtIfAddr.IP), l3GatewayConfig.IPAddresses)
 		if err != nil {
 			return fmt.Errorf("failed to extract the gateway IP addr for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(mgmtIfAddr.IP), hostAddrs)
 		if err != nil && err != util.ErrorNoIP {
 			return fmt.Errorf("failed to extract the host IP addrs for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
 		pbrMngr := gatewayrouter.NewPolicyBasedRoutesManager(gw.nbClient, routerName, gw.netInfo)
-		if err := pbrMngr.Add(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
+		if err := pbrMngr.AddSameNodeIPPolicy(node.Name, mgmtIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
 			return fmt.Errorf("failed to configure the policy based routes for network %q: %v", gw.netInfo.GetNetworkName(), err)
+		}
+		if gw.netInfo.TopologyType() == types.Layer2Topology && config.Gateway.Mode == config.GatewayModeLocal {
+			if err := pbrMngr.AddHostCIDRPolicy(node, mgmtIfAddr.IP.String(), subnet.String()); err != nil {
+				return fmt.Errorf("failed to configure the hostCIDR policy for L2 network %q on local gateway: %v",
+					gw.netInfo.GetNetworkName(), err)
+			}
 		}
 	}
 

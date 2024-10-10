@@ -108,6 +108,7 @@ const (
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
 	InterNodePolicyPriority               = "1003"
+	UDNHostCIDRPolicyPriority             = "99"
 	HybridOverlaySubnetPriority           = 1002
 	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 102
@@ -153,8 +154,9 @@ const (
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
-	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
-	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
+	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
@@ -196,6 +198,8 @@ const (
 	LoadBalancerKindExternalID = OvnK8sPrefix + "/" + "kind"
 	// key for load_balancer service external-id
 	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
+	// key for UDN enabled services routes
+	UDNEnabledServiceExternalID = OvnK8sPrefix + "/" + "udn-enabled-default-service"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology   = "layer3"

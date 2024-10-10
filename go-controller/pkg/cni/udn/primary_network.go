@@ -5,8 +5,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -15,14 +14,14 @@ import (
 type podAnnotWaitCond = func(map[string]string, string) (*util.PodAnnotation, bool)
 
 type UserDefinedPrimaryNetwork struct {
-	nadLister     nadlister.NetworkAttachmentDefinitionLister
-	annotation    *util.PodAnnotation
-	activeNetwork util.NetInfo
+	networkManager nad.NetworkManager
+	annotation     *util.PodAnnotation
+	activeNetwork  util.NetInfo
 }
 
-func NewPrimaryNetwork(nadLister nadlister.NetworkAttachmentDefinitionLister) *UserDefinedPrimaryNetwork {
+func NewPrimaryNetwork(networkManager nad.NetworkManager) *UserDefinedPrimaryNetwork {
 	return &UserDefinedPrimaryNetwork{
-		nadLister: nadLister,
+		networkManager: networkManager,
 	}
 }
 
@@ -124,7 +123,7 @@ func (p *UserDefinedPrimaryNetwork) ensureActiveNetwork(namespace string) error 
 	if p.activeNetwork != nil {
 		return nil
 	}
-	activeNetwork, err := util.GetActiveNetworkForNamespace(namespace, p.nadLister)
+	activeNetwork, err := p.networkManager.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}

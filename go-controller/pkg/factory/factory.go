@@ -12,6 +12,13 @@ import (
 	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
 	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
 
+	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
+
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
+	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
+	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
@@ -20,12 +27,6 @@ import (
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
-
-	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
-	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
-	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
-	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
@@ -74,6 +75,16 @@ import (
 	userdefinednetworkapiinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 
+	routeadvertisementsapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	routeadvertisementsscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/scheme"
+	routeadvertisementsinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions"
+	routeadvertisementsinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
+
+	frrapi "github.com/metallb/frr-k8s/api/v1beta1"
+	frrscheme "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/scheme"
+	frrinformerfactory "github.com/metallb/frr-k8s/pkg/client/informers/externalversions"
+	frrinformer "github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
@@ -113,6 +124,8 @@ type WatchFactory struct {
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
 	nadFactory           nadinformerfactory.SharedInformerFactory
 	udnFactory           userdefinednetworkapiinformerfactory.SharedInformerFactory
+	raFactory            routeadvertisementsinformerfactory.SharedInformerFactory
+	frrFactory           frrinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -212,18 +225,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() {
-		if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
-			return nil, err
-		}
-
-		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return wf, nil
 }
 
@@ -286,6 +287,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := adminbasedpolicyapi.AddToScheme(adminbasedpolicyscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := routeadvertisementsapi.AddToScheme(routeadvertisementsscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -406,6 +410,14 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
+		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		wf.informers[MultiNetworkPolicyType], err = newInformer(MultiNetworkPolicyType, wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
 		if err != nil {
@@ -416,6 +428,12 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
 		// make sure shared informer is created for a factory, so on wf.apbRouteFactory.Start() it is initialized and caches are synced.
 		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
+	}
+
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
+		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
 	}
 
 	return wf, nil
@@ -534,6 +552,24 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if wf.raFactory != nil {
+		wf.raFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.raFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
+	if wf.frrFactory != nil {
+		wf.frrFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.frrFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -575,6 +611,13 @@ func (wf *WatchFactory) Stop() {
 	if wf.udnFactory != nil {
 		wf.udnFactory.Shutdown()
 	}
+
+	if wf.raFactory != nil {
+		wf.raFactory.Shutdown()
+	}
+	if wf.frrFactory != nil {
+		wf.frrFactory.Shutdown()
+	}
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
@@ -603,6 +646,9 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		return nil, err
 	}
 	if err := nadapi.AddToScheme(nadscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := routeadvertisementsapi.AddToScheme(routeadvertisementsscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -698,12 +744,26 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
 	}
 
-	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode.
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
+		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
+	}
+
+	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to know what is the primary network for a namespace on the CNI side, which
 	// needs the NAD factory whenever the UDN feature is used.
-	if config.OVNKubernetesFeature.EnableMultiNetwork || config.OVNKubernetesFeature.EnableNetworkSegmentation {
+	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.OvnKubeNode.Mode == types.NodeModeDPU) {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
+		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -749,6 +809,12 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		return nil, err
 	}
 	if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := routeadvertisementsapi.AddToScheme(routeadvertisementsscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := frrapi.AddToScheme(frrscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -854,6 +920,16 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
+		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
+
+		wf.frrFactory = frrinformerfactory.NewSharedInformerFactory(ovnClientset.FRRClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.frrFactory.Start() it is initialized and caches are synced.
+		wf.frrFactory.Api().V1beta1().FRRConfigurations().Informer()
 	}
 
 	return wf, nil
@@ -1527,6 +1603,14 @@ func (wf *WatchFactory) UserDefinedNetworkInformer() userdefinednetworkinformer.
 
 func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {
 	return wf.dnsFactory.Network().V1alpha1().DNSNameResolvers()
+}
+
+func (wf *WatchFactory) RouteAdvertisementsInformer() routeadvertisementsinformer.RouteAdvertisementsInformer {
+	return wf.raFactory.K8s().V1().RouteAdvertisements()
+}
+
+func (wf *WatchFactory) FRRConfigurationsInformer() frrinformer.FRRConfigurationInformer {
+	return wf.frrFactory.Api().V1beta1().FRRConfigurations()
 }
 
 // withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the

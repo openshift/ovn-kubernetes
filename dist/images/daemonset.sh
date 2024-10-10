@@ -71,6 +71,7 @@ OVN_EGRESSSERVICE_ENABLE=
 OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_MULTI_NETWORK_ENABLE=
 OVN_NETWORK_SEGMENTATION_ENABLE=
+OVN_ROUTE_ADVERTISEMENTS_ENABLE=
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
@@ -94,6 +95,8 @@ OVN_ENABLE_OVNKUBE_IDENTITY="true"
 OVN_ENABLE_PERSISTENT_IPS=
 OVN_ENABLE_SVC_TEMPLATE_SUPPORT="true"
 OVN_ENABLE_DNSNAMERESOLVER="false"
+OVN_NOHOSTSUBNET_LABEL=""
+OVN_DISABLE_REQUESTEDCHASSIS="false"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -268,6 +271,9 @@ while [ "$1" != "" ]; do
   --network-segmentation-enable)
     OVN_NETWORK_SEGMENTATION_ENABLE=$VALUE
     ;;
+  --route-advertisements-enable)
+    OVN_ROUTE_ADVERTISEMENTS_ENABLE=$VALUE
+    ;;
   --egress-service-enable)
     OVN_EGRESSSERVICE_ENABLE=$VALUE
     ;;
@@ -357,6 +363,12 @@ while [ "$1" != "" ]; do
     ;;
   --enable-observ)
     OVN_OBSERV_ENABLE=$VALUE
+    ;;
+  --no-hostsubnet-label)
+    OVN_NOHOSTSUBNET_LABEL=$VALUE
+    ;;
+  --ovn_disable_requestedchassis)
+    OVN_DISABLE_REQUESTEDCHASSIS=$value
     ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -448,6 +460,8 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
 echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE}
 echo "ovn_network_segmentation_enable: ${ovn_network_segmentation_enable}"
+ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE}
+echo "ovn_route_advertisements_enable: ${ovn_route_advertisements_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -551,6 +565,12 @@ echo "ovn_enable_dnsnameresolver: ${ovn_enable_dnsnameresolver}"
 ovn_observ_enable=${OVN_OBSERV_ENABLE}
 echo "ovn_observ_enable: ${ovn_observ_enable}"
 
+ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL}
+echo "ovn_nohostsubnet_label: ${ovn_nohostsubnet_label}"
+
+ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS}
+echo "ovn_disable_requestedchassis: ${ovn_disable_requestedchassis}"
+
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -579,6 +599,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -631,6 +652,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -727,6 +749,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
@@ -743,6 +766,8 @@ ovn_image=${ovnkube_image} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
   ovn_observ_enable=${ovn_observ_enable} \
+  ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
+  ovn_disable_requestedchassis=${ovn_disable_requestedchassis} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \
@@ -772,6 +797,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
@@ -850,6 +876,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -915,6 +942,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
@@ -1009,10 +1037,12 @@ ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
 
 ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   jinjanate ../templates/rbac-ovnkube-cluster-manager.yaml.j2 -o ${output_dir}/rbac-ovnkube-cluster-manager.yaml
 
 ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   jinjanate ../templates/rbac-ovnkube-master.yaml.j2 -o ${output_dir}/rbac-ovnkube-master.yaml
 
 cp ../templates/rbac-ovnkube-identity.yaml.j2 ${output_dir}/rbac-ovnkube-identity.yaml
@@ -1024,5 +1054,6 @@ cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egress
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
 cp ../templates/k8s.ovn.org_userdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_userdefinednetworks.yaml
+cp ../templates/k8s.ovn.org_routeadvertisements.yaml.j2 ${output_dir}/k8s.ovn.org_routeadvertisements.yaml
 
 exit 0
