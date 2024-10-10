@@ -50,7 +50,7 @@ RUN INSTALL_PKGS=" \
 	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
 	dnf clean all && rm -rf /var/cache/*
 
-COPY libreswan-5.1-1.el9_2.x86_64.rpm /root/
+COPY libreswan-4.5-1.0fa145b49.el9_2.x86_64.rpm /root/
 RUN rpm -Uhv --nodeps --force /root/libreswan*.rpm
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
