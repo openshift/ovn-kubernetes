@@ -12,6 +12,8 @@ import (
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	nadinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlistermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -129,6 +131,7 @@ var _ = Describe("Healthcheck tests", func() {
 
 		BeforeEach(func() {
 			// setup kube output
+			factoryMock.On("NADInformer").Return(nil)
 			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
@@ -144,7 +147,6 @@ var _ = Describe("Healthcheck tests", func() {
 						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod iface-id-ver=pod-stale-uuid-3 vf-netdev-name=blah\n",
 					Err: nil,
 				})
-
 				// mock calls to remove only stale-port
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genDeleteStaleRepPortCmd("stale-pod-ifc"),
@@ -204,7 +206,7 @@ var _ = Describe("Healthcheck tests", func() {
 			Expect(testutils.UnmountNS(testNS)).To(Succeed())
 		})
 
-		It("check vrf devices are cleaned for deleted networks", func() {
+		ovntest.OnSupportedPlatformsIt("check vrf devices are cleaned for deleted networks", func() {
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 
@@ -222,7 +224,12 @@ var _ = Describe("Healthcheck tests", func() {
 			nodeList := []*corev1.Node{node}
 			factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
 			factoryMock.On("GetNodes").Return(nodeList, nil)
-			factoryMock.On("NADInformer").Return(nil)
+			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
+			nadListerMock := &nadlistermocks.NetworkAttachmentDefinitionLister{}
+			nadInformerMock := &nadinformermocks.NetworkAttachmentDefinitionInformer{}
+			nadInformerMock.On("Lister").Return(nadListerMock)
+			nadInformerMock.On("Informer").Return(nil)
+			factoryMock.On("NADInformer").Return(nadInformerMock)
 
 			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())

@@ -18,16 +18,17 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	fakenad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func() {
 	var (
-		app        *cli.App
-		controller *Controller
-		fakeClient *util.OVNClusterManagerClientset
+		app                *cli.App
+		controller         *Controller
+		fakeClient         *util.OVNClusterManagerClientset
+		fakeNetworkManager fakenad.FakeNetworkManager
 	)
 
 	start := func(objects ...runtime.Object) {
@@ -37,7 +38,8 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
 		wf, err := factory.NewClusterManagerWatchFactory(fakeClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		controller, err = NewController(fakeClient, wf)
+		fakeNetworkManager = fakenad.FakeNetworkManager{}
+		controller, err = NewController(fakeClient, wf, &fakeNetworkManager)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		err = wf.Start()
@@ -48,7 +50,8 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 	}
 
 	ginkgo.BeforeEach(func() {
-		config.PrepareTestConfig()
+		err := config.PrepareTestConfig()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		config.OVNKubernetesFeature.EnableInterconnect = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
@@ -61,6 +64,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		if controller != nil {
 			controller.Stop()
 		}
+		fakeNetworkManager.PrimaryNetworks = map[string]util.NetInfo{}
 	})
 
 	ginkgo.Context("on startup repair", func() {
@@ -96,7 +100,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 						},
 					},
 				}
-				staleEndpointSlice := kubetest.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
+				staleEndpointSlice := testing.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
 				staleEndpointSlice.Labels[types.LabelSourceEndpointSlice] = "non-existing-endpointslice"
 
 				objs := []runtime.Object{
@@ -120,11 +124,11 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 				start(objs...)
 
-				_, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespaceT.Name).Create(
-					context.TODO(),
-					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.132.2.0/16/24", types.NetworkRolePrimary),
-					metav1.CreateOptions{})
+				nad := testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.132.2.0/16/24", types.NetworkRolePrimary)
+				netInfo, err := util.ParseNADInfo(nad)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				netInfo.SetNADs(nad.Namespace + "/" + nad.Name)
+				fakeNetworkManager.PrimaryNetworks = map[string]util.NetInfo{"testns": netInfo}
 
 				var mirroredEndpointSlices *discovery.EndpointSliceList
 				gomega.Eventually(func() error {
@@ -300,7 +304,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 						},
 					},
 				}
-				mirroredEndpointSlice := kubetest.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
+				mirroredEndpointSlice := testing.MirrorEndpointSlice(&defaultEndpointSlice, "l3-network", false)
 				objs := []runtime.Object{
 					&v1.PodList{
 						Items: []v1.Pod{
@@ -322,20 +326,14 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 				start(objs...)
 
-				_, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespaceT.Name).Create(
-					context.TODO(),
-					testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.132.2.0/16/24", types.NetworkRolePrimary),
-					metav1.CreateOptions{})
+				nad := testing.GenerateNAD("l3-network", "l3-network", namespaceT.Name, types.Layer3Topology, "10.132.2.0/16/24", types.NetworkRolePrimary)
+				netInfo, err := util.ParseNADInfo(nad)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				netInfo.SetNADs(nad.Namespace + "/" + nad.Name)
+				fakeNetworkManager.PrimaryNetworks = map[string]util.NetInfo{"testns": netInfo}
 
 				var mirroredEndpointSlices *discovery.EndpointSliceList
 				gomega.Eventually(func() error {
-					// nad should exist
-					_, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespaceT.Name).Get(context.TODO(), "l3-network", metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
-
 					// defaultEndpointSlice should exist
 					_, err = fakeClient.KubeClient.DiscoveryV1().EndpointSlices(namespaceT.Name).Get(context.TODO(), defaultEndpointSlice.Name, metav1.GetOptions{})
 					if err != nil {

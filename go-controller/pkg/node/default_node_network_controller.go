@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -112,6 +114,12 @@ type DefaultNodeNetworkController struct {
 	retryEndpointSlices *retry.RetryFramework
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+
+	networkManager nad.NetworkManager
+
+	cniServer *cni.Server
+
+	mgmtPorts []*managementPortEntry
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -129,7 +137,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, networkManager nad.NetworkManager) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
@@ -153,6 +161,8 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 		return nil, err
 	}
 
+	nc.networkManager = networkManager
+
 	nc.initRetryFrameworkForNode()
 
 	return nc, nil
@@ -161,6 +171,26 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo) (*D
 func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryNamespaces = nc.newRetryFrameworkNode(factory.NamespaceExGwType)
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
+}
+
+func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.ReconcilableNetInfo) error {
+	wasAdvertised := len(oc.GetNodeVRFs(oc.name)) > 0
+	isAdvertised := len(netInfo.GetNodeVRFs(oc.name)) > 0
+	oc.SetVRFs(netInfo.GetVRFs())
+	oc.SetNADs(netInfo.GetNADs()...)
+	if oc.Gateway != nil && isAdvertised != wasAdvertised {
+		oc.Gateway.SetRoutingAdvertised(isAdvertised)
+		oc.Gateway.Reconcile()
+		for _, mgmtPort := range oc.mgmtPorts {
+			mgmtPort.setRoutingAdvertised(isAdvertised)
+			mgmtPort.Reconcile()
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNodeNetworkController) isRoutingAdvertised() bool {
+	return util.IsRoutingAdvertised(oc, oc.name)
 }
 
 func clearOVSFlowTargets() error {
@@ -311,7 +341,6 @@ func setupOVNNode(node *kapi.Node) error {
 		// to finish computation specially with complex acl configuration with port range.
 		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
 			config.Default.OpenFlowProbe),
-		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		// If Interconnect feature is enabled, we want to tell ovn-controller to
 		// make this node/chassis as an interconnect gateway.
 		fmt.Sprintf("external_ids:ovn-is-interconn=%s", strconv.FormatBool(config.OVNKubernetesFeature.EnableInterconnect)),
@@ -332,6 +361,12 @@ func setupOVNNode(node *kapi.Node) error {
 		setExternalIdsCmd = append(setExternalIdsCmd,
 			fmt.Sprintf("external_ids:ovn-memlimit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
 		)
+	}
+
+	// In the case of DPU, the hostname should be that of the DPU and not
+	// the K8s Node's. So skip setting the incorrect hostname.
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
 	}
 
 	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
@@ -416,11 +451,6 @@ func isOVNControllerReady() (bool, error) {
 	}
 
 	return true, nil
-}
-
-type managementPortEntry struct {
-	port   ManagementPort
-	config *managementPortConfig
 }
 
 // getEnvNameFromResourceName gets the device plugin env variable from the device plugin resource name.
@@ -587,7 +617,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 }
 
 func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
-	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]managementPortEntry, *managementPortConfig, error) {
+	subnets []*net.IPNet, routeManager *routemanager.Controller, isRoutingAdvertised bool) ([]*managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
 		return nil, nil, err
@@ -602,13 +632,14 @@ func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, n
 	ports := NewManagementPorts(node.Name, subnets, netdevName, rep)
 
 	var mgmtPortConfig *managementPortConfig
-	mgmtPorts := make([]managementPortEntry, 0)
+	mgmtPorts := make([]*managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(routeManager, node, nodeLister, kubeInterface, waiter)
+		config, err := port.Create(isRoutingAdvertised, routeManager, node, nodeLister, kubeInterface, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
-		mgmtPorts = append(mgmtPorts, managementPortEntry{port: port, config: config})
+		mgmtPorts = append(mgmtPorts, NewManagementPortEntry(port, config, routeManager))
+
 		// Save this management port config for later usage.
 		// Since only one OVS internal port / Representor config may exist it is fine just to overwrite it
 		if _, ok := port.(*managementPortNetdev); !ok {
@@ -705,13 +736,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	if err = configureGlobalForwarding(); err != nil {
-		return err
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		if err = configureGlobalForwarding(); err != nil {
+			return err
+		}
 	}
 
-	// Bootstrap flows in OVS if just normal flow is present
-	if err := bootstrapOVSFlows(nc.name); err != nil {
-		return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Bootstrap flows in OVS if just normal flow is present
+		if err := bootstrapOVSFlows(nc.name); err != nil {
+			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
+		}
 	}
 
 	if node, err = nc.Kube.GetNode(nc.name); err != nil {
@@ -792,10 +827,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager)
 		if err != nil {
 			return err
 		}
+		nc.cniServer = cniServer
 	}
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
@@ -822,11 +858,19 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
-		nc.Kube, waiter, subnets, nc.routeManager)
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(
+		node,
+		nc.watchFactory.NodeCoreInformer().Lister(),
+		nodeAnnotator,
+		nc.Kube,
+		waiter,
+		subnets,
+		nc.routeManager,
+		nc.isRoutingAdvertised())
 	if err != nil {
 		return err
 	}
+	nc.mgmtPorts = mgmtPorts
 
 	// Initialize gateway
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
@@ -1041,7 +1085,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// start management ports health check
 	for _, mgmtPort := range mgmtPorts {
-		mgmtPort.port.CheckManagementPortHealth(nc.routeManager, mgmtPort.config, nc.stopChan)
+		mgmtPort.Start(nc.stopChan)
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
 			if err := nc.startEgressIPHealthCheckingServer(mgmtPort); err != nil {
@@ -1082,8 +1126,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	} else {
 		// start the cni server
-		if err := cniServer.Start(cni.ServerRunDir); err != nil {
-			return err
+		if nc.cniServer != nil {
+			if err := nc.cniServer.Start(cni.ServerRunDir); err != nil {
+				return err
+			}
 		}
 
 		// Write CNI config file if it doesn't already exist
@@ -1145,7 +1191,7 @@ func (nc *DefaultNodeNetworkController) Stop() {
 	nc.wg.Wait()
 }
 
-func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry managementPortEntry) error {
+func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry *managementPortEntry) error {
 	healthCheckPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
 	if healthCheckPort == 0 {
 		klog.Infof("Egress IP health check server skipped: no port specified")

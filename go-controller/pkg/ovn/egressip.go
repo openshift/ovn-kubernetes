@@ -14,6 +14,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -1648,6 +1649,12 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 		if err != nil {
 			return nil, nil // nothing to do.
 		}
+
+		if util.IsRoutingAdvertised(e, pod.Spec.NodeName) {
+			// network is advertised so don't setup the SNAT
+			return ops, nil
+		}
+
 		isLocalZonePod, loadedPodNode := e.nodeZoneState.Load(pod.Spec.NodeName)
 		if pod.Spec.NodeName == status.Node && loadedPodNode && isLocalZonePod && util.PodNeedsSNAT(pod) {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
@@ -1660,7 +1667,7 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 			if err != nil {
 				return nil, err
 			}
-			ops, err = addOrUpdatePodSNATOps(e.nbClient, e.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs, ops)
+			ops, err = addOrUpdatePodSNATOps(e.nbClient, e.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs, "", ops)
 			if err != nil {
 				return nil, err
 			}
@@ -1679,7 +1686,7 @@ func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operatio
 		if err != nil {
 			return nil, err
 		}
-		ops, err = deletePodSNATOps(e.nbClient, ops, e.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs)
+		ops, err = deletePodSNATOps(e.nbClient, ops, e.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs, "")
 		if err != nil {
 			return nil, err
 		}

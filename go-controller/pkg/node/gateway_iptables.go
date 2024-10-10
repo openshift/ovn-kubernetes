@@ -12,6 +12,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/coreos/go-iptables/iptables"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
@@ -453,23 +454,9 @@ func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	}
 }
 
-func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
-	// Allow packets to/from the gateway interface in case defaults deny
+func getLocalGatewayPodSubnetNATRules(cidr *net.IPNet) []nodeipt.Rule {
 	protocol := getIPTablesProtocol(cidr.IP.String())
-	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
-	if protocol == iptables.ProtocolIPv6 {
-		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
-	}
-	rules := []nodeipt.Rule{
-		{
-			Table: "nat",
-			Chain: "POSTROUTING",
-			Args: []string{
-				"-s", masqueradeIP.String(),
-				"-j", "MASQUERADE",
-			},
-			Protocol: protocol,
-		},
+	return []nodeipt.Rule{
 		{
 			Table: "nat",
 			Chain: "POSTROUTING",
@@ -480,12 +467,6 @@ func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
 			Protocol: protocol,
 		},
 	}
-	// FIXME(tssurya): If the feature is disabled we should be removing
-	// these rules
-	if util.IsNetworkSegmentationSupportEnabled() {
-		rules = append(rules, getUDNMasqueradeRules(protocol)...)
-	}
-	return rules
 }
 
 // getUDNMasqueradeRules is only called for local-gateway-mode
@@ -493,6 +474,7 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 	// the following rules are actively used only for the UDN Feature:
 	// -A POSTROUTING -j OVN-KUBE-UDN-MASQUERADE
 	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/29 -j RETURN
+	// -A OVN-KUBE-UDN-MASQUERADE -d 10.96.0.0/16 -j RETURN
 	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/17 -j MASQUERADE
 	// NOTE: Ordering is important here, the RETURN must come before
 	// the MASQUERADE rule. Please don't change the ordering.
@@ -500,11 +482,13 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 	// defaultNetworkReservedMasqueradePrefix contains the first 6IPs in the masquerade
 	// range that shouldn't be MASQUERADED. Hence /29 and /125 is intentionally hardcoded here
 	defaultNetworkReservedMasqueradePrefix := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String() + "/29"
+	ipFamily := utilnet.IPv4
 	if protocol == iptables.ProtocolIPv6 {
 		srcUDNMasqueradePrefix = config.Gateway.V6MasqueradeSubnet
 		defaultNetworkReservedMasqueradePrefix = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String() + "/125"
+		ipFamily = utilnet.IPv6
 	}
-	return []nodeipt.Rule{
+	rules := []nodeipt.Rule{
 		{
 			Table:    "nat",
 			Chain:    "POSTROUTING",
@@ -520,7 +504,25 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 			},
 			Protocol: protocol,
 		},
-		{
+	}
+	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+		if utilnet.IPFamilyOfCIDR(svcCIDR) != ipFamily {
+			continue
+		}
+		rules = append(rules,
+			nodeipt.Rule{
+				Table: "nat",
+				Chain: iptableUDNMasqueradeChain,
+				Args: []string{
+					"-d", svcCIDR.String(),
+					"-j", "RETURN",
+				},
+				Protocol: protocol,
+			},
+		)
+	}
+	rules = append(rules,
+		nodeipt.Rule{
 			Table: "nat",
 			Chain: iptableUDNMasqueradeChain,
 			Args: []string{
@@ -529,7 +531,39 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 			},
 			Protocol: protocol,
 		},
+	)
+	return rules
+}
+
+func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
+	// Allow packets to/from the gateway interface in case defaults deny
+	protocol := getIPTablesProtocol(cidr.IP.String())
+	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
+	if protocol == iptables.ProtocolIPv6 {
+		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
 	}
+	rules := append(
+		[]nodeipt.Rule{
+			{
+				Table: "nat",
+				Chain: "POSTROUTING",
+				Args: []string{
+					"-s", masqueradeIP.String(),
+					"-j", "MASQUERADE",
+				},
+				Protocol: protocol,
+			},
+		},
+		getLocalGatewayPodSubnetNATRules(cidr)...,
+	)
+
+	// FIXME(tssurya): If the feature is disabled we should be removing
+	// these rules
+	if util.IsNetworkSegmentationSupportEnabled() {
+		rules = append(rules, getUDNMasqueradeRules(protocol)...)
+	}
+
+	return rules
 }
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
@@ -544,6 +578,22 @@ func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	// append the masquerade rules in POSTROUTING table since that needs to be
 	// evaluated last.
 	return appendIptRules(getLocalGatewayNATRules(cidr))
+}
+
+func addLocalGatewayPodSubnetNATRules(cidrs ...*net.IPNet) error {
+	var rules []nodeipt.Rule
+	for _, cidr := range cidrs {
+		rules = append(rules, getLocalGatewayPodSubnetNATRules(cidr)...)
+	}
+	return appendIptRules(rules)
+}
+
+func delLocalGatewayPodSubnetNATRules(cidrs ...*net.IPNet) error {
+	var rules []nodeipt.Rule
+	for _, cidr := range cidrs {
+		rules = append(rules, getLocalGatewayPodSubnetNATRules(cidr)...)
+	}
+	return deleteIptRules(rules)
 }
 
 func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
