@@ -15,7 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // bridgedGatewayNodeSetup enables forwarding on bridge interface, sets up the physical network name mappings for the bridge,
@@ -361,11 +361,11 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
 		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager)
+			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.nadController)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
 		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
-			managementPortConfig, nc.watchFactory, nc.routeManager)
+			managementPortConfig, nc.watchFactory, nc.routeManager, nc.nadController)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
@@ -450,7 +450,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 	config.Gateway.Interface = gwIntf
 
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+	_, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
 		return err
 	}
@@ -480,7 +480,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nc.name, err)
 	}
 
-	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops)
+	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, DummyNextHopIPs())
 	if err != nil {
 		return err
 	}
@@ -497,7 +497,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		if err := initSharedGatewayIPTables(); err != nil {
 			return err
 		}
-		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.watchFactory)
+		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.nadController)
 		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
 		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
@@ -545,6 +545,13 @@ func CleanupClusterNode(name string) error {
 }
 
 func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) error {
+	// TBD-merge for dpu-host mode: if interface mac of the dpu-host interface that connects to the
+	// gateway bridge on the dpu changes, we need to update dpu's gatewayBridge.macAddress L3 gateway
+	// annotation (see bridgeForInterface)
+	if config.OvnKubeNode.Mode != types.NodeModeFull {
+		return nil
+	}
+
 	if nc.Gateway.GetGatewayBridgeIface() != link.Attrs().Name {
 		return nil
 	}

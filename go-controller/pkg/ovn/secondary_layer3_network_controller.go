@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -18,6 +17,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -168,6 +168,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
+				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
 				syncMgmtPort := failed || macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) || nodeSubnetChanged
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
@@ -249,6 +250,9 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 		case factory.NamespaceType:
 			syncFunc = h.oc.syncNamespaces
 
+		case factory.PolicyType:
+			syncFunc = h.oc.syncNetworkPolicies
+
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
@@ -303,7 +307,7 @@ type SecondaryLayer3NetworkController struct {
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) (*SecondaryLayer3NetworkController, error) {
+func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer3NetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -314,17 +318,15 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 
-	var nadLister nadlister.NetworkAttachmentDefinitionLister
 	var svcController *svccontroller.Controller
 	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
 		var err error
-		nadLister = cnci.watchFactory.NADInformer().Lister()
 		svcController, err = svccontroller.NewController(
 			cnci.client, cnci.nbClient,
 			cnci.watchFactory.ServiceCoreInformer(),
 			cnci.watchFactory.EndpointSliceCoreInformer(),
 			cnci.watchFactory.NodeCoreInformer(),
-			nadLister,
+			nadController,
 			cnci.recorder,
 			netInfo,
 		)
@@ -352,6 +354,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				localZoneNodes:              &sync.Map{},
 				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
+				nadController:               nadController,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -385,11 +388,19 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 
+	// When a user-defined network is enabled as a primary network for namespace,
+	// then watch for namespace and network policy events.
+	if oc.IsPrimaryNetwork() {
+		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+		oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
+	}
+
 	// For secondary networks, we don't have to watch namespace events if
-	// multi-network policy support is not enabled.
+	// multi-network policy support is not enabled. We don't support
+	// multi-network policy for IPAM-less secondary networks either.
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
-		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
+		oc.retryMultiNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }
 
@@ -438,8 +449,11 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 
-	if oc.policyHandler != nil {
-		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
+	if oc.netPolicyHandler != nil {
+		oc.watchFactory.RemovePolicyHandler(oc.netPolicyHandler)
+	}
+	if oc.multiNetPolicyHandler != nil {
+		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
 	}
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
@@ -544,9 +558,18 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 		return err
 	}
 
-	// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
-	if err := oc.WatchMultiNetworkPolicy(); err != nil {
-		return err
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
+		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchMultiNetworkPolicy(); err != nil {
+			return err
+		}
+	}
+
+	if oc.IsPrimaryNetwork() {
+		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchNetworkPolicy(); err != nil {
+			return err
+		}
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
@@ -653,7 +676,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
 			} else {
-				_, err = oc.syncNodeManagementPortRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets)
+				_, err = oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(node.Name), oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 				if err != nil {
 					errs = append(errs, err)
 					oc.mgmtPortFailed.Store(node.Name, true)
@@ -1033,7 +1056,7 @@ func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.Wait
 		// kubernetes controller-manager
 		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
 		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
+			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
 	}()
 	return nil
