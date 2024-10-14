@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
 	kexec "k8s.io/utils/exec"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -154,6 +155,7 @@ no-hostsubnet-nodes=label=another-test-label
 healthz-bind-address=0.0.0.0:1234
 dns-service-namespace=kube-system-f
 dns-service-name=kube-dns-f
+disable-requestedchassis=false
 
 [metrics]
 bind-address=1.1.1.1:8080
@@ -225,6 +227,7 @@ egressip-node-healthcheck-port=1234
 enable-multi-network=false
 enable-multi-networkpolicy=false
 enable-network-segmentation=false
+enable-route-advertisements=false
 enable-interconnect=false
 enable-multi-external-gateway=false
 enable-admin-network-policy=false
@@ -335,6 +338,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(0))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeFalse())
@@ -593,6 +597,7 @@ var _ = Describe("Config Operations", func() {
 			"enable-multi-network=true",
 			"enable-multi-networkpolicy=true",
 			"enable-network-segmentation=true",
+			"enable-route-advertisements=true",
 			"enable-interconnect=true",
 			"enable-multi-external-gateway=true",
 			"enable-admin-network-policy=true",
@@ -682,6 +687,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(1234))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableAdminNetworkPolicy).To(gomega.BeTrue())
@@ -743,6 +749,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.HealthzBindAddress).To(gomega.Equal("0.0.0.0:4321"))
 			gomega.Expect(Kubernetes.DNSServiceNamespace).To(gomega.Equal("kube-system-2"))
 			gomega.Expect(Kubernetes.DNSServiceName).To(gomega.Equal("kube-dns-2"))
+			gomega.Expect(Kubernetes.DisableRequestedChassis).To(gomega.BeTrue())
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
@@ -787,6 +794,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(4321))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
@@ -861,6 +869,7 @@ var _ = Describe("Config Operations", func() {
 			"-enable-multi-network=true",
 			"-enable-multi-networkpolicy=true",
 			"-enable-network-segmentation=true",
+			"-enable-route-advertisements=true",
 			"-enable-interconnect=true",
 			"-enable-multi-external-gateway=true",
 			"-enable-admin-network-policy=true",
@@ -869,6 +878,7 @@ var _ = Describe("Config Operations", func() {
 			"-zone=bar",
 			"-dns-service-namespace=kube-system-2",
 			"-dns-service-name=kube-dns-2",
+			"-disable-requestedchassis=true",
 			"-cluster-manager-v4-transit-switch-subnet=100.90.0.0/16",
 			"-cluster-manager-v6-transit-switch-subnet=fd96::/64",
 		}
@@ -1600,6 +1610,45 @@ foo=bar
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	It("rejects a config with invalid udn allowed services", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+udn-allowed-default-services=namespace/invalid.name,test
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err = InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("accepts a config with valid udn allowed services", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+udn-allowed-default-services= ns/svc, ns1/svc1 
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err = InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(Default.UDNAllowedDefaultServices).To(gomega.HaveLen(2))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
 	Describe("OvnDBAuth operations", func() {
 		var certFile, keyFile, caFile string
 

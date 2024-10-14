@@ -12,6 +12,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	metaapplyv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -77,7 +78,7 @@ func New(
 		networkInUseRequeueInterval: defaultNetworkInUseCheckInterval,
 	}
 	cfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
-		RateLimiter:    workqueue.DefaultControllerRateLimiter(),
+		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:      c.reconcile,
 		ObjNeedsUpdate: c.udnNeedUpdate,
 		Threadiness:    1,
@@ -209,7 +210,7 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 		// any other thread that create NADs.
 		// Since the UserDefinedNetwork controller use single thread (threadiness=1),
 		// and being the only controller that create NADs, this conditions is fulfilled.
-		if primaryNetwork(udn.Spec) {
+		if util.IsPrimaryNetwork(udn.Spec) {
 			actualNads, lerr := c.nadLister.NetworkAttachmentDefinitions(udn.Namespace).List(labels.Everything())
 			if lerr != nil {
 				return nil, fmt.Errorf("failed to list  NetworkAttachmetDefinition: %w", lerr)
@@ -241,18 +242,6 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 	}
 
 	return nad, nil
-}
-
-func primaryNetwork(spec userdefinednetworkv1.UserDefinedNetworkSpec) bool {
-	var role userdefinednetworkv1.NetworkRole
-	switch spec.Topology {
-	case userdefinednetworkv1.NetworkTopologyLayer3:
-		role = spec.Layer3.Role
-	case userdefinednetworkv1.NetworkTopologyLayer2:
-		role = spec.Layer2.Role
-	}
-
-	return role == userdefinednetworkv1.NetworkRolePrimary
 }
 
 func (c *Controller) verifyNetAttachDefNotInUse(nad *netv1.NetworkAttachmentDefinition) error {
@@ -303,9 +292,19 @@ func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.Us
 
 	if updated {
 		var err error
+		conditionsApply := make([]*metaapplyv1.ConditionApplyConfiguration, len(conditions))
+		for i := range conditions {
+			conditionsApply[i] = &metaapplyv1.ConditionApplyConfiguration{
+				Type:               &conditions[i].Type,
+				Status:             &conditions[i].Status,
+				LastTransitionTime: &conditions[i].LastTransitionTime,
+				Reason:             &conditions[i].Reason,
+				Message:            &conditions[i].Message,
+			}
+		}
 		udnApplyConf := udnapplyconfkv1.UserDefinedNetwork(udn.Name, udn.Namespace).
 			WithStatus(udnapplyconfkv1.UserDefinedNetworkStatus().
-				WithConditions(conditions...))
+				WithConditions(conditionsApply...))
 		opts := metav1.ApplyOptions{FieldManager: "user-defined-network-controller"}
 		udn, err = c.udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).ApplyStatus(context.Background(), udnApplyConf, opts)
 		if err != nil {

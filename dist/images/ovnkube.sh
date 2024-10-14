@@ -269,6 +269,8 @@ ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_NETWORK_SEGMENTATION_ENABLE - enable user defined primary networks for ovn-kubernetes
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
+#OVN_NROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
+ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE:=false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -313,6 +315,11 @@ ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-true}
 ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER:-false}
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
 ovn_observ_enable=${OVN_OBSERV_ENABLE:-false}
+# OVN_NOHOSTSUBNET_LABEL - node label indicating nodes managing their own network
+ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
+# OVN_DISABLE_REQUESTEDCHASSIS - disable requested-chassis option during pod creation
+# should be set to true when dpu nodes are in the cluster
+ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1216,6 +1223,12 @@ ovn-master() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
 	  egressservice_enabled_flag="--enable-egress-service"
@@ -1267,6 +1280,17 @@ ovn-master() {
     ovn_observ_enable_flag="--enable-observability"
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
+  
+  nohostsubnet_label_option=
+  if [[ ${ovn_nohostsubnet_label} != "" ]]; then
+	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
+  fi
+
+  ovn_disable_requestedchassis_flag=
+  if [[ ${ovn_disable_requestedchassis} == "true" ]]; then
+	  ovn_disable_requestedchassis_flag="--disable-requestedchassis"
+  fi
+  echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
 
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
@@ -1305,6 +1329,7 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_enable_svc_template_support_flag} \
     ${ovn_observ_enable_flag} \
@@ -1320,6 +1345,8 @@ ovn-master() {
     ${ovn_v6_masquerade_subnet_opt} \
     ${persistent_ips_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${nohostsubnet_label_option} \
+    ${ovn_disable_requestedchassis_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -1491,6 +1518,12 @@ ovnkube-controller() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
 	  egressservice_enabled_flag="--enable-egress-service"
@@ -1592,6 +1625,7 @@ ovnkube-controller() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_dbs} \
     ${ovn_enable_svc_template_support_flag} \
@@ -1773,6 +1807,12 @@ ovnkube-controller-with-node() {
 	  network_segmentation_enabled_flag="--enable-multi-network --enable-network-segmentation"
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
+
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -2008,6 +2048,7 @@ ovnkube-controller-with-node() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
     ${ovn_acl_logging_rate_limit_flag} \
@@ -2172,6 +2213,12 @@ ovn-cluster-manager() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
   persistent_ips_enabled_flag=
   if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
 	  persistent_ips_enabled_flag="--enable-persistent-ips"
@@ -2227,6 +2274,7 @@ ovn-cluster-manager() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
@@ -2394,6 +2442,11 @@ ovn-node() {
 	  network_segmentation_enabled_flag="--enable-multi-network --enable-network-segmentation"
   fi
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
       netflow_targets="--netflow-targets ${ovn_netflow_targets}"
@@ -2481,6 +2534,39 @@ ovn-node() {
   fi
   if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
     node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
+  fi
+
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    # in the case of dpu mode we want the host K8s Node Name and not the DPU K8s Node Name
+    K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+    if [[ ${K8S_NODE} == "" ]]; then
+      echo "Couldn't get the required Host K8s Nodename. Exiting..."
+      exit 1
+    fi
+    if [[ ${ovn_gateway_opts} == "" ]]; then
+      # get the gateway interface
+      gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
+      if [[ ${gw_iface} == "" ]]; then
+        echo "Couldn't get the required OVN Gateway Interface. Exiting..."
+        exit 1
+      fi
+      ovn_gateway_opts="--gateway-interface=${gw_iface} "
+
+      # get the gateway nexthop
+      gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
+      if [[ ${gw_nexthop} == "" ]]; then
+        echo "Couldn't get the required OVN Gateway NextHop. Exiting..."
+        exit 1
+      fi
+      ovn_gateway_opts+="--gateway-nexthop=${gw_nexthop} "
+    fi
+
+    # this is required if the DPU and DPU Host are in different subnets
+    if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+      # get the gateway router subnet
+      ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
+    fi
+
   fi
 
   local ovn_node_ssl_opts=""
@@ -2583,6 +2669,7 @@ ovn-node() {
         ${multicast_enabled_flag} \
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
+        ${route_advertisements_enabled_flag} \
         ${netflow_targets} \
         ${ofctrl_wait_before_clear} \
         ${ovn_dbs} \

@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/routeadvertisements"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	udncontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	udntemplate "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
@@ -54,6 +55,8 @@ type ClusterManager struct {
 	// used for leader election
 	identity      string
 	statusManager *status_manager.StatusManager
+
+	raController routeadvertisements.Controller
 }
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
@@ -114,7 +117,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		}
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf)
+		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf, cm.secondaryNetClusterManager.nadController)
 		if err != nil {
 			return nil, err
 		}
@@ -138,6 +141,10 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		cm.userDefinedNetworkController = udnController
 	}
 
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		cm.raController = *routeadvertisements.NewController(wf, ovnClient)
+	}
+
 	return cm, nil
 }
 
@@ -150,18 +157,19 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Start secondary CM first so that NAD controller initializes before other controllers
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		if err := cm.secondaryNetClusterManager.Start(); err != nil {
+			return err
+		}
+	}
+
 	if err := cm.defaultNetClusterController.Start(ctx); err != nil {
 		return err
 	}
 
 	if err := cm.zoneClusterController.Start(ctx); err != nil {
 		return fmt.Errorf("could not start zone controller, err: %w", err)
-	}
-
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		if err := cm.secondaryNetClusterManager.Start(); err != nil {
-			return err
-		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
@@ -196,6 +204,14 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		err := cm.raController.Start()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -222,5 +238,8 @@ func (cm *ClusterManager) Stop() {
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		cm.userDefinedNetworkController.Shutdown()
+	}
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		cm.raController.Stop()
 	}
 }
