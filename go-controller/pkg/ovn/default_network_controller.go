@@ -860,9 +860,12 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		if config.HybridOverlay.Enabled {
 			if util.NoHostSubnet(newNode) && !util.NoHostSubnet(oldNode) {
 				klog.Infof("Node %s has been updated to be a remote/unmanaged hybrid overlay node", newNode.Name)
+				// need to reset the host network address set, as the address is different in ovn and sdn.
+				h.oc.syncHostNetAddrSetFailed.Store(newNode.Name, true)
 				return h.oc.addUpdateHoNodeEvent(newNode)
 			} else if !util.NoHostSubnet(newNode) && util.NoHostSubnet(oldNode) {
 				klog.Infof("Node %s has been updated to be an ovn-kubernetes managed node", newNode.Name)
+				h.oc.syncHostNetAddrSetFailed.Store(newNode.Name, true)
 				if err := h.oc.deleteHoNodeEvent(newNode); err != nil {
 					return err
 				}
