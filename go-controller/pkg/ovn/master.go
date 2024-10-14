@@ -912,6 +912,38 @@ func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
 			return fmt.Errorf("failed to remove hybrid overlay static routes and route policy: %w", err)
 		}
 	}
+	if oc.inMigrationMode {
+		// Remove SDN node subnet GW IP from address_set specific to HostNetworkNamespace
+		hoHostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForHoNode(node)
+		if err != nil {
+			parsedErr := err
+			if !oc.isLocalZoneNode(node) {
+				parsedErr = types.NewSuppressedError(err)
+			}
+			return fmt.Errorf("error parsing annotation for node %s: %w", node.Name, parsedErr)
+		}
+		if len(hoHostNetworkPolicyIPs) > 0 {
+			// delete the host network IPs for this ho node from host network namespace's address set
+			if err = func() error {
+				hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
+				if hostNetworkNamespace != "" {
+					nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
+					if err != nil {
+						return fmt.Errorf("failed to ensure namespace locked: %v", err)
+					}
+					defer nsUnlock()
+					if err = nsInfo.addressSet.DeleteIPs(hoHostNetworkPolicyIPs); err != nil &&
+						!errors.Is(err, libovsdbclient.ErrNotFound) {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
