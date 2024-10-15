@@ -42,12 +42,12 @@ RUN INSTALL_PKGS=" \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
 	tcpdump iputils \
-	libreswan \
 	ethtool conntrack-tools \
 	openshift-clients \
 	" && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
 	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
+	eval "dnf localinstall -y ./libreswan-4.5-1.el9.x86_64.rpm" && \
 	dnf clean all && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
