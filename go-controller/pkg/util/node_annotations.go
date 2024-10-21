@@ -839,7 +839,7 @@ func ParseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primary
 	}
 	val, ok := joinSubnetMap[netName]
 	if !ok {
-		return val, fmt.Errorf("unable to fetch annotation value on node %s for network %s",
+		return val, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
 			node.Name, netName)
 	}
 	return val, nil
@@ -1072,7 +1072,7 @@ func GetNodeHostAddrs(node *kapi.Node) ([]string, error) {
 	if err != nil && !IsAnnotationNotSetError(err) {
 		return nil, fmt.Errorf("failed to get node host CIDRs for %s: %s", node.Name, err.Error())
 	}
-	return hostAddresses.UnsortedList(), nil
+	return sets.List(hostAddresses), nil
 }
 
 func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {

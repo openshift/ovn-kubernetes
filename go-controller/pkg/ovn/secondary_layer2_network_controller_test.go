@@ -7,8 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/urfave/cli/v2"
@@ -54,7 +53,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 		fakeOvn.shutdown()
 	})
 
-	table.DescribeTable(
+	DescribeTable(
 		"reconciles a new",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration, gatewayMode config.GatewayMode) {
 			podInfo := dummyL2TestPod(ns, netInfo)
@@ -172,44 +171,44 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 
 			Expect(app.Run([]string{app.Name})).To(Succeed())
 		},
-		table.Entry("pod on a user defined secondary network",
+		Entry("pod on a user defined secondary network",
 			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			nonICClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
 
-		table.Entry("pod on a user defined primary network",
+		Entry("pod on a user defined primary network",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			nonICClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
 
-		table.Entry("pod on a user defined secondary network on an IC cluster",
+		Entry("pod on a user defined secondary network on an IC cluster",
 			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
 
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		Entry("pod on a user defined primary network on an IC cluster",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterTestConfiguration(),
 			config.GatewayModeShared,
 		),
 
-		table.Entry("pod on a user defined primary network on an IC cluster; LGW",
+		Entry("pod on a user defined primary network on an IC cluster; LGW",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterTestConfiguration(),
 			config.GatewayModeLocal,
 		),
 
-		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
+		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterWithDisableSNATTestConfiguration(),
 			config.GatewayModeShared,
 		),
 	)
 
-	table.DescribeTable(
+	DescribeTable(
 		"the gateway is properly cleaned up",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
 			podInfo := dummyTestPod(ns, netInfo)
@@ -315,15 +314,15 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			}
 			Expect(app.Run([]string{app.Name})).To(Succeed())
 		},
-		table.Entry("pod on a user defined primary network",
+		Entry("pod on a user defined primary network",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			nonICClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster",
+		Entry("pod on a user defined primary network on an IC cluster",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterTestConfiguration(),
 		),
-		table.Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
+		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
 			icClusterWithDisableSNATTestConfiguration(),
 		),
@@ -478,7 +477,16 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 
 func expectedGWToNetworkSwitchRouterPort(name string, netInfo util.NetInfo, networks ...*net.IPNet) *nbdb.LogicalRouterPort {
 	options := map[string]string{"gateway_mtu": fmt.Sprintf("%d", 1400)}
-	return expectedLogicalRouterPort(name, netInfo, options, networks...)
+	lrp := expectedLogicalRouterPort(name, netInfo, options, networks...)
+	lrp.Ipv6RaConfigs = map[string]string{
+		"address_mode":      "dhcpv6_stateful",
+		"mtu":               "1400",
+		"send_periodic":     "true",
+		"max_interval":      "900",
+		"min_interval":      "300",
+		"router_preference": "LOW",
+	}
+	return lrp
 }
 
 func layer2Subnet() *net.IPNet {
