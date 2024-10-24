@@ -27,6 +27,7 @@ import (
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -146,10 +147,11 @@ func NewDefaultNetworkController(
 	cnci *CommonNetworkControllerInfo,
 	observManager *observability.Manager,
 	networkManager networkmanager.Interface,
+	routeImportManager routeimport.Manager,
 ) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, observManager)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, observManager, routeImportManager)
 }
 
 func newDefaultNetworkControllerCommon(
@@ -159,6 +161,7 @@ func newDefaultNetworkControllerCommon(
 	addressSetFactory addressset.AddressSetFactory,
 	networkManager networkmanager.Interface,
 	observManager *observability.Manager,
+	routeImportManager routeimport.Manager,
 ) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
@@ -220,6 +223,7 @@ func newDefaultNetworkControllerCommon(
 			cancelableCtx:               util.NewCancelableContext(),
 			observManager:               observManager,
 			networkManager:              networkManager,
+			routeImportManager:          routeImportManager,
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
@@ -354,6 +358,9 @@ func (oc *DefaultNetworkController) Stop() {
 	}
 	if oc.efNodeController != nil {
 		controller.Stop(oc.efNodeController)
+	}
+	if oc.routeImportManager != nil {
+		_ = oc.routeImportManager.ForgetNetwork(oc, 0)
 	}
 
 	close(oc.stopChan)
@@ -615,6 +622,13 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		return err
 	}
 
+	if oc.routeImportManager != nil {
+		err = oc.routeImportManager.UpdateNetwork(oc, 0)
+		if err != nil {
+			return err
+		}
+	}
+
 	var errs []error
 	for _, node := range retryNodes {
 		oc.gatewaysFailed.Store(node.Name, true)
@@ -627,6 +641,7 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 	if len(retryNodes) > 0 {
 		oc.retryNodes.RequestRetryObjs()
 	}
+
 	if len(errs) > 0 {
 		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), utilerrors.Join(errs...))
 	}
