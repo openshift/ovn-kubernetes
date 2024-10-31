@@ -8,6 +8,8 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
@@ -76,8 +78,8 @@ type Controller struct {
 	banpCache *adminNetworkPolicyState
 
 	// queues for the CRDs where incoming work is placed to de-dup
-	anpQueue  workqueue.RateLimitingInterface
-	banpQueue workqueue.RateLimitingInterface
+	anpQueue  workqueue.TypedRateLimitingInterface[string]
+	banpQueue workqueue.TypedRateLimitingInterface[string]
 	// cached access to anp and banp objects
 	anpLister       anplister.AdminNetworkPolicyLister
 	banpLister      anplister.BaselineAdminNetworkPolicyLister
@@ -86,15 +88,17 @@ type Controller struct {
 	// namespace queue, cache, lister
 	anpNamespaceLister corev1listers.NamespaceLister
 	anpNamespaceSynced cache.InformerSynced
-	anpNamespaceQueue  workqueue.RateLimitingInterface
+	anpNamespaceQueue  workqueue.TypedRateLimitingInterface[string]
 	// pod queue, cache, lister
 	anpPodLister corev1listers.PodLister
 	anpPodSynced cache.InformerSynced
-	anpPodQueue  workqueue.RateLimitingInterface
+	anpPodQueue  workqueue.TypedRateLimitingInterface[string]
 	// node queue, cache, lister
 	anpNodeLister corev1listers.NodeLister
 	anpNodeSynced cache.InformerSynced
-	anpNodeQueue  workqueue.RateLimitingInterface
+	anpNodeQueue  workqueue.TypedRateLimitingInterface[string]
+
+	observManager *observability.Manager
 }
 
 // NewController returns a new *Controller.
@@ -110,7 +114,8 @@ func NewController(
 	addressSetFactory addressset.AddressSetFactory,
 	isPodScheduledinLocalZone func(*v1.Pod) bool,
 	zone string,
-	recorder record.EventRecorder) (*Controller, error) {
+	recorder record.EventRecorder,
+	observManager *observability.Manager) (*Controller, error) {
 
 	c := &Controller{
 		controllerName:            controllerName,
@@ -122,15 +127,16 @@ func NewController(
 		anpCache:                  make(map[string]*adminNetworkPolicyState),
 		anpPriorityMap:            make(map[int32]string),
 		banpCache:                 &adminNetworkPolicyState{}, // safe to initialise pointer to empty struct than nil
+		observManager:             observManager,
 	}
 
 	klog.V(5).Info("Setting up event handlers for Admin Network Policy")
 	// setup anp informers, listers, queue
 	c.anpLister = anpInformer.Lister()
 	c.anpCacheSynced = anpInformer.Informer().HasSynced
-	c.anpQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"adminNetworkPolicy",
+	c.anpQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "adminNetworkPolicy"},
 	)
 	_, err := anpInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onANPAdd,
@@ -146,9 +152,9 @@ func NewController(
 	// setup banp informers, listers, queue
 	c.banpLister = banpInformer.Lister()
 	c.banpCacheSynced = banpInformer.Informer().HasSynced
-	c.banpQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"baselineAdminNetworkPolicy",
+	c.banpQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "baselineAdminNetworkPolicy"},
 	)
 	_, err = banpInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onBANPAdd,
@@ -162,9 +168,9 @@ func NewController(
 	klog.V(5).Info("Setting up event handlers for Namespaces in Admin Network Policy controller")
 	c.anpNamespaceLister = namespaceInformer.Lister()
 	c.anpNamespaceSynced = namespaceInformer.Informer().HasSynced
-	c.anpNamespaceQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"anpNamespaces",
+	c.anpNamespaceQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "anpNamespaces"},
 	)
 	_, err = namespaceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onANPNamespaceAdd,
@@ -178,9 +184,9 @@ func NewController(
 	klog.V(5).Info("Setting up event handlers for Pods in Admin Network Policy controller")
 	c.anpPodLister = podInformer.Lister()
 	c.anpPodSynced = podInformer.Informer().HasSynced
-	c.anpPodQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"anpPods",
+	c.anpPodQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "anpPods"},
 	)
 	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onANPPodAdd,
@@ -194,9 +200,9 @@ func NewController(
 	klog.V(5).Info("Setting up event handlers for Nodes in Admin Network Policy controller")
 	c.anpNodeLister = nodeInformer.Lister()
 	c.anpNodeSynced = podInformer.Informer().HasSynced
-	c.anpNodeQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"anpNodes",
+	c.anpNodeQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "anpNodes"},
 	)
 	_, err = nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onANPNodeAdd,
@@ -587,4 +593,11 @@ func (c *Controller) onANPNodeDelete(obj interface{}) {
 	}
 	klog.V(5).Infof("Deleting Node Admin Network Policy %s", key)
 	c.anpNodeQueue.Add(key)
+}
+
+func (c *Controller) GetSamplingConfig() *libovsdbops.SamplingConfig {
+	if c.observManager != nil {
+		return c.observManager.SamplingConfig()
+	}
+	return nil
 }

@@ -31,6 +31,7 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 )
@@ -164,7 +165,7 @@ var _ = ginkgo.Describe("Services", func() {
 		replicas := 3
 		config := testutils.RCConfig{
 			Client:               cs,
-			Image:                framework.ServeHostnameImage,
+			Image:                imageutils.GetE2EImage(imageutils.Agnhost),
 			Command:              []string{"/agnhost", "serve-hostname"},
 			Name:                 "backend",
 			Labels:               jig.Labels,
@@ -708,11 +709,8 @@ var _ = ginkgo.Describe("Services", func() {
 		var nodes *v1.NodeList
 		var err error
 		nodeIPs := make(map[string]map[int]string)
-		var egressPod *v1.Pod
 		var egressNode string
-		targetSecondaryNode := node{
-			name: "egressSecondaryTargetNode-allowed",
-		}
+		var targetSecondaryNode node
 
 		const (
 			endpointHTTPPort    = 80
@@ -721,6 +719,14 @@ var _ = ginkgo.Describe("Services", func() {
 			clusterUDPPort      = 91
 			clientContainerName = "npclient"
 		)
+
+		ginkgo.BeforeEach(func() {
+			nodeIPs = make(map[string]map[int]string)
+			egressNode = ""
+			targetSecondaryNode = node{
+				name: "egressSecondaryTargetNode-allowed",
+			}
+		})
 
 		ginkgo.AfterEach(func() {
 			ginkgo.By("Cleaning up external container")
@@ -745,7 +751,6 @@ var _ = ginkgo.Describe("Services", func() {
 				e2ekubectl.RunKubectlOrDie("default", "delete", "eip", "egressip", "--ignore-not-found=true")
 				e2ekubectl.RunKubectlOrDie("default", "label", "node", egressNode, "k8s.ovn.org/egress-assignable-")
 				tearDownNetworkAndTargetForMultiNIC([]string{egressNode}, targetSecondaryNode)
-				targetSecondaryNode.nodeIP = ""
 			}
 		})
 
@@ -924,7 +929,7 @@ var _ = ginkgo.Describe("Services", func() {
 			}
 
 			ginkgo.By("Choosing egressIP pod")
-			egressPod = endPoints[0]
+			egressPod := endPoints[0]
 			framework.Logf("EgressIP pod is %s/%s", endPoints[0].Namespace, endPoints[0].Name)
 
 			ginkgo.By("Label egress node" + egressNode + " create external container to send egress traffic to via secondary MultiNIC EIP")

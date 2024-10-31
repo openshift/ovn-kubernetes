@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
@@ -114,6 +114,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 			)
 
 			ginkgo.BeforeEach(func() {
+
 				fakeClient = &util.OVNClusterManagerClientset{
 					KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
 					IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
@@ -191,6 +192,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						sncm.ovnClient,
 						sncm.watchFactory,
 						sncm.recorder,
+						sncm.nadController,
+						nil,
 					)
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -317,6 +320,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					sncm.ovnClient,
 					sncm.watchFactory,
 					sncm.recorder,
+					sncm.nadController,
+					nil,
 				)
 				err = oc.init()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -407,6 +412,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -455,6 +462,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -504,6 +513,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -573,6 +584,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -645,6 +658,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -674,24 +689,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				netInfo    util.NetInfo
 			)
 
-			ginkgo.BeforeEach(func() {
-				var err error
-				netInfo, err = util.NewNetInfo(
-					&ovncnitypes.NetConf{
-						NetConf:  types.NetConf{Name: "blue"},
-						Role:     ovntypes.NetworkRolePrimary,
-						Subnets:  subnets,
-						Topology: ovntypes.Layer2Topology,
-					})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				fakeClient = &util.OVNClusterManagerClientset{
-					KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
-					IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
-					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
-				}
-			})
-
 			ginkgo.It("Automatically reserves IPs for the GW (.1) and mgmt port (.2)", func() {
 				app.Action = func(ctx *cli.Context) error {
 					gomega.Expect(
@@ -701,6 +698,20 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						)).To(gomega.Succeed())
 
 					var err error
+					netInfo, err = util.NewNetInfo(
+						&ovncnitypes.NetConf{
+							NetConf:  types.NetConf{Name: "blue"},
+							Role:     ovntypes.NetworkRolePrimary,
+							Subnets:  subnets,
+							Topology: ovntypes.Layer2Topology,
+						})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					fakeClient = &util.OVNClusterManagerClientset{
+						KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
+						IPAMClaimsClient:      fakeipamclaimclient.NewSimpleClientset(),
+						NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
+					}
 					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Expect(f.Start()).NotTo(gomega.HaveOccurred())
@@ -715,6 +726,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						sncm.ovnClient,
 						sncm.watchFactory,
 						sncm.recorder,
+						sncm.nadController,
+						nil,
 					)
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -740,7 +753,12 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					return nil
 				}
 
-				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+				gomega.Expect(app.Run([]string{
+					app.Name,
+					// define the cluster as dualstack so the user defined primary network matches the ip family
+					"--cluster-subnets=10.128.0.0/14,fd00:10:244::/48",
+					"--k8s-service-cidrs=172.16.1.0/24,fd02::/112",
+				})).To(gomega.Succeed())
 			})
 
 		})

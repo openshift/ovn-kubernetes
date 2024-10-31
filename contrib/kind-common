@@ -122,12 +122,13 @@ install_ingress() {
 
 METALLB_DIR="/tmp/metallb"
 install_metallb() {
+  local metallb_version=v0.14.8
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
 
   pushd "${builddir}"
-  git clone https://github.com/metallb/metallb.git
+  git clone https://github.com/metallb/metallb.git -b $metallb_version
   cd metallb
   # Use global IP next hops in IPv6
   if  [ "$KIND_IPV6_SUPPORT" == true ]; then
@@ -320,7 +321,13 @@ is_nested_virt_enabled() {
 }
 
 install_kubevirt() {
-    local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
+    # possible values:
+    # stable - install newest stable (default)
+    # vX.Y.Z - install specific stable (i.e v1.3.1)
+    # nightly - install newest nightly
+    # nightly tag - install specific nightly (i.e 20240910)
+    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"stable"}
+
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
@@ -329,10 +336,10 @@ install_kubevirt() {
             kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
         fi
     done
-    local kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
 
-    echo "Deploy latest nighly build Kubevirt"
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
+      local kubevirt_release_url=$(get_kubevirt_release_url "$KUBEVIRT_VERSION")
+      echo "Deploying Kubevirt from $kubevirt_release_url"
       kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
       kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
       if ! is_nested_virt_enabled; then
@@ -348,6 +355,12 @@ install_kubevirt() {
             kubectl logs --all-containers=true -n kubevirt $p || true
         done
     fi
+
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/developerConfiguration","value":{"featureGates":[]}},{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"NetworkBindingPlugins"}]'
+    
+    local kubevirt_stable_release_url=$(get_kubevirt_release_url "stable")
+    local passt_binding_image="quay.io/kubevirt/network-passt-binding:${kubevirt_stable_release_url##*/}"
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"passt":{"computeResourceOverhead":{"requests":{"memory":"500Mi"}},"migration":{"method":"link-refresh"},"networkAttachmentDefinition":"default/primary-udn-kubevirt-binding","sidecarImage":"'"${passt_binding_image}"'"}}}]'
     
     if [ ! -d "./bin" ]
     then
@@ -363,8 +376,9 @@ install_kubevirt() {
 
     pushd ./bin
        if [ ! -f ./virtctl ]; then
-           cli_name="virtctl-${kubevirt_version}-${OS_TYPE}-${ARCH}"
-           curl -LO "${kubevirt_release_url}/${cli_name}"
+           kubevirt_stable_release_url=$(get_kubevirt_release_url "stable")
+           cli_name="virtctl-${kubevirt_stable_release_url##*/}-${OS_TYPE}-${ARCH}"
+           curl -LO "${kubevirt_stable_release_url}/${cli_name}"
            mv ${cli_name} virtctl
            if_error_exit "Failed to download virtctl!"
        fi
@@ -373,12 +387,14 @@ install_kubevirt() {
     chmod +x ./bin/virtctl
 }
 
-install_kubevirt_ipam_controller() {
+install_cert_manager() {
   local cert_manager_version="v1.14.4"
   echo "Installing cert-manager ..."
   manifest="https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
   run_kubectl apply -f "$manifest"
+}
 
+install_kubevirt_ipam_controller() {
   echo "Installing KubeVirt IPAM controller manager ..."
   manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/dist/install.yaml"
   run_kubectl apply -f "$manifest"
@@ -386,9 +402,11 @@ install_kubevirt_ipam_controller() {
 }
 
 install_multus() {
-  echo "Installing multus-cni daemonset ..."
-  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
-  run_kubectl apply -f "$multus_manifest"
+  local version="v4.1.3"
+  echo "Installing multus-cni $version daemonset ..."
+  wget -qO- "https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/${version}/deployments/multus-daemonset.yml" |\
+    sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" |\
+    run_kubectl apply -f -
 }
 
 install_mpolicy_crd() {
@@ -575,4 +593,59 @@ kubectl_wait_dnsnameresolver_pods() {
   timeout=$(calculate_timeout ${endtime})
   echo "Waiting for pods in dnsnameresolver-operator namespace to become ready (timeout ${timeout})..."
   kubectl wait -n dnsnameresolver-operator --for=condition=ready pods --all --timeout=${timeout}s
+}
+
+deploy_kubevirt_binding() {
+  cat <<EOF | run_kubectl apply -f -
+---
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: primary-udn-kubevirt-binding
+  namespace: default
+spec:
+  config: '{
+  "cniVersion": "1.0.0",
+  "name": "primary-udn-kubevirt-binding",
+  "plugins": [
+    {
+      "type": "network-passt-binding"
+    }
+  ]
+}'
+EOF
+}
+
+deploy_passt_binary() {
+  echo "Installing passt-binding-cni-ds ..."
+  local manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/passt/passt-binding-cni-ds.yaml"
+  run_kubectl apply -f "$manifest"
+
+  run_kubectl rollout status -n kube-system daemonset/passt-binding-cni --timeout 2m
+}
+
+get_kubevirt_release_url() {
+    local VERSION="$1"
+
+    local kubevirt_version
+    local kubevirt_release_url
+
+    if [[ "$VERSION" == "stable" ]]; then
+        kubevirt_version=$(curl -sL https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)
+        kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
+    elif [[ "$VERSION" == v* ]]; then
+        kubevirt_version="$VERSION"
+        kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
+    elif [[ "$VERSION" == "nightly" ]]; then
+        kubevirt_version=$(curl -sL https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/latest)
+        kubevirt_release_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/${kubevirt_version}"
+    elif [[ "$VERSION" =~ ^[0-9]{8}$ ]]; then
+        kubevirt_version="$VERSION"
+        kubevirt_release_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/${kubevirt_version}"
+    else
+        echo "Unsupported KUBEVIRT_VERSION value $VERSION (use either stable, vX.Y.Z, nightly or nightly tag)"
+        exit 1
+    fi
+
+    echo "$kubevirt_release_url"
 }

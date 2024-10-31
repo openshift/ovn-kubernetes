@@ -25,6 +25,22 @@ func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
 }
 
+// takes ipv4 and ipv6 cidrs and returns the correct type for the cluster under test
+func correctCIDRFamily(ipv4CIDR, ipv6CIDR string) string {
+	// dual stack cluster
+	if isIPv6Supported() && isIPv4Supported() {
+		return strings.Join([]string{ipv4CIDR, ipv6CIDR}, ",")
+	}
+	// is an ipv6 only cluster
+	if isIPv6Supported() {
+		return ipv6CIDR
+	}
+
+	//ipv4 only cluster
+	return ipv4CIDR
+
+}
+
 func getNetCIDRSubnet(netCIDR string) (string, error) {
 	subStrings := strings.Split(netCIDR, "/")
 	if len(subStrings) == 3 {
@@ -45,6 +61,7 @@ type networkAttachmentConfigParams struct {
 	vlanID             int
 	allowPersistentIPs bool
 	role               string
+	mtu                int
 }
 
 type networkAttachmentConfig struct {
@@ -67,6 +84,9 @@ func uniqueNadName(originalNetName string) string {
 }
 
 func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+	if config.mtu == 0 {
+		config.mtu = 1300
+	}
 	nadSpec := fmt.Sprintf(
 		`
 {
@@ -76,7 +96,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "topology":%q,
         "subnets": %q,
         "excludeSubnets": %q,
-        "mtu": 1300,
+        "mtu": %d,
         "netAttachDefName": %q,
         "vlanID": %d,
         "allowPersistentIPs": %t,
@@ -87,6 +107,7 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		config.topology,
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
+		config.mtu,
 		namespacedName(config.namespace, config.name),
 		config.vlanID,
 		config.allowPersistentIPs,

@@ -10,7 +10,7 @@ import (
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,10 +22,10 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 )
 
 var _ = Describe("Network Segmentation: services", func() {
-	const ()
 
 	f := wrappedTestFramework("udn-services")
 
@@ -50,6 +50,7 @@ var _ = Describe("Network Segmentation: services", func() {
 			var err error
 			nadClient, err = nadclient.NewForConfig(f.ClientConfig())
 			Expect(err).NotTo(HaveOccurred())
+			defaultNetNamespace = ""
 		})
 
 		cleanupFn := func() {
@@ -88,10 +89,6 @@ var _ = Describe("Network Segmentation: services", func() {
 			// -  UDN service --> default-network:
 			//   + clusterIP fails
 			//   + nodeIP:nodePort fails FOR NOW, when we only target the local node (*)
-			//
-			// (*) TODO connect to node ports on other nodes too once ovnkube-node fully supports UDN,
-			//     that is when https://github.com/ovn-org/ovn-kubernetes/pull/4648 and
-			//     https://github.com/ovn-org/ovn-kubernetes/pull/4554 merge
 
 			"should be reachable through their cluster IP and node port",
 			func(
@@ -99,6 +96,13 @@ var _ = Describe("Network Segmentation: services", func() {
 			) {
 				namespace := f.Namespace.Name
 				jig := e2eservice.NewTestJig(cs, namespace, "udn-service")
+
+				if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
+					const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4703"
+					e2eskipper.Skipf(
+						"Service e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+					)
+				}
 
 				By("Selecting 3 schedulable nodes")
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -158,8 +162,11 @@ var _ = Describe("Network Segmentation: services", func() {
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[0], "endpoint node", udnServerPod.Name)
 				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
 				if !IsGatewayModeLocal() {
-					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "client node", udnServerPod.Name)
-					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+					// FIXME(kyrtapz): Remove once l2 external->svc is fixed. Client node is nodes.Items[0]
+					if netConfigParams.topology != types.Layer2Topology {
+						checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
+						checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+					}
 				}
 
 				By(fmt.Sprintf("Creating a UDN client pod on a different node (%s)", clientNode))
@@ -172,8 +179,11 @@ var _ = Describe("Network Segmentation: services", func() {
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[1], "local node", udnServerPod.Name)
 				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
 				if !IsGatewayModeLocal() {
-					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+					// FIXME(kyrtapz): Remove once l2 external->svc is fixed. Client node is nodes.Items[1]
+					if netConfigParams.topology != types.Layer2Topology {
+						checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+						checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+					}
 				}
 
 				// Default network -> UDN
@@ -192,11 +202,16 @@ var _ = Describe("Network Segmentation: services", func() {
 
 				By("Verify the client in the default network connection to the UDN service")
 				checkNoConnectionToClusterIPs(f, defaultClient, udnService)
+
 				checkNoConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[1], "local node") // TODO change to checkConnectionToNodePort when we have full UDN support in ovnkube-node
+
 				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
 				if !IsGatewayModeLocal() {
-					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+					// FIXME(kyrtapz): Remove once l2 external->svc is fixed
+					if netConfigParams.topology != types.Layer2Topology {
+						checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+						checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+					}
 				}
 
 				// UDN -> Default network
@@ -205,7 +220,7 @@ var _ = Describe("Network Segmentation: services", func() {
 				By(fmt.Sprintf("Creating a backend pod in the default network on node %s", serverPodNodeName))
 				defaultLabels := map[string]string{"app": "default-app"}
 
-				_, err = createPod(f, "backend-pod-default", serverPodNodeName,
+				defaultServerPod, err := createPod(f, "backend-pod-default", serverPodNodeName,
 					defaultNetNamespace, []string{"/agnhost", "netexec", "--udp-port=" + fmt.Sprint(serviceTargetPort)}, defaultLabels,
 					func(pod *v1.Pod) {
 						pod.Spec.Containers[0].Ports = []v1.ContainerPort{{ContainerPort: (serviceTargetPort), Protocol: "UDP"}}
@@ -233,13 +248,10 @@ var _ = Describe("Network Segmentation: services", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Verify the UDN client connection to the default network service")
-				checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
-				// TODO uncomment below when below OVN_DISABLE_SNAT_MULTIPLE_GWS=true is supported
-				// checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
-				// TODO change line below to checkConnectionToNodePort when we have full UDN support in ovnkube-node
+				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[0], "server node", defaultServerPod.Name)
 				checkNoConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[1], "local node")
-				// TODO uncomment below when OVN_DISABLE_SNAT_MULTIPLE_GWS=true is supported
-				// checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
+				checkConnectionToNodePort(f, udnClientPod2, defaultService, &nodes.Items[2], "other node", defaultServerPod.Name)
+				checkNoConnectionToClusterIPs(f, udnClientPod2, defaultService)
 			},
 
 			Entry(
@@ -251,8 +263,15 @@ var _ = Describe("Network Segmentation: services", func() {
 					role:     "primary",
 				},
 			),
-
-			// TODO add L2 NADs once L2 UDN support is available for services
+			Entry(
+				"L2 dualstack primary UDN, cluster-networked pods, NodePort service",
+				networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer2",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				},
+			),
 		)
 
 	})

@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/stretchr/testify/assert"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -1211,8 +1212,10 @@ func Test_buildClusterLBs(t *testing.T) {
 	namespace := "testns"
 
 	oldGwMode := globalconfig.Gateway.Mode
+	oldIPv4Mode := globalconfig.IPv4Mode
 	defer func() {
 		globalconfig.Gateway.Mode = oldGwMode
+		globalconfig.IPv4Mode = oldIPv4Mode
 	}()
 	globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 
@@ -1228,8 +1231,12 @@ func Test_buildClusterLBs(t *testing.T) {
 	defaultGroups := []string{types.ClusterLBGroupName}
 	defaultOpts := LBOpts{Reject: true}
 
-	UDNNetInfo := getSampleUDNNetInfo(namespace)
-	UDNGroups := []string{UDNNetInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)}
+	globalconfig.IPv4Mode = true
+	l3UDN, err := getSampleUDNNetInfo(namespace, "layer3")
+	assert.Equal(t, err, nil)
+	l2UDN, err := getSampleUDNNetInfo(namespace, "layer2")
+	assert.Equal(t, err, nil)
+	udnNets := []util.NetInfo{l3UDN, l2UDN}
 
 	tc := []struct {
 		name      string
@@ -1450,14 +1457,18 @@ func Test_buildClusterLBs(t *testing.T) {
 			assert.Equal(t, tt.expected, actual)
 
 			// UDN
-			UDNExternalIDs := loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), UDNNetInfo.GetNetworkName())
-			for idx := range tt.expected {
-				tt.expected[idx].ExternalIDs = UDNExternalIDs
-				tt.expected[idx].Groups = UDNGroups
-				tt.expected[idx].Name = UDNNetInfo.GetNetworkScopedLoadBalancerName(tt.expected[idx].Name)
+			for _, udn := range udnNets {
+				UDNExternalIDs := loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), udn.GetNetworkName())
+				expected := make([]LB, len(tt.expected))
+				copy(expected, tt.expected)
+				for idx := range tt.expected {
+					expected[idx].ExternalIDs = UDNExternalIDs
+					expected[idx].Groups = []string{udn.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)}
+					expected[idx].Name = udn.GetNetworkScopedLoadBalancerName(tt.expected[idx].Name)
+				}
+				actual = buildClusterLBs(tt.service, tt.configs, tt.nodeInfos, true, udn)
+				assert.Equal(t, expected, actual)
 			}
-			actual = buildClusterLBs(tt.service, tt.configs, tt.nodeInfos, true, UDNNetInfo)
-			assert.Equal(t, tt.expected, actual)
 		})
 	}
 }
@@ -1466,7 +1477,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	oldGwMode := globalconfig.Gateway.Mode
 	oldServiceCIDRs := globalconfig.Kubernetes.ServiceCIDRs
+	oldIPv4Mode := globalconfig.IPv4Mode
 	defer func() {
+		globalconfig.IPv4Mode = oldIPv4Mode
 		globalconfig.Gateway.Mode = oldGwMode
 		globalconfig.Default.ClusterSubnets = oldClusterSubnet
 		globalconfig.Kubernetes.ServiceCIDRs = oldServiceCIDRs
@@ -1479,11 +1492,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	_, svcCIDRv6, _ := net.ParseCIDR("fd92::0/80")
 
 	globalconfig.Kubernetes.ServiceCIDRs = []*net.IPNet{svcCIDRv4}
+	globalconfig.IPv4Mode = true
 
 	name := "foo"
 	namespace := "testns"
 
-	UDNNetInfo := getSampleUDNNetInfo(namespace)
+	l3UDN, err := getSampleUDNNetInfo(namespace, "layer3")
+	assert.Equal(t, err, nil)
+	l2UDN, err := getSampleUDNNetInfo(namespace, "layer2")
+	assert.Equal(t, err, nil)
+	udnNetworks := []util.NetInfo{l3UDN, l2UDN}
 
 	defaultService := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -3103,8 +3121,6 @@ func Test_buildPerNodeLBs(t *testing.T) {
 		},
 	}
 
-	UDNExternalIDs := loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), UDNNetInfo.GetNetworkName())
-
 	// v4
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
@@ -3115,13 +3131,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				assert.Equal(t, tt.expectedShared, actual, "shared gateway mode not as expected")
 
 				// UDN
-				for idx := range tt.expectedShared {
-					tt.expectedShared[idx].ExternalIDs = UDNExternalIDs
-					tt.expectedShared[idx].Name = UDNNetInfo.GetNetworkScopedLoadBalancerName(tt.expectedShared[idx].Name)
-
+				for _, udn := range udnNetworks {
+					expectedShared := make([]LB, len(tt.expectedShared))
+					copy(expectedShared, tt.expectedShared)
+					for idx := range tt.expectedShared {
+						expectedShared[idx].ExternalIDs = loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), udn.GetNetworkName())
+						expectedShared[idx].Name = udn.GetNetworkScopedLoadBalancerName(tt.expectedShared[idx].Name)
+					}
+					actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, udn)
+					assert.Equal(t, expectedShared, actual, "shared gateway mode not as expected")
 				}
-				actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, UDNNetInfo)
-				assert.Equal(t, tt.expectedShared, actual, "shared gateway mode not as expected")
 			}
 
 			if tt.expectedLocal != nil {
@@ -3132,13 +3151,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
 
 				// UDN
-				for idx := range tt.expectedLocal {
-					tt.expectedLocal[idx].ExternalIDs = UDNExternalIDs
-					tt.expectedLocal[idx].Name = UDNNetInfo.GetNetworkScopedLoadBalancerName(tt.expectedLocal[idx].Name)
-
+				for _, udn := range udnNetworks {
+					expectedLocal := make([]LB, len(tt.expectedLocal))
+					copy(expectedLocal, tt.expectedLocal)
+					for idx := range tt.expectedLocal {
+						expectedLocal[idx].ExternalIDs = loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), udn.GetNetworkName())
+						expectedLocal[idx].Name = udn.GetNetworkScopedLoadBalancerName(tt.expectedLocal[idx].Name)
+					}
+					actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, udn)
+					assert.Equal(t, expectedLocal, actual, "local gateway mode not as expected")
 				}
-				actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodes, UDNNetInfo)
-				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
 			}
 
 		})
@@ -3157,13 +3179,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				assert.Equal(t, tt.expectedShared, actual, "shared gateway mode not as expected")
 
 				// UDN
-				for idx := range tt.expectedShared {
-					tt.expectedShared[idx].ExternalIDs = UDNExternalIDs
-					tt.expectedShared[idx].Name = UDNNetInfo.GetNetworkScopedLoadBalancerName(tt.expectedShared[idx].Name)
-
+				for _, udn := range udnNetworks {
+					expectedShared := make([]LB, len(tt.expectedShared))
+					copy(expectedShared, tt.expectedShared)
+					for idx := range tt.expectedShared {
+						expectedShared[idx].ExternalIDs = loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), udn.GetNetworkName())
+						expectedShared[idx].Name = udn.GetNetworkScopedLoadBalancerName(tt.expectedShared[idx].Name)
+					}
+					actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6, udn)
+					assert.Equal(t, expectedShared, actual, "shared gateway mode not as expected for UDN")
 				}
-				actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6, UDNNetInfo)
-				assert.Equal(t, tt.expectedShared, actual, "shared gateway mode not as expected for UDN")
 			}
 
 			if tt.expectedLocal != nil {
@@ -3174,13 +3199,16 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
 
 				// UDN
-				for idx := range tt.expectedLocal {
-					tt.expectedLocal[idx].ExternalIDs = UDNExternalIDs
-					tt.expectedLocal[idx].Name = UDNNetInfo.GetNetworkScopedLoadBalancerName(tt.expectedLocal[idx].Name)
-
+				for _, udn := range udnNetworks {
+					expectedLocal := make([]LB, len(tt.expectedLocal))
+					copy(expectedLocal, tt.expectedLocal)
+					for idx := range tt.expectedLocal {
+						expectedLocal[idx].ExternalIDs = loadBalancerExternalIDsForNetwork(namespacedServiceName(namespace, name), udn.GetNetworkName())
+						expectedLocal[idx].Name = udn.GetNetworkScopedLoadBalancerName(tt.expectedLocal[idx].Name)
+					}
+					actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6, udn)
+					assert.Equal(t, expectedLocal, actual, "local gateway mode not as expected for UDN")
 				}
-				actual = buildPerNodeLBs(tt.service, tt.configs, defaultNodesV6, UDNNetInfo)
-				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected for UDN")
 			}
 
 		})
