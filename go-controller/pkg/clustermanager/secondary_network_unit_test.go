@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
@@ -192,6 +192,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						sncm.ovnClient,
 						sncm.watchFactory,
 						sncm.recorder,
+						sncm.nadController,
+						nil,
 					)
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -318,6 +320,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					sncm.ovnClient,
 					sncm.watchFactory,
 					sncm.recorder,
+					sncm.nadController,
+					nil,
 				)
 				err = oc.init()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -408,6 +412,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -456,6 +462,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -505,6 +513,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -574,6 +584,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -646,6 +658,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							sncm.ovnClient,
 							sncm.watchFactory,
 							sncm.recorder,
+							sncm.nadController,
+							nil,
 						)
 						gomega.Expect(nc.init()).To(gomega.Succeed())
 						gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())
@@ -712,6 +726,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						sncm.ovnClient,
 						sncm.watchFactory,
 						sncm.recorder,
+						sncm.nadController,
+						nil,
 					)
 					gomega.Expect(nc.init()).To(gomega.Succeed())
 					gomega.Expect(nc.Start(ctx.Context)).To(gomega.Succeed())

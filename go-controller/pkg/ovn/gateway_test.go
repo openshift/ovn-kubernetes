@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	v1 "k8s.io/api/core/v1"
@@ -365,8 +365,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		ginkgo.It("creates an IPv4 gateway in OVN", func() {
 			routeUUID := "route-UUID"
 			leftoverMgmtIPRoute := &nbdb.LogicalRouterStaticRoute{
-				Nexthop: "10.130.0.2",
-				UUID:    routeUUID,
+				Nexthop:  "10.130.0.2",
+				IPPrefix: "10.130.0.0/23",
+				UUID:     routeUUID,
 			}
 			expectedOVNClusterRouter := &nbdb.LogicalRouter{
 				UUID:         types.OVNClusterRouter + "-UUID",
@@ -675,8 +676,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		ginkgo.It("creates an IPv4 gateway in OVN without next hops", func() {
 			routeUUID := "route-UUID"
 			leftoverMgmtIPRoute := &nbdb.LogicalRouterStaticRoute{
-				Nexthop: "10.130.0.2",
-				UUID:    routeUUID,
+				Nexthop:  "10.130.0.2",
+				IPPrefix: "10.130.0.0/23",
+				UUID:     routeUUID,
 			}
 			expectedOVNClusterRouter := &nbdb.LogicalRouter{
 				UUID:         types.OVNClusterRouter + "-UUID",

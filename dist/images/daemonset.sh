@@ -94,6 +94,8 @@ OVN_ENABLE_OVNKUBE_IDENTITY="true"
 OVN_ENABLE_PERSISTENT_IPS=
 OVN_ENABLE_SVC_TEMPLATE_SUPPORT="true"
 OVN_ENABLE_DNSNAMERESOLVER="false"
+OVN_NOHOSTSUBNET_LABEL=""
+OVN_DISABLE_REQUESTEDCHASSIS="false"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -358,6 +360,12 @@ while [ "$1" != "" ]; do
   --enable-observ)
     OVN_OBSERV_ENABLE=$VALUE
     ;;
+  --no-hostsubnet-label)
+    OVN_NOHOSTSUBNET_LABEL=$VALUE
+    ;;
+  --ovn_disable_requestedchassis)
+    OVN_DISABLE_REQUESTEDCHASSIS=$value
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -551,6 +559,12 @@ echo "ovn_enable_dnsnameresolver: ${ovn_enable_dnsnameresolver}"
 ovn_observ_enable=${OVN_OBSERV_ENABLE}
 echo "ovn_observ_enable: ${ovn_observ_enable}"
 
+ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL}
+echo "ovn_nohostsubnet_label: ${ovn_nohostsubnet_label}"
+
+ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS}
+echo "ovn_disable_requestedchassis: ${ovn_disable_requestedchassis}"
+
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -743,6 +757,8 @@ ovn_image=${ovnkube_image} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
   ovn_observ_enable=${ovn_observ_enable} \
+  ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
+  ovn_disable_requestedchassis=${ovn_disable_requestedchassis} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${ovnkube_image} \

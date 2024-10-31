@@ -9,6 +9,10 @@ import (
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	kapi "k8s.io/api/core/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
+
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -19,9 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
-	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
@@ -183,6 +185,15 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return err
 	}
 
+	// delete open port ACLs for UDN pods
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// safe to call for non-UDN pods
+		err = oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, "")
+		if err != nil {
+			return fmt.Errorf("failed to cleanup UDN pod %s/%s open ports: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
 	if pInfo == nil {
 		return nil
@@ -258,6 +269,13 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
 			return err
 		}
+		// set open ports for UDN pods, use function without transact, since lsp is not created yet.
+		var parseErr error
+		ops, parseErr, err = oc.setUDNPodOpenPortsOps(pod.Namespace+"/"+pod.Name, pod.Annotations, lsp.Name, ops)
+		err = utilerrors.Join(parseErr, err)
+		if err != nil {
+			return fmt.Errorf("failed to set UDN pod %s/%s open ports: %w", pod.Namespace, pod.Name, err)
+		}
 	}
 
 	// Ensure the namespace/nsInfo exists
@@ -296,7 +314,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		} else if ops, err = addOrUpdatePodSNATOps(oc.nbClient, oc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs, ops); err != nil {
+		} else if ops, err = addOrUpdatePodSNATOps(oc.nbClient, oc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs, "", ops); err != nil {
 			return err
 		}
 	}

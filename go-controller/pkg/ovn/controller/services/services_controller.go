@@ -3,18 +3,23 @@ package services
 import (
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"golang.org/x/time/rate"
+
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"golang.org/x/time/rate"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -25,6 +30,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1"
+	utilnet "k8s.io/utils/net"
 
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	discoveryinformers "k8s.io/client-go/informers/discovery/v1"
@@ -57,15 +63,18 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
-	nadLister nadlister.NetworkAttachmentDefinitionLister,
+	nadController networkAttachDefController.NADController,
 	recorder record.EventRecorder,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
 	klog.V(4).Infof("Creating services controller for network=%s", netInfo.GetNetworkName())
 	c := &Controller{
-		client:                client,
-		nbClient:              nbClient,
-		queue:                 workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
+		client:   client,
+		nbClient: nbClient,
+		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			newRatelimiter(100),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: controllerName},
+		),
 		workerLoopPeriod:      time.Second,
 		alreadyApplied:        map[string][]LB{},
 		nodeIPv4Templates:     NewNodeIPsTemplates(v1.IPv4Protocol),
@@ -74,7 +83,7 @@ func NewController(client clientset.Interface,
 		serviceLister:         serviceInformer.Lister(),
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
-		nadLister:             nadLister,
+		nadController:         nadController,
 
 		eventRecorder: recorder,
 		repair:        newRepair(serviceInformer.Lister(), nbClient),
@@ -90,9 +99,6 @@ func NewController(client clientset.Interface,
 	// we need to watch Node objects for changes.
 	// Need to re-sync all services when a node gains its switch or GWR
 	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync, netInfo)
-	if err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 
@@ -111,7 +117,7 @@ type Controller struct {
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	endpointSliceLister   discoverylisters.EndpointSliceLister
 
-	nadLister nadlister.NetworkAttachmentDefinitionLister
+	nadController networkAttachDefController.NADController
 
 	nodesSynced cache.InformerSynced
 
@@ -120,7 +126,7 @@ type Controller struct {
 	// more often than services with few pods; it also would cause a
 	// service that's inserted multiple times to be processed more than
 	// necessary.
-	queue workqueue.RateLimitingInterface
+	queue workqueue.TypedRateLimitingInterface[string]
 
 	// workerLoopPeriod is the time between worker runs. The workers process the queue of service and pod changes.
 	workerLoopPeriod time.Duration
@@ -222,7 +228,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		// Run the repair controller only once
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
-		c.repair.runBeforeSync(c.useTemplates, c.netInfo)
+		c.repair.runBeforeSync(c.useTemplates, c.netInfo, c.nodeTracker.nodes)
 	}
 
 	if err := c.initTopLevelCache(); err != nil {
@@ -259,14 +265,14 @@ func (c *Controller) processNextWorkItem() bool {
 	}
 	defer c.queue.Done(eKey)
 
-	err := c.syncService(eKey.(string))
+	err := c.syncService(eKey)
 	c.handleErr(err, eKey)
 
 	return true
 }
 
-func (c *Controller) handleErr(err error, key interface{}) {
-	ns, name, keyErr := cache.SplitMetaNamespaceKey(key.(string))
+func (c *Controller) handleErr(err error, key string) {
+	ns, name, keyErr := cache.SplitMetaNamespaceKey(key)
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
@@ -360,6 +366,21 @@ func (c *Controller) syncService(key string) error {
 	// because we are getting the object from the informer´s cache
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
+	}
+
+	// Handle default network services enabled for UDN in shared gateway mode
+	if c.netInfo.IsPrimaryNetwork() &&
+		util.IsUDNEnabledService(key) {
+
+		if service == nil {
+			return c.cleanupUDNEnabledServiceRoute(key)
+		}
+
+		err = c.configureUDNEnabledServiceRoute(service)
+		if err != nil {
+			return fmt.Errorf("failed to configure the UDN enabled service route: %v", err)
+		}
+		return nil
 	}
 
 	// Delete the Service's LB(s) from OVN if:
@@ -548,12 +569,21 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 // belong to the network that this service controller is responsible for.
 func (c *Controller) skipService(name, namespace string) bool {
 	if util.IsNetworkSegmentationSupportEnabled() {
-		serviceNetwork, err := util.GetActiveNetworkForNamespace(namespace, c.nadLister)
+		serviceNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
 		if err != nil {
 			utilruntime.HandleError(fmt.Errorf("failed to retrieve network for service %s/%s: %w",
 				namespace, name, err))
 			return true
 		}
+
+		// Do not skip default network services enabled for UDN
+		if serviceNetwork.IsDefault() &&
+			c.netInfo.IsPrimaryNetwork() &&
+			globalconfig.Gateway.Mode == globalconfig.GatewayModeShared &&
+			util.IsUDNEnabledService(ktypes.NamespacedName{Namespace: namespace, Name: name}.String()) {
+			return false
+		}
+
 		if serviceNetwork.GetNetworkName() != c.netInfo.GetNetworkName() {
 			return true
 		}
@@ -707,6 +737,80 @@ func (c *Controller) getServiceNamespacedNameFromEndpointSlice(endpointSlice *di
 	}
 }
 
+func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
+	klog.Infof("Removing UDN enabled service route for service %s in network: %s", key, c.netInfo.GetNetworkName())
+	delPredicate := func(route *nbdb.LogicalRouterStaticRoute) bool {
+		return route.ExternalIDs[types.NetworkExternalID] == c.netInfo.GetNetworkName() &&
+			route.ExternalIDs[types.TopologyExternalID] == c.netInfo.TopologyType() &&
+			route.ExternalIDs[types.UDNEnabledServiceExternalID] == key
+	}
+
+	var ops []libovsdb.Operation
+	var err error
+	if c.netInfo.TopologyType() == types.Layer2Topology {
+		for _, node := range c.nodeInfos {
+			if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, c.netInfo.GetNetworkScopedGWRouterName(node.name), delPredicate); err != nil {
+				return err
+			}
+		}
+	} else {
+		if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, c.netInfo.GetNetworkScopedClusterRouterName(), delPredicate); err != nil {
+			return err
+		}
+	}
+	_, err = libovsdbops.TransactAndCheck(c.nbClient, ops)
+	return err
+}
+
+func (c *Controller) configureUDNEnabledServiceRoute(service *v1.Service) error {
+	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, c.netInfo.GetNetworkName())
+
+	extIDs := map[string]string{
+		types.NetworkExternalID:           c.netInfo.GetNetworkName(),
+		types.TopologyExternalID:          c.netInfo.TopologyType(),
+		types.UDNEnabledServiceExternalID: ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String(),
+	}
+	routesEqual := func(a, b *nbdb.LogicalRouterStaticRoute) bool {
+		return a.IPPrefix == b.IPPrefix &&
+			a.ExternalIDs[types.NetworkExternalID] == b.ExternalIDs[types.NetworkExternalID] &&
+			a.ExternalIDs[types.TopologyExternalID] == b.ExternalIDs[types.TopologyExternalID] &&
+			a.ExternalIDs[types.UDNEnabledServiceExternalID] == b.ExternalIDs[types.UDNEnabledServiceExternalID] &&
+			libovsdbops.PolicyEqualPredicate(a.Policy, b.Policy) &&
+			a.Nexthop == b.Nexthop
+
+	}
+	var ops []libovsdb.Operation
+	for _, nodeInfo := range c.nodeInfos {
+		var mgmtPortIPs []net.IP
+		for _, subnet := range nodeInfo.podSubnets {
+			mgmtPortIPs = append(mgmtPortIPs, util.GetNodeManagementIfAddr(&subnet).IP)
+		}
+		mgmtIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6String(service.Spec.ClusterIP), mgmtPortIPs)
+		if err != nil {
+			return err
+		}
+		staticRoute := nbdb.LogicalRouterStaticRoute{
+			Policy:      &nbdb.LogicalRouterStaticRoutePolicyDstIP,
+			IPPrefix:    service.Spec.ClusterIP,
+			Nexthop:     mgmtIP.String(),
+			ExternalIDs: extIDs,
+		}
+		routerName := c.netInfo.GetNetworkScopedClusterRouterName()
+		if c.netInfo.TopologyType() == types.Layer2Topology {
+			routerName = nodeInfo.gatewayRouterName
+		}
+		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, nil, routerName, &staticRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return routesEqual(item, &staticRoute)
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err := libovsdbops.TransactAndCheck(c.nbClient, ops)
+	return err
+}
+
 func _getServiceNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice, inDefaultNetwork bool) (ktypes.NamespacedName, error) {
 	if endpointSlice == nil {
 		return ktypes.NamespacedName{}, fmt.Errorf("nil EndpointSlice passed to _getServiceNameFromEndpointSlice()")
@@ -728,9 +832,9 @@ func _getServiceNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice, in
 
 // newRateLimiter makes a queue rate limiter. This limits re-queues somewhat more significantly than base qps.
 // the client-go default qps is 10, but this is low for our level of scale.
-func newRatelimiter(qps int) workqueue.RateLimiter {
-	return workqueue.NewMaxOfRateLimiter(
-		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
-		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)},
+func newRatelimiter(qps int) workqueue.TypedRateLimiter[string] {
+	return workqueue.NewTypedMaxOfRateLimiter(
+		workqueue.NewTypedItemExponentialFailureRateLimiter[string](5*time.Millisecond, 1000*time.Second),
+		&workqueue.TypedBucketRateLimiter[string]{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)},
 	)
 }
