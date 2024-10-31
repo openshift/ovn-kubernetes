@@ -2,6 +2,7 @@ package networkAttachDefController
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -179,7 +180,13 @@ func (nm *networkManagerImpl) syncAll() error {
 	start := time.Now()
 	klog.Infof("%s: syncing all networks", nm.name)
 	for _, networkName := range networkNames {
-		if err := nm.sync(networkName); err != nil {
+		if err := nm.sync(networkName); errors.Is(err, ErrNetworkControllerTopologyNotManaged) {
+			klog.V(5).Infof(
+				"ignoring network %q since %q does not manage it",
+				networkName,
+				nm.name,
+			)
+		} else if err != nil {
 			return fmt.Errorf("failed to sync network %s: %w", networkName, err)
 		}
 	}
