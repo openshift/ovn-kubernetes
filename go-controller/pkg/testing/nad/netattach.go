@@ -2,6 +2,7 @@ package nad
 
 import (
 	"context"
+
 	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )

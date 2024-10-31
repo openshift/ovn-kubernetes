@@ -386,13 +386,13 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
 
-	networkID := util.InvalidNetworkID
+	networkID := util.InvalidID
 	nodeNames := []string{}
 	for _, node := range existingNodes {
 		node := *node
 		nodeNames = append(nodeNames, node.Name)
 
-		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidNetworkID {
+		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidID {
 			// get networkID from any node in the cluster
 			networkID, _ = util.ParseNetworkIDAnnotation(&node, oc.zoneICHandler.GetNetworkName())
 		}
@@ -994,7 +994,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				return err
 			}
 		}
-		return nil
+		return h.oc.addEgressNode(newNode)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
