@@ -192,12 +192,17 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				By("asserting the OVN entities provisioned in the NBDB are the expected ones after migration")
 				expectedPodLspEnabled := map[string]*bool{}
 				expectedPodLspEnabled[sourcePodInfo.podName] = migrationInfo.sourcePodInfo.expectedLspEnabled
-				expectedPodLspEnabled[targetPodInfo.podName] = migrationInfo.targetPodInfo.expectedLspEnabled
+
+				testPods := []testPod{sourcePodInfo}
+				if !util.PodCompleted(targetKvPod) {
+					testPods = append(testPods, targetPodInfo)
+					expectedPodLspEnabled[targetPodInfo.podName] = migrationInfo.targetPodInfo.expectedLspEnabled
+				}
 				Eventually(fakeOvn.nbClient).Should(
 					libovsdbtest.HaveData(
 						newSecondaryNetworkExpectationMachine(
 							fakeOvn,
-							[]testPod{sourcePodInfo, targetPodInfo},
+							testPods,
 							expectationOptions...,
 						).expectedLogicalSwitchesAndPortsWithLspEnabled(expectedPodLspEnabled)...))
 				return nil
@@ -228,6 +233,12 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			icClusterTestConfiguration(),
 			readyMigrationInfo(),
+		),
+
+		table.Entry("on a layer2 topology with user defined secondary network and an IC cluster, when target pod failed",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			failedMigrationInfo(),
 		),
 	)
 })
@@ -370,6 +381,22 @@ func readyMigrationInfo() *liveMigrationInfo {
 			creationTimestamp:  metav1.NewTime(time.Now()),
 			annotation:         map[string]string{kubevirtv1.MigrationTargetReadyTimestamp: "some-timestamp"},
 			expectedLspEnabled: lspEnableExplicitlyTrue,
+		},
+	}
+}
+
+func failedMigrationInfo() *liveMigrationInfo {
+	const vmName = "my-vm"
+	return &liveMigrationInfo{
+		vmName: vmName,
+		sourcePodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now().Add(-time.Hour)),
+			expectedLspEnabled: lspEnableExplicitlyTrue,
+		},
+		targetPodInfo: liveMigrationPodInfo{
+			podPhase:          v1.PodFailed,
+			creationTimestamp: metav1.NewTime(time.Now()),
 		},
 	}
 }
