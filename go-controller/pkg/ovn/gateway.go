@@ -356,6 +356,23 @@ func (gw *GatewayManager) GatewayInit(
 			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
+		if util.IsNetworkSegmentationSupportEnabled() && gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
+			node, err := gw.watchFactory.GetNode(nodeName)
+			if err != nil {
+				return fmt.Errorf("failed to fetch node %s from watch factory %w", node, err)
+			}
+			tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, gw.netInfo.GetNetworkName())
+			if err != nil {
+				if util.IsAnnotationNotSetError(err) {
+					// remote node may not have the annotation yet, suppress it
+					return types.NewSuppressedError(err)
+				}
+				// Don't consider this node as cluster-manager has not allocated node id yet.
+				return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %w",
+					nodeName, gw.netInfo.GetNetworkName(), err)
+			}
+			logicalSwitchPort.Options["requested-tnl-key"] = strconv.Itoa(tunnelID)
+		}
 	}
 	sw := nbdb.LogicalSwitch{Name: gw.joinSwitchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(gw.nbClient, &sw, &logicalSwitchPort)
@@ -386,7 +403,8 @@ func (gw *GatewayManager) GatewayInit(
 			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
-		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
+		_, isNetIPv6 := gw.netInfo.IPMode()
+		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology && isNetIPv6 && config.IPv6Mode {
 			logicalRouterPort.Ipv6RaConfigs = map[string]string{
 				"address_mode":      "dhcpv6_stateful",
 				"send_periodic":     "true",
