@@ -54,7 +54,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 	table.DescribeTable(
 		"reconciles a new",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
-			podInfo := dummyL2TestPod(ns, netInfo)
+			const podIdx = 0
+			podInfo := dummyL2TestPod(ns, netInfo, podIdx)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
 			}
@@ -160,17 +161,17 @@ func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	}
 }
 
-func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
+func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx int) testPod {
 	const nodeSubnet = "10.128.1.0/24"
-	pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "10.128.1.1", podName, "10.128.1.3", "0a:58:0a:80:01:03", nsName)
+	pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "10.128.1.1", fmt.Sprintf("%s-%d", podName, podIdx), fmt.Sprintf("10.128.1.%d", podIdx+3), fmt.Sprintf("0a:58:0a:80:01:%0.2d", podIdx+3), nsName)
 	pod.addNetwork(
 		info.netName,
 		info.nadName,
 		info.subnets,
 		"",
 		"",
-		"100.200.0.1/16",
-		"0a:58:64:c8:00:01",
+		fmt.Sprintf("100.200.0.%d/16", podIdx+1),
+		fmt.Sprintf("0a:58:64:c8:00:%0.2d", podIdx+1),
 		"secondary",
 		0,
 		[]util.PodRoute{},
