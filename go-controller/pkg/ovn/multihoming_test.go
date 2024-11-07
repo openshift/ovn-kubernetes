@@ -103,6 +103,8 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 		nodeslsps := make(map[string][]string)
 		acls := make(map[string][]string)
 		var switchName string
+		switchNodeMap := make(map[string]*nbdb.LogicalSwitch)
+		alreadyAddedManagementElements := make(map[string]struct{})
 		for _, pod := range em.pods {
 			podInfo, ok := pod.secondaryPodInfos[ocInfo.bnc.GetNetworkName()]
 			if !ok {
@@ -136,6 +138,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					lsp.Options["requested-tnl-key"] = "1" // hardcode this for now.
 				}
 				data = append(data, lsp)
+
 				switch ocInfo.bnc.TopologyType() {
 				case ovntypes.Layer3Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(pod.nodeName)
@@ -169,7 +172,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				otherConfig = nil
 			}
 
-			data = append(data, &nbdb.LogicalSwitch{
+			switchNodeMap[switchName] = &nbdb.LogicalSwitch{
 				UUID:  switchName + "-UUID",
 				Name:  switchName,
 				Ports: nodeslsps[switchName],
@@ -178,9 +181,10 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				},
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
-			})
+			}
 
-			if em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
+			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
+				em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
 				transitSwitchName := ocInfo.bnc.GetNetworkName() + "_transit_switch"
 				data = append(data, &nbdb.LogicalSwitch{
 					UUID: transitSwitchName + "-UUID",
@@ -194,9 +198,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					},
 				})
 			}
+			alreadyAddedManagementElements[pod.nodeName] = struct{}{}
 		}
-
+		for _, logicalSwitch := range switchNodeMap {
+			data = append(data, logicalSwitch)
+		}
 	}
+
 	return data
 }
 
@@ -257,13 +265,6 @@ func icClusterTestConfiguration() testConfiguration {
 
 func nonICClusterTestConfiguration() testConfiguration {
 	return testConfiguration{}
-}
-
-func icClusterWithDisableSNATTestConfiguration() testConfiguration {
-	return testConfiguration{
-		configToOverride:   enableICFeatureConfig(),
-		expectationOptions: []option{withInterconnectCluster()},
-	}
 }
 
 func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
