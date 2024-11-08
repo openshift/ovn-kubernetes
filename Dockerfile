@@ -52,6 +52,9 @@ RUN INSTALL_PKGS=" \
 	eval "yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $(cat /more-pkgs)" && \
 	yum clean all && rm -rf /var/cache/*
 
+COPY libreswan-4.5-1.el8_6.5.x86_64.rpm /root/
+RUN rpm -Uhv --nodeps --force /root/libreswan*.rpm
+
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/
