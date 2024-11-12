@@ -60,61 +60,13 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
 			}
 			app.Action = func(ctx *cli.Context) error {
-				By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
-				nad, err := newNetworkAttachmentDefinition(
-					ns,
-					nadName,
-					*netInfo.netconf(),
-				)
-				Expect(err).NotTo(HaveOccurred())
-				By("setting up the OVN DB without any entities in it")
-				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
+				pod := newMultiHomedPod(podInfo, netInfo)
 
 				const nodeIPv4CIDR = "192.168.126.202/24"
 				By(fmt.Sprintf("Creating a node named %q, with IP: %s", nodeName, nodeIPv4CIDR))
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvn.startWithDBSetup(
-					initialDB,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							*newNamespace(ns),
-						},
-					},
-					&v1.NodeList{Items: []v1.Node{*testNode}},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo, netInfo),
-						},
-					},
-					&nadapi.NetworkAttachmentDefinitionList{
-						Items: []nadapi.NetworkAttachmentDefinition{*nad},
-					},
-				)
-				podInfo.populateLogicalSwitchCache(fakeOvn)
-
-				// on IC, the test itself spits out the pod with the
-				// annotations set, since on production it would be the
-				// clustermanager to annotate the pod.
-				if !config.OVNKubernetesFeature.EnableInterconnect {
-					By("asserting the pod originally does *not* feature the OVN pod networks annotation")
-					// pod exists, networks annotations don't
-					pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					_, ok := pod.Annotations[util.OvnPodAnnotationName]
-					Expect(ok).To(BeFalse())
-				}
-
-				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
-				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
-				By("asserting the pod (once reconciled) *features* the OVN pod networks annotation")
-				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
-				Expect(ok).To(BeTrue())
-
-				secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
-				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
-				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
-				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
+				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, podInfo, pod)).To(Succeed())
 
 				// for layer2 on interconnect, it is the cluster manager that
 				// allocates the OVN annotation; on unit tests, this just
@@ -280,4 +232,77 @@ func nodeIP() *net.IPNet {
 		IP:   net.ParseIP("192.168.126.202"),
 		Mask: net.CIDRMask(24, 32),
 	}
+}
+
+func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.TestSetup, netInfo secondaryNetInfo, testNode *v1.Node, podInfo testPod, pod *v1.Pod) error {
+	By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
+	nad, err := newNetworkAttachmentDefinition(
+		ns,
+		nadName,
+		*netInfo.netconf(),
+	)
+	if err != nil {
+		return err
+	}
+	By("setting up the OVN DB without any entities in it")
+	if err = netInfo.setupOVNDependencies(&initialDB); err != nil {
+		return err
+	}
+
+	fakeOvn.startWithDBSetup(
+		initialDB,
+		&v1.NamespaceList{
+			Items: []v1.Namespace{
+				*newNamespace(ns),
+			},
+		},
+		&v1.NodeList{Items: []v1.Node{*testNode}},
+		&v1.PodList{
+			Items: []v1.Pod{
+				*pod,
+			},
+		},
+		&nadapi.NetworkAttachmentDefinitionList{
+			Items: []nadapi.NetworkAttachmentDefinition{*nad},
+		},
+	)
+	podInfo.populateLogicalSwitchCache(fakeOvn)
+
+	// on IC, the test itself spits out the pod with the
+	// annotations set, since on production it would be the
+	// clustermanager to annotate the pod.
+	if !config.OVNKubernetesFeature.EnableInterconnect {
+		By("asserting the pod originally does *not* feature the OVN pod networks annotation")
+		// pod exists, networks annotations don't
+		pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		_, ok := pod.Annotations[util.OvnPodAnnotationName]
+		if ok {
+			return fmt.Errorf("pod annotation %s is not expected", util.OvnPodAnnotationName)
+		}
+	}
+
+	if err = fakeOvn.controller.WatchNamespaces(); err != nil {
+		return err
+	}
+	if err = fakeOvn.controller.WatchPods(); err != nil {
+		return err
+	}
+	By("asserting the pod (once reconciled) *features* the OVN pod networks annotation")
+	secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
+	if ok != true {
+		return fmt.Errorf("secondary network controller %s is expected", secondaryNetworkName)
+	}
+
+	secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
+	podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
+	if err = secondaryNetController.bnc.WatchNodes(); err != nil {
+		return err
+	}
+	if err = secondaryNetController.bnc.WatchPods(); err != nil {
+		return err
+	}
+	return nil
 }
