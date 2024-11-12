@@ -12,6 +12,13 @@ import (
 	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
 	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
 
+	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
+
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
+	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
+	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
@@ -20,12 +27,6 @@ import (
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	certificatesinformers "k8s.io/client-go/informers/certificates/v1"
-
-	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
-	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
-	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
-	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
@@ -212,18 +213,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() {
-		if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
-			return nil, err
-		}
-
-		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return wf, nil
 }
 
@@ -403,6 +392,14 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			if err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
+		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -704,6 +701,14 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	if config.OVNKubernetesFeature.EnableMultiNetwork || config.OVNKubernetesFeature.EnableNetworkSegmentation {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
+		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -1374,30 +1379,14 @@ func (wf *WatchFactory) GetEndpointSlice(namespace, name string) (*discovery.End
 
 // GetEndpointSlicesBySelector returns a list of EndpointSlices in a given namespace by the label selector
 func (wf *WatchFactory) GetEndpointSlicesBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*discovery.EndpointSlice, error) {
-	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
-	if err != nil {
-		return nil, err
-	}
-	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
-	return endpointSliceLister.EndpointSlices(namespace).List(selector)
+	return util.GetEndpointSlicesBySelector(namespace, labelSelector, wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister))
 }
 
 // GetServiceEndpointSlices returns the endpointSlices associated with a service for the specified network
 // if network is DefaultNetworkName the default endpointSlices are returned, otherwise the function looks for mirror endpointslices
 // for the specified network.
 func (wf *WatchFactory) GetServiceEndpointSlices(namespace, svcName, network string) ([]*discovery.EndpointSlice, error) {
-	var selector metav1.LabelSelector
-	if network == types.DefaultNetworkName {
-		selector = metav1.LabelSelector{MatchLabels: map[string]string{
-			discovery.LabelServiceName: svcName,
-		}}
-	} else {
-		selector = metav1.LabelSelector{MatchLabels: map[string]string{
-			types.LabelUserDefinedServiceName:          svcName,
-			types.LabelUserDefinedEndpointSliceNetwork: network,
-		}}
-	}
-	return wf.GetEndpointSlicesBySelector(namespace, selector)
+	return util.GetServiceEndpointSlices(namespace, svcName, network, wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister))
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
