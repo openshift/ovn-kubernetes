@@ -15,6 +15,8 @@ RUN dnf install -y --nodocs \
 ARG ovsver=3.1.0-137.el9fdp
 ARG ovnver=23.09.4-16.el9fdp
 
+COPY ovn23.09-23.09.6-7.el9fdp.x86_64.rpm ovn23.09-central-23.09.6-7.el9fdp.x86_64.rpm ovn23.09-host-23.09.6-7.el9fdp.x86_64.rpm ovn23.09-vtep-23.09.6-7.el9fdp.x86_64.rpm /root/
+
 RUN INSTALL_PKGS="iptables" && \
 	ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
 	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
@@ -27,12 +29,16 @@ RUN ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
 	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
 	sed 's/%/"/g' <<<"%openvswitch$ovsver_short-devel = $ovsver% %openvswitch$ovsver_short-ipsec = $ovsver% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
 
+RUN yum install -y /root/ovn*.rpm
+
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
     mkdir -p /etc/cni/net.d && \
     mkdir -p /opt/cni/bin && \
     mkdir -p /usr/libexec/cni/ && \
     mkdir -p /root/windows/
+
+RUN rm -f /root/ovn*.rpm
 
 # copy git commit number into image
 COPY .git/HEAD /root/.git/HEAD
