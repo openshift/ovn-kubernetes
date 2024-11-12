@@ -22,6 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
 
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,8 +35,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
+	e2eframework "k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
@@ -305,6 +308,24 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 						WithTimeout(timeout).
 						Should(Succeed(), func() string { return stage + ": " + podName + ": " + output })
 				}
+			}
+		}
+
+		checkNorthSouthIperfTraffic = func(containerName string, addresses []string, port int32, stage string) {
+			GinkgoHelper()
+			Expect(addresses).NotTo(BeEmpty())
+			polling := 15 * time.Second
+			timeout := time.Minute
+			for _, address := range addresses {
+				output := ""
+				Eventually(func() error {
+					var err error
+					output, err = runCommand(containerRuntime, "exec", containerName, "bash", "-c", fmt.Sprintf("iperf3 -t 1 -c %s -p %d", address, port))
+					return err
+				}).
+					WithPolling(polling).
+					WithTimeout(timeout).
+					Should(Succeed(), func() string { return stage + ": external server : " + output })
 			}
 		}
 
@@ -1043,6 +1064,15 @@ passwd:
 			}
 			return nil
 		}
+
+		createIperfExternalContainer = func(name string) {
+			createClusterExternalContainer(
+				name,
+				iperf3Image,
+				[]string{"--network", "kind", "--entrypoint", "/bin/bash"},
+				[]string{"-c", "sleep infinity"},
+			)
+		}
 	)
 	BeforeEach(func() {
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
@@ -1272,9 +1302,12 @@ ethernets:
     dhcp4: true
     dhcp6: true
     ipv6-address-generation: eui64`
-			userData = `#cloud-config
+			userData = fmt.Sprintf(`#cloud-config
 password: fedora
-chpasswd: { expire: False }`
+chpasswd: { expire: False }
+runcmd:
+- iperf3 -s -D --logfile /tmp/iperf3.log
+`)
 			virtualMachine = resourceCommand{
 				description: "VirtualMachine",
 				cmd: func() string {
@@ -1353,6 +1386,13 @@ chpasswd: { expire: False }`
 			role        string
 		}
 		DescribeTable("should keep ip", func(td testData) {
+			if td.role == "primary" && !isInterconnectEnabled() {
+				const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4528"
+				e2eskipper.Skipf(
+					"The egress check of tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+				)
+			}
+
 			l := map[string]string{
 				"e2e-framework": fr.BaseName,
 			}
@@ -1398,6 +1438,14 @@ chpasswd: { expire: False }`
 			iperfServerTestPods, err = createIperfServerPods(selectedNodes, netConfig)
 			Expect(err).NotTo(HaveOccurred())
 
+			externalContainerName := namespace + "-iperf"
+			createIperfExternalContainer(externalContainerName)
+			DeferCleanup(func() {
+				if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
+					deleteClusterExternalContainer(externalContainerName)
+				}
+			})
+
 			vmiName := td.resource.cmd()
 			vmi = &kubevirtv1.VirtualMachineInstance{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1425,6 +1473,10 @@ chpasswd: { expire: False }`
 			expectedAddresesAtGuest := expectedAddreses
 			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, podNetworkStatusByNetConfigPredicate(netConfig))
 
+			step = by(vmi.Name, "Expose VM iperf server as a service")
+			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vm.Name, 5201), metav1.CreateOptions{})
+			Expect(svc.Spec.Ports[0].NodePort).NotTo(Equal(0), step)
+
 			// IPv6 is not support for secondaries with IPAM so guest will
 			// have only ipv4.
 			if td.role != "primary" {
@@ -1440,8 +1492,17 @@ chpasswd: { expire: False }`
 				Should(ConsistOf(expectedAddresesAtGuest), step)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
-
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
+
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), fr.ClientSet, 1)
+			Expect(err).NotTo(HaveOccurred())
+
+			nodeIPs := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+
+			if td.role == "primary" {
+				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
+				checkNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+			}
 
 			by(vmi.Name, fmt.Sprintf("Running %s for %s", td.test.description, td.resource.description))
 			td.test.cmd()
@@ -1461,6 +1522,10 @@ chpasswd: { expire: False }`
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
+			if td.role == "primary" {
+				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
+				checkNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+			}
 		},
 			func(td testData) string {
 				role := "secondary"
