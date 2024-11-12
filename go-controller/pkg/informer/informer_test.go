@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -523,7 +523,7 @@ var _ = Describe("Event Handler Internals", func() {
 			name:           "test",
 			informer:       factory.Core().V1().Pods().Informer(),
 			deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-			workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+			workqueue:      workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 			add: func(obj interface{}) error {
 				return nil
 			},
@@ -547,7 +547,7 @@ var _ = Describe("Event Handler Internals", func() {
 			name:           "test",
 			informer:       factory.Core().V1().Pods().Informer(),
 			deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-			workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+			workqueue:      workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 			add: func(obj interface{}) error {
 				return nil
 			},
@@ -576,7 +576,7 @@ var _ = Describe("Event Handler Internals", func() {
 			name:           "test",
 			informer:       factory.Core().V1().Pods().Informer(),
 			deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-			workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+			workqueue:      workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 			add: func(obj interface{}) error {
 				return nil
 			},

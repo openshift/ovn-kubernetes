@@ -12,7 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -220,9 +220,7 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	g.wg = wg
 
 	var err error
-	if err = g.initFunc(); err != nil {
-		return err
-	}
+
 	g.servicesRetryFramework = g.newRetryFrameworkNode(factory.ServiceForGatewayType)
 	if _, err = g.servicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching services: %v", err)

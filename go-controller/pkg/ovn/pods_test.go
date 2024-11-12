@@ -21,12 +21,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
 )
@@ -250,6 +251,13 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 				routeSources = append(routeSources, sc)
 			}
 		}
+		hairpinMasqueradeIP := config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP.String()
+		mask := 32
+		if isIPv6 {
+			hairpinMasqueradeIP = config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP.String()
+			mask = 128
+		}
+		routeSources = append(routeSources, ovntest.MustParseIPNet(fmt.Sprintf("%s/%d", hairpinMasqueradeIP, mask)))
 		joinNet := config.Gateway.V4JoinSubnet
 		if isIPv6 {
 			joinNet = config.Gateway.V6JoinSubnet
@@ -612,8 +620,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-				gomega.Expect(pod).To(gomega.BeNil())
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(err).To(gomega.MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
 					newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
@@ -667,8 +675,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-				gomega.Expect(pod).To(gomega.BeNil())
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(err).To(gomega.MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
@@ -779,8 +787,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-				gomega.Expect(pod).To(gomega.BeNil())
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(err).To(gomega.MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
@@ -1001,8 +1009,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-				gomega.Expect(pod).To(gomega.BeNil())
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(err).To(gomega.MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 				podObj := &v1.Pod{
 					Spec: v1.PodSpec{NodeName: "node1"},
@@ -1397,10 +1405,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				fakeOvn.controller.retryPods.RequestRetryObjs()
 
 				// check that the pod is not in API server
-				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(
 					context.TODO(), podTest.podName, metav1.GetOptions{})
-				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(pod).To(gomega.BeNil())
+				gomega.Expect(err).To(gomega.MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 				// check that the retry cache no longer has the entry
 				retry.CheckRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
@@ -1595,9 +1602,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(pod).To(gomega.BeNil())
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(err).To(gomega.MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})))
 				return nil
@@ -2517,6 +2523,57 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				fakeOvn.controller.localZoneNodes = nil
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should correctly handle a pod running on a no host subnet node", func() {
+			app.Action = func(ctx *cli.Context) error {
+				testNs := "namespace1"
+				testPodIP := "10.128.1.3"
+				namespaceT := *newNamespace(testNs)
+				myPod := newPod(testNs, "myPod", node2Name, testPodIP)
+				myPod.Status.Phase = v1.PodRunning
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{},
+				}
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							// Add a hybrid overlay node
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: nodeName,
+								},
+								Status: v1.NodeStatus{
+									Conditions: []v1.NodeCondition{
+										{
+											Type:   v1.NodeReady,
+											Status: v1.ConditionTrue,
+										},
+									},
+								},
+							},
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*myPod},
+					},
+				)
+				fakeOvn.controller.lsManager.AddOrUpdateSwitch(myPod.Spec.NodeName, nil)
+				err := fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check that the pod IP is added to the namespace AS
+				fakeOvn.asf.ExpectAddressSetWithAddresses(testNs, []string{testPodIP})
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
