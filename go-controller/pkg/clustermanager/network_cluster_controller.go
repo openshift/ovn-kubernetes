@@ -90,6 +90,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 			KClient: ovnClient.KubeClient,
 		},
 		IPAMClaimsClient: ovnClient.IPAMClaimsClient,
+		UDNNodeClient:    ovnClient.UserDefinedNodeClient,
 	}
 
 	wg := &sync.WaitGroup{}
@@ -212,8 +213,8 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasNodeAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
-
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(),
+			ncc.watchFactory.UserDefinedNodeInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
 		err := ncc.nodeAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)

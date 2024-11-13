@@ -70,6 +70,9 @@ import (
 	ipamclaimsinformer "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	userdefinednodeinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions"
+	userdefinednodeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions/udnnode/v1"
 	userdefinednetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	userdefinednetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
 	userdefinednetworkapiinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
@@ -114,6 +117,7 @@ type WatchFactory struct {
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
 	nadFactory           nadinformerfactory.SharedInformerFactory
 	udnFactory           userdefinednetworkapiinformerfactory.SharedInformerFactory
+	udnNodeFactory       userdefinednodeinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -187,6 +191,7 @@ var (
 	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
 	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
 	ClusterUserDefinedNetworkType         reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
+	UserDefinedNodeType                   reflect.Type = reflect.TypeOf(&userdefinednodeapi.UDNNode{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -878,11 +883,18 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 
+		wf.udnNodeFactory = userdefinednodeinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNodeClient, resyncInterval)
+		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, wf.udnNodeFactory.K8s().V1().UDNNodes().Informer())
+		if err != nil {
+			return nil, err
+		}
+
 		// make sure namespace informer cache is initialized and synced on Start().
 		wf.iFactory.Core().V1().Namespaces().Informer()
 
 		// make sure pod informer cache is initialized and synced when on Start().
 		wf.iFactory.Core().V1().Pods().Informer()
+
 	}
 
 	return wf, nil
@@ -1556,6 +1568,10 @@ func (wf *WatchFactory) UserDefinedNetworkInformer() userdefinednetworkinformer.
 
 func (wf *WatchFactory) ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer {
 	return wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks()
+}
+
+func (wf *WatchFactory) UserDefinedNodeInformer() userdefinednodeinformer.UDNNodeInformer {
+	return wf.udnNodeFactory.K8s().V1().UDNNodes()
 }
 
 func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {
