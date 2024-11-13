@@ -2,9 +2,13 @@ package node
 
 import (
 	"fmt"
+	udnnodev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/listers/udnnode/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"net"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
@@ -32,8 +36,9 @@ import (
 //     Only for the default or layer3 networks.
 //   - stores the network id in each node's annotation.
 type NodeAllocator struct {
-	kube       kube.Interface
-	nodeLister listers.NodeLister
+	kube          kube.InterfaceOVN
+	nodeLister    listers.NodeLister
+	udnNodeLister v1.UDNNodeLister
 	// idAllocator of IDs within the network
 	idAllocator                  id.Allocator
 	clusterSubnetAllocator       SubnetAllocator
@@ -48,10 +53,12 @@ type NodeAllocator struct {
 	netInfo util.NetInfo
 }
 
-func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface, tunnelIDAllocator id.Allocator) *NodeAllocator {
+func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, udnNodeLister v1.UDNNodeLister,
+	kube kube.InterfaceOVN, tunnelIDAllocator id.Allocator) *NodeAllocator {
 	na := &NodeAllocator{
 		kube:                         kube,
 		nodeLister:                   nodeLister,
+		udnNodeLister:                udnNodeLister,
 		networkID:                    networkID,
 		netInfo:                      netInfo,
 		clusterSubnetAllocator:       NewSubnetAllocator(),
@@ -199,10 +206,85 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 	return na.syncNodeNetworkAnnotations(node)
 }
 
-// syncNodeNetworkAnnotations does 2 things
-//   - syncs the node's allocated subnets in the node subnet annotation
-//   - syncs the network id in the node network id annotation
-func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
+func (na *NodeAllocator) syncUDNNodeNetworkAnnotations(node *corev1.Node) error {
+	udnNodeName := fmt.Sprintf("%s-%d", node.Name, na.networkID)
+	udnNode, err := na.udnNodeLister.Get(udnNodeName)
+	if err != nil && !kerrors.IsNotFound(err) {
+		return err
+	}
+	if udnNode != nil {
+		// udnNode was already created, values are immutable
+		return nil
+	}
+
+	spec := udnnodev1.UDNNodeSpec{}
+
+	// udnNode is missing, lets create it
+	if na.hasJoinSubnetAllocation() {
+		var joinAddr udnnodev1.DualStackCIDRs
+		// Allocate the IP address(es) for the node Gateway router port connecting
+		// to the Join switch
+		nodeID := util.GetNodeID(node)
+		if nodeID == -1 {
+			// Don't consider this node as cluster-manager has not allocated node id yet.
+			return fmt.Errorf("failed to get node id for node - %s", node.Name)
+		}
+
+		if config.IPv4Mode {
+			joinV4Addr, err := na.nodeGWRouterLRPIPv4Generator.GenerateIP(nodeID)
+			if err != nil {
+				return fmt.Errorf("failed to generate gateway router port IPv4 address for node %s : err - %w", node.Name, err)
+			}
+			joinAddr = append(joinAddr, udnnodev1.CIDR(joinV4Addr.String()))
+		}
+
+		if config.IPv6Mode {
+			joinV6Addr, err := na.nodeGWRouterLRPIPv6Generator.GenerateIP(nodeID)
+			if err != nil {
+				return fmt.Errorf("failed to generate gateway router port IPv6 address for node %s : err - %w", node.Name, err)
+			}
+			joinAddr = append(joinAddr, udnnodev1.CIDR(joinV6Addr.String()))
+		}
+
+		spec.JoinSubnets = joinAddr
+	}
+
+	if na.hasNodeSubnetAllocation() {
+		// On return validExistingSubnets will contain any valid subnets that
+		// were already assigned to the node. allocatedSubnets will contain
+		// any newly allocated subnets required to ensure that the node has one subnet
+		// from each enabled IP family.
+		ipv4Mode, ipv6Mode := na.netInfo.IPMode()
+		_, allocatedNets, err := na.allocateNodeSubnets(na.clusterSubnetAllocator, node.Name, nil, ipv4Mode, ipv6Mode)
+		if err != nil {
+			return err
+		}
+		var nodeSubnets udnnodev1.DualStackCIDRs
+		for _, allocatedSubnet := range allocatedNets {
+			nodeSubnets = append(nodeSubnets, udnnodev1.CIDR(allocatedSubnet.String()))
+		}
+		spec.NodeSubnets = nodeSubnets
+	}
+
+	x := &udnnodev1.UDNNode{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: udnNodeName,
+			Labels: map[string]string{
+				"networkName": na.netInfo.GetNetworkName(),
+				"nodeName":    node.Name,
+			},
+		},
+		Spec: spec,
+	}
+
+	y, err := na.kube.CreateUDNNode(x)
+	if y != nil {
+		klog.Infof("UDNNode created: %#v", *y)
+	}
+	return err
+}
+
+func (na *NodeAllocator) syncDefaultNodeNetworkAnnotations(node *corev1.Node) error {
 	networkName := na.netInfo.GetNetworkName()
 
 	networkID, err := util.ParseNetworkIDAnnotation(node, networkName)
@@ -316,6 +398,16 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	}
 
 	return nil
+}
+
+// syncNodeNetworkAnnotations does 2 things
+//   - syncs the node's allocated subnets in the node subnet annotation
+//   - syncs the network id in the node network id annotation
+func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
+	if na.networkID == 0 {
+		return na.syncDefaultNodeNetworkAnnotations(node)
+	}
+	return na.syncUDNNodeNetworkAnnotations(node)
 }
 
 // HandleDeleteNode handles the delete node event

@@ -46,6 +46,7 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
+	userdefinednodeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
@@ -122,6 +123,7 @@ type OVNClusterManagerClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	OCPNetworkClient         ocpnetworkclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 const (
