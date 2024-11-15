@@ -233,6 +233,7 @@ func newDefaultNetworkControllerCommon(
 			podAssignment:      make(map[string]*podAssignmentState),
 			nbClient:           cnci.nbClient,
 			watchFactory:       cnci.watchFactory,
+			networkManager:     networkManager,
 			nodeZoneState:      syncmap.NewSyncMap[bool](),
 		},
 		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
@@ -251,6 +252,8 @@ func newDefaultNetworkControllerCommon(
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 
 	oc.initRetryFramework()
+	oc.eIPC.Init()
+
 	return oc, nil
 }
 
@@ -362,6 +365,7 @@ func (oc *DefaultNetworkController) Stop() {
 	if oc.routeImportManager != nil {
 		_ = oc.routeImportManager.ForgetNetwork(oc, 0)
 	}
+	oc.eIPC.Stop()
 
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
@@ -589,6 +593,11 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 	}
 
+	err = oc.eIPC.Start()
+	if err != nil {
+		return err
+	}
+
 	metrics.RunOVNKubeFeatureDBObjectsMetricsUpdater(oc.nbClient, oc.controllerName, 30*time.Second, oc.stopChan)
 
 	return nil
@@ -598,6 +607,7 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 	// gather some information first
 	var err error
 	var retryNodes []*kapi.Node
+	var retryNodeNames []string
 	oc.localZoneNodes.Range(func(key, value any) bool {
 		nodeName := key.(string)
 		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
@@ -612,11 +622,14 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 			return false
 		}
 		retryNodes = append(retryNodes, node)
+		retryNodeNames = append(retryNodeNames, node.Name)
 		return true
 	})
 	if err != nil {
 		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
 	}
+
+	reconcileEgressIP := oc.eIPC.ShouldReconcileNetworkChange(retryNodeNames, oc.ReconcilableNetInfo, netInfo)
 
 	// update network information, point of no return
 	err = util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
@@ -625,10 +638,14 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 	}
 
 	if oc.routeImportManager != nil {
-		err = oc.routeImportManager.UpdateNetwork(oc, 0)
+		err = oc.routeImportManager.UpdateNetwork(oc.GetNetInfo(), 0)
 		if err != nil {
 			return err
 		}
+	}
+
+	if reconcileEgressIP {
+		oc.eIPC.ReconcileNetwork(oc.GetNetworkName())
 	}
 
 	for _, node := range retryNodes {
