@@ -34,6 +34,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/egressip"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
@@ -233,6 +234,7 @@ func newDefaultNetworkControllerCommon(
 			podAssignment:      make(map[string]*podAssignmentState),
 			nbClient:           cnci.nbClient,
 			watchFactory:       cnci.watchFactory,
+			networkManager:     networkManager,
 			nodeZoneState:      syncmap.NewSyncMap[bool](),
 		},
 		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
@@ -597,6 +599,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 	var err error
 	var retryNodes []*kapi.Node
+	var retryNodeNames []string
 	oc.localZoneNodes.Range(func(key, value any) bool {
 		nodeName := key.(string)
 		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
@@ -611,19 +614,30 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 			return false
 		}
 		retryNodes = append(retryNodes, node)
+		retryNodeNames = append(retryNodeNames, node.Name)
 		return true
 	})
 	if err != nil {
 		return fmt.Errorf("failed to reconcile: %w", err)
 	}
 
+	reconcileEgressIP := egressip.ReconcileEgressIPNetworkChangeOnNodes(retryNodeNames, oc.ReconcilableNetInfo, netInfo)
+
 	err = util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
 	if err != nil {
 		return err
 	}
 
+	// TODO this should be asynchrounous
+	if reconcileEgressIP {
+		err = oc.reconcileEgressIPNetwork()
+		if err != nil {
+			return err
+		}
+	}
+
 	if oc.routeImportManager != nil {
-		err = oc.routeImportManager.UpdateNetwork(oc, 0)
+		err = oc.routeImportManager.UpdateNetwork(oc.GetNetInfo(), 0)
 		if err != nil {
 			return err
 		}

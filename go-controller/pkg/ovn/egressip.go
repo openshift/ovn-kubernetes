@@ -22,11 +22,13 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/egressip"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
@@ -1423,7 +1425,8 @@ type egressIPZoneController struct {
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
 	// watchFactory watching k8s objects
-	watchFactory *factory.WatchFactory
+	watchFactory   *factory.WatchFactory
+	networkManager networkmanager.Interface
 	// A cache that maintains all nodes in the cluster,
 	// value will be true if local to this zone and false otherwise
 	nodeZoneState *syncmap.SyncMap[bool]
@@ -1494,25 +1497,28 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 		return fmt.Errorf("failed to add pod %s/%s because failed to lookup node %s: %v", pod.Namespace, pod.Name,
 			pod.Spec.NodeName, err)
 	}
-	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(eNode)
+	parsedNodeEIPConfig, err := egressip.GetNodeEIPConfig(eNode)
 	if err != nil {
 		return fmt.Errorf("failed to get node %s egress IP config: %w", eNode.Name, err)
 	}
-	isOVNNetwork := util.IsOVNNetwork(parsedNodeEIPConfig, eIPIP)
-	nextHopIP, err := e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNNetwork)
+	isOVNManaged, err := egressip.IsEgressIPOVNManaged(e.watchFactory, e.networkManager, parsedNodeEIPConfig, eNode, egressIPName, eIPIP)
+	if err != nil {
+		return err
+	}
+	nextHopIP, err := e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNManaged)
 	if err != nil || nextHopIP == "" {
 		return fmt.Errorf("failed to determine next hop for pod %s/%s when configuring egress IP %s"+
 			" IP %s: %v", pod.Namespace, pod.Name, egressIPName, status.EgressIP, err)
 	}
 	var ops []ovsdb.Operation
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if isOVNNetwork {
+		if isOVNManaged {
 			ops, err = e.createNATRuleOps(nil, podIPs, status, egressIPName)
 			if err != nil {
 				return fmt.Errorf("unable to create NAT rule ops for status: %v, err: %v", status, err)
 			}
 		}
-		if config.OVNKubernetesFeature.EnableInterconnect && !isOVNNetwork && (loadedPodNode && !isLocalZonePod) {
+		if config.OVNKubernetesFeature.EnableInterconnect && !isOVNManaged && (loadedPodNode && !isLocalZonePod) {
 			// configure reroute for non-local-zone pods on egress nodes
 			ops, err = e.createReroutePolicyOps(ops, podIPs, status, egressIPName, nextHopIP)
 			if err != nil {
@@ -1528,7 +1534,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 		if err != nil {
 			return fmt.Errorf("unable to create logical router policy ops, err: %v", err)
 		}
-		ops, err = e.deleteExternalGWPodSNATOps(ops, pod, podIPs, status, isOVNNetwork)
+		ops, err = e.deleteExternalGWPodSNATOps(ops, pod, podIPs, status, isOVNManaged)
 		if err != nil {
 			return err
 		}
@@ -1554,7 +1560,7 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 	isLocalZoneEgressNode, loadedEgressNode := e.nodeZoneState.Load(status.Node)
 	isLocalZonePod, loadedPodNode := e.nodeZoneState.Load(pod.Spec.NodeName)
 	var nextHopIP string
-	var isOVNNetwork bool
+	var isOVNManaged bool
 	// node may not exist - attempt to retrieve it
 	eNode, err := e.watchFactory.GetNode(status.Node)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -1563,12 +1569,15 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 	}
 	if err == nil {
 		eIPIP := net.ParseIP(status.EgressIP)
-		parsedEIPConfig, err := util.GetNodeEIPConfig(eNode)
+		parsedEIPConfig, err := egressip.GetNodeEIPConfig(eNode)
 		if err != nil {
 			klog.Warningf("Unable to get node %s egress IP config: %v", eNode.Name, err)
 		} else {
-			isOVNNetwork = util.IsOVNNetwork(parsedEIPConfig, eIPIP)
-			nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNNetwork)
+			isOVNManaged, err = egressip.IsEgressIPOVNManaged(e.watchFactory, e.networkManager, parsedEIPConfig, eNode, egressIPName, eIPIP)
+			if err != nil {
+				return err
+			}
+			nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, egressIPName, isLocalZoneEgressNode, isOVNManaged)
 			if err != nil {
 				klog.Warningf("Unable to determine next hop for egress IP %s IP %s assigned to node %s: %v", egressIPName,
 					status.EgressIP, status.Node, err)
@@ -1592,7 +1601,7 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 	}
 
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if config.OVNKubernetesFeature.EnableInterconnect && !isOVNNetwork && (!loadedPodNode || !isLocalZonePod) { // node is deleted (we can't determine zone so we always try and nuke OR pod is remote to zone)
+		if config.OVNKubernetesFeature.EnableInterconnect && !isOVNManaged && (!loadedPodNode || !isLocalZonePod) { // node is deleted (we can't determine zone so we always try and nuke OR pod is remote to zone)
 			// delete reroute for non-local-zone pods on egress nodes
 			ops, err = e.deleteReroutePolicyOps(ops, podIPs, status, egressIPName, nextHopIP)
 			if err != nil {
@@ -1678,8 +1687,8 @@ func (e *egressIPZoneController) addExternalGWPodSNATOps(ops []ovsdb.Operation, 
 }
 
 // deleteExternalGWPodSNATOps creates ops for the required external GW teardown for the given pod
-func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operation, pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem, isOVNNetwork bool) ([]ovsdb.Operation, error) {
-	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName && isOVNNetwork {
+func (e *egressIPZoneController) deleteExternalGWPodSNATOps(ops []ovsdb.Operation, pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem, isOVNManaged bool) ([]ovsdb.Operation, error) {
+	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName && isOVNManaged {
 		// remove snats to->nodeIP (from the node where pod exists if that node is also serving
 		// as an egress node for this pod) for these podIPs before adding the snat to->egressIP
 		extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
@@ -1738,14 +1747,14 @@ func (e *egressIPZoneController) getTransitIP(nodeName string, wantsIPv6 bool) (
 // a secondary host network. If we failed to look up the information required to determine this, an error will be returned
 // however if we are able to lookup the information, but it doesnt exist, called must be able to tolerate a blank next hop
 // and no error returned. This means we searched successfully but could not find the information required to generate the next hop.
-func (e *egressIPZoneController) getNextHop(egressNodeName, egressIP, egressIPName string, isLocalZoneEgressNode, isOVNNetwork bool) (string, error) {
+func (e *egressIPZoneController) getNextHop(egressNodeName, egressIP, egressIPName string, isLocalZoneEgressNode, isOVNManaged bool) (string, error) {
 	var nextHopIP string
 	var err error
 	isEgressIPv6 := utilnet.IsIPv6String(egressIP)
 	// NOTE: No need to check if status.node exists or not in the cache, we are calling this function only if it
 	// is present in the nodeZoneState cache. Since we call it with lock on cache, we are safe here.
 	if isLocalZoneEgressNode {
-		if isOVNNetwork {
+		if isOVNManaged {
 			gatewayRouterIP, err := e.getGatewayRouterJoinIP(egressNodeName, isEgressIPv6)
 			if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 				return "", fmt.Errorf("unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %w",
@@ -2015,11 +2024,14 @@ func (e *egressIPZoneController) attemptToGetNextHopIP(name string, status egres
 	}
 	var nextHopIP string
 	eIPIP := net.ParseIP(status.EgressIP)
-	if eIPConfig, err := util.GetNodeEIPConfig(eNode); err != nil {
+	if eIPConfig, err := egressip.GetNodeEIPConfig(eNode); err != nil {
 		klog.Warningf("Failed to get Egress IP config from node annotation %s: %v", status.Node, err)
 	} else {
-		isOVNNetwork := util.IsOVNNetwork(eIPConfig, eIPIP)
-		nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, name, isLocalZoneEgressNode, isOVNNetwork)
+		isOVNManaged, err := egressip.IsEgressIPOVNManaged(e.watchFactory, e.networkManager, eIPConfig, eNode, name, eIPIP)
+		if err != nil {
+			return "", err
+		}
+		nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, name, isLocalZoneEgressNode, isOVNManaged)
 		if err != nil {
 			return "", err
 		}
@@ -2389,3 +2401,51 @@ func getPodNamespaceAndNameFromKey(podKey string) (string, string) {
 	parts := strings.Split(podKey, "_")
 	return parts[0], parts[1]
 }
+
+func (oc *DefaultNetworkController) reconcileEgressIPNetwork() error {
+	eips, err := oc.watchFactory.EgressIPInformer().Lister().List(labels.Everything())
+	if err != nil {
+		return err
+	}
+
+	isActiveNetworkForAnyNamespace := func(namespaces []*v1.Namespace) bool {
+		for _, ns := range namespaces {
+			network := oc.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
+			if network.GetNetworkName() == oc.GetNetworkName() {
+				return true
+			}
+		}
+		return false
+	}
+
+	reconcileEIPs := map[string]*egressipv1.EgressIP{}
+	for _, eip := range eips {
+		selector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
+		if err != nil {
+			return err
+		}
+		selectedNs, err := oc.watchFactory.NamespaceCoreInformer().Lister().List(selector)
+		if err != nil {
+			return err
+		}
+		if isActiveNetworkForAnyNamespace(selectedNs) {
+			reconcileEIPs[eip.Name] = eip
+			break
+		}
+	}
+
+	if len(reconcileEIPs) == 0 {
+		return nil
+	}
+
+	for _, eip := range reconcileEIPs {
+		err := oc.retryEgressIPs.AddRetryObjWithAddNoBackoff(eip)
+		if err != nil {
+			return err
+		}
+	}
+
+	oc.retryEgressIPs.RequestRetryObjs()
+	return nil
+}
+

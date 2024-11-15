@@ -20,14 +20,17 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/egressip"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -382,15 +385,26 @@ type egressIPClusterController struct {
 	retryEgressIPs *objretry.RetryFramework
 	// retry framework for Cloud private IP config
 	retryCloudPrivateIPConfig *objretry.RetryFramework
+	// retry framework for Cloud private IP config
+	retryNamespaces *objretry.RetryFramework
 	// egressNodes events factory handler
 	egressNodeHandler *factory.Handler
 	// egressIP events factory handler
 	egressIPHandler *factory.Handler
 	// cloudPrivateIPConfig events factory handler
 	cloudPrivateIPConfigHandler *factory.Handler
+	// namespaceHandler is the namespace events factory handler
+	namespaceHandler *factory.Handler
+
+	networkManager networkmanager.Interface
 }
 
-func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *egressIPClusterController {
+func newEgressIPController(
+	ovnClient *util.OVNClusterManagerClientset,
+	wf *factory.WatchFactory,
+	networkManager networkmanager.Interface,
+	recorder record.EventRecorder,
+) *egressIPClusterController {
 	kube := &kube.KubeOVN{
 		Kube:               kube.Kube{KClient: ovnClient.KubeClient},
 		EIPClient:          ovnClient.EgressIPClient,
@@ -405,6 +419,7 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		pendingCloudPrivateIPConfigsOps:   make(map[string]map[string]*cloudPrivateIPConfigOp),
 		allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 		watchFactory:                      wf,
+		networkManager:                    networkManager,
 		recorder:                          recorder,
 		egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
 		reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
@@ -420,6 +435,9 @@ func (eIPC *egressIPClusterController) initRetryFramework() {
 	eIPC.retryEgressIPs = eIPC.newRetryFramework(factory.EgressIPType)
 	if util.PlatformTypeIsEgressIPCloudProvider() {
 		eIPC.retryCloudPrivateIPConfig = eIPC.newRetryFramework(factory.CloudPrivateIPConfigType)
+	}
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		eIPC.retryNamespaces = eIPC.newRetryFramework(factory.NamespaceType)
 	}
 }
 
@@ -453,6 +471,11 @@ func (eIPC *egressIPClusterController) Start() error {
 			return err
 		}
 	}
+	if eIPC.retryNamespaces != nil {
+		if eIPC.namespaceHandler, err = eIPC.WatchNamespaces(); err != nil {
+			return err
+		}
+	}
 	if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
 		klog.V(2).Infof("EgressIP node reachability check disabled")
 	} else if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort != 0 {
@@ -481,6 +504,11 @@ func (eIPC *egressIPClusterController) WatchEgressIP() (*factory.Handler, error)
 	return eIPC.retryEgressIPs.WatchResource()
 }
 
+// WatchNamespaces whatches for namespaces
+func (eIPC *egressIPClusterController) WatchNamespaces() (*factory.Handler, error) {
+	return eIPC.retryNamespaces.WatchResource()
+}
+
 func (eIPC *egressIPClusterController) Stop() {
 	close(eIPC.stopChan)
 	eIPC.wg.Wait()
@@ -492,6 +520,9 @@ func (eIPC *egressIPClusterController) Stop() {
 	}
 	if eIPC.cloudPrivateIPConfigHandler != nil {
 		eIPC.watchFactory.RemoveCloudPrivateIPConfigHandler(eIPC.cloudPrivateIPConfigHandler)
+	}
+	if eIPC.retryNamespaces != nil {
+		eIPC.watchFactory.RemoveNamespaceHandler(eIPC.namespaceHandler)
 	}
 }
 
@@ -714,14 +745,25 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v
 					reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 					continue
 				}
-				// do not reconcile if EIP is hosted by OVN network or if network is what we expect
-				if util.IsOVNNetwork(eNode.egressIPConfig, egressIPIP) {
+				// do not reconcile if EIP is hosted by OVN network or if network is what we expectcontinue
+				isOVNManaged, network, err := egressip.GetSecondaryHostNetworkContainingIP(
+					eIPC.watchFactory,
+					eIPC.networkManager,
+					eNode.egressIPConfig,
+					node,
+					egressIP.Name,
+					egressIPIP,
+				)
+				if err != nil {
+					errorAggregate = append(errorAggregate,
+						fmt.Errorf("failed to determine if egress IP %s IP %s is managed by OVN on node %s: %w",
+							egressIP.Name,
+							egressIPIP.String(),
+							node.Name,
+							err))
 					continue
 				}
-				network, err := util.GetSecondaryHostNetworkContainingIP(node, egressIPIP)
-				if err != nil {
-					errorAggregate = append(errorAggregate, fmt.Errorf("failed to determine if egress IP %s IP %s "+
-						"is hosted by secondary host network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
+				if isOVNManaged {
 					continue
 				}
 				if network == "" {
@@ -822,7 +864,7 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 }
 
 func (eIPC *egressIPClusterController) initEgressIPAllocator(node *v1.Node) (err error) {
-	parsedEgressIPConfig, err := util.GetNodeEIPConfig(node)
+	parsedEgressIPConfig, err := egressip.GetNodeEIPConfig(node)
 	if err != nil {
 		return fmt.Errorf("failed to get egress IP config for node %s: %w", node.Name, err)
 	}
@@ -941,7 +983,10 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	// anymore (specifically if ovnkube-master has been crashing for a while).
 	// Any invalid status at this point in time needs to be removed and assigned
 	// to a valid node.
-	validStatus, invalidStatus := eIPC.validateEgressIPStatus(name, status)
+	validStatus, invalidStatus, err := eIPC.validateEgressIPStatus(name, status)
+	if err != nil {
+		return fmt.Errorf("failed to validate EgressIP status: %v", err)
+	}
 	for status := range validStatus {
 		// If the spec has changed and an egress IP has been removed by the
 		// user: we need to un-assign that egress IP
@@ -1158,19 +1203,33 @@ func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interfa
 }
 
 // assignEgressIPs is the main assignment algorithm for egress IPs to nodes.
-// Specifically we have a couple of hard constraints: a) the subnet of the node
-// must be able to host the egress IP b) the egress IP cannot be a node IP c)
-// the IP cannot already be assigned and reference by another EgressIP object d)
-// no two egress IPs for the same EgressIP object can be assigned to the same
-// node e) (for public clouds) the amount of egress IPs assigned to one node
-// must respect its assignment capacity. Moreover there is a soft constraint:
-// the assignments need to be balanced across all cluster nodes, so that no node
-// becomes a bottleneck. The balancing is achieved by sorting the nodes in
-// ascending order following their existing amount of allocations, and trying to
-// assign the egress IP to the node with the lowest amount of allocations every
-// time, this does not guarantee complete balance, but mostly complete.
-// For Egress IPs that are hosted by secondary host networks, there must be at least
-// one node that hosts the network and exposed via the nodes host-cidrs annotation.
+// Specifically we have a couple of hard constraints:
+// a) the egress IP cannot be a node IP
+// b) the IP cannot already be assigned and reference by another EgressIP object
+// c) no two egress IPs for the same EgressIP object can be assigned to the same
+//
+//	node
+//
+// d) (for public clouds) the amount of egress IPs assigned to one node
+//
+//	must respect its assignment capacity.
+//
+// e) the subnet of the node must be able to host the egress IP (for Egress IPs
+//
+//	that are hosted by secondary host networks, there must be at least one node
+//	that hosts the network and exposed via the nodes host-cidrs annotation), or
+//
+// f) the node must be selected to advertise egress IPs for the network. If the
+//
+//	egress IP subnet is also hosted by any node, the intersection of both groups
+//	is elegible. If the intersection is empty, the egress IP cannot be assigned.
+//
+// Moreover there is a soft constraint: the assignments need to be balanced
+// across all cluster nodes, so that no node becomes a bottleneck. The balancing
+// is achieved by sorting the nodes in ascending order following their existing
+// amount of allocations, and trying to assign the egress IP to the node with
+// the lowest amount of allocations every time, this does not guarantee complete
+// balance, but mostly complete.
 func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string) []egressipv1.EgressIPStatusItem {
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
@@ -1186,6 +1245,31 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 		return assignments
 	}
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
+
+	// fetch nodes that can host this EIP by route advertisements
+	assignableNodesByAdvertisements := sets.New[string]()
+	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+		eip, err := eIPC.watchFactory.GetEgressIP(name)
+		if err != nil {
+			klog.Errorf("Failed to get EgressIP %s: %v", name, err)
+			return assignments
+		}
+		selector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
+		if err != nil {
+			klog.Errorf("Failed to parse EgressIP %s namespace selector: %v", name, err)
+			return assignments
+		}
+		selectedNs, err := eIPC.watchFactory.NamespaceCoreInformer().Lister().List(selector)
+		if err != nil {
+			klog.Errorf("Failed to list selected namespaces for EgressIP %s: %v", name, err)
+			return assignments
+		}
+		for _, ns := range selectedNs {
+			network := eIPC.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
+			assignableNodesByAdvertisements.Insert(network.GetEgressIPAdvertisedNodes()...)
+		}
+	}
+
 	for _, egressIP := range egressIPs {
 		klog.V(5).Infof("Will attempt assignment for egress IP: %s", egressIP)
 		eIP := net.ParseIP(egressIP)
@@ -1205,6 +1289,37 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			klog.Errorf("Egress IP: %v address is already assigned on an interface on node %s", eIP, conflictedHost)
 			return assignments
 		}
+
+		// fetch nodes that can host this EIP by interfaces on the same subnet
+		assignableNodesBySubnet := sets.New[string]()
+		for _, eNode := range assignableNodes {
+			node, err := eIPC.watchFactory.GetNode(eNode.name)
+			if err != nil {
+				klog.Errorf("Failed to determine if egress IP %s can be hosted on node %s: unable to get node: %v",
+					eIP.String(), node.Name, err)
+				return assignments
+			}
+			egressIPNetwork, err := egressip.GetEgressIPNetwork(node, eNode.egressIPConfig, eIP)
+			if err != nil {
+				klog.Errorf("Failed to determine if egress IP %s can be hosted on node %s: %v",
+					eIP.String(), node.Name, err)
+				return assignments
+			}
+			if egressIPNetwork == "" {
+				continue
+			}
+			assignableNodesBySubnet.Insert(eNode.name)
+		}
+
+		isNodeAsignableBySubnetOrAdvertisement := func(node string) error {
+			isAssignableNodeBySubnet := assignableNodesBySubnet.Has(node)
+			isAssignableNodeByAdvertisement := assignableNodesByAdvertisements.Has(node)
+			if !isAssignableNodeBySubnet && !isAssignableNodeByAdvertisement {
+				return fmt.Errorf("node is not connected to Egress IP network nor selected to be advertised through BGP")
+			}
+			return nil
+		}
+
 		if status, exists := existingAllocations[eIP.String()]; exists {
 			// On public clouds we will re-process assignments for the same IP
 			// multiple times due to the nature of syncing each individual
@@ -1223,20 +1338,9 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 						egressIP, status.Node, err)
 					continue
 				}
-				eNode, exists := eIPC.allocator.cache[status.Node] // allocator lock was previously acquired
-				if !exists {
-					klog.Errorf("Failed to find entry in allocator cache for EgressIP %s and IP %s,", name, eIP.String())
-					continue
-				}
-				eIPNetwork, err := util.GetEgressIPNetwork(node, eNode.egressIPConfig, eIP)
+				err = isNodeAsignableBySubnetOrAdvertisement(node.Name)
 				if err != nil {
-					klog.Errorf("Failed to determine EgressIP %s network using IP %s for node %s: %v", name, eIP.String(), node.Name, err)
-					continue
-				}
-				if eIPNetwork == "" {
-					klog.Errorf("EgressIP %s IP %s is allocated to node %s but node does not contain a network "+
-						"that can host it", name, eIP.String(), node.Name)
-					continue
+					klog.Errorf("EgressIP %s IP %s is allocated to node %s that can't host it: %v", name, eIP.String(), node.Name, err)
 				}
 				// IP is already assigned for this EgressIP object
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
@@ -1258,39 +1362,6 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				return assignments
 			}
 		}
-		// Egress IP for secondary host networks is only available on baremetal environments
-		if !util.PlatformTypeIsEgressIPCloudProvider() {
-			assignableNodesWithSecondaryNet := make([]*egressNode, 0)
-			for _, eNode := range assignableNodes {
-				node, err := eIPC.watchFactory.GetNode(eNode.name)
-				if err != nil {
-					klog.Warningf("Failed to determine if node %s may host EgressIP %s IP %s because unable to get node obj: %v",
-						name, eNode.name, eIP.String(), err)
-					continue
-				}
-				if util.IsOVNNetwork(eNode.egressIPConfig, eIP) {
-					continue
-				}
-				network, err := util.GetSecondaryHostNetworkContainingIP(node, eIP)
-				if err != nil {
-					klog.Warningf("Failed to determine if egress IP %s is hosted by a secondary host network for node %s: %v",
-						eIP.String(), node.Name, err)
-					continue
-				}
-				if network == "" {
-					continue
-				}
-				assignableNodesWithSecondaryNet = append(assignableNodesWithSecondaryNet, eNode)
-
-			}
-			// if the EIP is hosted by a secondary host network, then limit the assignable nodes to the set of nodes
-			// that connect to this network.
-			if len(assignableNodesWithSecondaryNet) > 0 {
-				klog.V(5).Infof("Restricting the number of assignable nodes from %d to %d because EgressIP %s IP %s "+
-					"is going to be hosted by a secondary host network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
-				assignableNodes = assignableNodesWithSecondaryNet
-			}
-		}
 
 		var assignmentSuccessful bool
 		for i := 0; i < len(assignableNodes) && !assignmentSuccessful; i++ {
@@ -1300,18 +1371,14 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				klog.V(5).Infof("Node: %s is already in use by another egress IP for this EgressIP: %s, trying another node", eNode.name, name)
 				continue
 			}
-			node, err := eIPC.watchFactory.GetNode(eNode.name)
-			if err != nil {
-				klog.Errorf("Failed to consider node %s because lookup of kubernetes object failed: %v", eNode.name, err)
+			isAssignableNodeBySubnet := assignableNodesBySubnet.Has(eNode.name)
+			isAssignableNodeByAdvertisement := assignableNodesByAdvertisements.Has(eNode.name)
+			if !isAssignableNodeBySubnet && !isAssignableNodeByAdvertisement {
+				klog.V(5).Infof("Node %s is not assignable neither by subnet nor advertisements, trying another node", eNode.name)
 				continue
 			}
-			egressIPNetwork, err := util.GetEgressIPNetwork(node, eNode.egressIPConfig, eIP)
-			if err != nil {
-				klog.Errorf("Failed to consider node %s for EgressIP %s IP %s because unable to find a network to host it: %v",
-					node.Name, name, eIP.String(), err)
-				continue
-			}
-			if egressIPNetwork == "" {
+			if isAssignableNodeBySubnet && !isAssignableNodeByAdvertisement && len(assignableNodesByAdvertisements) > 0 {
+				klog.V(5).Infof("Node %s is assignable by subnet but not assignable by advertisements, trying another node", eNode.name)
 				continue
 			}
 			if eNode.egressIPConfig.Capacity.IP < util.UnlimitedNodeCapacity {
@@ -1338,7 +1405,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			})
 			eNode.allocations[eIP.String()] = name
 			assignmentSuccessful = true
-			klog.Infof("Successful assignment of egress IP: %s to network %s on node: %+v", egressIP, egressIPNetwork, eNode)
+			klog.Infof("Successful assignment of egress IP %s to node %sv", egressIP, eNode.name)
 			break
 		}
 	}
@@ -1419,7 +1486,7 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 // cache knows about all egress nodes. WatchEgressNodes is initialized before
 // any other egress IP handler, so the cache should be warm and correct once we
 // start going this.
-func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items []egressipv1.EgressIPStatusItem) (map[egressipv1.EgressIPStatusItem]string, map[egressipv1.EgressIPStatusItem]string) {
+func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items []egressipv1.EgressIPStatusItem) (map[egressipv1.EgressIPStatusItem]string, map[egressipv1.EgressIPStatusItem]string, error) {
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
 	valid, invalid := make(map[egressipv1.EgressIPStatusItem]string), make(map[egressipv1.EgressIPStatusItem]string)
@@ -1455,16 +1522,17 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 				klog.Errorf("Allocator error: failed to validate and will not consider node %s for egress IP %s: %v",
 					eNode.name, name, err)
 			}
-			isOVNNetwork := util.IsOVNNetwork(eNode.egressIPConfig, ip)
-			isSecondaryHostNetwork, err := util.IsSecondaryHostNetworkContainingIP(node, ip)
+			localOrAdvertised, err := egressip.IsEgressIPLocalOrAdvertised(eIPC.watchFactory, eIPC.networkManager, eNode.egressIPConfig, node, name, ip)
 			if err != nil {
-				klog.Errorf("Allocator error: failed to determine if Egress IP %q is to be hosted by a secondary host "+
-					"network for egress IP %s: %v", eIPStatus.EgressIP, name, err)
+				klog.Errorf("Allocator error: failed to determine if EgressIP %q IP %q is local to the node % q or advertised: %v",
+					name, ip, eNode.name, err)
 			}
-			if !isOVNNetwork && !isSecondaryHostNetwork {
-				klog.Errorf("Allocator error: failed to assign Egress IP %s IP %q", name, eIPStatus.EgressIP)
-				validAssignment = false
+			if localOrAdvertised {
+				continue
 			}
+			klog.Errorf("Allocator error: EgressIP %s IP %s is allocated to node %s not local to the node nor advertised",
+				name, eIPStatus.EgressIP, eIPStatus.Node)
+			validAssignment = false
 		}
 		if validAssignment {
 			valid[eIPStatus] = ""
@@ -1472,7 +1540,7 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 			invalid[eIPStatus] = ""
 		}
 	}
-	return valid, invalid
+	return valid, invalid, nil
 }
 
 func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi.CloudPrivateIPConfig) error {
@@ -1722,4 +1790,117 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 		}
 	}
 	return resyncs, nil
+}
+
+func (eIPC *egressIPClusterController) ReconcileNetwork(name string, old, new util.NetInfo) error {
+	getNamespacesAndEgressIPNodes := func(net util.NetInfo) (sets.Set[string], sets.Set[string]) {
+		ns, nodes := sets.New[string](), sets.New[string]()
+		if net != nil && (net.IsPrimaryNetwork() || net.IsDefault()) {
+			ns.Insert(net.GetNamespaces()...)
+			nodes.Insert(net.GetEgressIPAdvertisedNodes()...)
+		}
+		return ns, nodes
+	}
+
+	oldNs, oldNodes := getNamespacesAndEgressIPNodes(old)
+	newNs, newNodes := getNamespacesAndEgressIPNodes(new)
+	hadNsChanges := !oldNs.Equal(newNs)
+	hadNodeChanges := !oldNodes.Equal(newNodes)
+
+	if !hadNsChanges && !hadNodeChanges {
+		return nil
+	}
+	return eIPC.reconcileNetwork(name)
+}
+
+func (eIPC *egressIPClusterController) reconcileNetwork(name string) error {
+	eips, err := eIPC.watchFactory.EgressIPInformer().Lister().List(labels.Everything())
+	if err != nil {
+		return err
+	}
+
+	isActiveNetworkForAnyNamespace := func(namespaces []*v1.Namespace) bool {
+		for _, ns := range namespaces {
+			network := eIPC.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
+			if network.GetNetworkName() == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	reconcileEIPs := map[string]*egressipv1.EgressIP{}
+	for _, eip := range eips {
+		selector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
+		if err != nil {
+			return err
+		}
+		selectedNs, err := eIPC.watchFactory.NamespaceCoreInformer().Lister().List(selector)
+		if err != nil {
+			return err
+		}
+		if isActiveNetworkForAnyNamespace(selectedNs) {
+			reconcileEIPs[eip.Name] = eip
+			break
+		}
+	}
+
+	if len(reconcileEIPs) == 0 {
+		return nil
+	}
+
+	for _, eip := range reconcileEIPs {
+		err := eIPC.retryEgressIPs.AddRetryObjWithAddNoBackoff(eip)
+		if err != nil {
+			return err
+		}
+	}
+
+	eIPC.retryEgressIPs.RequestRetryObjs()
+	return nil
+}
+
+func (eIPC *egressIPClusterController) reconcileNamespace(name string) error {
+	eips, err := eIPC.watchFactory.GetEgressIPs()
+	if err != nil {
+		return fmt.Errorf("failed to get EgressIPs: %w", err)
+	}
+	reconcileEIPs := func(eips []*egressipv1.EgressIP) error {
+		for _, eip := range eips {
+			err := eIPC.retryEgressIPs.AddRetryObjWithAddNoBackoff(eip)
+			if err != nil {
+				return err
+			}
+		}
+		eIPC.retryEgressIPs.RequestRetryObjs()
+		return nil
+	}
+
+	_, err = eIPC.watchFactory.GetNamespace(name)
+	if apierrors.IsNotFound(err) {
+		return reconcileEIPs(eips)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get namespace %s: %w", name, err)
+	}
+
+	reconcile := []*egressipv1.EgressIP{}
+	for _, eip := range eips {
+		selector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
+		if err != nil {
+			return err
+		}
+		selectedNs, err := eIPC.watchFactory.NamespaceCoreInformer().Lister().List(selector)
+		if err != nil {
+			return err
+		}
+		for _, selected := range selectedNs {
+			if selected.Name == name {
+				reconcile = append(reconcile, eip)
+				break
+			}
+		}
+	}
+
+	return reconcileEIPs(reconcile)
 }
