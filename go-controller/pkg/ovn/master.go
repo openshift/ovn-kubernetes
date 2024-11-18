@@ -130,7 +130,11 @@ func (oc *DefaultNetworkController) newClusterRouter() (*nbdb.LogicalRouter, err
 }
 
 func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) error {
-	mgmtPortIPs, err := oc.syncNodeManagementPort(node, switchName, oc.GetNetworkScopedClusterRouterName(), hostSubnets)
+	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, oc.GetNetworkName())
+	if err != nil {
+		return err
+	}
+	mgmtPortIPs, err := oc.syncNodeManagementPort(macAddress, node.Name, switchName, oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 	if err == nil {
 		return oc.setupUDNACLs(mgmtPortIPs)
 	}
@@ -142,23 +146,11 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
 	l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,
+	gwLRPIPs []*net.IPNet,
 ) error {
 	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
-	}
-
-	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
-	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// FIXME(tssurya): This is present for backwards compatibility
-			// Remove me a few months from now
-			var err1 error
-			gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err1 != nil {
-				return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
-			}
-		}
 	}
 
 	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
@@ -595,7 +587,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			}
 		}
 
-		// If we succcessfully discovered the host subnets then add the management port.
+		// If we successfully discovered the host subnets then add the management port.
 		if hostSubnets != nil {
 			if err = oc.syncNodeManagementPortDefault(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets); err != nil {
 				errs = append(errs, err)
@@ -628,13 +620,33 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
 	}
 
-	if nSyncs.syncGw {
-		err := oc.syncNodeGateway(node, nil)
+	var gwLRPIPs []*net.IPNet
+	if nSyncs.syncGw || (nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect) {
+		gwLRPIPs, err = util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 		if err != nil {
-			errs = append(errs, err)
-			oc.gatewaysFailed.Store(node.Name, true)
+			if util.IsAnnotationNotSetError(err) {
+				// FIXME(tssurya): This is present for backwards compatibility
+				// Remove me a few months from now
+				var err1 error
+				gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+				if err1 != nil {
+					return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+				}
+			}
+		}
+	}
+
+	if nSyncs.syncGw {
+		if gwLRPIPs != nil {
+			err := oc.syncNodeGateway(node, hostSubnets, gwLRPIPs)
+			if err != nil {
+				errs = append(errs, err)
+				oc.gatewaysFailed.Store(node.Name, true)
+			} else {
+				oc.gatewaysFailed.Delete(node.Name)
+			}
 		} else {
-			oc.gatewaysFailed.Delete(node.Name)
+			oc.gatewaysFailed.Store(node.Name, true)
 		}
 	}
 
@@ -655,13 +667,21 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			errs = append(errs, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
-			// Call zone IC handler's AddLocalZoneNode function to create
-			// interconnect resources in the OVN Northbound db for this local zone node.
-			if err := oc.zoneICHandler.AddLocalZoneNode(node); err != nil {
-				errs = append(errs, err)
-				oc.syncZoneICFailed.Store(node.Name, true)
+			if hostSubnets == nil {
+				hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+				if err != nil {
+					errs = append(errs, err)
+					oc.syncZoneICFailed.Store(node.Name, true)
+				}
 			} else {
-				oc.syncZoneICFailed.Delete(node.Name)
+				// Call zone IC handler's AddLocalZoneNode function to create
+				// interconnect resources in the OVN Northbound db for this local zone node.
+				if err := oc.zoneICHandler.AddLocalZoneNode(hostSubnets, gwLRPIPs, node); err != nil {
+					errs = append(errs, err)
+					oc.syncZoneICFailed.Store(node.Name, true)
+				} else {
+					oc.syncZoneICFailed.Delete(node.Name)
+				}
 			}
 		}
 	}
@@ -699,10 +719,28 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 			return err
 		}
 
+		hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+		if err != nil {
+			return fmt.Errorf("failed to get host subnets for node: %s: %w", node.Name, err)
+		}
+
+		gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				// FIXME(tssurya): This is present for backwards compatibility
+				// Remove me a few months from now
+				var err1 error
+				gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+				if err1 != nil {
+					return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+				}
+			}
+		}
+
 		// Call zone IC handler's AddRemoteZoneNode function to create
 		// interconnect resources in the OVN NBDB for this remote zone node.
 		// Also, create the remote port binding in SBDB
-		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
+		if err = oc.zoneICHandler.AddRemoteZoneNode(hostSubnets, gwLRPIPs, node); err != nil {
 			err = fmt.Errorf("adding or updating remote node IC resources %s failed, err - %w", node.Name, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
@@ -736,7 +774,7 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
+		if err := oc.zoneICHandler.DeleteNode(node.Name); err != nil {
 			return err
 		}
 		if !oc.isLocalZoneNode(node) {

@@ -884,10 +884,22 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		}
 
 		wf.udnNodeFactory = userdefinednodeinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNodeClient, resyncInterval)
-		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, wf.udnNodeFactory.K8s().V1().UDNNodes().Informer())
+		udnNodeInformer := wf.udnNodeFactory.K8s().V1().UDNNodes().Informer()
+
+		indexers := cache.Indexers{
+			"byNodeAndNetwork": func(obj interface{}) ([]string, error) {
+				udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type")
+				}
+				return []string{udnNode.Labels["nodeName"] + "-" + udnNode.Labels["networkName"]}, nil
+			},
+		}
+		err := udnNodeInformer.AddIndexers(indexers)
 		if err != nil {
 			return nil, err
 		}
+		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, wf.udnNodeFactory.K8s().V1().UDNNodes().Informer())
 
 		// make sure namespace informer cache is initialized and synced on Start().
 		wf.iFactory.Core().V1().Namespaces().Informer()

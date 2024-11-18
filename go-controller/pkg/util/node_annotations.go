@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"math"
 	"net"
 	"net/netip"
@@ -904,6 +905,18 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 	return ip, nil
 }
 
+func ParseNodeUDNGatewayRouterJoinAddrs(udnNode *userdefinednodeapi.UDNNode) ([]*net.IPNet, error) {
+	var nets []*net.IPNet
+	for _, subnet := range udnNode.Spec.JoinSubnets {
+		_, ipnet, err := net.ParseCIDR(string(subnet))
+		if err != nil {
+			return nil, err
+		}
+		nets = append(nets, ipnet)
+	}
+	return nets, nil
+}
+
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
@@ -918,6 +931,10 @@ func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IP
 // stored in the 'ovnTransitSwitchPortAddr' annotation
 func ParseNodeTransitSwitchPortAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnTransitSwitchPortAddr)
+}
+
+func TransitSwitchAddrsEqual(old, new *kapi.Node) bool {
+	return old.Annotations[ovnTransitSwitchPortAddr] == new.Annotations[ovnTransitSwitchPortAddr]
 }
 
 // ParseNodeMasqueradeSubnet returns the IPv4 and/or IPv6 networks for the node's gateway router port
