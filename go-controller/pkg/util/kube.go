@@ -7,6 +7,7 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"net"
 	"os"
 	"path/filepath"
@@ -717,6 +718,14 @@ func NoHostSubnet(node *kapi.Node) bool {
 	}
 
 	return config.Kubernetes.NoHostSubnetNodes.Matches(labels.Set(node.Labels))
+}
+
+func NoHostSubnetUDNNode(udnNode *userdefinednodeapi.UDNNode) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
+	}
+
+	return config.Kubernetes.NoHostSubnetNodes.Matches(labels.Set(udnNode.Labels))
 }
 
 // getSelectedEligibleEndpoints does the following:

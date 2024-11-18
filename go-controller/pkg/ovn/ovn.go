@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"net"
 	"reflect"
 	"sync"
@@ -371,7 +372,7 @@ func (oc *DefaultNetworkController) WatchEgressIPPods() error {
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
-func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets, gwLRPIPs []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
@@ -396,7 +397,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
 			}
 		}
-		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
+		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, gwLRPIPs); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -424,10 +425,21 @@ func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
+func udnNodeMACAddressChanged(oldNode, node *userdefinednodeapi.UDNNode) bool {
+	return oldNode.Spec.ManagementPortMACAddress != node.Spec.ManagementPortMACAddress
+}
+
 func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
 	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
 	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func udnNodeSubnetChanged(oldNode, node *userdefinednodeapi.UDNNode) bool {
+	if !reflect.DeepEqual(oldNode.Spec.NodeSubnets, node.Spec.NodeSubnets) {
+		return true
+	}
+	return false
 }
 
 func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {

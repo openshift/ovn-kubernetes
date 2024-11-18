@@ -59,6 +59,8 @@ type UDNNodeSpec struct {
 	//
 	// +optional
 	JoinSubnets DualStackCIDRs `json:"joinSubnets,omitempty"`
+
+	ManagementPortMACAddress string `json:"managementPortMACAddress,omitempty"`
 }
 
 // UDNNodeStatus defines the observed state of UDNNode
@@ -87,3 +89,14 @@ type CIDR string
 // + TODO: Add the following validations when available (kube v1.31).
 // + kubebuilder:validation:XValidation:rule="size(self) != 2 || isCIDR(self[0]) && isCIDR(self[1]) && cidr(self[0]).ip().family() != cidr(self[1]).ip().family()", message="When 2 CIDRs are set, they must be from different IP families"
 type DualStackCIDRs []CIDR
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +resource:path=udnnode
+// UDNNodeList is the list of UDNNodes.
+type UDNNodeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	// List of EgressIP.
+	Items []UDNNode `json:"items"`
+}
