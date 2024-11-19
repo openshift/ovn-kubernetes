@@ -3,7 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"net"
 	"reflect"
 	"sync"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -118,6 +118,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 		}
 
 		if h.oc.isLocalZoneNode(node) {
+			h.oc.nodeMutex.LockKey(node.Name)
+			defer h.oc.nodeMutex.UnlockKey(node.Name)
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
 				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
@@ -178,7 +180,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		// transit switch subnet change, node id, chassis id, primary if addr, l3 gateway config change determine
 		// if we need to trigger UDN node type update
 		needsResync := false
-
+		h.oc.nodeMutex.LockKey(newNode.Name)
+		defer h.oc.nodeMutex.UnlockKey(newNode.Name)
 		if newNodeIsLocalZoneNode && !h.oc.isLocalZoneNode(oldNode) {
 			// this is a remote -> local transition, need full sync
 			needsResync = true
@@ -257,7 +260,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if err != nil {
 			return fmt.Errorf("failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, newUDNNode.Name)
 		}
-
+		h.oc.nodeMutex.LockKey(node.Name)
+		defer h.oc.nodeMutex.UnlockKey(node.Name)
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(node)
 		// can node subnet change for UDN?
 		nodeSubnetChange := udnNodeSubnetChanged(oldUDNNode, newUDNNode)
@@ -312,6 +316,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cache
 		if nodeName == "" {
 			return fmt.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
 		}
+		h.oc.nodeMutex.Delete(nodeName)
 		return h.oc.deleteNodeEvent(nodeName)
 	case factory.NodeType:
 		return nil
@@ -365,6 +370,7 @@ type SecondaryLayer3NetworkController struct {
 	BaseSecondaryNetworkController
 
 	// Node-specific syncMaps used by node event handler
+	nodeMutex                   *syncmap.SyncMapComparableKey[string, bool]
 	mgmtPortFailed              sync.Map
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
@@ -444,6 +450,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				nadController:               nadController,
 			},
 		},
+		nodeMutex:                   syncmap.NewSyncMapComparableKey[string, bool](),
 		mgmtPortFailed:              sync.Map{},
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},

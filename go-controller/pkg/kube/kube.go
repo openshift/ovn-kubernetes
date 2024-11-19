@@ -45,6 +45,7 @@ type InterfaceOVN interface {
 	UpdateEgressServiceStatus(namespace, name, host string) error
 	UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
 	CreateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode, error)
+	UpdateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode, error)
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -470,4 +471,8 @@ func (k *KubeOVN) UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) 
 
 func (k *KubeOVN) CreateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode, error) {
 	return k.UDNNodeClient.K8sV1().UDNNodes().Create(context.TODO(), udnNode, metav1.CreateOptions{})
+}
+
+func (k *KubeOVN) UpdateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode, error) {
+	return k.UDNNodeClient.K8sV1().UDNNodes().Update(context.TODO(), udnNode, metav1.UpdateOptions{})
 }

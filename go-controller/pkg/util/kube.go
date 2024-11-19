@@ -67,6 +67,7 @@ type OVNClientset struct {
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 // OVNMasterClientset
@@ -109,6 +110,7 @@ type OVNNodeClientset struct {
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
