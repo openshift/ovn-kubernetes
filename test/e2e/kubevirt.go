@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -306,49 +307,76 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return nil
 		}
 
+		checkIperfTraffic = func(iperfLogFile string, execFn func(cmd string) (string, error), stage string) {
+			GinkgoHelper()
+			// Check the last line eventually show traffic flowing
+			Eventually(func() (string, error) {
+				iperfLog, err := execFn("cat " + iperfLogFile)
+				if err != nil {
+					return "", err
+				}
+				// Fail fast
+				Expect(iperfLog).NotTo(ContainSubstring("iperf3: error"), stage+": "+iperfLogFile)
+				//Remove last carriage return to propertly split by new line.
+				iperfLog = strings.TrimSuffix(iperfLog, "\n")
+				iperfLogLines := strings.Split(iperfLog, "\n")
+				if len(iperfLogLines) == 0 {
+					return "", nil
+				}
+				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
+				return lastIperfLogLine, nil
+			}).
+				WithPolling(time.Second).
+				WithTimeout(30*time.Second).
+				Should(
+					SatisfyAll(
+						ContainSubstring(" sec "),
+						Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
+					),
+					stage+": failed checking iperf3 traffic at file "+iperfLogFile,
+				)
+		}
+
 		checkEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
 			GinkgoHelper()
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
-					// Check the last line eventually show traffic flowing
-					Eventually(func() (string, error) {
-						iperfLog, err := kubevirt.RunCommand(vmi, fmt.Sprintf("cat /tmp/%s_%s_iperf3.log", podName, podIP), 2*time.Second)
-						if err != nil {
-							return "", err
-						}
-						iperfLogLines := strings.Split(iperfLog, "\n")
-						if len(iperfLogLines) == 0 {
-							return "", nil
-						}
-						return iperfLogLines[len(iperfLogLines)-1], nil
-					}).
-						WithPolling(time.Second).
-						WithTimeout(3 * time.Minute).
-						Should(
-							SatisfyAll(
-								ContainSubstring(" sec "),
-								Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
-							),
-						)
+					iperfLogFile := fmt.Sprintf("/tmp/%s_%s_iperf3.log", podName, podIP)
+					execFn := func(cmd string) (string, error) {
+						return kubevirt.RunCommand(vmi, cmd, 2*time.Second)
+					}
+					checkIperfTraffic(iperfLogFile, execFn, stage)
 				}
 			}
 		}
 
-		checkNorthSouthIperfTraffic = func(containerName string, addresses []string, port int32, stage string) {
+		startNorthSouthIngressIperfTraffic = func(containerName string, addresses []string, port int32, stage string) error {
 			GinkgoHelper()
 			Expect(addresses).NotTo(BeEmpty())
-			polling := 15 * time.Second
-			timeout := time.Minute
 			for _, address := range addresses {
-				output := ""
-				Eventually(func() error {
-					var err error
-					output, err = runCommand(containerRuntime, "exec", containerName, "bash", "-c", fmt.Sprintf("iperf3 -t 1 -c %s -p %d", address, port))
-					return err
-				}).
-					WithPolling(polling).
-					WithTimeout(timeout).
-					Should(Succeed(), func() string { return stage + ": external server : " + output })
+				iperfLogFile := fmt.Sprintf("/tmp/ingress_test_%[1]s_%[2]d_iperf3.log", address, port)
+				output, err := runCommand(containerRuntime, "exec", containerName, "bash", "-c", fmt.Sprintf(`
+iperf3 -c %[1]s -p %[2]d
+killall iperf3
+rm -f %[3]s
+iperf3 -t 0 -c %[1]s -p %[2]d --logfile %[3]s &
+`, address, port, iperfLogFile))
+				if err != nil {
+					return fmt.Errorf("%s: %w", output, err)
+				}
+			}
+			return nil
+		}
+
+		checkNorthSouthIngressIperfTraffic = func(containerName string, addresses []string, port int32, stage string) {
+			GinkgoHelper()
+			Expect(addresses).NotTo(BeEmpty())
+			for _, ip := range addresses {
+				iperfLogFile := fmt.Sprintf("/tmp/ingress_test_%s_%d_iperf3.log", ip, port)
+				execFn := func(cmd string) (string, error) {
+					return runCommand(containerRuntime, "exec", containerName, "bash", "-c", cmd)
+				}
+				checkIperfTraffic(iperfLogFile, execFn, stage)
 			}
 		}
 
@@ -1008,7 +1036,6 @@ fi
 if [ "$ipv6" != "" ]; then
 	iperf3 -s -D --bind $ipv6 --logfile /tmp/test_${ipv6}_iperf3.log
 fi
-sleep infinity
 `
 		createIperfServerPods = func(nodes []corev1.Node, netConfig networkAttachmentConfig) ([]*corev1.Pod, error) {
 			annotations := map[string]string{}
@@ -1020,7 +1047,7 @@ sleep infinity
 				pod, err := createPod(fr, "testpod-"+node.Name, node.Name, namespace, []string{"bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
 					pod.Annotations = annotations
 					pod.Spec.Containers[0].Image = iperf3Image
-					pod.Spec.Containers[0].Args = []string{iperfServerScript}
+					pod.Spec.Containers[0].Args = []string{iperfServerScript + "\n sleep infinity"}
 
 				})
 				if err != nil {
@@ -1343,9 +1370,13 @@ ethernets:
 			userData = fmt.Sprintf(`#cloud-config
 password: fedora
 chpasswd: { expire: False }
+write_files:
+  - path: /tmp/iperf-server.sh
+    encoding: b64
+    content: %s
+    permissions: '0755'
 runcmd:
-- iperf3 -s -D --logfile /tmp/iperf3.log
-`)
+- /tmp/iperf-server.sh`, base64.StdEncoding.EncodeToString([]byte(iperfServerScript)))
 			virtualMachine = resourceCommand{
 				description: "VirtualMachine",
 				cmd: func() string {
@@ -1503,16 +1534,19 @@ runcmd:
 				WithPolling(time.Second).
 				Should(Succeed(), step)
 
-			step = by(vmi.Name, "Wait for addresses at the virtual machine")
+			step = by(vmi.Name, "Wait for cloud init to finish at first boot")
+			output, err := kubevirt.RunCommand(vmi, "cloud-init status --wait", time.Minute)
+			Expect(err).NotTo(HaveOccurred(), step+": "+output)
 
 			// expect 2 addresses on dual-stack deployments; 1 on single-stack
+			step = by(vmi.Name, "Wait for addresses at the virtual machine")
 			expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
 			expectedAddreses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
 			expectedAddresesAtGuest := expectedAddreses
 			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, podNetworkStatusByNetConfigPredicate(netConfig))
 
 			step = by(vmi.Name, "Expose VM iperf server as a service")
-			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vm.Name, 5201), metav1.CreateOptions{})
+			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vmi.Name, 5201), metav1.CreateOptions{})
 			Expect(svc.Spec.Ports[0].NodePort).NotTo(Equal(0), step)
 
 			// IPv6 is not support for secondaries with IPAM so guest will
@@ -1541,7 +1575,8 @@ runcmd:
 
 			if td.role == "primary" {
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
-				checkNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				startNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
 			}
 
 			by(vmi.Name, fmt.Sprintf("Running %s for %s", td.test.description, td.resource.description))
@@ -1549,9 +1584,14 @@ runcmd:
 
 			step = by(vmi.Name, fmt.Sprintf("Login to virtual machine after %s %s", td.resource.description, td.test.description))
 			Expect(kubevirt.LoginToFedora(vmi, "fedora", "fedora")).To(Succeed(), step)
-			var obtainedAddresses []string
 
-			obtainedAddresses = virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			if td.test.description == restart.description {
+				step := by(vmi.Name, "Wait for cloud init to finish after restart")
+				output, err = kubevirt.RunCommand(vmi, "cloud-init status --wait", time.Minute)
+				Expect(err).NotTo(HaveOccurred(), step+": "+output)
+			}
+
+			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
 
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
 			Eventually(kubevirt.RetrieveAllGlobalAddressesFromGuest).
@@ -1562,13 +1602,17 @@ runcmd:
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			if td.test.description == restart.description {
+
 				// At restart we need re-connect
 				Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
+				if td.role == "primary" {
+					startNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				}
 			}
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 			if td.role == "primary" {
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
-				checkNorthSouthIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
 			}
 		},
 			func(td testData) string {
