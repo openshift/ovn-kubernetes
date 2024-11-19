@@ -406,16 +406,13 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
-	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
+	return oldNode.Annotations[util.OvnNodeL3GatewayConfig] != newNode.Annotations[util.OvnNodeL3GatewayConfig] ||
+		oldNode.Annotations[util.OvnNodeChassisID] != newNode.Annotations[util.OvnNodeChassisID]
 }
 
 // hostCIDRsChanged compares old annotations to new and returns true if the something has changed.
 func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
-	oldAddrs, _ := util.ParseNodeHostCIDRs(oldNode)
-	Addrs, _ := util.ParseNodeHostCIDRs(newNode)
-	return !oldAddrs.Equal(Addrs)
+	return util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 }
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
