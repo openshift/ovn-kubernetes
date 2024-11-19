@@ -119,6 +119,8 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 			return fmt.Errorf("failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, udnNode.Name)
 		}
 		if h.oc.isLocalZoneNode(node) {
+			h.oc.nodeMutex.LockKey(node.Name)
+			defer h.oc.nodeMutex.UnlockKey(node.Name)
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
 				_, syncMgmtPort := h.oc.mgmtPortFailed.Load(node.Name)
@@ -152,6 +154,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) DeleteResource(obj, cache
 		if nodeName == "" {
 			return fmt.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
 		}
+		h.oc.nodeMutex.Delete(nodeName)
 		return h.oc.deleteNodeEvent(nodeName)
 	case factory.NodeType:
 		return nil
@@ -176,6 +179,8 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
+		h.oc.nodeMutex.LockKey(newNode.Name)
+		defer h.oc.nodeMutex.UnlockKey(newNode.Name)
 		needsResync := false
 		if newNodeIsLocalZoneNode {
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -239,7 +244,8 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if err != nil {
 			return fmt.Errorf("failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, newUDNNode.Name)
 		}
-
+		h.oc.nodeMutex.LockKey(node.Name)
+		defer h.oc.nodeMutex.UnlockKey(node.Name)
 		if h.oc.isLocalZoneNode(node) {
 			var nodeSyncsParam *nodeSyncs
 			// determine what actually changed in this update and combine that with what failed previously
@@ -308,6 +314,7 @@ type SecondaryLayer2NetworkController struct {
 	BaseSecondaryLayer2NetworkController
 
 	// Node-specific syncMaps used by node event handler
+	nodeMutex        *syncmap.SyncMapComparableKey[string, bool]
 	mgmtPortFailed   sync.Map
 	gatewaysFailed   sync.Map
 	syncZoneICFailed sync.Map
@@ -387,6 +394,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 				},
 			},
 		},
+		nodeMutex:        syncmap.NewSyncMapComparableKey[string, bool](),
 		mgmtPortFailed:   sync.Map{},
 		syncZoneICFailed: sync.Map{},
 		gatewayManagers:  sync.Map{},
