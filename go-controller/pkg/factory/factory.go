@@ -900,6 +900,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, wf.udnNodeFactory.K8s().V1().UDNNodes().Informer())
+		if err != nil {
+			return nil, err
+		}
 
 		// make sure namespace informer cache is initialized and synced on Start().
 		wf.iFactory.Core().V1().Namespaces().Informer()

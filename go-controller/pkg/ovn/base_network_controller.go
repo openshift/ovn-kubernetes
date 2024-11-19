@@ -673,7 +673,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(macAddress net.Hardware
 		Addresses: []string{addresses},
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
+	err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return nil, err
 	}
@@ -691,7 +691,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(macAddress net.Hardware
 	}
 
 	if v4Subnet != nil {
-		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(node.Name),
+		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(nodeName),
 			bnc.GetNetworkScopedSwitchName(nodeName), nodeName, v4Subnet); err != nil {
 			return nil, err
 		}

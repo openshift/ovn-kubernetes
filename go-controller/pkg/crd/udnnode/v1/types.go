@@ -61,6 +61,8 @@ type UDNNodeSpec struct {
 	JoinSubnets DualStackCIDRs `json:"joinSubnets,omitempty"`
 
 	ManagementPortMACAddress string `json:"managementPortMACAddress,omitempty"`
+
+	Layer2TunnelID int `json:"layer2TunnelID,omitempty"`
 }
 
 // UDNNodeStatus defines the observed state of UDNNode
