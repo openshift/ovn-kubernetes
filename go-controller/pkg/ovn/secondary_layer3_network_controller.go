@@ -101,9 +101,12 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 	case factory.UserDefinedNodeType:
 		udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
+			return fmt.Errorf("could not cast %T object to *userdefinednodeapi.UDNNode", obj)
 		}
 
+		if h.oc.GetNetworkName() != udnNode.GetLabels()["networkName"] {
+			return nil
+		}
 		nodeName := udnNode.GetLabels()["nodeName"]
 		if nodeName == "" {
 			return fmt.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
@@ -242,7 +245,9 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *userdefinednodeapi.UDNNode", oldObj)
 		}
-
+		if h.oc.GetNetworkName() != newUDNNode.GetLabels()["networkName"] {
+			return nil
+		}
 		nodeName := newUDNNode.GetLabels()["nodeName"]
 		if nodeName == "" {
 			return fmt.Errorf("unable to find nodeName label for udn Node: %s", newUDNNode.Name)
@@ -255,19 +260,19 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(node)
 		// can node subnet change for UDN?
-		nodeSubnetChanged := udnNodeSubnetChanged(oldUDNNode, newUDNNode)
+		nodeSubnetChange := udnNodeSubnetChanged(oldUDNNode, newUDNNode)
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 
 			// determine what actually changed in this update
 			_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
 			_, failed := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
-			clusterRtrSync := failed || nodeSubnetChanged
+			clusterRtrSync := failed || nodeSubnetChange
 			_, failed = h.oc.mgmtPortFailed.Load(node.Name)
-			syncMgmtPort := failed || udnNodeMACAddressChanged(oldUDNNode, newUDNNode) || nodeSubnetChanged
+			syncMgmtPort := failed || udnNodeMACAddressChanged(oldUDNNode, newUDNNode) || nodeSubnetChange
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
 			_, failed = h.oc.gatewaysFailed.Load(node.Name)
-			syncGw := failed || nodeSubnetChanged
+			syncGw := failed || nodeSubnetChange
 			nodeSyncsParam = &nodeSyncs{
 				syncNode:              nodeSync,
 				syncClusterRouterPort: clusterRtrSync,
@@ -282,7 +287,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
-			syncZoneIC = syncZoneIC || nodeSubnetChanged
+			syncZoneIC = syncZoneIC || nodeSubnetChange
 			return h.oc.addUpdateRemoteNodeEvent(newUDNNode, node, syncZoneIC)
 		}
 	default:
@@ -300,12 +305,16 @@ func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cache
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
+		if h.oc.GetNetworkName() != udnNode.GetLabels()["networkName"] {
+			return nil
+		}
 		nodeName := udnNode.GetLabels()["nodeName"]
 		if nodeName == "" {
 			return fmt.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
 		}
 		return h.oc.deleteNodeEvent(nodeName)
-
+	case factory.NodeType:
+		return nil
 	default:
 		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
 	}

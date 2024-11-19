@@ -907,6 +907,9 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 
 func ParseNodeUDNGatewayRouterJoinAddrs(udnNode *userdefinednodeapi.UDNNode) ([]*net.IPNet, error) {
 	var nets []*net.IPNet
+	if len(udnNode.Spec.JoinSubnets) == 0 {
+		return nil, types.NewSuppressedError(fmt.Errorf("join subnet missing in spec"))
+	}
 	for _, subnet := range udnNode.Spec.JoinSubnets {
 		_, ipnet, err := net.ParseCIDR(string(subnet))
 		if err != nil {

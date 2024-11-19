@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -99,10 +100,23 @@ func (h *secondaryLayer2NetworkControllerEventHandler) IsResourceScheduled(obj i
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
-	case factory.NodeType:
-		node, ok := obj.(*corev1.Node)
+	case factory.UserDefinedNodeType:
+		udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to Node", obj)
+			return fmt.Errorf("could not cast %T object to *userdefinednodeapi.UDNNode", obj)
+		}
+
+		if h.oc.GetNetworkName() != udnNode.GetLabels()["networkName"] {
+			return nil
+		}
+		nodeName := udnNode.GetLabels()["nodeName"]
+		if nodeName == "" {
+			return fmt.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
+		}
+
+		node, err := h.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return fmt.Errorf("failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, udnNode.Name)
 		}
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
@@ -113,9 +127,9 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 			} else {
 				nodeParams = &nodeSyncs{syncMgmtPort: true, syncGw: true}
 			}
-			return h.oc.addUpdateLocalNodeEvent(node, nodeParams)
+			return h.oc.addUpdateLocalNodeEvent(udnNode, node, nodeParams)
 		}
-		return h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect)
+		return h.oc.addUpdateRemoteNodeEvent(udnNode, node, config.OVNKubernetesFeature.EnableInterconnect)
 	default:
 		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
 	}
@@ -126,12 +140,21 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 // used for now for pods and network policies.
 func (h *secondaryLayer2NetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	switch h.objType {
-	case factory.NodeType:
-		node, ok := obj.(*corev1.Node)
+	case factory.UserDefinedNodeType:
+		udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to Node", obj)
+			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
-		return h.oc.deleteNodeEvent(node)
+		if h.oc.GetNetworkName() != udnNode.GetLabels()["networkName"] {
+			return nil
+		}
+		nodeName := udnNode.GetLabels()["nodeName"]
+		if nodeName == "" {
+			return fmt.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
+		}
+		return h.oc.deleteNodeEvent(nodeName)
+	case factory.NodeType:
+		return nil
 	default:
 		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
 	}
@@ -153,34 +176,85 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
+		needsResync := false
 		if newNodeIsLocalZoneNode {
-			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update and combine that with what failed previously
-				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
-				shouldSyncMgmtPort := mgmtUpdateFailed ||
-					macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) ||
-					nodeSubnetChanged
-				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
-				shouldSyncGW := gwUpdateFailed ||
-					gatewayChanged(oldNode, newNode) ||
-					hostCIDRsChanged(oldNode, newNode) ||
-					nodeGatewayMTUSupportChanged(oldNode, newNode)
-
-				nodeSyncsParam = &nodeSyncs{syncMgmtPort: shouldSyncMgmtPort, syncGw: shouldSyncGW}
+				// TODO(trozet): why do we care if host cidrs changed?
+				if gatewayChanged(oldNode, newNode) || hostCIDRsChanged(oldNode, newNode) || nodeGatewayMTUSupportChanged(oldNode, newNode) {
+					h.oc.mgmtPortFailed.Store(newNode.Name, true)
+					h.oc.gatewaysFailed.Store(newNode.Name, true)
+					needsResync = true
+				}
 			} else {
+				// node moved from remote -> local
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
-				// The node is now a local zone node. Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{syncMgmtPort: true, syncGw: true}
+				h.oc.mgmtPortFailed.Store(newNode.Name, true)
+				h.oc.gatewaysFailed.Store(newNode.Name, true)
+				// TODO(trozet): should we also be setting sync IC here? was not in old code
+				needsResync = true
 			}
-
-			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
 		} else {
-			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
-			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
+			// TROZET: looks like there was a bug here already where we are not forcing resync if local -> remote
+			if h.oc.isLocalZoneNode(oldNode) {
+				klog.Infof("Node %s moved from the local zone %s to remote zone %s.",
+					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
+				// node is moving from local to remote
+				h.oc.syncZoneICFailed.Store(newNode.Name, true)
+				needsResync = true
+			}
+			// no other node changes for remote really matter for setting up layer 2 networks
 		}
+
+		if needsResync {
+			networkID, err := h.oc.getNetworkID()
+			if err != nil {
+				return err
+			}
+			// reset
+			if err := h.oc.retryUDNNodes.AddRetryObjWithAddNoBackoff(fmt.Sprintf("%d-%s", networkID, newNode.Name)); err != nil {
+				return err
+			}
+		}
+		return nil
+	case factory.UserDefinedNodeType:
+		newUDNNode, ok := newObj.(*userdefinednodeapi.UDNNode)
+		if !ok {
+			return fmt.Errorf("could not cast newObj of type %T to *userdefinednodeapi.UDNNode", newObj)
+		}
+		oldUDNNode, ok := oldObj.(*userdefinednodeapi.UDNNode)
+		if !ok {
+			return fmt.Errorf("could not cast oldObj of type %T to *userdefinednodeapi.UDNNode", oldObj)
+		}
+		if h.oc.GetNetworkName() != newUDNNode.GetLabels()["networkName"] {
+			return nil
+		}
+		nodeName := newUDNNode.GetLabels()["nodeName"]
+		if nodeName == "" {
+			return fmt.Errorf("unable to find nodeName label for udn Node: %s", newUDNNode.Name)
+		}
+
+		node, err := h.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return fmt.Errorf("failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, newUDNNode.Name)
+		}
+
+		if h.oc.isLocalZoneNode(node) {
+			var nodeSyncsParam *nodeSyncs
+			// determine what actually changed in this update and combine that with what failed previously
+			_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(node.Name)
+			shouldSyncMgmtPort := mgmtUpdateFailed || udnNodeMACAddressChanged(oldUDNNode, newUDNNode) || udnNodeSubnetChanged(oldUDNNode, newUDNNode)
+
+			_, gwUpdateFailed := h.oc.gatewaysFailed.Load(node.Name)
+			shouldSyncGW := gwUpdateFailed
+			nodeSyncsParam = &nodeSyncs{syncMgmtPort: shouldSyncMgmtPort, syncGw: shouldSyncGW}
+			return h.oc.addUpdateLocalNodeEvent(newUDNNode, node, nodeSyncsParam)
+		} else {
+			_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
+			return h.oc.addUpdateRemoteNodeEvent(newUDNNode, node, syncZoneIC)
+		}
+
 	default:
 		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
@@ -492,19 +566,31 @@ func (oc *SecondaryLayer2NetworkController) newRetryFramework(
 	)
 }
 
-func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
+func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(udnNode *userdefinednodeapi.UDNNode, node *corev1.Node, nSyncs *nodeSyncs) error {
 	var errs []error
-
+	var macAddr net.HardwareAddr
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if nSyncs.syncGw {
+
 			gwManager := oc.gatewayManagerForNode(node.Name)
 			oc.gatewayManagers.Store(node.Name, gwManager)
 
-			gwConfig, err := oc.nodeGatewayConfig(node)
+			gwLRPIPs, err := util.ParseNodeUDNGatewayRouterJoinAddrs(udnNode)
+			if err != nil {
+				oc.gatewaysFailed.Store(node.Name, true)
+
+				errs = append(errs, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w",
+					node.Name, oc.GetNetworkName(), err))
+			}
+
+			// gets l3 gw config from node
+			gwConfig, err := oc.nodeGatewayConfig(gwLRPIPs, node)
 			if err != nil {
 				errs = append(errs, err)
 				oc.gatewaysFailed.Store(node.Name, true)
-			} else {
+			}
+
+			if err != nil && len(gwLRPIPs) > 0 {
 				if err := gwManager.syncNodeGateway(
 					node,
 					gwConfig.config,
@@ -520,11 +606,17 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
 					if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-						if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node); err != nil {
-							errs = append(errs, err)
+						macAddr, err = net.ParseMAC(udnNode.Spec.ManagementPortMACAddress)
+						if err != nil {
+							errs = append(errs, fmt.Errorf("failed to parse MAC for network %q on node %q, mac string: %q", oc.GetNetworkName(), node.Name, udnNode.Spec.ManagementPortMACAddress))
 							oc.gatewaysFailed.Store(node.Name, true)
 						} else {
-							oc.gatewaysFailed.Delete(node.Name)
+							if err := oc.addUDNClusterSubnetEgressSNAT(macAddr, gwConfig.hostSubnets, gwManager.gwRouterName, node.Name); err != nil {
+								errs = append(errs, err)
+								oc.gatewaysFailed.Store(node.Name, true)
+							} else {
+								oc.gatewaysFailed.Delete(node.Name)
+							}
 						}
 					}
 				}
@@ -539,15 +631,26 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 			for _, subnet := range oc.Subnets() {
 				hostSubnets = append(hostSubnets, subnet.CIDR)
 			}
-			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
-				errs = append(errs, err)
-				oc.mgmtPortFailed.Store(node.Name, true)
-			} else {
-				oc.mgmtPortFailed.Delete(node.Name)
+			var err error
+			if macAddr == nil {
+				macAddr, err = net.ParseMAC(udnNode.Spec.ManagementPortMACAddress)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to parse MAC for network %q on node %q, mac string: %q", oc.GetNetworkName(), node.Name, udnNode.Spec.ManagementPortMACAddress))
+					oc.mgmtPortFailed.Store(node.Name, true)
+				}
+			}
+			if macAddr != nil {
+				if _, err := oc.syncNodeManagementPort(macAddr, node.Name, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+					errs = append(errs, err)
+					oc.mgmtPortFailed.Store(node.Name, true)
+				} else {
+					oc.mgmtPortFailed.Delete(node.Name)
+				}
 			}
 		}
 	}
 
+	// only uses node name for this path, but localnet relies on full node
 	errs = append(errs, oc.BaseSecondaryLayer2NetworkController.addUpdateLocalNodeEvent(node))
 
 	err := utilerrors.Join(errs...)
@@ -557,12 +660,19 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 	return err
 }
 
-func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIC bool) error {
+func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(udnNode *userdefinednodeapi.UDNNode, node *corev1.Node, syncZoneIC bool) error {
 	var errs []error
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
-			if err := oc.addPortForRemoteNodeGR(node); err != nil {
+			gwLRPIPs, err := util.ParseNodeUDNGatewayRouterJoinAddrs(udnNode)
+			if err != nil {
+				oc.syncZoneICFailed.Store(node.Name, true)
+				errs = append(errs, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w",
+					node.Name, oc.GetNetworkName(), err))
+			}
+
+			if err := oc.addPortForRemoteNodeGR(gwLRPIPs, udnNode, node.Name); err != nil {
 				err = fmt.Errorf("failed to add the remote zone node %s's remote LRP, %w", node.Name, err)
 				errs = append(errs, err)
 				oc.syncZoneICFailed.Store(node.Name, true)
@@ -572,6 +682,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev
 		}
 	}
 
+	// just uses node name
 	errs = append(errs, oc.BaseSecondaryLayer2NetworkController.addUpdateRemoteNodeEvent(node))
 
 	err := utilerrors.Join(errs...)
@@ -581,17 +692,9 @@ func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev
 	return err
 }
 
-func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.Node) error {
-	nodeJoinSubnetIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
-	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// remote node may not have the annotation yet, suppress it
-			return types.NewSuppressedError(err)
-		}
-		return fmt.Errorf("failed to get the node %s join subnet IPs: %w", node.Name, err)
-	}
+func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(nodeJoinSubnetIPs []*net.IPNet, udnNode *userdefinednodeapi.UDNNode, nodeName string) error {
 	if len(nodeJoinSubnetIPs) == 0 {
-		return fmt.Errorf("annotation on the node %s had empty join subnet IPs", node.Name)
+		return fmt.Errorf("annotation on the node %s had empty join subnet IPs", nodeName)
 	}
 
 	remoteGRPortMac := util.IPAddrToHWAddr(nodeJoinSubnetIPs[0].IP)
@@ -601,46 +704,40 @@ func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.
 	}
 
 	remotePortAddr := remoteGRPortMac.String() + " " + strings.Join(remoteGRPortNetworks, " ")
-	klog.V(5).Infof("The remote port addresses for node %s in network %s are %s", node.Name, oc.GetNetworkName(), remotePortAddr)
+	klog.V(5).Infof("The remote port addresses for node %s in network %s are %s", nodeName, oc.GetNetworkName(), remotePortAddr)
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch) + "_" + node.Name,
+		Name:      types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch) + "_" + nodeName,
 		Type:      "remote",
 		Addresses: []string{remotePortAddr},
 	}
 	logicalSwitchPort.ExternalIDs = map[string]string{
 		types.NetworkExternalID:  oc.GetNetworkName(),
 		types.TopologyExternalID: oc.TopologyType(),
-		types.NodeExternalID:     node.Name,
+		types.NodeExternalID:     nodeName,
 	}
-	tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, oc.GetNetworkName())
-	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// remote node may not have the annotation yet, suppress it
-			return types.NewSuppressedError(err)
-		}
-		// Don't consider this node as cluster-manager has not allocated node id yet.
-		return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %w",
-			node.Name, oc.GetNetworkName(), err)
+	tunnelID := udnNode.Spec.Layer2TunnelID
+	if tunnelID == util.NoID {
+		return types.NewSuppressedError(fmt.Errorf("tunnel ID not set for node %s, UDN Node: %s", nodeName, udnNode.Name))
 	}
 	logicalSwitchPort.Options = map[string]string{
 		"requested-tnl-key": strconv.Itoa(tunnelID),
-		"requested-chassis": node.Name,
+		"requested-chassis": nodeName,
 	}
 	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
+	err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return fmt.Errorf("failed to create port %v on logical switch %q: %v", logicalSwitchPort, sw.Name, err)
 	}
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
-	if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
-		return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(nodeName string) error {
+	if err := oc.gatewayManagerForNode(nodeName).Cleanup(); err != nil {
+		return fmt.Errorf("failed to cleanup gateway on node %q: %w", nodeName, err)
 	}
-	oc.gatewayManagers.Delete(node.Name)
-	oc.localZoneNodes.Delete(node.Name)
-	oc.mgmtPortFailed.Delete(node.Name)
+	oc.gatewayManagers.Delete(nodeName)
+	oc.localZoneNodes.Delete(nodeName)
+	oc.mgmtPortFailed.Delete(nodeName)
 	return nil
 }
 
@@ -654,9 +751,9 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *kapi.Node) error {
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(macAddr net.HardwareAddr, localPodSubnets []*net.IPNet, routerName, nodeName string) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, nodeName, macAddr)
 	if err != nil {
 		return err
 	}
@@ -680,7 +777,7 @@ type SecondaryL2GatewayConfig struct {
 	externalIPs []net.IP
 }
 
-func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL2GatewayConfig, error) {
+func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(gwLRPIPs []*net.IPNet, node *corev1.Node) (*SecondaryL2GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
@@ -712,13 +809,6 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
 	for _, subnet := range oc.Subnets() {
 		hostSubnets = append(hostSubnets, subnet.CIDR)
-	}
-
-	// at layer2 the GR LRP should be different per node same we do for layer3
-	// since they should not collide at the distributed switch later on
-	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
-	if err != nil {
-		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
 	}
 
 	// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
