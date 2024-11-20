@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ovnconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	eipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -23,7 +24,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/egressip"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -132,7 +132,9 @@ type Controller struct {
 	// key is EIP name.
 	referencedObjects map[string]*referencedObjects
 
-	networkManager  networkmanager.Interface
+	networkManager    networkmanager.Interface
+	networkReconciler controller.Reconciler
+
 	routeManager    *routemanager.Controller
 	linkManager     *linkmanager.Controller
 	ruleManager     *iprulemanager.Controller
@@ -179,6 +181,17 @@ func NewController(k kube.Interface, wf factory.NodeWatchFactory, networkManager
 		nodeName:        nodeName,
 		v4:              v4,
 		v6:              v6,
+	}
+	if egressip.AdvertisementsEnabled() {
+		config := &controller.ReconcilerConfig{
+			RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+			Reconcile:   c.reconcileNetwork,
+			Threadiness: 1,
+		}
+		c.networkReconciler = controller.NewReconciler(
+			"EgressIP node network controller",
+			config,
+		)
 	}
 	return c, nil
 }
@@ -346,6 +359,14 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			}(workerFn)
 		}
 	}
+
+	if c.networkReconciler != nil {
+		err = controller.Start(c.networkReconciler)
+		if err != nil {
+			return err
+		}
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -354,6 +375,9 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		c.eIPQueue.ShutDown()
 		c.podQueue.ShutDown()
 		c.namespaceQueue.ShutDown()
+		if c.networkReconciler != nil {
+			controller.Stop(c.networkReconciler)
+		}
 	}()
 	return nil
 }
@@ -1563,7 +1587,18 @@ func isVRFSlaveDevice(link netlink.Link) bool {
 	return link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
 }
 
-func (c *Controller) reconcileEgressIPNetwork() error {
+func (c *Controller) ReconcileNetwork(name string, old, new util.NetInfo) error {
+	if egressip.AdvertisementsEnabled() {
+		return nil
+	}
+	reconcile := egressip.ReconcileEgressIPNetworkChangeOnNodes([]string{c.nodeName}, old, new)
+	if reconcile {
+		c.networkReconciler.Reconcile(name)
+	}
+	return nil
+}
+
+func (c *Controller) reconcileNetwork(name string) error {
 	eips, err := c.watchFactory.EgressIPInformer().Lister().List(labels.Everything())
 	if err != nil {
 		return err
@@ -1572,7 +1607,7 @@ func (c *Controller) reconcileEgressIPNetwork() error {
 	isActiveNetworkForAnyNamespace := func(namespaces []*corev1.Namespace) bool {
 		for _, ns := range namespaces {
 			network := c.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
-			if network.GetNetworkName() == types.DefaultNetworkName {
+			if network.GetNetworkName() == name {
 				return true
 			}
 		}

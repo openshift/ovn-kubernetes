@@ -34,7 +34,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/egressip"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
@@ -253,6 +252,8 @@ func newDefaultNetworkControllerCommon(
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 
 	oc.initRetryFramework()
+	oc.eIPC.Init()
+
 	return oc, nil
 }
 
@@ -364,6 +365,7 @@ func (oc *DefaultNetworkController) Stop() {
 	if oc.routeImportManager != nil {
 		_ = oc.routeImportManager.ForgetNetwork(oc, 0)
 	}
+	oc.eIPC.Stop()
 
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
@@ -591,6 +593,11 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 	}
 
+	err = oc.eIPC.Start()
+	if err != nil {
+		return err
+	}
+
 	metrics.RunOVNKubeFeatureDBObjectsMetricsUpdater(oc.nbClient, oc.controllerName, 30*time.Second, oc.stopChan)
 
 	return nil
@@ -621,19 +628,14 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		return fmt.Errorf("failed to reconcile: %w", err)
 	}
 
-	reconcileEgressIP := egressip.ReconcileEgressIPNetworkChangeOnNodes(retryNodeNames, oc.ReconcilableNetInfo, netInfo)
-
-	err = util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
+	err = oc.eIPC.ReconcileNetwork(oc.GetNetworkName(), retryNodeNames, oc.ReconcilableNetInfo, netInfo)
 	if err != nil {
 		return err
 	}
 
-	// TODO this should be asynchrounous
-	if reconcileEgressIP {
-		err = oc.reconcileEgressIPNetwork()
-		if err != nil {
-			return err
-		}
+	err = util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		return err
 	}
 
 	if oc.routeImportManager != nil {

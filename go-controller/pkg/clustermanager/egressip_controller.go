@@ -16,6 +16,7 @@ import (
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -34,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -396,7 +398,8 @@ type egressIPClusterController struct {
 	// namespaceHandler is the namespace events factory handler
 	namespaceHandler *factory.Handler
 
-	networkManager networkmanager.Interface
+	networkManager    networkmanager.Interface
+	networkReconciler controller.Reconciler
 }
 
 func newEgressIPController(
@@ -427,6 +430,19 @@ func newEgressIPController(
 		stopChan:                          make(chan struct{}),
 	}
 	eIPC.initRetryFramework()
+
+	if egressip.AdvertisementsEnabled() {
+		config := controller.ReconcilerConfig{
+			RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+			Reconcile:   eIPC.reconcileNetwork,
+			Threadiness: 1,
+		}
+		eIPC.networkReconciler = controller.NewReconciler(
+			"EgressIP network reconciler",
+			&config,
+		)
+	}
+
 	return eIPC
 }
 
@@ -436,7 +452,7 @@ func (eIPC *egressIPClusterController) initRetryFramework() {
 	if util.PlatformTypeIsEgressIPCloudProvider() {
 		eIPC.retryCloudPrivateIPConfig = eIPC.newRetryFramework(factory.CloudPrivateIPConfigType)
 	}
-	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+	if egressip.AdvertisementsEnabled() {
 		eIPC.retryNamespaces = eIPC.newRetryFramework(factory.NamespaceType)
 	}
 }
@@ -482,6 +498,11 @@ func (eIPC *egressIPClusterController) Start() error {
 		klog.Infof("EgressIP node reachability enabled and using gRPC port %d",
 			config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
 	}
+
+	if eIPC.networkReconciler != nil {
+		return controller.Start(eIPC.networkReconciler)
+	}
+
 	return nil
 }
 
@@ -523,6 +544,9 @@ func (eIPC *egressIPClusterController) Stop() {
 	}
 	if eIPC.retryNamespaces != nil {
 		eIPC.watchFactory.RemoveNamespaceHandler(eIPC.namespaceHandler)
+	}
+	if eIPC.networkReconciler != nil {
+		controller.Stop(eIPC.networkReconciler)
 	}
 }
 
@@ -1248,7 +1272,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 
 	// fetch nodes that can host this EIP by route advertisements
 	assignableNodesByAdvertisements := sets.New[string]()
-	if config.OVNKubernetesFeature.EnableRouteAdvertisements {
+	if egressip.AdvertisementsEnabled() {
 		eip, err := eIPC.watchFactory.GetEgressIP(name)
 		if err != nil {
 			klog.Errorf("Failed to get EgressIP %s: %v", name, err)
@@ -1793,6 +1817,10 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 }
 
 func (eIPC *egressIPClusterController) ReconcileNetwork(name string, old, new util.NetInfo) error {
+	if !egressip.AdvertisementsEnabled() {
+		return nil
+	}
+
 	getNamespacesAndEgressIPNodes := func(net util.NetInfo) (sets.Set[string], sets.Set[string]) {
 		ns, nodes := sets.New[string](), sets.New[string]()
 		if net != nil && (net.IsPrimaryNetwork() || net.IsDefault()) {
@@ -1807,10 +1835,11 @@ func (eIPC *egressIPClusterController) ReconcileNetwork(name string, old, new ut
 	hadNsChanges := !oldNs.Equal(newNs)
 	hadNodeChanges := !oldNodes.Equal(newNodes)
 
-	if !hadNsChanges && !hadNodeChanges {
-		return nil
+	if hadNsChanges || hadNodeChanges {
+		eIPC.networkReconciler.Reconcile(name)
 	}
-	return eIPC.reconcileNetwork(name)
+
+	return nil
 }
 
 func (eIPC *egressIPClusterController) reconcileNetwork(name string) error {
@@ -1861,6 +1890,10 @@ func (eIPC *egressIPClusterController) reconcileNetwork(name string) error {
 }
 
 func (eIPC *egressIPClusterController) reconcileNamespace(name string) error {
+	if !egressip.AdvertisementsEnabled() {
+		return nil
+	}
+
 	eips, err := eIPC.watchFactory.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("failed to get EgressIPs: %w", err)

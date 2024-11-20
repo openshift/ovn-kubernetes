@@ -13,9 +13,9 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
+	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -39,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -1425,8 +1427,10 @@ type egressIPZoneController struct {
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
 	// watchFactory watching k8s objects
-	watchFactory   *factory.WatchFactory
-	networkManager networkmanager.Interface
+	watchFactory      *factory.WatchFactory
+	retryEgressIPs    *ovnretry.RetryFramework
+	networkManager    networkmanager.Interface
+	networkReconciler controller.Reconciler
 	// A cache that maintains all nodes in the cluster,
 	// value will be true if local to this zone and false otherwise
 	nodeZoneState *syncmap.SyncMap[bool]
@@ -1950,7 +1954,7 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 	return podIPs, nil
 }
 
-func (e *egressIPZoneController) ensureOnlyValidNextHops(name string, ops []libovsdb.Operation) ([]libovsdb.Operation, error) {
+func (e *egressIPZoneController) ensureOnlyValidNextHops(name string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
 	// When no nextHopIP is found, This may happen when node object is already deleted.
 	// So compare validNextHopIPs associated with current eIP.Status and Nexthops present
 	// in the LogicalRouterPolicy, then delete nexthop(s) from LogicalRouterPolicy if
@@ -2402,16 +2406,29 @@ func getPodNamespaceAndNameFromKey(podKey string) (string, string) {
 	return parts[0], parts[1]
 }
 
-func (oc *DefaultNetworkController) reconcileEgressIPNetwork() error {
-	eips, err := oc.watchFactory.EgressIPInformer().Lister().List(labels.Everything())
+func (c *egressIPZoneController) ReconcileNetwork(name string, nodes []string, old, new util.NetInfo) error {
+	if !egressip.AdvertisementsEnabled() {
+		return nil
+	}
+
+	reconcileEgressIP := egressip.ReconcileEgressIPNetworkChangeOnNodes(nodes, old, new)
+	if reconcileEgressIP {
+		c.networkReconciler.Reconcile(name)
+	}
+
+	return nil
+}
+
+func (c *egressIPZoneController) reconcileNetwork(name string) error {
+	eips, err := c.watchFactory.EgressIPInformer().Lister().List(labels.Everything())
 	if err != nil {
 		return err
 	}
 
 	isActiveNetworkForAnyNamespace := func(namespaces []*v1.Namespace) bool {
 		for _, ns := range namespaces {
-			network := oc.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
-			if network.GetNetworkName() == oc.GetNetworkName() {
+			network := c.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
+			if network.GetNetworkName() == name {
 				return true
 			}
 		}
@@ -2424,7 +2441,7 @@ func (oc *DefaultNetworkController) reconcileEgressIPNetwork() error {
 		if err != nil {
 			return err
 		}
-		selectedNs, err := oc.watchFactory.NamespaceCoreInformer().Lister().List(selector)
+		selectedNs, err := c.watchFactory.NamespaceCoreInformer().Lister().List(selector)
 		if err != nil {
 			return err
 		}
@@ -2439,13 +2456,41 @@ func (oc *DefaultNetworkController) reconcileEgressIPNetwork() error {
 	}
 
 	for _, eip := range reconcileEIPs {
-		err := oc.retryEgressIPs.AddRetryObjWithAddNoBackoff(eip)
+		err := c.retryEgressIPs.AddRetryObjWithAddNoBackoff(eip)
 		if err != nil {
 			return err
 		}
 	}
 
-	oc.retryEgressIPs.RequestRetryObjs()
+	c.retryEgressIPs.RequestRetryObjs()
 	return nil
 }
 
+func (c *egressIPZoneController) Init() {
+	if !egressip.AdvertisementsEnabled() {
+		return
+	}
+
+	config := &controller.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile:   c.reconcileNetwork,
+		Threadiness: 1,
+	}
+	c.networkReconciler = controller.NewReconciler(
+		"EgressIP zone network controller",
+		config,
+	)
+}
+
+func (c *egressIPZoneController) Start() error {
+	if c.networkReconciler != nil {
+		return controller.Start(c.networkReconciler)
+	}
+	return nil
+}
+
+func (c *egressIPZoneController) Stop() {
+	if c.networkReconciler != nil {
+		controller.Stop(c.networkReconciler)
+	}
+}

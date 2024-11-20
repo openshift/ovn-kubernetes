@@ -171,6 +171,9 @@ func ReconcileEgressIPNetworkChangeOnNodes(nodes []string, old, new util.NetInfo
 	return reconcileEgressIPNetworkChange(nodes, old, new)
 }
 
+func AdvertisementsEnabled() bool {
+	return util.IsRouteAdvertisementsEnabled() && config.OVNKubernetesFeature.EnableEgressIP
+}
 
 func reconcileEgressIPNetworkChange(nodes []string, old, new util.NetInfo) bool {
 	getNamespacesAndEgressIPNodes := func(net util.NetInfo) (sets.Set[string], sets.Set[string]) {
