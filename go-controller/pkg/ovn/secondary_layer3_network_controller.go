@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/labels"
 	"net"
 	"reflect"
 	"sync"
@@ -98,6 +99,9 @@ func (h *secondaryLayer3NetworkControllerEventHandler) IsResourceScheduled(obj i
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
+	case factory.NodeType:
+		//do nothing
+		return nil
 	case factory.UserDefinedNodeType:
 		udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
 		if !ok {
@@ -348,6 +352,9 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
+		case factory.UserDefinedNodeType:
+			syncFunc = h.oc.syncUDNNodes
+
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -557,6 +564,9 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 	if oc.nodeHandler != nil {
 		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
 	}
+	if oc.udnNodeHandler != nil {
+		oc.watchFactory.RemoveUDNNodeHandler(oc.udnNodeHandler)
+	}
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
@@ -638,6 +648,12 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 		return err
 	}
 
+	if config.OVNKubernetesFeature.EnableNetworkSegmentation {
+		if err := oc.WatchUDNNodes(); err != nil {
+			return err
+		}
+	}
+
 	if oc.svcController != nil {
 		startSvc := time.Now()
 		// Services should be started after nodes to prevent LB churn
@@ -671,6 +687,22 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	return nil
+}
+
+// WatchUDNNodes starts the watching of node resource and calls
+// back the appropriate handler logic
+func (oc *SecondaryLayer3NetworkController) WatchUDNNodes() error {
+	if oc.udnNodeHandler != nil {
+		return nil
+	}
+	selector := labels.SelectorFromSet(labels.Set{
+		"networkName": oc.GetNetworkName(),
+	})
+	handler, err := oc.retryUDNNodes.WatchResourceFiltered("", selector)
+	if err == nil {
+		oc.udnNodeHandler = handler
+	}
+	return err
 }
 
 // WatchNodes starts the watching of node resource and calls
@@ -1000,6 +1032,11 @@ func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
 
+	return nil
+}
+
+func (oc *SecondaryLayer3NetworkController) syncUDNNodes(nodes []interface{}) error {
+	//TODO(trozet) implement
 	return nil
 }
 

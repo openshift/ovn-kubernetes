@@ -85,9 +85,9 @@ type OVNMasterClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
-// OVNNetworkControllerManagerClientset
 type OVNKubeControllerClientset struct {
 	KubeClient               kubernetes.Interface
 	ANPClient                anpclientset.Interface
@@ -101,6 +101,7 @@ type OVNKubeControllerClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -139,6 +140,7 @@ var (
 	certUsages = []certificatesv1.KeyUsage{certificatesv1.UsageDigitalSignature, certificatesv1.UsageClientAuth}
 )
 
+// GetMasterClientset is for runMode.clusterManager && runMode.ovnkubeController
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	return &OVNMasterClientset{
 		KubeClient:               cs.KubeClient,
@@ -157,6 +159,10 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	}
 }
 
+// GetOVNKubeControllerClientset for
+// a) ovnkube controller + cluster manager or
+// b) ovnkube controller + node
+// c) all-in-one a.k.a ovnkube controller + cluster-manager + node
 func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClientset {
 	return &OVNKubeControllerClientset{
 		KubeClient:               cs.KubeClient,
@@ -171,9 +177,11 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
+// GetOVNKubeControllerClientset for runMode.ovnkubeController
 func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClientset {
 	return &OVNKubeControllerClientset{
 		KubeClient:               cs.KubeClient,
@@ -188,6 +196,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
