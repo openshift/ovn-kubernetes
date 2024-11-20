@@ -19,16 +19,16 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -83,7 +83,7 @@ type BaseNetworkController struct {
 	controllerName string
 
 	// network information
-	util.NetInfo
+	util.ReconcilableNetInfo
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
@@ -164,8 +164,9 @@ type BaseNetworkController struct {
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
 
-	// nadController used for getting network information for UDNs
-	nadController nad.NADController
+	// networkManager used for getting network information
+	networkManager networkmanager.Interface
+
 	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
 	// might have been already be released on startup
 	releasedPodsBeforeStartup  map[string]sets.Set[string]
@@ -176,6 +177,8 @@ type BaseNetworkController struct {
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 
 	observManager *observability.Manager
+
+	routeImportManager routeimport.Manager
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -189,6 +192,10 @@ type BaseSecondaryNetworkController struct {
 	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
 	multiNetPolicyHandler *factory.Handler
+}
+
+func (oc *BaseSecondaryNetworkController) Reconcile(netInfo util.NetInfo) error {
+	return util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
 }
 
 func getNetworkControllerName(netName string) string {
@@ -367,7 +374,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		Name: switchName,
 	}
 
-	logicalSwitch.ExternalIDs = util.GenerateExternalIDsForSwitchOrRouter(bnc.NetInfo)
+	logicalSwitch.ExternalIDs = util.GenerateExternalIDsForSwitchOrRouter(bnc.GetNetInfo())
 	var v4Gateway, v6Gateway net.IP
 	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
@@ -654,8 +661,8 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 			}
 			if bnc.IsSecondary() {
 				lrsr.ExternalIDs = map[string]string{
-					ovntypes.NetworkExternalID:  bnc.GetNetworkName(),
-					ovntypes.TopologyExternalID: bnc.TopologyType(),
+					types.NetworkExternalID:  bnc.GetNetworkName(),
+					types.TopologyExternalID: bnc.TopologyType(),
 				}
 			}
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
@@ -741,14 +748,14 @@ func (bnc *BaseNetworkController) recordPodErrorEvent(pod *kapi.Pod, podErr erro
 }
 
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
-	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
+	return util.DoesNetworkRequireIPAM(bnc.GetNetInfo())
 }
 
 func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 	if !bnc.IsSecondary() {
 		return []string{types.DefaultNetworkName}
 	}
-	podNadNames, _ := util.PodNadNames(pod, bnc.NetInfo)
+	podNadNames, _ := util.PodNadNames(pod, bnc.GetNetInfo())
 	return podNadNames
 }
 
@@ -804,11 +811,6 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 	return util.GetNodeZone(node) == bnc.zone
 }
 
-// and is a wrapper around GetActiveNetworkForNamespace
-func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	return bnc.nadController.GetActiveNetworkForNamespace(namespace)
-}
-
 // GetNetworkRole returns the role of this controller's
 // network for the given pod
 // Expected values are:
@@ -842,7 +844,7 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 		}
 		return types.NetworkRoleSecondary, nil
 	}
-	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
+	activeNetwork, err := bnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
 		if util.IsUnprocessedActiveNetworkError(err) {
 			bnc.recordPodErrorEvent(pod, err)
@@ -862,7 +864,7 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) 
 }
 
 func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
-	return config.OVNKubernetesFeature.EnableInterconnect && bnc.NetInfo.TopologyType() == types.Layer2Topology
+	return config.OVNKubernetesFeature.EnableInterconnect && bnc.TopologyType() == types.Layer2Topology
 }
 
 func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool, netName string) bool {
@@ -878,7 +880,7 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 	}
 
 	// NodeGatewayRouterLRPAddrsAnnotationChanged would not affect local, nor localnet secondary network
-	if !newNodeIsLocalZone && bnc.NetInfo.TopologyType() != types.LocalnetTopology && joinCIDRChanged(oldNode, newNode, netName) {
+	if !newNodeIsLocalZone && bnc.TopologyType() != types.LocalnetTopology && joinCIDRChanged(oldNode, newNode, netName) {
 		return true
 	}
 
@@ -946,7 +948,7 @@ func (bnc *BaseNetworkController) AddResourceCommon(objType reflect.Type, obj in
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		netinfo, err := bnc.getActiveNetworkForNamespace(np.Namespace)
+		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(np.Namespace)
 		if err != nil {
 			return fmt.Errorf("could not get active network for namespace %s: %v", np.Namespace, err)
 		}
@@ -971,7 +973,7 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
-		netinfo, err := bnc.getActiveNetworkForNamespace(knp.Namespace)
+		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(knp.Namespace)
 		if err != nil {
 			return fmt.Errorf("could not get active network for namespace %s: %v", knp.Namespace, err)
 		}
@@ -988,7 +990,7 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo) (
 	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID, routerLoadBalancerGroupUUID string, err error) {
 
-	loadBalancerGroupName := netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterLBGroupName)
+	loadBalancerGroupName := netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)
 	clusterLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, nil, &clusterLBGroup)
 	if err != nil {
@@ -996,7 +998,7 @@ func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo
 		return
 	}
 
-	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterSwitchLBGroupName)
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterSwitchLBGroupName)
 	clusterSwitchLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
 	ops, err = libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, ops, &clusterSwitchLBGroup)
 	if err != nil {
@@ -1004,7 +1006,7 @@ func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo
 		return
 	}
 
-	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterRouterLBGroupName)
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterRouterLBGroupName)
 	clusterRouterLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
 	ops, err = libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, ops, &clusterRouterLBGroup)
 	if err != nil {

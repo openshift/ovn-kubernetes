@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/testing"
@@ -179,7 +180,7 @@ var _ = Describe("User Defined Network Controller", func() {
 
 				mutatedNAD := expectedNAD.DeepCopy()
 				mutatedNAD.Spec.Config = "MUTATED"
-				mutatedNAD, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Update(context.Background(), mutatedNAD, metav1.UpdateOptions{})
+				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Update(context.Background(), mutatedNAD, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(func() *netv1.NetworkAttachmentDefinition {
@@ -336,6 +337,11 @@ var _ = Describe("User Defined Network Controller", func() {
 				pod2, err = cs.KubeClient.CoreV1().Pods(udn.Namespace).Create(context.Background(), pod2, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
+				// Wait for pods to be noticed
+				Eventually(func() ([]*corev1.Pod, error) {
+					return f.PodCoreInformer().Lister().Pods(udn.Namespace).List(labels.Everything())
+				}).Should(HaveLen(2))
+
 				By("mark UDN for deletion")
 				udn.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
 				udn, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Update(context.Background(), udn, metav1.UpdateOptions{})
@@ -358,7 +364,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return udn.Finalizers
 				}).Should(BeEmpty(), "should remove finalizer on UDN following deletion and not being used")
-				nad, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
+				_, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
 				Expect(err).To(HaveOccurred())
 				Expect(kerrors.IsNotFound(err)).To(BeTrue())
 			})
@@ -487,7 +493,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					newNsNames := []string{"black", "gray"}
 					for _, nsName := range newNsNames {
 						ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName, Labels: newNsLabel}}
-						ns, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
+						_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
 						Expect(err).NotTo(HaveOccurred())
 					}
 
@@ -496,6 +502,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					cudn.Spec.NamespaceSelector.MatchExpressions[0].Values = append(cudn.Spec.NamespaceSelector.MatchExpressions[0].Values, newNsLabelValue)
 					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudn, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
 					Expect(cudn.Spec.NamespaceSelector.MatchExpressions).To(Equal([]metav1.LabelSelectorRequirement{{
 						Key:      testLabelKey,
 						Operator: metav1.LabelSelectorOpIn,
@@ -527,6 +534,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					cudn.Spec.NamespaceSelector.MatchExpressions[0].Values = []string{""}
 					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudn, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
 					Expect(cudn.Spec.NamespaceSelector.MatchExpressions).To(Equal([]metav1.LabelSelectorRequirement{{
 						Key: testLabelKey, Operator: metav1.LabelSelectorOpIn, Values: []string{""},
 					}}))
@@ -553,7 +561,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					var testPods []corev1.Pod
 					for _, nsName := range connectedNsNames {
 						pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-							Name:        fmt.Sprintf("pod-0"),
+							Name:        "pod-0",
 							Namespace:   nsName,
 							Annotations: map[string]string{util.OvnPodAnnotationName: `{"default": {"role":"primary"}, "` + nsName + `/` + cudnName + `": {"role": "secondary"}}`}},
 						}
@@ -619,7 +627,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					for _, nsName := range newNsNames {
 						ns := testNamespace(nsName)
 						ns.Labels = map[string]string{testLabelKey: testLabelValue}
-						ns, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
+						_, err := cs.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
 						Expect(err).NotTo(HaveOccurred())
 					}
 
@@ -672,7 +680,7 @@ var _ = Describe("User Defined Network Controller", func() {
 
 					By("remove label from few connected namespaces")
 					for _, nsName := range staleNADNsNames {
-						p := fmt.Sprintf(`[{"op": "replace", "path": "./metadata/labels", "value": {}}]`)
+						p := `[{"op": "replace", "path": "./metadata/labels", "value": {}}]`
 						ns, err := cs.KubeClient.CoreV1().Namespaces().Patch(context.Background(), nsName, types.JSONPatchType, []byte(p), metav1.PatchOptions{})
 						Expect(err).NotTo(HaveOccurred())
 						Expect(ns.Labels).To(BeEmpty())
@@ -785,7 +793,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			_, err := c.syncUserDefinedNetwork(udn)
 			Expect(err).ToNot(HaveOccurred())
 
-			nad, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
+			_, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
 			Expect(err).To(HaveOccurred())
 			Expect(kerrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -856,7 +864,7 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			Expect(udn.Finalizers).To(BeEmpty())
 
-			nad, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
+			_, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), nad.Name, metav1.GetOptions{})
 			Expect(err).To(HaveOccurred())
 			Expect(kerrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -1250,6 +1258,8 @@ func assertConditionReportNetworkInUse(conditions []metav1.Condition, messageNAD
 }
 
 func assertUserDefinedNetworkStatus(udnClient udnclient.Interface, udn *udnv1.UserDefinedNetwork, expectedStatus *udnv1.UserDefinedNetworkStatus) {
+	GinkgoHelper()
+
 	actualUDN, err := udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -1264,6 +1274,8 @@ func assertFinalizersPresent(
 	udn *udnv1.UserDefinedNetwork,
 	pods ...*corev1.Pod,
 ) {
+	GinkgoHelper()
+
 	var podNames []string
 	for _, pod := range pods {
 		podNames = append(podNames, pod.Namespace+"/"+pod.Name)
