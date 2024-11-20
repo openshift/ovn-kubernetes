@@ -304,10 +304,14 @@ type SecondaryLayer3NetworkController struct {
 
 	// Controller in charge of services
 	svcController *svccontroller.Controller
+
+	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
+	eIPController *EgressIPController
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer3NetworkController, error) {
+func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController,
+	eIPController *EgressIPController, portCache *PortCache) (*SecondaryLayer3NetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -342,7 +346,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
-				logicalPortCache:            newPortCache(stopChan),
+				logicalPortCache:            portCache,
 				namespaces:                  make(map[string]*namespaceInfo),
 				namespacesMutex:             sync.Mutex{},
 				addressSetFactory:           addressSetFactory,
@@ -365,6 +369,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 		gatewayManagers:             sync.Map{},
 		svcController:               svcController,
+		eIPController:               eIPController,
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -709,9 +714,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 					gwConfig.hostSubnets,
 					gwConfig.hostAddrs,
 					gwConfig.clusterSubnets,
-					gwConfig.gwLRPIPs,
+					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
 					oc.SCTPSupport,
-					oc.ovnClusterLRPToJoinIfAddrs,
+					oc.ovnClusterLRPToJoinIfAddrs, // the .1 of this controller's global joinSubnet
 					gwConfig.externalIPs,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
@@ -742,6 +747,15 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)
+		}
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if err = oc.eIPController.ensureL3ClusterRouterPoliciesForNetwork(oc.NetInfo); err != nil {
+			errs = append(errs, fmt.Errorf("failed to add network %s to EgressIP controller: %v", oc.NetInfo.GetNetworkName(), err))
+		}
+		if err = oc.eIPController.ensureL3SwitchPoliciesForNode(oc.NetInfo, node.Name); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies: %v", err))
 		}
 	}
 
@@ -922,7 +936,7 @@ type SecondaryL3GatewayConfig struct {
 	config         *util.L3GatewayConfig
 	hostSubnets    []*net.IPNet
 	clusterSubnets []*net.IPNet
-	gwLRPIPs       []*net.IPNet
+	gwLRPJoinIPs   []*net.IPNet
 	hostAddrs      []string
 	externalIPs    []net.IP
 }
@@ -972,7 +986,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		return nil, fmt.Errorf("failed to get node %q subnet annotation for network %q: %v", node.Name, oc.GetNetworkName(), err)
 	}
 
-	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
 		return nil, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w", node.Name, networkName, err)
 	}
@@ -984,7 +998,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		config:         l3GatewayConfig,
 		hostSubnets:    hostSubnets,
 		clusterSubnets: clusterSubnets,
-		gwLRPIPs:       gwLRPIPs,
+		gwLRPJoinIPs:   gwLRPJoinIPs,
 		hostAddrs:      hostAddrs,
 		externalIPs:    externalIPs,
 	}, nil
@@ -1052,9 +1066,9 @@ func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.Wait
 	go func() {
 		defer wg.Done()
 		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the
-		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
+		// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
+		// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, false)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
