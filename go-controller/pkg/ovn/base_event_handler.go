@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"reflect"
 
 	kapi "k8s.io/api/core/v1"
@@ -26,6 +27,7 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 	switch objType {
 	case factory.PodType,
 		factory.NodeType,
+		factory.UserDefinedNodeType,
 		factory.EgressIPType,
 		factory.EgressIPNamespaceType,
 		factory.EgressIPPodType,
@@ -72,6 +74,19 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 			klog.Errorf(err.Error())
 		}
 		return !shouldUpdate, nil
+
+	case factory.UserDefinedNodeType:
+		// TODO(trozet): double check this later
+		udnNode1, ok := obj1.(*userdefinednodeapi.UDNNode)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj1 of type %T to *userdefinednodeapi.UDNNode", obj1)
+		}
+		udnNode2, ok := obj2.(*userdefinednodeapi.UDNNode)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj2 of type %T to *userdefinednodeapi.UDNNode", obj2)
+		}
+
+		return reflect.DeepEqual(udnNode1.Spec, udnNode2.Spec), nil
 
 	case factory.PodType,
 		factory.EgressIPPodType:
@@ -166,6 +181,9 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 
 	case factory.IPAMClaimsType:
 		obj, err = watchFactory.GetIPAMClaim(namespace, name)
+
+	case factory.UserDefinedNodeType:
+		obj, err = watchFactory.GetUDNNode(name)
 
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",

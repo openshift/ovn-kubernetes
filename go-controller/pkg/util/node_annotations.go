@@ -1515,3 +1515,16 @@ func GetNetworkID(nodes []*corev1.Node, nInfo BasicNetInfo) (int, error) {
 	}
 	return InvalidID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
 }
+
+func GetUDNNetworkID(udnNodes []*userdefinednodeapi.UDNNode, networkName string) (int, error) {
+	for _, udnNode := range udnNodes {
+		if udnNode.Spec.NetworkID != nil && *udnNode.Spec.NetworkID > 0 {
+			return *udnNode.Spec.NetworkID, nil
+		}
+	}
+	return InvalidID, fmt.Errorf("missing network id for network '%s'", networkName)
+}
+
+func GetUDNNodeFormat(nodeName, networkName string) string {
+	return fmt.Sprintf("%s-%s", networkName, nodeName)
+}

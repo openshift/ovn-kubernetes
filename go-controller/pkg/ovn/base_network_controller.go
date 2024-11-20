@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"net"
 	"reflect"
 	"sync"
@@ -109,6 +110,8 @@ type BaseNetworkController struct {
 	namespaceHandler *factory.Handler
 	// ipam claims events factory Handler
 	ipamClaimsHandler *factory.Handler
+	// udnNodeHandler
+	udnNodeHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
@@ -698,6 +701,22 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(macAddress net.Hardware
 	}
 
 	return mgmtPortIPs, nil
+}
+
+// WatchUDNNodes starts the watching of node resource and calls
+// back the appropriate handler logic
+func (oc *BaseNetworkController) WatchUDNNodes() error {
+	if oc.udnNodeHandler != nil {
+		return nil
+	}
+	selector := labels.SelectorFromSet(labels.Set{
+		"networkName": oc.GetNetworkName(),
+	})
+	handler, err := oc.retryUDNNodes.WatchResourceFiltered("", selector)
+	if err == nil {
+		oc.udnNodeHandler = handler
+	}
+	return err
 }
 
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic

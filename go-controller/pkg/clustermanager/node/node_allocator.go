@@ -266,6 +266,10 @@ func (na *NodeAllocator) syncUDNNodeNetworkAnnotations(node *corev1.Node) error 
 		spec.NodeSubnets = nodeSubnets
 	}
 
+	if na.networkID > util.NoID {
+		spec.NetworkID = &na.networkID
+	}
+
 	x := &udnnodev1.UDNNode{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: udnNodeName,

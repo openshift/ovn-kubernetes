@@ -24,6 +24,7 @@ import (
 // UDNNodeSpecApplyConfiguration represents a declarative configuration of the UDNNodeSpec type for use
 // with apply.
 type UDNNodeSpecApplyConfiguration struct {
+	NetworkID                *int               `json:"network-id,omitempty"`
 	NodeSubnets              *v1.DualStackCIDRs `json:"nodeSubnets,omitempty"`
 	JoinSubnets              *v1.DualStackCIDRs `json:"joinSubnets,omitempty"`
 	ManagementPortMACAddress *string            `json:"managementPortMACAddress,omitempty"`
@@ -34,6 +35,14 @@ type UDNNodeSpecApplyConfiguration struct {
 // apply.
 func UDNNodeSpec() *UDNNodeSpecApplyConfiguration {
 	return &UDNNodeSpecApplyConfiguration{}
+}
+
+// WithNetworkID sets the NetworkID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the NetworkID field is set to the value of the last call.
+func (b *UDNNodeSpecApplyConfiguration) WithNetworkID(value int) *UDNNodeSpecApplyConfiguration {
+	b.NetworkID = &value
+	return b
 }
 
 // WithNodeSubnets sets the NodeSubnets field in the declarative configuration to the given value

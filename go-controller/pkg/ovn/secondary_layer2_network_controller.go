@@ -292,6 +292,9 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 		case factory.IPAMClaimsType:
 			syncFunc = h.oc.syncIPAMClaims
 
+		case factory.UserDefinedNodeType:
+			syncFunc = h.oc.syncUDNNodes
+
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}

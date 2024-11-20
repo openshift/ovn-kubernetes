@@ -42,6 +42,7 @@ type UDNNode struct {
 
 // UDNNodeSpec defines the desired state of UDNNode
 type UDNNodeSpec struct {
+	NetworkID *int `json:"network-id,omitempty"`
 	// NodeSubnets are used for the pod network across the cluster.
 	//
 	// Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.

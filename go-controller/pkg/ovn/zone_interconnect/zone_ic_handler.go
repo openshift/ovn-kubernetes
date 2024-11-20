@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"net"
 	"strconv"
 	"time"
@@ -180,20 +181,33 @@ func (zic *ZoneInterconnectHandler) ensureTransitSwitch(nodes []*corev1.Node) er
 	}
 	start := time.Now()
 
-	// first try to get the network ID from the current state of the nodes
-	networkID, err := zic.getNetworkIdFromNodes(nodes)
+	var networkID int
+	var err error
+	maxTimeout := 2 * time.Minute
+	if zic.IsDefault() {
+		// first try to get the network ID from the current state of the nodes
+		networkID, err = zic.getNetworkIdFromNodes(nodes)
+		// if not set yet, let's retry for a bit
+		if util.IsAnnotationNotSetError(err) {
+			err = wait.PollUntilContextTimeout(context.Background(), 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+				var err error
+				networkID, err = zic.getNetworkId()
+				if util.IsAnnotationNotSetError(err) {
+					return false, nil
+				}
+				if err != nil {
+					return false, err
+				}
 
-	// if not set yet, let's retry for a bit
-	if util.IsAnnotationNotSetError(err) {
-		maxTimeout := 2 * time.Minute
+				return true, nil
+			})
+		}
+	} else {
 		err = wait.PollUntilContextTimeout(context.Background(), 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
 			var err error
-			networkID, err = zic.getNetworkId()
-			if util.IsAnnotationNotSetError(err) {
+			networkID, err = zic.getNetworkIDFromUDNNodes()
+			if err != nil || networkID <= util.NoID {
 				return false, nil
-			}
-			if err != nil {
-				return false, err
 			}
 
 			return true, nil
@@ -719,6 +733,31 @@ func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []*corev1.Node) 
 		}
 		if networkId != util.InvalidID {
 			zic.networkId = networkId
+			return zic.networkId, nil
+		}
+	}
+
+	return util.InvalidID, fmt.Errorf("could not find network ID: %w", err)
+}
+
+func (zic *ZoneInterconnectHandler) getNetworkIDFromUDNNodes() (int, error) {
+	nodes, err := zic.watchFactory.GetUDNNodes(zic.GetNetworkName())
+	if err != nil {
+		return util.InvalidID, err
+	}
+	return zic.updateNetworkIDFromUDNNodes(nodes)
+}
+
+// getNetworkIDFromUDNNodes returns the cached network ID or looks it up in any of the provided nodes
+func (zic *ZoneInterconnectHandler) updateNetworkIDFromUDNNodes(nodes []*userdefinednodeapi.UDNNode) (int, error) {
+	if zic.networkId != util.InvalidID {
+		return zic.networkId, nil
+	}
+
+	var err error
+	for _, i := range nodes {
+		if i.Spec.NetworkID != nil && *i.Spec.NetworkID > util.NoID {
+			zic.networkId = *i.Spec.NetworkID
 			return zic.networkId, nil
 		}
 	}

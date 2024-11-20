@@ -3,6 +3,8 @@ package networkControllerManager
 import (
 	"context"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	kapi "k8s.io/api/core/v1"
 	"strings"
 	"sync"
 	"time"
@@ -81,13 +83,28 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ..
 }
 
 func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
-	nodes, err := ncm.watchFactory.GetNodes()
-	if err != nil {
-		return util.InvalidID, err
-	}
-	networkID, err := util.GetNetworkID(nodes, network)
-	if err != nil {
-		return util.InvalidID, err
+	var err error
+	var networkID int
+	if network.IsDefault() {
+		var nodes []*kapi.Node
+		nodes, err = ncm.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidID, err
+		}
+		networkID, err = util.GetNetworkID(nodes, network)
+		if err != nil {
+			return util.InvalidID, err
+		}
+	} else {
+		var udnNodes []*userdefinednodeapi.UDNNode
+		udnNodes, err = ncm.watchFactory.GetUDNNodes(network.GetNetworkName())
+		if err != nil {
+			return util.InvalidID, err
+		}
+		networkID, err = util.GetUDNNetworkID(udnNodes, network.GetNetworkName())
+		if err != nil || networkID <= util.NoID {
+			return util.InvalidID, err
+		}
 	}
 	return networkID, nil
 }
