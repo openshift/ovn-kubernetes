@@ -205,6 +205,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		OCPNetworkClient:         cs.OCPNetworkClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
@@ -216,6 +217,7 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
@@ -497,6 +499,8 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	userDefinedNodeClientSet, err := userdefinednodeclientset.NewForConfig(kconfig)
+
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		ANPClient:                anpClientset,
@@ -511,6 +515,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		AdminPolicyRouteClient:   adminPolicyBasedRouteClientset,
 		IPAMClaimsClient:         ipamClaimsClientset,
 		UserDefinedNetworkClient: userDefinedNetworkClientSet,
+		UserDefinedNodeClient:    userDefinedNodeClientSet,
 	}, nil
 }
 

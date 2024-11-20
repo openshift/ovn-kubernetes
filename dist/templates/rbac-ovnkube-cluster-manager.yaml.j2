@@ -86,6 +86,10 @@ rules:
           - clusteruserdefinednetworks/status
           - clusteruserdefinednetworks/finalizers
       verbs: [ "patch", "update" ]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+           - udnnodes
+      verbs: [ "create", "delete", "get", "list", "watch", "update", "patch"]
     - apiGroups: [""]
       resources:
           - events
