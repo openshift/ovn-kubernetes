@@ -184,6 +184,10 @@ rules:
           - userdefinednetworks
           - clusteruserdefinednetworks
       verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - udnnodes
+      verbs: [ "create", "delete", "get", "list", "watch", "update", "patch"]
     {% if ovn_enable_ovnkube_identity == "true" -%}
     - apiGroups: ["certificates.k8s.io"]
       resources:

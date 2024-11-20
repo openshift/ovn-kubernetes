@@ -71,6 +71,7 @@ import (
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 
 	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	userdefinednodescheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/clientset/versioned/scheme"
 	userdefinednodeinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions"
 	userdefinednodeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions/udnnode/v1"
 	userdefinednetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
@@ -775,6 +776,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
+	if err := userdefinednodeapi.AddToScheme(userdefinednodescheme.Scheme); err != nil {
+		return nil, err
+	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -899,7 +903,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, wf.udnNodeFactory.K8s().V1().UDNNodes().Informer())
+		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, udnNodeInformer)
 		if err != nil {
 			return nil, err
 		}

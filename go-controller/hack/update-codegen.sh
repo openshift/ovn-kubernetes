@@ -108,3 +108,5 @@ echo "Copying userdefinednetworks CRD"
 cp _output/crds/k8s.ovn.org_userdefinednetworks.yaml ../dist/templates/k8s.ovn.org_userdefinednetworks.yaml.j2
 echo "Copying clusteruserdefinednetworks CRD"
 cp _output/crds/k8s.ovn.org_clusteruserdefinednetworks.yaml ../dist/templates/k8s.ovn.org_clusteruserdefinednetworks.yaml.j2
+echo "Copying userdefinednodes CRD"
+cp _output/crds/k8s.ovn.org_udnnodes.yaml ../dist/templates/k8s.ovn.org_udnnodes.yaml.j2
