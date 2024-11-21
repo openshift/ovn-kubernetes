@@ -608,7 +608,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(udnNode *use
 				oc.gatewaysFailed.Store(node.Name, true)
 			}
 
-			if err != nil && len(gwLRPIPs) > 0 {
+			if err == nil && len(gwLRPIPs) > 0 {
 				if err := gwManager.syncNodeGateway(
 					node,
 					gwConfig.config,

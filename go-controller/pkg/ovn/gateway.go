@@ -357,21 +357,33 @@ func (gw *GatewayManager) GatewayInit(
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
 		if util.IsNetworkSegmentationSupportEnabled() && gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
-			node, err := gw.watchFactory.GetNode(nodeName)
-			if err != nil {
-				return fmt.Errorf("failed to fetch node %s from watch factory %w", node, err)
-			}
-			tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, gw.netInfo.GetNetworkName())
-			if err != nil {
-				if util.IsAnnotationNotSetError(err) {
-					// remote node may not have the annotation yet, suppress it
-					return types.NewSuppressedError(err)
+			if gw.netInfo.IsDefault() {
+				node, err := gw.watchFactory.GetNode(nodeName)
+				if err != nil {
+					return fmt.Errorf("failed to fetch node %s from watch factory %w", node, err)
 				}
-				// Don't consider this node as cluster-manager has not allocated node id yet.
-				return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %w",
-					nodeName, gw.netInfo.GetNetworkName(), err)
+				tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, gw.netInfo.GetNetworkName())
+				if err != nil {
+					if util.IsAnnotationNotSetError(err) {
+						// remote node may not have the annotation yet, suppress it
+						return types.NewSuppressedError(err)
+					}
+					// Don't consider this node as cluster-manager has not allocated node id yet.
+					return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %w",
+						nodeName, gw.netInfo.GetNetworkName(), err)
+				}
+				logicalSwitchPort.Options["requested-tnl-key"] = strconv.Itoa(tunnelID)
+			} else {
+				udnNode, err := gw.watchFactory.GetUDNNodeByLabels(nodeName, gw.netInfo.GetNetworkName())
+				if err != nil {
+					return fmt.Errorf("failed to fetch udn node %s/%s from watch factory %w", nodeName, gw.netInfo.GetNetworkName(), err)
+				}
+				if udnNode.Spec.Layer2TunnelID == nil {
+					return fmt.Errorf("layer 2 tunnel id is not populated in UDN Node: %s for node/network %s/%s",
+						udnNode.Name, nodeName, gw.netInfo.GetNetworkName())
+				}
+				logicalSwitchPort.Options["requested-tnl-key"] = strconv.Itoa(*udnNode.Spec.Layer2TunnelID)
 			}
-			logicalSwitchPort.Options["requested-tnl-key"] = strconv.Itoa(tunnelID)
 		}
 	}
 	sw := nbdb.LogicalSwitch{Name: gw.joinSwitchName}
