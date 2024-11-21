@@ -426,9 +426,11 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 			cnci.watchFactory.ServiceCoreInformer(),
 			cnci.watchFactory.EndpointSliceCoreInformer(),
 			cnci.watchFactory.NodeCoreInformer(),
+			cnci.watchFactory.UserDefinedNodeInformer(),
 			nadController,
 			cnci.recorder,
 			netInfo,
+			cnci.watchFactory,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
