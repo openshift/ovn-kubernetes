@@ -167,7 +167,7 @@ func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 }
 
 func ParseNodeUDNHostSubnet(udnNode *userdefinednodeapi.UDNNode) ([]*net.IPNet, error) {
-	nets := []*net.IPNet{}
+	var nets []*net.IPNet
 	for _, subnet := range udnNode.Spec.NodeSubnets {
 		_, ipnet, err := net.ParseCIDR(string(subnet))
 		if err != nil {

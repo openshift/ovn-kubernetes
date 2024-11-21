@@ -12,6 +12,7 @@ import (
 	"golang.org/x/time/rate"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	userdefinednodeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions/udnnode/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -63,9 +64,11 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
+	udnNodeInformer userdefinednodeinformer.UDNNodeInformer,
 	nadController networkAttachDefController.NADController,
 	recorder record.EventRecorder,
 	netInfo util.NetInfo,
+	watchFactory *factory.WatchFactory,
 ) (*Controller, error) {
 	klog.V(4).Infof("Creating services controller for network=%s", netInfo.GetNetworkName())
 	c := &Controller{
@@ -85,11 +88,14 @@ func NewController(client clientset.Interface,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
 		nadController:         nadController,
 
-		eventRecorder: recorder,
-		repair:        newRepair(serviceInformer.Lister(), nbClient),
-		nodeInformer:  nodeInformer,
-		nodesSynced:   nodeInformer.Informer().HasSynced,
-		netInfo:       netInfo,
+		eventRecorder:   recorder,
+		repair:          newRepair(serviceInformer.Lister(), nbClient),
+		nodeInformer:    nodeInformer,
+		nodesSynced:     nodeInformer.Informer().HasSynced,
+		udnNodeInformer: udnNodeInformer,
+		udnNodesSynced:  udnNodeInformer.Informer().HasSynced,
+
+		netInfo: netInfo,
 	}
 	zone, err := libovsdbutil.GetNBZone(c.nbClient)
 	if err != nil {
@@ -98,7 +104,7 @@ func NewController(client clientset.Interface,
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
 	// Need to re-sync all services when a node gains its switch or GWR
-	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync, netInfo)
+	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync, netInfo, watchFactory)
 	return c, nil
 }
 
@@ -119,7 +125,8 @@ type Controller struct {
 
 	nadController networkAttachDefController.NADController
 
-	nodesSynced cache.InformerSynced
+	nodesSynced    cache.InformerSynced
+	udnNodesSynced cache.InformerSynced
 
 	// Services that need to be updated. A channel is inappropriate here,
 	// because it allows services with lots of pods to be serviced much
@@ -134,7 +141,8 @@ type Controller struct {
 	// repair contains a controller that keeps in sync OVN and Kubernetes services
 	repair *repair
 
-	nodeInformer coreinformers.NodeInformer
+	nodeInformer    coreinformers.NodeInformer
+	udnNodeInformer userdefinednodeinformer.UDNNodeInformer
 	// nodeTracker
 	nodeTracker *nodeTracker
 
@@ -181,7 +189,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	klog.Infof("Starting controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
 	defer klog.Infof("Shutting down controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
 
-	nodeHandler, err := c.nodeTracker.Start(c.nodeInformer)
+	nodeHandler, udnNodeHandler, err := c.nodeTracker.Start(c.nodeInformer, c.udnNodeInformer)
 	if err != nil {
 		return err
 	}
@@ -190,7 +198,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 	c.startupDoneLock.Lock()
 	c.startupDone = false
 	c.startupDoneLock.Unlock()
-	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, types.HandlerSyncTimeout, nodeHandler.HasSynced) {
+	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, types.HandlerSyncTimeout, nodeHandler.HasSynced, udnNodeHandler.HasSynced) {
 		return fmt.Errorf("error syncing node tracker handler")
 	}
 
