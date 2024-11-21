@@ -1436,6 +1436,41 @@ type egressIPZoneController struct {
 	nodeZoneState *syncmap.SyncMap[bool]
 }
 
+func newEgressIPZoneController(
+	nbClient libovsdbclient.Client,
+	watchFactory *factory.WatchFactory,
+	networkManager networkmanager.Interface,
+	retryEgressIPs *ovnretry.RetryFramework,
+) *egressIPZoneController {
+	c := &egressIPZoneController{
+		NetInfo:            &util.DefaultNetInfo{},
+		nodeUpdateMutex:    &sync.Mutex{},
+		podAssignmentMutex: &sync.Mutex{},
+		podAssignment:      make(map[string]*podAssignmentState),
+		nodeZoneState:      syncmap.NewSyncMap[bool](),
+		nbClient:           nbClient,
+		watchFactory:       watchFactory,
+		networkManager:     networkManager,
+		retryEgressIPs:     retryEgressIPs,
+	}
+
+	if !egressip.AdvertisementsEnabled() {
+		return c
+	}
+
+	config := &controller.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile:   c.reconcileNetwork,
+		Threadiness: 1,
+	}
+	c.networkReconciler = controller.NewReconciler(
+		"EgressIP zone network controller",
+		config,
+	)
+
+	return c
+}
+
 // addStandByEgressIPAssignment does the same setup that is done by addPodEgressIPAssignments but for
 // the standby egressIP. This must always be called with a lock on podAssignmentState mutex
 // This is special case function called only from deleteEgressIPAssignments, don't use this for normal setup
@@ -2465,22 +2500,6 @@ func (c *egressIPZoneController) reconcileNetwork(name string) error {
 
 	c.retryEgressIPs.RequestRetryObjs()
 	return nil
-}
-
-func (c *egressIPZoneController) Init() {
-	if !egressip.AdvertisementsEnabled() {
-		return
-	}
-
-	config := &controller.ReconcilerConfig{
-		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:   c.reconcileNetwork,
-		Threadiness: 1,
-	}
-	c.networkReconciler = controller.NewReconciler(
-		"EgressIP zone network controller",
-		config,
-	)
 }
 
 func (c *egressIPZoneController) Start() error {

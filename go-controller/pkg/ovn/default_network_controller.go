@@ -94,7 +94,7 @@ type DefaultNetworkController struct {
 	svcController *svccontroller.Controller
 
 	// Controller used for programming OVN for egress IP
-	eIPC egressIPZoneController
+	eIPC *egressIPZoneController
 
 	// Controller used to handle egress services
 	egressSvcController *egresssvc.Controller
@@ -225,17 +225,7 @@ func newDefaultNetworkControllerCommon(
 			networkManager:              networkManager,
 			routeImportManager:          routeImportManager,
 		},
-		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
-		eIPC: egressIPZoneController{
-			NetInfo:            &util.DefaultNetInfo{},
-			nodeUpdateMutex:    &sync.Mutex{},
-			podAssignmentMutex: &sync.Mutex{},
-			podAssignment:      make(map[string]*podAssignmentState),
-			nbClient:           cnci.nbClient,
-			watchFactory:       cnci.watchFactory,
-			networkManager:     networkManager,
-			nodeZoneState:      syncmap.NewSyncMap[bool](),
-		},
+		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
 		zoneChassisHandler:         zoneChassisHandler,
 		apbExternalRouteController: apbExternalRouteController,
@@ -252,7 +242,7 @@ func newDefaultNetworkControllerCommon(
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
 
 	oc.initRetryFramework()
-	oc.eIPC.Init()
+	oc.eIPC = newEgressIPZoneController(cnci.nbClient, cnci.watchFactory, networkManager, oc.retryEgressIPs)
 
 	return oc, nil
 }
