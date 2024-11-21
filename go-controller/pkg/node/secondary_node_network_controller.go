@@ -123,5 +123,10 @@ func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
 }
 
 func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
-	return util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
+	// reconcile network information, point of no return
+	err := util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+	}
+	return nil
 }

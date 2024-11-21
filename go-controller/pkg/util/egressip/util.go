@@ -8,6 +8,7 @@ import (
 	"github.com/gaissmai/cidrtree"
 	ocpconfigapi "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	informerscorev1 "k8s.io/client-go/informers/core/v1"
@@ -116,7 +117,7 @@ func getEgressIPLocalManaged(
 		managed = false
 		return
 	}
-	if !config.OVNKubernetesFeature.EnableRouteAdvertisements {
+	if !AdvertisementsEnabled() {
 		return
 	}
 	var isAdvertised bool
@@ -238,10 +239,13 @@ func getSecondaryHostNetworkContainingIP(node *corev1.Node, ip net.IP) (string, 
 }
 
 func isAdvertisedOnNode(wf watchFactory, nm networkmanager.Interface, eip, node string) (bool, error) {
-	if !config.OVNKubernetesFeature.EnableRouteAdvertisements {
+	if !AdvertisementsEnabled() {
 		return false, nil
 	}
 	egressip, err := wf.EgressIPInformer().Lister().Get(eip)
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("failed to get Egress IP %s: %v", eip, err)
 	}

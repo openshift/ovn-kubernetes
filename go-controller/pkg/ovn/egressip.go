@@ -2406,17 +2406,18 @@ func getPodNamespaceAndNameFromKey(podKey string) (string, string) {
 	return parts[0], parts[1]
 }
 
-func (c *egressIPZoneController) ReconcileNetwork(name string, nodes []string, old, new util.NetInfo) error {
+func (c *egressIPZoneController) ShouldReconcileNetworkChange(nodes []string, old, new util.NetInfo) bool {
 	if !egressip.AdvertisementsEnabled() {
-		return nil
+		return false
 	}
 
-	reconcileEgressIP := egressip.ReconcileEgressIPNetworkChangeOnNodes(nodes, old, new)
-	if reconcileEgressIP {
+	return egressip.ReconcileEgressIPNetworkChangeOnNodes(nodes, old, new)
+}
+
+func (c *egressIPZoneController) ReconcileNetwork(name string) {
+	if c.networkReconciler != nil {
 		c.networkReconciler.Reconcile(name)
 	}
-
-	return nil
 }
 
 func (c *egressIPZoneController) reconcileNetwork(name string) error {

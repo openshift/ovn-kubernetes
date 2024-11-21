@@ -145,8 +145,7 @@ type Controller struct {
 	v6              bool
 }
 
-func NewController(k kube.Interface, wf factory.NodeWatchFactory, networkManager networkmanager.Interface, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) (*Controller, error) {
-
+func NewController(k kube.Interface, wf factory.NodeWatchFactory, networkManager networkmanager.Interface, routeManager *routemanager.Controller, v4, v6 bool, nodeName string, linkManager *linkmanager.Controller) *Controller {
 	c := &Controller{
 		watchFactory: wf,
 		eIPLister:    wf.EgressIPInformer().Lister(),
@@ -193,7 +192,7 @@ func NewController(k kube.Interface, wf factory.NodeWatchFactory, networkManager
 			config,
 		)
 	}
-	return c, nil
+	return c
 }
 
 // Run starts the Egress IP that is hosted in secondary host networks. Changes to this function
@@ -1587,15 +1586,18 @@ func isVRFSlaveDevice(link netlink.Link) bool {
 	return link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
 }
 
-func (c *Controller) ReconcileNetwork(name string, old, new util.NetInfo) error {
-	if egressip.AdvertisementsEnabled() {
-		return nil
+func (c *Controller) ShouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	if !egressip.AdvertisementsEnabled() {
+		return false
 	}
-	reconcile := egressip.ReconcileEgressIPNetworkChangeOnNodes([]string{c.nodeName}, old, new)
-	if reconcile {
+
+	return egressip.ReconcileEgressIPNetworkChangeOnNodes([]string{c.nodeName}, old, new)
+}
+
+func (c *Controller) ReconcileNetwork(name string) {
+	if c.networkReconciler != nil {
 		c.networkReconciler.Reconcile(name)
 	}
-	return nil
 }
 
 func (c *Controller) reconcileNetwork(name string) error {

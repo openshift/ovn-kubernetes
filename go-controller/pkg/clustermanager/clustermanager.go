@@ -280,5 +280,8 @@ func (cm *ClusterManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) er
 }
 
 func (cm *ClusterManager) Reconcile(name string, old, new util.NetInfo) error {
-	return cm.eIPC.ReconcileNetwork(name, old, new)
+	if cm.eIPC != nil {
+		cm.eIPC.ReconcileNetwork(name, old, new)
+	}
+	return nil
 }

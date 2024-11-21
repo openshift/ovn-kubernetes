@@ -269,9 +269,9 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 		return nil, nil, err
 	}
 	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
-	c, err := NewController(
+	c := NewController(
 		&ovnkube.Kube{KClient: kubeClient},
-		watchFactory,networkmanager.Default().Interface(),
+		watchFactory, networkmanager.Default().Interface(),
 		rm,
 		v4,
 		v6,

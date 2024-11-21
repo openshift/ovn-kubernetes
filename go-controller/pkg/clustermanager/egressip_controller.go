@@ -398,7 +398,7 @@ type egressIPClusterController struct {
 	// namespaceHandler is the namespace events factory handler
 	namespaceHandler *factory.Handler
 
-	networkManager    networkmanager.Interface
+	networkManager networkmanager.Interface
 	networkReconciler controller.Reconciler
 }
 
@@ -1551,8 +1551,10 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 				klog.Errorf("Allocator error: failed to determine if EgressIP %q IP %q is local to the node % q or advertised: %v",
 					name, ip, eNode.name, err)
 			}
-			if localOrAdvertised {
-				continue
+			if !localOrAdvertised {
+				klog.Errorf("Allocator error: EgressIP %s IP %s is allocated to node %s not local to the node nor advertised",
+					name, eIPStatus.EgressIP, eIPStatus.Node)
+				validAssignment = false
 			}
 			klog.Errorf("Allocator error: EgressIP %s IP %s is allocated to node %s not local to the node nor advertised",
 				name, eIPStatus.EgressIP, eIPStatus.Node)
@@ -1816,9 +1818,9 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 	return resyncs, nil
 }
 
-func (eIPC *egressIPClusterController) ReconcileNetwork(name string, old, new util.NetInfo) error {
+func (eIPC *egressIPClusterController) ReconcileNetwork(name string, old, new util.NetInfo) {
 	if !egressip.AdvertisementsEnabled() {
-		return nil
+		return
 	}
 
 	getNamespacesAndEgressIPNodes := func(net util.NetInfo) (sets.Set[string], sets.Set[string]) {
@@ -1838,8 +1840,6 @@ func (eIPC *egressIPClusterController) ReconcileNetwork(name string, old, new ut
 	if hadNsChanges || hadNodeChanges {
 		eIPC.networkReconciler.Reconcile(name)
 	}
-
-	return nil
 }
 
 func (eIPC *egressIPClusterController) reconcileNetwork(name string) error {

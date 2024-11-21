@@ -604,6 +604,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 }
 
 func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
+	// gather some information first
 	var err error
 	var retryNodes []*kapi.Node
 	var retryNodeNames []string
@@ -625,17 +626,15 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		return true
 	})
 	if err != nil {
-		return fmt.Errorf("failed to reconcile: %w", err)
+		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
 	}
 
-	err = oc.eIPC.ReconcileNetwork(oc.GetNetworkName(), retryNodeNames, oc.ReconcilableNetInfo, netInfo)
-	if err != nil {
-		return err
-	}
+	reconcileEgressIP := oc.eIPC.ShouldReconcileNetworkChange(retryNodeNames, oc.ReconcilableNetInfo, netInfo)
 
+	// update network information, point of no return
 	err = util.ReconcileNetwork(oc.ReconcilableNetInfo, netInfo)
 	if err != nil {
-		return err
+		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
 	}
 
 	if oc.routeImportManager != nil {
@@ -645,21 +644,19 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		}
 	}
 
-	var errs []error
+	if reconcileEgressIP {
+		oc.eIPC.ReconcileNetwork(oc.GetNetworkName())
+	}
+
 	for _, node := range retryNodes {
 		oc.gatewaysFailed.Store(node.Name, true)
 		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
 		if err != nil {
-			err := fmt.Errorf("failed to reconcile network for node %s: %w", node.Name, err)
-			errs = append(errs, err)
+			klog.Errorf("Failed to retry node %s for network %s: %v", node.Name, oc.GetNetworkName(), err)
 		}
 	}
 	if len(retryNodes) > 0 {
 		oc.retryNodes.RequestRetryObjs()
-	}
-
-	if len(errs) > 0 {
-		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), utilerrors.Join(errs...))
 	}
 
 	return nil
