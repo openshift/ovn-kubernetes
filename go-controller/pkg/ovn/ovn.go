@@ -440,9 +440,7 @@ func udnNodeSubnetChanged(oldNode, node *userdefinednodeapi.UDNNode) bool {
 }
 
 func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {
-	oldSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(oldNode, netName)
-	newSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(node, netName)
-	return !reflect.DeepEqual(oldSubnets, newSubnets)
+	return !reflect.DeepEqual(oldNode.Annotations[util.OVNNodeGRLRPAddrs], node.Annotations[util.OVNNodeGRLRPAddrs])
 }
 
 func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {
