@@ -63,7 +63,7 @@ type UDNNodeSpec struct {
 
 	ManagementPortMACAddress string `json:"managementPortMACAddress,omitempty"`
 
-	Layer2TunnelID int `json:"layer2TunnelID,omitempty"`
+	Layer2TunnelID *int `json:"layer2TunnelID,omitempty"`
 }
 
 // UDNNodeStatus defines the observed state of UDNNode

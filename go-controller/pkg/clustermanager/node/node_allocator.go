@@ -4,12 +4,13 @@ import (
 	"fmt"
 	udnnodev1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/listers/udnnode/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"net"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -39,6 +40,7 @@ type NodeAllocator struct {
 	kube          kube.InterfaceOVN
 	nodeLister    listers.NodeLister
 	udnNodeLister v1.UDNNodeLister
+	watchFactory  *factory.WatchFactory
 	// idAllocator of IDs within the network
 	idAllocator                  id.Allocator
 	clusterSubnetAllocator       SubnetAllocator
@@ -54,7 +56,7 @@ type NodeAllocator struct {
 }
 
 func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, udnNodeLister v1.UDNNodeLister,
-	kube kube.InterfaceOVN, tunnelIDAllocator id.Allocator) *NodeAllocator {
+	kube kube.InterfaceOVN, tunnelIDAllocator id.Allocator, watchFactory *factory.WatchFactory) *NodeAllocator {
 	na := &NodeAllocator{
 		kube:                         kube,
 		nodeLister:                   nodeLister,
@@ -64,6 +66,7 @@ func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.No
 		clusterSubnetAllocator:       NewSubnetAllocator(),
 		hybridOverlaySubnetAllocator: NewSubnetAllocator(),
 		idAllocator:                  tunnelIDAllocator,
+		watchFactory:                 watchFactory,
 	}
 
 	if na.hasNodeSubnetAllocation() {
@@ -207,6 +210,7 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 }
 
 func (na *NodeAllocator) syncUDNNodeNetworkAnnotations(node *corev1.Node) error {
+	// TODO(trozet): change this naming scheme, maybe hash since max node name length would break adding suffix
 	udnNodeName := fmt.Sprintf("%s-%d", node.Name, na.networkID)
 	udnNode, err := na.udnNodeLister.Get(udnNodeName)
 	if err != nil && !kerrors.IsNotFound(err) {
@@ -270,6 +274,17 @@ func (na *NodeAllocator) syncUDNNodeNetworkAnnotations(node *corev1.Node) error 
 		spec.NetworkID = &na.networkID
 	}
 
+	newTunnelID := util.NoID
+	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		if newTunnelID, err = na.idAllocator.AllocateID(na.netInfo.GetNetworkName() + "_" + node.Name); err != nil {
+			return fmt.Errorf("failed to assign node %s tunnel id for network %s: %w", node.Name, na.netInfo.GetNetworkName(), err)
+		}
+		spec.Layer2TunnelID = &newTunnelID
+
+	}
+
+	// note should defer de-allocation if resource creation fails
+
 	x := &udnnodev1.UDNNode{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: udnNodeName,
@@ -282,10 +297,13 @@ func (na *NodeAllocator) syncUDNNodeNetworkAnnotations(node *corev1.Node) error 
 	}
 
 	y, err := na.kube.CreateUDNNode(x)
+	if err != nil {
+		return err
+	}
 	if y != nil {
 		klog.Infof("UDNNode created: %#v", *y)
 	}
-	return err
+	return nil
 }
 
 func (na *NodeAllocator) syncDefaultNodeNetworkAnnotations(node *corev1.Node) error {
@@ -425,8 +443,8 @@ func (na *NodeAllocator) HandleDeleteNode(node *corev1.Node) error {
 		na.clusterSubnetAllocator.ReleaseAllNetworks(node.Name)
 		na.recordSubnetUsage()
 	}
-
-	return nil
+	err := na.kube.DeleteUDNNode(util.GetUDNNodeFormat(node.Name, na.netInfo.GetNetworkName()))
+	return err
 }
 
 func (na *NodeAllocator) Sync(nodes []interface{}) error {
@@ -527,29 +545,25 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 func (na *NodeAllocator) Cleanup() error {
 	networkName := na.netInfo.GetNetworkName()
 
-	// remove hostsubnet annotation for this network
-	klog.Infof("Remove node-subnets annotation for network %s on all nodes", networkName)
-	existingNodes, err := na.nodeLister.List(labels.Everything())
+	existingUDNNodes, err := na.watchFactory.GetUDNNodes(networkName)
 	if err != nil {
-		return fmt.Errorf("error in retrieving the nodes: %v", err)
+		return fmt.Errorf("error in retrieving the UDN nodes: %v", err)
+	}
+	klog.Infof("Remove UDN Nodes CRD for network %s on all nodes", networkName)
+	var aggregatedErrors []error
+	for _, udnNode := range existingUDNNodes {
+		if err = na.kube.DeleteUDNNode(udnNode.Name); err != nil {
+			aggregatedErrors = append(aggregatedErrors, err)
+		}
+		if len(udnNode.Spec.NodeSubnets) > 0 {
+			if nodeName, ok := udnNode.Labels["nodeName"]; ok {
+				na.clusterSubnetAllocator.ReleaseAllNetworks(nodeName)
+			}
+		}
 	}
 
-	for _, node := range existingNodes {
-		if util.NoHostSubnet(node) {
-			// Secondary network subnet is not allocated for a nohost subnet node
-			klog.V(5).Infof("Node %s is not managed by OVN", node.Name)
-			continue
-		}
-
-		hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
-		// passing util.InvalidID deletes the network/tunnel id annotation for the network.
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidID, util.InvalidID, nil)
-		if err != nil {
-			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
-				node.Name, networkName)
-		}
-
-		na.clusterSubnetAllocator.ReleaseAllNetworks(node.Name)
+	if len(aggregatedErrors) > 0 {
+		return utilerrors.Join(aggregatedErrors...)
 	}
 
 	return nil

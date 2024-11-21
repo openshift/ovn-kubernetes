@@ -46,6 +46,7 @@ type InterfaceOVN interface {
 	UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
 	CreateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode, error)
 	UpdateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode, error)
+	DeleteUDNNode(udnNodeName string) error
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -475,4 +476,8 @@ func (k *KubeOVN) CreateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode,
 
 func (k *KubeOVN) UpdateUDNNode(udnNode *udnnodev1.UDNNode) (*udnnodev1.UDNNode, error) {
 	return k.UDNNodeClient.K8sV1().UDNNodes().Update(context.TODO(), udnNode, metav1.UpdateOptions{})
+}
+
+func (k *KubeOVN) DeleteUDNNode(udnNodeName string) error {
+	return k.UDNNodeClient.K8sV1().UDNNodes().Delete(context.TODO(), udnNodeName, metav1.DeleteOptions{})
 }

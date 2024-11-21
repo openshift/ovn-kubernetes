@@ -708,11 +708,18 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 }
 
 func (zic *ZoneInterconnectHandler) getNetworkId() (int, error) {
-	nodes, err := zic.watchFactory.GetNodes()
-	if err != nil {
+	if zic.IsDefault() {
+		nodes, err := zic.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidID, err
+		}
+		return zic.getNetworkIdFromNodes(nodes)
+	}
+	networkID, err := zic.getNetworkIDFromUDNNodes()
+	if err != nil || networkID <= util.NoID {
 		return util.InvalidID, err
 	}
-	return zic.getNetworkIdFromNodes(nodes)
+	return networkID, nil
 }
 
 // getNetworkId returns the cached network ID or looks it up in any of the provided nodes

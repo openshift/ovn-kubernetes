@@ -124,6 +124,11 @@ func (in *UDNNodeSpec) DeepCopyInto(out *UDNNodeSpec) {
 		*out = make(DualStackCIDRs, len(*in))
 		copy(*out, *in)
 	}
+	if in.Layer2TunnelID != nil {
+		in, out := &in.Layer2TunnelID, &out.Layer2TunnelID
+		*out = new(int)
+		**out = **in
+	}
 	return
 }
 
