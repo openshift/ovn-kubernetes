@@ -100,6 +100,9 @@ func (h *secondaryLayer2NetworkControllerEventHandler) IsResourceScheduled(obj i
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
+	case factory.NodeType:
+		// do nothing
+		return nil
 	case factory.UserDefinedNodeType:
 		udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
 		if !ok {
@@ -551,6 +554,10 @@ func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
 		oc.retryMultiNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
+
+	if config.OVNKubernetesFeature.EnableNetworkSegmentation {
+		oc.retryUDNNodes = oc.newRetryFramework(factory.UserDefinedNodeType)
+	}
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
@@ -726,10 +733,10 @@ func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(nodeJoinSubne
 		types.TopologyExternalID: oc.TopologyType(),
 		types.NodeExternalID:     nodeName,
 	}
-	tunnelID := udnNode.Spec.Layer2TunnelID
-	if tunnelID == util.NoID {
+	if udnNode.Spec.Layer2TunnelID == nil {
 		return types.NewSuppressedError(fmt.Errorf("tunnel ID not set for node %s, UDN Node: %s", nodeName, udnNode.Name))
 	}
+	tunnelID := *udnNode.Spec.Layer2TunnelID
 	logicalSwitchPort.Options = map[string]string{
 		"requested-tnl-key": strconv.Itoa(tunnelID),
 		"requested-chassis": nodeName,
