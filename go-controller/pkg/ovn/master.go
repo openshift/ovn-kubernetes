@@ -630,8 +630,13 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 				var err1 error
 				gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
 				if err1 != nil {
+					oc.gatewaysFailed.Store(node.Name, true)
+					oc.syncZoneICFailed.Store(node.Name, true)
 					return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
 				}
+			} else {
+				oc.gatewaysFailed.Store(node.Name, true)
+				oc.syncZoneICFailed.Store(node.Name, true)
 			}
 		}
 	}
@@ -673,7 +678,8 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 					errs = append(errs, err)
 					oc.syncZoneICFailed.Store(node.Name, true)
 				}
-			} else {
+			}
+			if hostSubnets != nil {
 				// Call zone IC handler's AddLocalZoneNode function to create
 				// interconnect resources in the OVN Northbound db for this local zone node.
 				if err := oc.zoneICHandler.AddLocalZoneNode(hostSubnets, gwLRPIPs, node); err != nil {
@@ -732,8 +738,11 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 				var err1 error
 				gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
 				if err1 != nil {
+					oc.syncZoneICFailed.Store(node.Name, true)
 					return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
 				}
+			} else {
+				oc.syncZoneICFailed.Store(node.Name, true)
 			}
 		}
 

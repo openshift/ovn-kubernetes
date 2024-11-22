@@ -199,6 +199,7 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer, udnNodeInf
 	if err != nil {
 		return nil, nil, err
 	}
+
 	return nodeHandler, udnNodeHandler, nil
 
 }
@@ -275,7 +276,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 			hsn, err = util.ParseNodeHostSubnetAnnotation(node, nt.netInfo.GetNetworkName())
 		} else {
 			udnNode, err = nt.watchFactory.GetUDNNodeByLabels(node.Name, nt.netInfo.GetNetworkName())
-			if err != nil {
+			if err == nil {
 				hsn, err = util.ParseNodeUDNHostSubnet(udnNode)
 			}
 		}
