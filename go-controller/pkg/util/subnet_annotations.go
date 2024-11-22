@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"net"
 
 	kapi "k8s.io/api/core/v1"
@@ -163,6 +164,18 @@ func SetNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnets []
 // using a kube.Annotator
 func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 	nodeAnnotator.Delete(ovnNodeSubnets)
+}
+
+func ParseNodeUDNHostSubnet(udnNode *userdefinednodeapi.UDNNode) ([]*net.IPNet, error) {
+	var nets []*net.IPNet
+	for _, subnet := range udnNode.Spec.NodeSubnets {
+		_, ipnet, err := net.ParseCIDR(string(subnet))
+		if err != nil {
+			return nil, err
+		}
+		nets = append(nets, ipnet)
+	}
+	return nets, nil
 }
 
 // ParseNodeHostSubnetAnnotation parses the "k8s.ovn.org/node-subnets" annotation

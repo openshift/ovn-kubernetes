@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	userdefinednodeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions/udnnode/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -34,6 +36,8 @@ type nodeTracker struct {
 	zone string
 
 	netInfo util.NetInfo
+
+	watchFactory *factory.WatchFactory
 }
 
 type nodeInfo struct {
@@ -78,18 +82,19 @@ func (ni *nodeInfo) l3gatewayAddressesStr() []string {
 	return out
 }
 
-func newNodeTracker(zone string, resyncFn func(nodes []nodeInfo), netInfo util.NetInfo) *nodeTracker {
+func newNodeTracker(zone string, resyncFn func(nodes []nodeInfo), netInfo util.NetInfo, watchFactory *factory.WatchFactory) *nodeTracker {
 
 	return &nodeTracker{
-		nodes:    map[string]nodeInfo{},
-		zone:     zone,
-		resyncFn: resyncFn,
-		netInfo:  netInfo,
+		nodes:        map[string]nodeInfo{},
+		zone:         zone,
+		resyncFn:     resyncFn,
+		netInfo:      netInfo,
+		watchFactory: watchFactory,
 	}
 }
 
-func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.ResourceEventHandlerRegistration, error) {
-	return nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer, udnNodeInformer userdefinednodeinformer.UDNNodeInformer) (cache.ResourceEventHandlerRegistration, cache.ResourceEventHandlerRegistration, error) {
+	nodeHandler, err := nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*v1.Node)
 			if !ok {
@@ -119,13 +124,16 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 			// - node changes its zone
 			// - node becomes a hybrid overlay node from a ovn node or vice verse
 			// . No need to trigger update for any other field change.
-			if util.NodeSubnetAnnotationChanged(oldObj, newObj) ||
-				util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
+			if util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
 				oldObj.Name != newObj.Name ||
 				util.NodeHostCIDRsAnnotationChanged(oldObj, newObj) ||
 				util.NodeZoneAnnotationChanged(oldObj, newObj) ||
 				util.NodeMigratedZoneAnnotationChanged(oldObj, newObj) ||
 				util.NoHostSubnet(oldObj) != util.NoHostSubnet(newObj) {
+				nt.updateNode(newObj)
+			}
+
+			if nt.netInfo.IsDefault() && util.NodeSubnetAnnotationChanged(oldObj, newObj) {
 				nt.updateNode(newObj)
 			}
 		},
@@ -146,6 +154,53 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 			nt.removeNodeWithServiceReSync(node.Name)
 		},
 	}))
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// node tracker has no workqueue and retry logic wtf...
+	// TODO(trozet): refactor node tracker with a workqueue
+	udnNodeHandler, err := udnNodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			// need to handle add because node tracker update fired on node may not be able to get the pod subnet
+			// which comes on the UDN CRD
+			udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
+			if !ok {
+				klog.Errorf("could not cast %T object to *userdefinednodeapi.UDNNode", obj)
+				return
+			}
+
+			if nt.netInfo.GetNetworkName() != udnNode.GetLabels()["networkName"] {
+				return
+			}
+			nodeName := udnNode.GetLabels()["nodeName"]
+			if nodeName == "" {
+				klog.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
+				return
+			}
+			node, err := nt.watchFactory.GetNode(nodeName)
+			if err != nil {
+				klog.Errorf("failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, udnNode.Name)
+				return
+			}
+			// hopefully node tracker is thread safe...
+			nt.updateNode(node)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			// only thing here would be to check if subnets changed which isn't possible for UDN
+			return
+		},
+		DeleteFunc: func(obj interface{}) {
+			// no need to delete here, node delete will take care of it
+			return
+		},
+	}))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return nodeHandler, udnNodeHandler, nil
 
 }
 
@@ -211,12 +266,20 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 	klog.V(2).Infof("Processing possible switch / router updates for node %s", node.Name)
 	var hsn []*net.IPNet
 	var err error
+	var udnNode *userdefinednodeapi.UDNNode
 	if nt.netInfo.TopologyType() == types.Layer2Topology {
 		for _, subnet := range nt.netInfo.Subnets() {
 			hsn = append(hsn, subnet.CIDR)
 		}
 	} else {
-		hsn, err = util.ParseNodeHostSubnetAnnotation(node, nt.netInfo.GetNetworkName())
+		if nt.netInfo.IsDefault() {
+			hsn, err = util.ParseNodeHostSubnetAnnotation(node, nt.netInfo.GetNetworkName())
+		} else {
+			udnNode, err = nt.watchFactory.GetUDNNodeByLabels(node.Name, nt.netInfo.GetNetworkName())
+			if err == nil {
+				hsn, err = util.ParseNodeUDNHostSubnet(udnNode)
+			}
+		}
 	}
 	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
@@ -233,18 +296,43 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 
 	// if the node has a gateway config, it will soon have a gateway router
 	// so, set the router name
-	gwConf, err := util.ParseNodeL3GatewayAnnotation(node)
-	if err != nil || gwConf == nil {
-		klog.Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
-	} else if gwConf.Mode != globalconfig.GatewayModeDisabled {
-		grName = nt.netInfo.GetNetworkScopedGWRouterName(node.Name)
-		// L3 GW IP addresses are not network-specific, we can take them from the default L3 GW annotation
-		for _, ip := range gwConf.IPAddresses {
-			l3gatewayAddresses = append(l3gatewayAddresses, ip.IP)
+	if nt.netInfo.IsDefault() {
+		var gwConf *util.L3GatewayConfig
+		gwConf, err = util.ParseNodeL3GatewayAnnotation(node)
+		if err != nil || gwConf == nil {
+			klog.Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
+		} else if gwConf.Mode != globalconfig.GatewayModeDisabled {
+			for _, ip := range gwConf.IPAddresses {
+				l3gatewayAddresses = append(l3gatewayAddresses, ip.IP)
+			}
+			nodePortEnabled = gwConf.NodePortEnable
 		}
-		nodePortEnabled = gwConf.NodePortEnable
-		chassisID = gwConf.ChassisID
+	} else {
+		if udnNode == nil {
+			udnNode, err = nt.watchFactory.GetUDNNodeByLabels(node.Name, nt.netInfo.GetNetworkName())
+			if err != nil {
+				klog.Infof("Node %s has invalid / no udn config: %v", node.Name, err)
+			}
+		}
+		if udnNode != nil {
+			joinCIDRs, err := util.ParseNodeUDNGatewayRouterJoinAddrs(udnNode)
+			// ignore gateway disabled mode, from l3gw config. Assume if join addrs exist then it must not be disabled
+			if err != nil {
+				klog.Infof("UDN Node %s has invalid / no gateway config: %v", node.Name, err)
+			} else {
+				for _, cidr := range joinCIDRs {
+					l3gatewayAddresses = append(l3gatewayAddresses, cidr.IP)
+				}
+			}
+			// assume node port enabled for UDN, may need to put this in UDN Node spec
+			nodePortEnabled = true
+		}
 	}
+	if len(l3gatewayAddresses) > 0 {
+		grName = nt.netInfo.GetNetworkScopedGWRouterName(node.Name)
+		chassisID = node.Annotations[util.OvnNodeChassisID]
+	}
+
 	hostAddresses, err := util.GetNodeHostAddrs(node)
 	if err != nil {
 		klog.Warningf("Failed to get node host CIDRs for [%s]: %s", node.Name, err.Error())

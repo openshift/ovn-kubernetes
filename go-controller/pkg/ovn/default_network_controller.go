@@ -164,9 +164,11 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
+		cnci.watchFactory.UserDefinedNodeInformer(),
 		nadController,
 		cnci.recorder,
 		&util.DefaultNetInfo{},
+		cnci.watchFactory,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)

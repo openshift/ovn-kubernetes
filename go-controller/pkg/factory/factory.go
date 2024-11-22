@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -70,6 +71,11 @@ import (
 	ipamclaimsinformer "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	userdefinednodescheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/clientset/versioned/scheme"
+	userdefinednodeinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions"
+	userdefinednodeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/informers/externalversions/udnnode/v1"
+	userdefinednodelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/listers/udnnode/v1"
 	userdefinednetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	userdefinednetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
 	userdefinednetworkapiinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
@@ -114,6 +120,7 @@ type WatchFactory struct {
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
 	nadFactory           nadinformerfactory.SharedInformerFactory
 	udnFactory           userdefinednetworkapiinformerfactory.SharedInformerFactory
+	udnNodeFactory       userdefinednodeinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -187,6 +194,7 @@ var (
 	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
 	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
 	ClusterUserDefinedNetworkType         reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
+	UserDefinedNodeType                   reflect.Type = reflect.TypeOf(&userdefinednodeapi.UDNNode{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -410,6 +418,27 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		if err != nil {
 			return nil, err
 		}
+
+		wf.udnNodeFactory = userdefinednodeinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNodeClient, resyncInterval)
+		udnNodeInformer := wf.udnNodeFactory.K8s().V1().UDNNodes().Informer()
+
+		indexers := cache.Indexers{
+			types.UDNIndexer: func(obj interface{}) ([]string, error) {
+				udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
+				if !ok {
+					return nil, fmt.Errorf("unexpected UDN node type: %#v", obj)
+				}
+				return []string{util.GetUDNNodeFormat(udnNode.Labels["nodeName"], udnNode.Labels["networkName"])}, nil
+			},
+		}
+		err := udnNodeInformer.AddIndexers(indexers)
+		if err != nil {
+			return nil, err
+		}
+		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, udnNodeInformer)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
@@ -540,6 +569,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() && wf.udnNodeFactory != nil {
+		wf.udnNodeFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.udnNodeFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -580,6 +618,10 @@ func (wf *WatchFactory) Stop() {
 
 	if wf.udnFactory != nil {
 		wf.udnFactory.Shutdown()
+	}
+
+	if wf.udnNodeFactory != nil {
+		wf.udnNodeFactory.Shutdown()
 	}
 }
 
@@ -726,6 +768,27 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		if err != nil {
 			return nil, err
 		}
+
+		wf.udnNodeFactory = userdefinednodeinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNodeClient, resyncInterval)
+		udnNodeInformer := wf.udnNodeFactory.K8s().V1().UDNNodes().Informer()
+
+		indexers := cache.Indexers{
+			types.UDNIndexer: func(obj interface{}) ([]string, error) {
+				udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type")
+				}
+				return []string{util.GetUDNNodeFormat(udnNode.Labels["nodeName"], udnNode.Labels["networkName"])}, nil
+			},
+		}
+		err := udnNodeInformer.AddIndexers(indexers)
+		if err != nil {
+			return nil, err
+		}
+		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, udnNodeInformer)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return wf, nil
@@ -768,6 +831,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		return nil, err
 	}
 	if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := userdefinednodeapi.AddToScheme(userdefinednodescheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -878,11 +944,33 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 
+		wf.udnNodeFactory = userdefinednodeinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNodeClient, resyncInterval)
+		udnNodeInformer := wf.udnNodeFactory.K8s().V1().UDNNodes().Informer()
+
+		indexers := cache.Indexers{
+			types.UDNIndexer: func(obj interface{}) ([]string, error) {
+				udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type")
+				}
+				return []string{util.GetUDNNodeFormat(udnNode.Labels["nodeName"], udnNode.Labels["networkName"])}, nil
+			},
+		}
+		err := udnNodeInformer.AddIndexers(indexers)
+		if err != nil {
+			return nil, err
+		}
+		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, udnNodeInformer)
+		if err != nil {
+			return nil, err
+		}
+
 		// make sure namespace informer cache is initialized and synced on Start().
 		wf.iFactory.Core().V1().Namespaces().Informer()
 
 		// make sure pod informer cache is initialized and synced when on Start().
 		wf.iFactory.Core().V1().Pods().Informer()
+
 	}
 
 	return wf, nil
@@ -956,6 +1044,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case IPAMClaimsType:
 		if persistentips, ok := obj.(*ipamclaimsapi.IPAMClaim); ok {
 			return &persistentips.ObjectMeta, nil
+		}
+	case UserDefinedNodeType:
+		if udnNode, ok := obj.(*userdefinednodeapi.UDNNode); ok {
+			return &udnNode.ObjectMeta, nil
 		}
 	}
 
@@ -1068,7 +1160,14 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddIPAMClaimsHandler(funcs, processExisting)
 		}, nil
+
+	case UserDefinedNodeType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddFilteredUDNNodeHandler(sel, funcs, processExisting)
+		}, nil
 	}
+
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
@@ -1288,9 +1387,19 @@ func (wf *WatchFactory) AddFilteredNodeHandler(sel labels.Selector, handlerFuncs
 	return wf.addHandler(NodeType, "", sel, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
+// AddFilteredUDNNodeHandler adds a handler function that will be executed when UDNNode objects that match the given label selector
+func (wf *WatchFactory) AddFilteredUDNNodeHandler(sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(UserDefinedNodeType, "", sel, handlerFuncs, processExisting, defaultHandlerPriority)
+}
+
 // RemoveNodeHandler removes a Node object event handler function
 func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) {
 	wf.removeHandler(NodeType, handler)
+}
+
+// RemoveUDNNodeHandler removes a Node object event handler function
+func (wf *WatchFactory) RemoveUDNNodeHandler(handler *Handler) {
+	wf.removeHandler(UserDefinedNodeType, handler)
 }
 
 // GetPod returns the pod spec given the namespace and pod name
@@ -1468,6 +1577,41 @@ func (wf *WatchFactory) GetNADs(namespace string) ([]*nadapi.NetworkAttachmentDe
 	return nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 }
 
+func (wf *WatchFactory) GetUDNNode(udnNodeName string) (*userdefinednodeapi.UDNNode, error) {
+	udnNodeLister := wf.informers[UserDefinedNodeType].lister.(userdefinednodelister.UDNNodeLister)
+	return udnNodeLister.Get(udnNodeName)
+}
+
+// GetUDNNodeByLabels retrieves corresponding UDN Node object by node name
+func (wf *WatchFactory) GetUDNNodeByLabels(nodeName, networkName string) (*userdefinednodeapi.UDNNode, error) {
+	u := &userdefinednodeapi.UDNNode{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				"nodeName":    nodeName,
+				"networkName": networkName,
+			},
+		},
+	}
+	udnNodes, err := wf.UserDefinedNodeInformer().Informer().GetIndexer().Index(
+		types.UDNIndexer, u)
+	if err != nil {
+		return nil, err
+	}
+	if len(udnNodes) == 0 {
+		return nil, errors.NewNotFound(userdefinednodeapi.Resource("udnnode"), util.GetUDNNodeFormat(nodeName, networkName))
+	}
+	if len(udnNodes) > 1 {
+		panic(fmt.Sprintf("should never have more than one UDN node of a specific index: %s, %d", util.GetUDNNodeFormat(nodeName, networkName), len(udnNodes)))
+	}
+	return udnNodes[0].(*userdefinednodeapi.UDNNode), nil
+}
+
+func (wf *WatchFactory) GetUDNNodes(networkName string) ([]*userdefinednodeapi.UDNNode, error) {
+	udnNodeLister := wf.informers[UserDefinedNodeType].lister.(userdefinednodelister.UDNNodeLister)
+	selector := labels.Set{"networkName": networkName}.AsSelector()
+	return udnNodeLister.List(selector)
+}
+
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
 	return wf.informers[NodeType].inf
 }
@@ -1556,6 +1700,10 @@ func (wf *WatchFactory) UserDefinedNetworkInformer() userdefinednetworkinformer.
 
 func (wf *WatchFactory) ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer {
 	return wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks()
+}
+
+func (wf *WatchFactory) UserDefinedNodeInformer() userdefinednodeinformer.UDNNodeInformer {
+	return wf.udnNodeFactory.K8s().V1().UDNNodes()
 }
 
 func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {

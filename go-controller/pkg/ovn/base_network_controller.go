@@ -2,6 +2,8 @@ package ovn
 
 import (
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"net"
 	"reflect"
 	"sync"
@@ -97,6 +99,8 @@ type BaseNetworkController struct {
 	retryMultiNetworkPolicies *ovnretry.RetryFramework
 	// retry framework for IPAMClaims
 	retryIPAMClaims *ovnretry.RetryFramework
+	// retry framework for UDN Nodes
+	retryUDNNodes *ovnretry.RetryFramework
 
 	// pod events factory handler
 	podHandler *factory.Handler
@@ -106,6 +110,8 @@ type BaseNetworkController struct {
 	namespaceHandler *factory.Handler
 	// ipam claims events factory Handler
 	ipamClaimsHandler *factory.Handler
+	// udnNodeHandler
+	udnNodeHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
@@ -625,12 +631,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 	return nsInfo, nil
 }
 
-func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName, routerName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
-	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, bnc.GetNetworkName())
-	if err != nil {
-		return nil, err
-	}
-
+func (bnc *BaseNetworkController) syncNodeManagementPort(macAddress net.HardwareAddr, nodeName, switchName, routerName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
 	var v4Subnet *net.IPNet
 	addresses := macAddress.String()
 	mgmtPortIPs := []net.IP{}
@@ -671,11 +672,11 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 
 	// Create this node's management logical port on the node switch
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      bnc.GetNetworkScopedK8sMgmtIntfName(node.Name),
+		Name:      bnc.GetNetworkScopedK8sMgmtIntfName(nodeName),
 		Addresses: []string{addresses},
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
+	err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return nil, err
 	}
@@ -693,12 +694,29 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switch
 	}
 
 	if v4Subnet != nil {
-		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(node.Name), bnc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet); err != nil {
+		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(nodeName),
+			bnc.GetNetworkScopedSwitchName(nodeName), nodeName, v4Subnet); err != nil {
 			return nil, err
 		}
 	}
 
 	return mgmtPortIPs, nil
+}
+
+// WatchUDNNodes starts the watching of node resource and calls
+// back the appropriate handler logic
+func (oc *BaseNetworkController) WatchUDNNodes() error {
+	if oc.udnNodeHandler != nil {
+		return nil
+	}
+	selector := labels.SelectorFromSet(labels.Set{
+		"networkName": oc.GetNetworkName(),
+	})
+	handler, err := oc.retryUDNNodes.WatchResourceFiltered("", selector)
+	if err == nil {
+		oc.udnNodeHandler = handler
+	}
+	return err
 }
 
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic
@@ -712,6 +730,21 @@ func (bnc *BaseNetworkController) WatchNodes() error {
 		bnc.nodeHandler = handler
 	}
 	return err
+}
+
+func (bnc *BaseNetworkController) recordUDNNodeErrorEvent(udnNode *userdefinednodeapi.UDNNode, nodeErr error) {
+	if bnc.IsSecondary() {
+		// TBD, no op for secondary network for now
+		return
+	}
+	nodeRef, err := ref.GetReference(scheme.Scheme, udnNode)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to node %s to post an event: %v", udnNode.Name, err)
+		return
+	}
+
+	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, udnNode.Name, nodeErr)
+	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
 
 func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr error) {

@@ -791,11 +791,11 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 	if oc.networkID == nil || *oc.networkID == util.InvalidID {
 		oc.networkID = ptr.To(util.InvalidID)
-		nodes, err := oc.watchFactory.GetNodes()
+		udnNodes, err := oc.watchFactory.GetUDNNodes(oc.GetNetworkName())
 		if err != nil {
 			return util.InvalidID, err
 		}
-		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		*oc.networkID, err = util.GetUDNNetworkID(udnNodes, oc.GetNetworkName())
 		if err != nil {
 			return util.InvalidID, err
 		}
@@ -805,8 +805,8 @@ func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
-func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string,
-	node *kapi.Node) ([]*nbdb.NAT, error) {
+func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort, nodeName string,
+	macAddr net.HardwareAddr) ([]*nbdb.NAT, error) {
 	if len(localPodSubnets) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -816,11 +816,6 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 	networkID, err := bsnc.getNetworkID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
-	}
-	dstMac, err := util.ParseNodeManagementPortMACAddresses(node, bsnc.GetNetworkName())
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse mac address annotation for network %q on node %q, err: %w",
-			bsnc.GetNetworkName(), node.Name, err)
 	}
 	extIDs := map[string]string{
 		types.NetworkExternalID:  bsnc.GetNetworkName(),
@@ -839,7 +834,7 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 		}
 		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
-			extIDs, getMasqueradeManagementIPSNATMatch(dstMac.String())))
+			extIDs, getMasqueradeManagementIPSNATMatch(macAddr.String())))
 	}
 	return snats, nil
 }

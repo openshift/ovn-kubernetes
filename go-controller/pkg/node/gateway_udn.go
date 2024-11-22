@@ -1,7 +1,11 @@
 package node
 
 import (
+	"context"
 	"fmt"
+	userdefinednodeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/clientset/versioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"net"
 	"strings"
 	"time"
@@ -44,9 +48,10 @@ type UserDefinedNetworkGateway struct {
 	// stores the networkID of this network
 	networkID int
 	// node that its programming things on
-	node          *v1.Node
-	nodeLister    listers.NodeLister
-	kubeInterface kube.Interface
+	node             *v1.Node
+	nodeLister       listers.NodeLister
+	kubeInterface    kube.Interface
+	udnNodeInterface userdefinednodeclientset.Interface
 	// vrf manager that creates and manages vrfs for all UDNs
 	// used with a lock since its shared between all network controllers
 	vrfManager *vrfmanager.Controller
@@ -180,7 +185,7 @@ func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error 
 }
 
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
-	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller,
+	kubeInterface kube.Interface, udnInterface userdefinednodeclientset.Interface, vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller,
 	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
 	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.
 	var (
@@ -208,18 +213,39 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 	}
 
 	return &UserDefinedNetworkGateway{
-		NetInfo:       netInfo,
-		networkID:     networkID,
-		node:          node,
-		nodeLister:    nodeLister,
-		kubeInterface: kubeInterface,
-		vrfManager:    vrfManager,
-		masqCTMark:    masqCTMark,
-		v4MasqIPs:     v4MasqIPs,
-		v6MasqIPs:     v6MasqIPs,
-		gateway:       gw,
-		ruleManager:   ruleManager,
+		NetInfo:          netInfo,
+		networkID:        networkID,
+		node:             node,
+		nodeLister:       nodeLister,
+		kubeInterface:    kubeInterface,
+		udnNodeInterface: udnInterface,
+		vrfManager:       vrfManager,
+		masqCTMark:       masqCTMark,
+		v4MasqIPs:        v4MasqIPs,
+		v6MasqIPs:        v6MasqIPs,
+		gateway:          gw,
+		ruleManager:      ruleManager,
 	}, nil
+}
+
+func (udng *UserDefinedNetworkGateway) updateUDNNodeMAC(macAddress net.HardwareAddr) error {
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		udnNode, err := udng.watchFactory.GetUDNNodeByLabels(udng.node.Name, udng.GetNetworkName())
+		if err != nil {
+			return err
+		}
+		cnode := *udnNode
+		cnode.Spec.ManagementPortMACAddress = macAddress.String()
+		_, err = udng.udnNodeInterface.K8sV1().UDNNodes().Update(context.TODO(), &cnode, metav1.UpdateOptions{})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update node %s annotation: %w", udng.node.Name, resultErr)
+	}
+	return nil
 }
 
 // AddNetwork will be responsible to create all plumbings
@@ -243,8 +269,9 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err = udng.addUDNManagementPortIPs(mplink); err != nil {
 		return fmt.Errorf("unable to add management port IP(s) for link %s, for network %s: %w", mplink.Attrs().Name, udng.GetNetworkName(), err)
 	}
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
-		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
+
+	if err = udng.updateUDNNodeMAC(macAddress); err != nil {
+		return err
 	}
 	// create the iprules for this network
 	udnReplyIPRules, err := udng.constructUDNVRFIPRules(vrfTableId)
@@ -377,14 +404,25 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net
 }
 
 func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Link) error {
-	var err error
 	var networkLocalSubnets []*net.IPNet
 	// fetch subnets which we will use to get management port IP(s)
 	if udng.TopologyType() == types.Layer3Topology {
-		networkLocalSubnets, err = util.ParseNodeHostSubnetAnnotation(udng.node, udng.GetNetworkName())
+		udnNode, err := udng.watchFactory.GetUDNNodeByLabels(udng.node.Name, udng.GetNetworkName())
 		if err != nil {
 			return fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
 				udng.node.Name, udng.GetNetworkName(), err)
+		}
+		if len(udnNode.Spec.NodeSubnets) == 0 {
+			return fmt.Errorf("subnets are empty for UDN Node: %s, for node: %s, network %s",
+				udnNode.Name, udng.node.Name, udng.GetNetworkName())
+		}
+		for _, subnet := range udnNode.Spec.NodeSubnets {
+			_, n, err := net.ParseCIDR(string(subnet))
+			if err != nil {
+				return fmt.Errorf("failed to parse CIDR %q for node %s, network %s: %w",
+					subnet, udng.node.Name, udng.GetNetworkName(), err)
+			}
+			networkLocalSubnets = append(networkLocalSubnets, n)
 		}
 	} else if udng.TopologyType() == types.Layer2Topology {
 		// NOTE: We don't support L2 networks without subnets as primary UDNs

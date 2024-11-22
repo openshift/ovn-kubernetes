@@ -247,4 +247,7 @@ const (
 	// entry for the gateway routers. After this time, the entry is removed and
 	// may be refreshed with a new ARP request.
 	GRMACBindingAgeThreshold = "300"
+
+	// UDNIndexer is the name of the label indexer used for UDN Node informer
+	UDNIndexer = "byNodeAndNetwork"
 )

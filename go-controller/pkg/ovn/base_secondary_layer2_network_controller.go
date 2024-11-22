@@ -49,6 +49,9 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
+	if oc.udnNodeHandler != nil {
+		oc.watchFactory.RemoveUDNNodeHandler(oc.udnNodeHandler)
+	}
 }
 
 // cleanup cleans up logical entities for the given network, called from net-attach-def routine
@@ -87,6 +90,12 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 
 	if err := oc.WatchNodes(); err != nil {
 		return err
+	}
+
+	if config.OVNKubernetesFeature.EnableNetworkSegmentation {
+		if err := oc.WatchUDNNodes(); err != nil {
+			return err
+		}
 	}
 
 	// when on IC, it will be the NetworkController that returns the IPAMClaims
@@ -206,6 +215,11 @@ func (oc *BaseSecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *c
 
 func (oc *BaseSecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
 	oc.localZoneNodes.Delete(node.Name)
+	return nil
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) syncUDNNodes(nodes []interface{}) error {
+	// TODO(trozet): implement
 	return nil
 }
 
