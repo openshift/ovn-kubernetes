@@ -167,7 +167,7 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer, udnNodeInf
 			// which comes on the UDN CRD
 			udnNode, ok := obj.(*userdefinednodeapi.UDNNode)
 			if !ok {
-				klog.Errorf("could not cast %T object to *userdefinednodeapi.UDNNode", obj)
+				klog.Errorf("Could not cast %T object to *userdefinednodeapi.UDNNode", obj)
 				return
 			}
 
@@ -176,12 +176,12 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer, udnNodeInf
 			}
 			nodeName := udnNode.GetLabels()["nodeName"]
 			if nodeName == "" {
-				klog.Errorf("unable to find nodeName label for udn Node: %s", udnNode.Name)
+				klog.Errorf("Unable to find nodeName label for udn Node: %s", udnNode.Name)
 				return
 			}
 			node, err := nt.watchFactory.GetNode(nodeName)
 			if err != nil {
-				klog.Errorf("failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, udnNode.Name)
+				klog.Errorf("Failed to find corresponding node object with name :%q for UDN Node: %q", nodeName, udnNode.Name)
 				return
 			}
 			// hopefully node tracker is thread safe...

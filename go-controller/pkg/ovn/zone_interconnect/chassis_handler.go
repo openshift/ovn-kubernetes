@@ -122,7 +122,7 @@ func (zic *ZoneChassisHandler) SyncNodes(kNodes []interface{}) error {
 
 // createOrUpdateNodeChassis creates or updates the node chassis to local or remote.
 func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRemote bool) error {
-	klog.Infof("adding node chassis: %s", node.Name)
+	klog.Infof("Adding node chassis: %s", node.Name)
 	// Get the chassis id.
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
