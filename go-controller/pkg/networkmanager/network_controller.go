@@ -503,11 +503,10 @@ func raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bool {
 	// there had to be a change on observed generation or status, otherwise we
 	// already processed this RA in its current form
 	oldCondition := meta.FindStatusCondition(oldRA.Status.Conditions, "Accepted")
-	if oldCondition.ObservedGeneration == newCondition.ObservedGeneration && oldCondition.Status == newCondition.Status {
-		return false
+	if oldCondition == nil {
+		return true
 	}
-
-	return true
+	return oldCondition.ObservedGeneration != newCondition.ObservedGeneration || oldCondition.Status != newCondition.Status
 }
 
 func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
