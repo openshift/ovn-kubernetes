@@ -191,7 +191,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 
 	nodeHandler, udnNodeHandler, err := c.nodeTracker.Start(c.nodeInformer, c.udnNodeInformer)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to add node and udnNode handlers with node tracker start: %w", err)
 	}
 	// We need the node tracker to be synced first, as we rely on it to properly reprogram initial per node load balancers
 	klog.Infof("Waiting for node tracker handler to sync for network=%s", c.netInfo.GetNetworkName())
