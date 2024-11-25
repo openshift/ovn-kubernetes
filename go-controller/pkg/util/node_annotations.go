@@ -906,18 +906,18 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 }
 
 func ParseNodeUDNGatewayRouterJoinAddrs(udnNode *userdefinednodeapi.UDNNode) ([]*net.IPNet, error) {
-	var nets []*net.IPNet
+	var ipAddrs []*net.IPNet
 	if len(udnNode.Spec.JoinSubnets) == 0 {
 		return nil, types.NewSuppressedError(fmt.Errorf("join subnet missing in spec"))
 	}
 	for _, subnet := range udnNode.Spec.JoinSubnets {
-		_, ipnet, err := net.ParseCIDR(string(subnet))
+		ip, ipNet, err := net.ParseCIDR(string(subnet))
 		if err != nil {
 			return nil, err
 		}
-		nets = append(nets, ipnet)
+		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
-	return nets, nil
+	return ipAddrs, nil
 }
 
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
