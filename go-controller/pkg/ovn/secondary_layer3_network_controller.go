@@ -894,15 +894,15 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(udnNode *use
 					node.Name, oc.GetNetworkName(), err))
 				oc.syncZoneICFailed.Store(node.Name, true)
 			}
-			if gwLRPIPs != nil {
-				// gets node ID from node annotation
-				// gets transit switch subnet
-				if err := oc.zoneICHandler.AddLocalZoneNode(hostSubnets, gwLRPIPs, node); err != nil {
-					errs = append(errs, err)
-					oc.syncZoneICFailed.Store(node.Name, true)
-				} else {
-					oc.syncZoneICFailed.Delete(node.Name)
-				}
+		}
+		if gwLRPIPs != nil {
+			// gets node ID from node annotation
+			// gets transit switch subnet
+			if err := oc.zoneICHandler.AddLocalZoneNode(hostSubnets, gwLRPIPs, node); err != nil {
+				errs = append(errs, err)
+				oc.syncZoneICFailed.Store(node.Name, true)
+			} else {
+				oc.syncZoneICFailed.Delete(node.Name)
 			}
 		}
 	}
