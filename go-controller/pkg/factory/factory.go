@@ -420,7 +420,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 
 		wf.udnNodeFactory = userdefinednodeinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNodeClient, resyncInterval)
-		udnNodeInformer := wf.udnNodeFactory.K8s().V1().UDNNodes().Informer()
+		udnNodeRawInformer := wf.udnNodeFactory.K8s().V1().UDNNodes().Informer()
 
 		indexers := cache.Indexers{
 			types.UDNIndexer: func(obj interface{}) ([]string, error) {
@@ -431,14 +431,17 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 				return []string{util.GetUDNNodeFormat(udnNode.Labels["nodeName"], udnNode.Labels["networkName"])}, nil
 			},
 		}
-		err := udnNodeInformer.AddIndexers(indexers)
+		err := udnNodeRawInformer.AddIndexers(indexers)
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[UserDefinedNodeType], err = newInformer(UserDefinedNodeType, udnNodeInformer)
+
+		udnNodeInformer, err := newQueuedInformer(UserDefinedNodeType, udnNodeRawInformer,
+			wf.stopChan, defaultNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
+		wf.informers[UserDefinedNodeType] = udnNodeInformer
 	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() {

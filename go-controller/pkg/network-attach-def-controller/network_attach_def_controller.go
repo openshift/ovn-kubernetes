@@ -100,7 +100,7 @@ func NewNetAttachDefinitionController(
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:      nadController.sync,
 		ObjNeedsUpdate: nadNeedsUpdate,
-		Threadiness:    1,
+		Threadiness:    5,
 	}
 
 	nadInformer := wf.NADInformer()
