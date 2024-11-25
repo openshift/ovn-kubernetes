@@ -915,7 +915,7 @@ func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kub
 	mgmtInterfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID()))
 
 	if hasIPv4Subnet, _ := oc.IPMode(); hasIPv4Subnet {
-		if err := kubevirt.ReconcileIPv4DefaultGatewayAfterLiveMigration(oc.watchFactory, oc.GetNetInfo(), kubevirtLiveMigrationStatus, mgmtInterfaceName); err != nil {
+		if err := kubevirt.NewDefaultGatewayReconciler(oc.watchFactory, oc.GetNetInfo(), mgmtInterfaceName).ReconcileIPv4AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
 			return err
 		}
 	}
