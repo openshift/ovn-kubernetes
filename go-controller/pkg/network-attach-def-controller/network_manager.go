@@ -49,7 +49,7 @@ func newNetworkManager(name string, ncm NetworkControllerManager) networkManager
 	config := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.sync,
-		Threadiness: 1,
+		Threadiness: 15,
 	}
 	nc.controller = controller.NewReconciler(
 		nc.name,
