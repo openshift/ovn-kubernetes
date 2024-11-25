@@ -32,6 +32,8 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+RUN echo "timeout=1" >> /etc/yum.conf
+
 # more-pkgs file is updated in Dockerfile.base
 # more-pkgs file contains the following ovs/ovn packages to be installed in this Dockerfile
 # - openvswitch-devel

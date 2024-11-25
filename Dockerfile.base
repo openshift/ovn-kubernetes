@@ -7,6 +7,8 @@
 # build base image shared by both OpenShift and MicroShift
 FROM registry.ci.openshift.org/ocp/4.17:base-rhel9
 
+RUN echo "timeout=1" >> /etc/yum.conf
+
 # install selinux-policy first to avoid a race
 RUN dnf install -y --nodocs \
 	selinux-policy procps-ng && \

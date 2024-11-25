@@ -1,5 +1,7 @@
 FROM registry.centos.org/centos/centos:9
 
+RUN echo "timeout=1" >> /etc/yum.conf
+
 # base: EPEL repo for extra tools
 RUN yum -y install epel-release
 
