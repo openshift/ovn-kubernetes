@@ -26,9 +26,11 @@ func PlatformTypeIsEgressIPCloudProvider() bool {
 		config.Kubernetes.PlatformType == string(ocpconfigapi.OpenStackPlatformType)
 }
 
-// GetNodeEIPConfig attempts to generate EIP configuration from a nodes annotations.
-// If the platform is running in the cloud, retrieve config info from node obj annotation added by Cloud Network Config
-// Controller (CNCC). If not on a cloud platform (i.e. baremetal), retrieve from the node obj primary interface annotation.
+// GetNodeEIPConfig attempts to generate EIP configuration from a nodes
+// annotations. If the platform is running in the cloud, retrieve config info
+// from node obj annotation added by Cloud Network Config Controller (CNCC). If
+// not on a cloud platform (i.e. baremetal), retrieve from the node obj primary
+// interface annotation.
 func GetNodeEIPConfig(node *corev1.Node) (*util.ParsedNodeEgressIPConfiguration, error) {
 	var parsedEgressIPConfig *util.ParsedNodeEgressIPConfiguration
 	var err error
@@ -44,11 +46,14 @@ func GetNodeEIPConfig(node *corev1.Node) (*util.ParsedNodeEgressIPConfiguration,
 }
 
 type watchFactory interface {
-	//GetEgressIP(name string) (*egressipv1.EgressIP, error)
 	NamespaceInformer() informerscorev1.NamespaceInformer
 	EgressIPInformer() egressipinformerv1.EgressIPInformer
 }
 
+// IsEgressIPLocalOrAdvertised checks if the egress IP can be hosted on the
+// given node: either because it is local to a network directly connected to the
+// node through a primary or secondary interface, or because it is configured to
+// be advertised for any of its selected namespaces on the given node.
 func IsEgressIPLocalOrAdvertised(
 	wf watchFactory,
 	nm networkmanager.Interface,
@@ -56,112 +61,52 @@ func IsEgressIPLocalOrAdvertised(
 	node *corev1.Node,
 	eip string,
 	ip net.IP,
-) (bool, error) {
-	local, managed, _, err := getEgressIPLocalManaged(wf, nm, eipCponfig, node, eip, ip)
-	if err != nil {
-		return false, err
-	}
-	return local || managed, nil
+) (localOrAdvertised bool, err error) {
+	primary, secondary, advertised, _, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip)
+	return primary || secondary || advertised, err
 }
 
-func IsEgressIPOVNManaged(
+// IsEgressIPPrimaryOrAdvertised checks if the egress IP can be hosted on a network
+// managed by OVN on the given node: either because it can be hosted on the
+// network directly connected on the primary interface or because it is
+// configured to be advertised for any of its selected namespaces.
+func IsEgressIPPrimaryOrAdvertised(
 	wf watchFactory,
 	nm networkmanager.Interface,
 	eipCponfig *util.ParsedNodeEgressIPConfiguration,
 	node *corev1.Node,
 	eip string,
 	ip net.IP,
-) (bool, error) {
-	_, managed, _, err := getEgressIPLocalManaged(wf, nm, eipCponfig, node, eip, ip)
-	if err != nil {
-		return false, err
-	}
-	return managed, nil
+) (primaryOrAdvertised bool, err error) {
+	primary, _, advertised, _, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip)
+	return primary || advertised, err
 }
 
-func GetSecondaryHostNetworkContainingIP(
+// GetEgressIPSecondaryNetwork checks if the egress IP can be hosted on
+// a secondary interface and if it is hosted, also returns the network it is
+// hosted on.
+func GetEgressIPSecondaryNetwork(
 	wf watchFactory,
 	nm networkmanager.Interface,
 	eipCponfig *util.ParsedNodeEgressIPConfiguration,
 	node *corev1.Node,
 	eip string,
 	ip net.IP,
-) (bool, string, error) {
-	_, managed, secondary, err := getEgressIPLocalManaged(wf, nm, eipCponfig, node, eip, ip)
-	if err != nil {
-		return false, "", err
-	}
-	return managed, secondary, nil
+) (canBeSecondary bool, network string, err error) {
+	primary, _, _, network, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip)
+	return !primary, network, err
 }
 
-func getEgressIPLocalManaged(
-	wf watchFactory,
-	nm networkmanager.Interface,
-	eipCponfig *util.ParsedNodeEgressIPConfiguration,
-	node *corev1.Node,
-	eip string,
-	ip net.IP,
-) (local, managed bool, secondary string, err error) {
-	isOVNNetwork := isOVNNetwork(eipCponfig, ip)
-	if isOVNNetwork {
-		local = true
-		managed = true
-		return
+// GetEgressIPPrimaryOrSecondaryNetwork attempts to retrieve a network directly
+// connected to the given node that contains EgressIP. Check the OVN network
+// first as represented by parameter eIPConfig, and if no match is found, and if
+// not in a cloud environment, check secondary host networks.
+func GetEgressIPPrimaryOrSecondaryNetwork(node *corev1.Node, eIPConfig *util.ParsedNodeEgressIPConfiguration, eIP net.IP) (string, error) {
+	network := getEgressIPPrimaryNetwork(eIPConfig, eIP)
+	if network != "" {
+		return network, nil
 	}
-	secondary, err = getSecondaryHostNetworkContainingIP(node, ip)
-	if err != nil {
-		return
-	}
-	if secondary != "" {
-		local = true
-		managed = false
-		return
-	}
-	if !AdvertisementsEnabled() {
-		return
-	}
-	var isAdvertised bool
-	isAdvertised, err = isAdvertisedOnNode(wf, nm, eip, node.Name)
-	if err != nil {
-		return
-	}
-	if isAdvertised {
-		local = false
-		managed = true
-	}
-	return
-}
-
-// isOVNNetwork attempts to detect if the argument IP can be hosted by a network managed by OVN. Currently, this is
-// only the primary OVN network
-func isOVNNetwork(eIPConfig *util.ParsedNodeEgressIPConfiguration, ip net.IP) bool {
-	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(ip) {
-		return true
-	}
-	if eIPConfig.V6.Net != nil && eIPConfig.V6.Net.Contains(ip) {
-		return true
-	}
-	return false
-}
-
-// GetEgressIPNetwork attempts to retrieve a network that contains EgressIP. Check the OVN network first as
-// represented by parameter eIPConfig, and if no match is found, and if not in a cloud environment, check secondary host networks.
-func GetEgressIPNetwork(node *corev1.Node, eIPConfig *util.ParsedNodeEgressIPConfiguration, eIP net.IP) (string, error) {
-	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(eIP) {
-		return eIPConfig.V4.Net.String(), nil
-	}
-	if eIPConfig.V6.Net != nil && eIPConfig.V6.Net.Contains(eIP) {
-		return eIPConfig.V6.Net.String(), nil
-	}
-	// Do not attempt to check if a secondary host network may host an EIP if we are in a cloud environment
-	if util.PlatformTypeIsEgressIPCloudProvider() {
-		return "", nil
-	}
-	network, err := getSecondaryHostNetworkContainingIP(node, eIP)
-	if err != nil {
-		return "", fmt.Errorf("failed to get Egress IP %s network for node %s: %v", eIP.String(), node.Name, err)
-	}
-	return network, nil
+	return getEgressIPSecondaryNetwork(node, eIP)
 }
 
 func ReconcileEgressIPNetworkChangeAnyNode(old, new util.NetInfo) bool {
@@ -174,6 +119,34 @@ func ReconcileEgressIPNetworkChangeOnNodes(nodes []string, old, new util.NetInfo
 
 func AdvertisementsEnabled() bool {
 	return util.IsRouteAdvertisementsEnabled() && config.OVNKubernetesFeature.EnableEgressIP
+}
+
+func getEgressIPPrimarySecondaryAdvertised(
+	wf watchFactory,
+	nm networkmanager.Interface,
+	eipCponfig *util.ParsedNodeEgressIPConfiguration,
+	node *corev1.Node,
+	eip string,
+	ip net.IP,
+) (primary, secondary, advertised bool, network string, err error) {
+	network = getEgressIPPrimaryNetwork(eipCponfig, ip)
+	if network != "" {
+		primary = true
+		return
+	}
+	network, err = getEgressIPSecondaryNetwork(node, ip)
+	if err != nil {
+		return
+	}
+	if network != "" {
+		secondary = true
+		return
+	}
+	if !AdvertisementsEnabled() {
+		return
+	}
+	advertised, err = isAdvertisedOnNode(wf, nm, eip, node.Name)
+	return
 }
 
 func reconcileEgressIPNetworkChange(nodes []string, old, new util.NetInfo) bool {
@@ -204,9 +177,24 @@ func reconcileEgressIPNetworkChange(nodes []string, old, new util.NetInfo) bool 
 	return true
 }
 
-// GetSecondaryHostNetworkContainingIP attempts to find a secondary host network to host the argument IP
-// and includes only global unicast addresses.
-func getSecondaryHostNetworkContainingIP(node *corev1.Node, ip net.IP) (string, error) {
+func getEgressIPPrimaryNetwork(eIPConfig *util.ParsedNodeEgressIPConfiguration, ip net.IP) string {
+	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(ip) {
+		return eIPConfig.V4.Net.String()
+	}
+	if eIPConfig.V6.Net != nil && eIPConfig.V6.Net.Contains(ip) {
+		return eIPConfig.V6.Net.String()
+	}
+	return ""
+}
+
+// getEgressIPSecondaryNetwork attempts to find a secondary host network
+// to host the argument IP and includes only global unicast addresses.
+func getEgressIPSecondaryNetwork(node *corev1.Node, ip net.IP) (string, error) {
+	// Do not attempt to check if a secondary host network may host an EIP if we
+	// are in a cloud environment
+	if util.PlatformTypeIsEgressIPCloudProvider() {
+		return "", nil
+	}
 	networks, err := util.ParseNodeHostCIDRsExcludeOVNNetworks(node)
 	if err != nil {
 		return "", fmt.Errorf("failed to get host-cidrs annotation excluding OVN networks for node %s: %v",

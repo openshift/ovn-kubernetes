@@ -73,12 +73,17 @@ type testControllerManager struct {
 	stopped []string
 	cleaned []string
 
+	raiseErrorWhenCreatingController error
+
 	valid []util.NetInfo
 }
 
 func (tcm *testControllerManager) NewNetworkController(netInfo util.NetInfo) (NetworkController, error) {
 	tcm.Lock()
 	defer tcm.Unlock()
+	if tcm.raiseErrorWhenCreatingController != nil {
+		return nil, tcm.raiseErrorWhenCreatingController
+	}
 	t := &testNetworkController{
 		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
 		tcm:                 tcm,
@@ -565,8 +570,9 @@ func TestSyncAll(t *testing.T) {
 		netconf *ovncnitypes.NetConf
 	}
 	tests := []struct {
-		name     string
-		testNADs []TestNAD
+		name         string
+		testNADs     []TestNAD
+		syncAllError error
 	}{
 		{
 			name: "multiple networks referenced by multiple nads",
@@ -584,6 +590,7 @@ func TestSyncAll(t *testing.T) {
 					netconf: &network_A_Copy,
 				},
 			},
+			syncAllError: ErrNetworkControllerTopologyNotManaged,
 		},
 	}
 	for _, tt := range tests {
@@ -601,6 +608,10 @@ func TestSyncAll(t *testing.T) {
 			tcm := &testControllerManager{
 				controllers: map[string]NetworkController{},
 			}
+			if tt.syncAllError != nil {
+				tcm.raiseErrorWhenCreatingController = tt.syncAllError
+			}
+
 			controller, err := NewForCluster(
 				"SUT",
 				tcm,

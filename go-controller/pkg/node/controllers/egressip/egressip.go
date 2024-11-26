@@ -569,7 +569,7 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 				fmt.Errorf("failed to generate mask for EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
-		isOVNManaged, err := egressip.IsEgressIPOVNManaged(c.watchFactory, c.networkManager, parsedNodeEIPConfig, node, eip.Name, eIPNet.IP)
+		isOVNManaged, err := egressip.IsEgressIPPrimaryOrAdvertised(c.watchFactory, c.networkManager, parsedNodeEIPConfig, node, eip.Name, eIPNet.IP)
 		if err != nil {
 			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
 				fmt.Errorf("failed to determine if EgressIP %s IP %s is on an OVN network: %v", eip.Name, status.EgressIP, err)
@@ -1013,7 +1013,7 @@ func (c *Controller) repairNode() error {
 			if err != nil {
 				return err
 			}
-			isOVNManaged, err := egressip.IsEgressIPOVNManaged(c.watchFactory, c.networkManager, parsedNodeEIPConfig, node, egressIP.Name, eIPNet.IP)
+			isOVNManaged, err := egressip.IsEgressIPPrimaryOrAdvertised(c.watchFactory, c.networkManager, parsedNodeEIPConfig, node, egressIP.Name, eIPNet.IP)
 			if err != nil {
 				return err
 			}

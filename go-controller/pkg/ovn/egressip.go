@@ -1540,7 +1540,7 @@ func (e *egressIPZoneController) addPodEgressIPAssignment(egressIPName string, s
 	if err != nil {
 		return fmt.Errorf("failed to get node %s egress IP config: %w", eNode.Name, err)
 	}
-	isOVNManaged, err := egressip.IsEgressIPOVNManaged(e.watchFactory, e.networkManager, parsedNodeEIPConfig, eNode, egressIPName, eIPIP)
+	isOVNManaged, err := egressip.IsEgressIPPrimaryOrAdvertised(e.watchFactory, e.networkManager, parsedNodeEIPConfig, eNode, egressIPName, eIPIP)
 	if err != nil {
 		return err
 	}
@@ -1612,7 +1612,7 @@ func (e *egressIPZoneController) deletePodEgressIPAssignment(egressIPName string
 		if err != nil {
 			klog.Warningf("Unable to get node %s egress IP config: %v", eNode.Name, err)
 		} else {
-			isOVNManaged, err = egressip.IsEgressIPOVNManaged(e.watchFactory, e.networkManager, parsedEIPConfig, eNode, egressIPName, eIPIP)
+			isOVNManaged, err = egressip.IsEgressIPPrimaryOrAdvertised(e.watchFactory, e.networkManager, parsedEIPConfig, eNode, egressIPName, eIPIP)
 			if err != nil {
 				return err
 			}
@@ -2066,7 +2066,7 @@ func (e *egressIPZoneController) attemptToGetNextHopIP(name string, status egres
 	if eIPConfig, err := egressip.GetNodeEIPConfig(eNode); err != nil {
 		klog.Warningf("Failed to get Egress IP config from node annotation %s: %v", status.Node, err)
 	} else {
-		isOVNManaged, err := egressip.IsEgressIPOVNManaged(e.watchFactory, e.networkManager, eIPConfig, eNode, name, eIPIP)
+		isOVNManaged, err := egressip.IsEgressIPPrimaryOrAdvertised(e.watchFactory, e.networkManager, eIPConfig, eNode, name, eIPIP)
 		if err != nil {
 			return "", err
 		}
