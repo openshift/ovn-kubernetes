@@ -353,7 +353,7 @@ func (oc *DefaultNetworkController) Stop() {
 		controller.Stop(oc.efNodeController)
 	}
 	if oc.routeImportManager != nil {
-		_ = oc.routeImportManager.ForgetNetwork(oc, 0)
+		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
 	}
 	oc.eIPC.Stop()
 
@@ -413,6 +413,14 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	klog.V(4).Info("Cleaning External Gateway ECMP routes")
 	if err := WithSyncDurationMetric("external gateway routes", oc.apbExternalRouteController.Repair); err != nil {
 		return err
+	}
+
+	// Add ourselves to the route import manager
+	if oc.routeImportManager != nil {
+		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo(), 0)
+		if err != nil {
+			return fmt.Errorf("failed to add default network to the route import manager: %v", err)
+		}
 	}
 
 	return nil
@@ -619,6 +627,7 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
 	}
 
+	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
 	reconcileEgressIP := oc.eIPC.ShouldReconcileNetworkChange(retryNodeNames, oc.ReconcilableNetInfo, netInfo)
 
 	// update network information, point of no return
@@ -627,8 +636,8 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
 	}
 
-	if oc.routeImportManager != nil {
-		err = oc.routeImportManager.UpdateNetwork(oc.GetNetInfo(), 0)
+	if reconcileRoutes {
+		err = oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
 		if err != nil {
 			return err
 		}

@@ -2,6 +2,7 @@ package routeimport
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,8 +32,23 @@ const (
 )
 
 type Manager interface {
-	UpdateNetwork(network util.NetInfo, networkID int) error
-	ForgetNetwork(network util.NetInfo, networkID int) error
+	// AddNetwork instructs the manager to continously reconcile BGP routes from
+	// the network host vrf to the network gateway router. A network can only be
+	// added once otherwise an error will be returned.
+	AddNetwork(network util.NetInfo, networkID int) error
+
+	// NeedsReconciliation checks the provided network information against the
+	// stored one and returns whether there is any change requires
+	// reconciliation. If the network is not known to the manager, it returns
+	// false.
+	NeedsReconciliation(network util.NetInfo) bool
+
+	// ReconcileNetwork triggers a manual reconciliation.
+	ReconcileNetwork(name string) error
+
+	// ForgetNetwork instructs the manager to stop reconciling BGP routes from
+	// the network host vrf to the network gateway router.
+	ForgetNetwork(name string)
 }
 
 type Controller interface {
@@ -85,23 +101,20 @@ type controller struct {
 	tables     map[int]int
 }
 
-func (c *controller) UpdateNetwork(network util.NetInfo, networkID int) error {
+func (c *controller) AddNetwork(network util.NetInfo, networkID int) error {
 	c.Lock()
 	defer c.Unlock()
 
-	name := network.GetNetworkName()
-	existing := c.networkIDs[networkID]
-
-	if existing != "" && existing != name {
-		return fmt.Errorf("already tracking network %s with same ID %d as %s",
-			existing,
+	if c.networkIDs[networkID] != "" {
+		return fmt.Errorf("already tracking network %q with ID %d",
+			c.networkIDs[networkID],
 			networkID,
-			name,
 		)
 	}
 
-	if existing != "" {
-		return nil
+	name := network.GetNetworkName()
+	if c.networks[name] != nil {
+		return fmt.Errorf("already tracking network name %q", name)
 	}
 
 	info := &netInfo{NetInfo: network, id: networkID}
@@ -112,38 +125,47 @@ func (c *controller) UpdateNetwork(network util.NetInfo, networkID int) error {
 	c.networkIDs[networkID] = name
 	c.networks[name] = info
 
-	reconcile := info.table != 0 || c.findTableForNetwork(networkID) != 0
-	c.log.V(5).Info("Added network", "network", name, "id", networkID, "reconcile", reconcile)
-
-	if reconcile {
-		c.reconcile(name)
-	}
+	c.log.V(5).Info("Added network", "name", name, "id", networkID)
+	c.reconcile(name)
 
 	return nil
 }
 
-func (c *controller) ForgetNetwork(network util.NetInfo, networkID int) error {
+func (c *controller) ForgetNetwork(name string) {
 	c.Lock()
 	defer c.Unlock()
 
-	name := network.GetNetworkName()
-	existing := c.networkIDs[networkID]
-
-	if existing == "" {
-		return nil
+	network := c.networks[name]
+	if network == nil {
+		return
 	}
 
-	if existing != name {
-		return fmt.Errorf("already tracking network %s with same ID %d",
-			existing,
-			networkID,
-		)
-	}
-
-	delete(c.networkIDs, networkID)
+	delete(c.networkIDs, network.id)
 	delete(c.networks, name)
 
-	c.log.V(5).Info("Forgot network", "network", name)
+	c.log.V(5).Info("Forgot network", "name", name)
+}
+
+func (c *controller) NeedsReconciliation(network util.NetInfo) bool {
+	c.RLock()
+	defer c.RUnlock()
+
+	if c.networks[network.GetNetworkName()] == nil {
+		return false
+	}
+
+	// TODO check if overlay mode changed
+	return false
+}
+
+func (c *controller) ReconcileNetwork(name string) error {
+	c.RLock()
+	defer c.RUnlock()
+	if c.networks[name] == nil {
+		return fmt.Errorf("unknown network with name %q", name)
+	}
+	c.log.V(5).Info("Reconciling network", "name", name)
+	c.reconcile(name)
 	return nil
 }
 
@@ -336,12 +358,19 @@ func (c *controller) syncNetwork(network string) error {
 	}
 	router := info.GetNetworkScopedGWRouterName(c.node)
 
+	// skip routes in the pod network
+	// TODO do not skip these routes in no overlay mode
+	ignoreSubnets := make([]*net.IPNet, len(info.Subnets()))
+	for i, subnet := range info.Subnets() {
+		ignoreSubnets[i] = subnet.CIDR
+	}
+
 	table := c.getTableForNetwork(info.id)
 	if table == 0 {
 		return nil
 	}
 
-	expected, err := c.getBGPRoutes(table)
+	expected, err := c.getBGPRoutes(table, ignoreSubnets)
 	if err != nil {
 		return err
 	}
@@ -404,7 +433,7 @@ func (c *controller) syncNetwork(network string) error {
 	return err
 }
 
-func (c *controller) getBGPRoutes(table int) (sets.Set[route], error) {
+func (c *controller) getBGPRoutes(table int, ignoreSubnets []*net.IPNet) (sets.Set[route], error) {
 	start := time.Now()
 	filter := &netlink.Route{
 		Protocol: unix.RTPROT_BGP,
@@ -417,6 +446,9 @@ func (c *controller) getBGPRoutes(table int) (sets.Set[route], error) {
 
 	routes := sets.New[route]()
 	for _, nlroute := range nlroutes {
+		if util.IsContainedInAnyCIDR(nlroute.Dst, ignoreSubnets...) {
+			continue
+		}
 		routes.Insert(routesFromNetlinkRoute(&nlroute)...)
 	}
 
