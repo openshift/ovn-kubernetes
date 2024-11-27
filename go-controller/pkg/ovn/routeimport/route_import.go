@@ -503,17 +503,6 @@ func (c *controller) getNetworkForTable(table int) *netInfo {
 	return nil
 }
 
-func (c *controller) findTableForNetwork(network int) int {
-	c.RLock()
-	defer c.RUnlock()
-	for table, id := range c.tables {
-		if id == network {
-			return table
-		}
-	}
-	return 0
-}
-
 func routesFromNetlinkRoute(r *netlink.Route) []route {
 	validIP := func(ip string) bool {
 		if ip == "" || ip == "<nil>" {

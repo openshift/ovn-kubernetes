@@ -399,6 +399,7 @@ type egressIPClusterController struct {
 	namespaceHandler *factory.Handler
 
 	networkManager networkmanager.Interface
+
 	networkReconciler controller.Reconciler
 }
 
