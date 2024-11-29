@@ -780,7 +780,7 @@ iperf3 -t 0 -c %[1]s -p %[2]d --logfile %[3]s &
 					Domain: kubevirtv1.DomainSpec{
 						Resources: kubevirtv1.ResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceMemory: resource.MustParse("512Mi"),
+								corev1.ResourceMemory: resource.MustParse("1024Mi"),
 							},
 						},
 						Devices: kubevirtv1.Devices{
