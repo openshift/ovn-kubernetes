@@ -771,7 +771,7 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v
 					continue
 				}
 				// do not reconcile if EIP is hosted by OVN network or if network is what we expect
-				canBeSecondary, network, err := egressip.GetEgressIPSecondaryNetwork(
+				isLocalOrAdvertised, err := egressip.IsEgressIPLocalOrAdvertised(
 					eIPC.watchFactory,
 					eIPC.networkManager,
 					eNode.egressIPConfig,
@@ -788,12 +788,13 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v
 							err))
 					continue
 				}
-				if !canBeSecondary {
+				if isLocalOrAdvertised {
 					continue
 				}
-				if network == "" {
-					reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
-				}
+				// if we can't recognize the EgressIP as local or advertised,
+				// then it could be that it had been allocated to a secondary
+				// interface that can no longer host it
+				reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 			}
 		}
 	}
@@ -1272,27 +1273,10 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
 
 	// fetch nodes that can host this EIP by route advertisements
-	advertisedOnNodes := sets.New[string]()
-	if egressip.AdvertisementsEnabled() {
-		eip, err := eIPC.watchFactory.GetEgressIP(name)
-		if err != nil {
-			klog.Errorf("Failed to get EgressIP %s: %v", name, err)
-			return assignments
-		}
-		selector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
-		if err != nil {
-			klog.Errorf("Failed to parse EgressIP %s namespace selector: %v", name, err)
-			return assignments
-		}
-		selectedNs, err := eIPC.watchFactory.NamespaceCoreInformer().Lister().List(selector)
-		if err != nil {
-			klog.Errorf("Failed to list selected namespaces for EgressIP %s: %v", name, err)
-			return assignments
-		}
-		for _, ns := range selectedNs {
-			network := eIPC.networkManager.GetActiveNetworkForNamespaceFast(ns.Name)
-			advertisedOnNodes.Insert(network.GetEgressIPAdvertisedNodes()...)
-		}
+	advertisedOnNodes, err := egressip.GetEgressIPAdvertisedNodes(eIPC.watchFactory, eIPC.networkManager, name)
+	if err != nil {
+		klog.Errorf("Failed to get nodes on which the EgressIP %s can be advertised: %v", name, err)
+		return assignments
 	}
 
 	for _, egressIP := range egressIPs {
@@ -1324,23 +1308,20 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 					eIP.String(), node.Name, err)
 				return assignments
 			}
-			egressIPNetwork, err := egressip.GetEgressIPPrimaryOrSecondaryNetwork(node, eNode.egressIPConfig, eIP)
+			local, err := egressip.IsEgressIPLocal(eIPC.watchFactory, eIPC.networkManager, eNode.egressIPConfig, node, name, eIP)
 			if err != nil {
 				klog.Errorf("Failed to determine if egress IP %s can be hosted on node %s: %v",
 					eIP.String(), node.Name, err)
 				return assignments
 			}
-			if egressIPNetwork == "" {
+			if !local {
 				continue
 			}
 			localOnNodes.Insert(eNode.name)
 		}
 
 		isLocalOrAdvertisedOnNode := func(node string) bool {
-			return localOnNodes.Has(node) || advertisedOnNodes.Has(node)
-		}
-		isLocalOnOtherNodes := func(node string) bool {
-			return !localOnNodes.Has(node) && len(localOnNodes) > 0
+			return localOnNodes.Has(node) || (advertisedOnNodes != nil && advertisedOnNodes.Has(node))
 		}
 
 		if status, exists := existingAllocations[eIP.String()]; exists {
@@ -1397,8 +1378,11 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				klog.V(5).Infof("Node %s is not connected to the EgressIP network or is not advertising the EgressIP, trying another node", eNode.name)
 				continue
 			}
-			if isLocalOnOtherNodes(eNode.name) {
-				klog.V(5).Infof("Node %s is advertising EgressIP but the EgressIP is local to a different node, trying another node", eNode.name)
+			if localOnNodes.Has(eNode.name) && advertisedOnNodes != nil {
+				klog.V(5).Infof("Node %s is connected to the EgressIP network but the EgressIP is configured to be advertised", eNode.name)
+			}
+			if advertisedOnNodes != nil && advertisedOnNodes.Has(eNode.name) && len(localOnNodes) != 0 {
+				klog.V(5).Infof("Node %s is configured to advertise the Egress IP but the EgressIP is local to a different node", eNode.name)
 				continue
 			}
 			if eNode.egressIPConfig.Capacity.IP < util.UnlimitedNodeCapacity {

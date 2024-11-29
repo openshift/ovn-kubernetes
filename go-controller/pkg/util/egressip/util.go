@@ -50,7 +50,22 @@ type watchFactory interface {
 	EgressIPInformer() egressipinformerv1.EgressIPInformer
 }
 
-// IsEgressIPLocalOrAdvertised checks if the egress IP can be hosted on the
+// IsEgressIPLocal checks if the EgressIP is hosted on a local network either
+// through a primary or secondary interface.
+func IsEgressIPLocal(
+	wf watchFactory,
+	nm networkmanager.Interface,
+	eipCponfig *util.ParsedNodeEgressIPConfiguration,
+	node *corev1.Node,
+	eip string,
+	ip net.IP,
+) (bool, error) {
+	checkAdvertisements := false
+	primary, secondary, _, _, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip, checkAdvertisements)
+	return primary || secondary, err
+}
+
+// IsEgressIPLocalOrAdvertised checks if the EgressIP can be hosted on the
 // given node: either because it is local to a network directly connected to the
 // node through a primary or secondary interface, or because it is configured to
 // be advertised for any of its selected namespaces on the given node.
@@ -61,12 +76,13 @@ func IsEgressIPLocalOrAdvertised(
 	node *corev1.Node,
 	eip string,
 	ip net.IP,
-) (localOrAdvertised bool, err error) {
-	primary, secondary, advertised, _, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip)
+) (bool, error) {
+	checkAdvertisements := true
+	primary, secondary, advertised, _, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip, checkAdvertisements)
 	return primary || secondary || advertised, err
 }
 
-// IsEgressIPPrimaryOrAdvertised checks if the egress IP can be hosted on a network
+// IsEgressIPPrimaryOrAdvertised checks if the EgressIP can be hosted on a network
 // managed by OVN on the given node: either because it can be hosted on the
 // network directly connected on the primary interface or because it is
 // configured to be advertised for any of its selected namespaces.
@@ -77,24 +93,10 @@ func IsEgressIPPrimaryOrAdvertised(
 	node *corev1.Node,
 	eip string,
 	ip net.IP,
-) (primaryOrAdvertised bool, err error) {
-	primary, _, advertised, _, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip)
+) (bool, error) {
+	checkAdvertisements := true
+	primary, _, advertised, _, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip, checkAdvertisements)
 	return primary || advertised, err
-}
-
-// GetEgressIPSecondaryNetwork checks if the egress IP can be hosted on
-// a secondary interface and if it is hosted, also returns the network it is
-// hosted on.
-func GetEgressIPSecondaryNetwork(
-	wf watchFactory,
-	nm networkmanager.Interface,
-	eipCponfig *util.ParsedNodeEgressIPConfiguration,
-	node *corev1.Node,
-	eip string,
-	ip net.IP,
-) (canBeSecondary bool, network string, err error) {
-	primary, _, _, network, err := getEgressIPPrimarySecondaryAdvertised(wf, nm, eipCponfig, node, eip, ip)
-	return !primary, network, err
 }
 
 // GetEgressIPPrimaryOrSecondaryNetwork attempts to retrieve a network directly
@@ -107,6 +109,44 @@ func GetEgressIPPrimaryOrSecondaryNetwork(node *corev1.Node, eIPConfig *util.Par
 		return network, nil
 	}
 	return getEgressIPSecondaryNetwork(node, eIP)
+}
+
+// GetEgressIPAdvertisedNodes return the common nodes on which an EgressIP is
+// advertised for all the selected namespaces. If the EgressIP is not advertised
+// at all it return nil. If it is not advertised in at least one common node for
+// all the selected namespaces it return an empty set.
+func GetEgressIPAdvertisedNodes(wf watchFactory, nm networkmanager.Interface, name string) (sets.Set[string], error) {
+	if !AdvertisementsEnabled() {
+		return nil, nil
+	}
+
+	var advertisedOnNodes sets.Set[string]
+	eip, err := wf.EgressIPInformer().Lister().Get(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get EgressIP %s: %v", name, err)
+	}
+	selector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse EgressIP %s namespace selector: %v", name, err)
+	}
+	selectedNs, err := wf.NamespaceInformer().Lister().List(selector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list selected namespaces for EgressIP %s: %v", name, err)
+	}
+	for _, ns := range selectedNs {
+		network := nm.GetActiveNetworkForNamespaceFast(ns.Name)
+		nodes := network.GetEgressIPAdvertisedNodes()
+		switch {
+		case len(nodes) == 0:
+			continue
+		case advertisedOnNodes == nil:
+			advertisedOnNodes = sets.New(nodes...)
+		default:
+			advertisedOnNodes = advertisedOnNodes.Intersection(sets.New(nodes...))
+		}
+	}
+
+	return advertisedOnNodes, nil
 }
 
 func ReconcileEgressIPNetworkChangeAnyNode(old, new util.NetInfo) bool {
@@ -128,6 +168,7 @@ func getEgressIPPrimarySecondaryAdvertised(
 	node *corev1.Node,
 	eip string,
 	ip net.IP,
+	checkAdvertisements bool,
 ) (primary, secondary, advertised bool, network string, err error) {
 	network = getEgressIPPrimaryNetwork(eipCponfig, ip)
 	if network != "" {
@@ -142,7 +183,7 @@ func getEgressIPPrimarySecondaryAdvertised(
 		secondary = true
 		return
 	}
-	if !AdvertisementsEnabled() {
+	if !AdvertisementsEnabled() || !checkAdvertisements {
 		return
 	}
 	advertised, err = isAdvertisedOnNode(wf, nm, eip, node.Name)
