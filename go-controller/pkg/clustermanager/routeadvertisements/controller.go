@@ -250,16 +250,20 @@ func (c *Controller) reconcileRouteAdvertisements(name string, ra *ratypes.Route
 type selectedNetworks struct {
 	// networks is an ordered list of selected network names
 	networks []string
-	// networkPrefixes is a map of selected network names to their ordered network subnets
-	networkPrefixes map[string][]string
-	// allNetworkPrefixes is an ordered list of all selected network subnets
-	allNetworkPrefixes []string
-	// hostPrefixes is a map of selected network names to their ordered network subnets specific for a node
-	hostPrefixes map[string][]string
-	// allHostPrefixes is an ordered list of all selected network subnets specific to a node
-	allHostPrefixes []string
-	// hostPrefixLength is a map of selected network subnets to their network host prefix length
-	hostPrefixLength map[string]uint32
+	// vrfs is an ordered list of selected networks VRF's
+	vrfs []string
+	// networkVRFs is a mapping of VRF to corresponding network
+	networkVRFs map[string]string
+	// subnets is an ordered list of all selected network subnets
+	subnets []string
+	// hostSubnets is an ordered list of all selected network subnets specific to a node
+	hostSubnets []string
+	// networkSubnets is a map of selected network names to their ordered network subnets
+	networkSubnets map[string][]string
+	// hostNetworkSubnets is a map of selected network names to their ordered network subnets specific for a node
+	hostNetworkSubnets map[string][]string
+	// prefixLength is a map of selected network to their prefix length
+	prefixLength map[string]uint32
 }
 
 // generateFRRConfigurations generates FRRConfigurations for the route
@@ -343,8 +347,9 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	// validate and gather information about the networks
 	networkSet := sets.New[string]()
 	selectedNetworks := &selectedNetworks{
-		networkPrefixes:  map[string][]string{},
-		hostPrefixLength: map[string]uint32{},
+		networkVRFs:    map[string]string{},
+		networkSubnets: map[string][]string{},
+		prefixLength:   map[string]uint32{},
 	}
 	for _, nad := range nads {
 		// TODO probably worth it to cache this info across reconciles
@@ -363,20 +368,30 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 			// TODO don't really know what to do with layer 2 topologies yet
 			return nil, nil, fmt.Errorf("%w: selected network %q has unsupported topology %q", errConfig, netInfo.GetNetworkName(), netInfo.TopologyType())
 		}
+		vrf := util.GetNetworkVRFNameForBGP(netInfo)
+		if vrf == "" {
+			return nil, nil, fmt.Errorf("%w: selected network %q is not mapped to any VRF", errConfig, netInfo.GetNetworkName())
+		}
+		if vfrNet, hasVFR := selectedNetworks.networkVRFs[vrf]; hasVFR && vfrNet != networkName {
+			return nil, nil, fmt.Errorf("%w: vrf %q found to be mapped to multiple networks %v", errConfig, vrf, []string{vfrNet, networkName})
+		}
 		networkSet.Insert(networkName)
+		selectedNetworks.vrfs = append(selectedNetworks.vrfs, vrf)
+		selectedNetworks.networkVRFs[vrf] = networkName
 		// TODO check overlaps?
 		for _, cidr := range netInfo.Subnets() {
 			subnet := cidr.CIDR.String()
 			len := uint32(cidr.HostSubnetLength)
-			selectedNetworks.networkPrefixes[networkName] = append(selectedNetworks.networkPrefixes[networkName], subnet)
-			selectedNetworks.allNetworkPrefixes = append(selectedNetworks.allNetworkPrefixes, subnet)
-			selectedNetworks.hostPrefixLength[subnet] = len
+			selectedNetworks.networkSubnets[networkName] = append(selectedNetworks.networkSubnets[networkName], subnet)
+			selectedNetworks.subnets = append(selectedNetworks.subnets, subnet)
+			selectedNetworks.prefixLength[subnet] = len
 		}
 		// ordered
-		slices.Sort(selectedNetworks.networkPrefixes[networkName])
+		slices.Sort(selectedNetworks.networkSubnets[networkName])
 	}
 	// ordered
-	slices.Sort(selectedNetworks.allNetworkPrefixes)
+	slices.Sort(selectedNetworks.vrfs)
+	slices.Sort(selectedNetworks.subnets)
 	selectedNetworks.networks = sets.List(networkSet)
 
 	// helper to gather host subnets and cache during reconcile
@@ -448,21 +463,21 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 			return nil, nil, fmt.Errorf("%w: no FRRConfiguration selected for node %q", errConfig, nodeName)
 		}
 		// reset node specific information
-		selectedNetworks.hostPrefixes = map[string][]string{}
-		selectedNetworks.allHostPrefixes = []string{}
+		selectedNetworks.hostNetworkSubnets = map[string][]string{}
+		selectedNetworks.hostSubnets = []string{}
 
 		// gather node specific information
 		for _, network := range selectedNetworks.networks {
-			selectedNetworks.hostPrefixes[network], err = getPrefixes(nodeName, network)
+			selectedNetworks.hostNetworkSubnets[network], err = getPrefixes(nodeName, network)
 			if err != nil {
 				return nil, nil, err
 			}
-			selectedNetworks.allHostPrefixes = append(selectedNetworks.allHostPrefixes, selectedNetworks.hostPrefixes[network]...)
+			selectedNetworks.hostSubnets = append(selectedNetworks.hostSubnets, selectedNetworks.hostNetworkSubnets[network]...)
 			// ordered
-			slices.Sort(selectedNetworks.hostPrefixes[network])
+			slices.Sort(selectedNetworks.hostNetworkSubnets[network])
 		}
 		// ordered
-		slices.Sort(selectedNetworks.allHostPrefixes)
+		slices.Sort(selectedNetworks.hostSubnets)
 
 		matchedNetworks := sets.New[string]()
 		for _, frrConfig := range frrConfigs {
@@ -498,50 +513,50 @@ func (c *Controller) generateFRRConfiguration(
 	source *frrtypes.FRRConfiguration,
 	nodeName string,
 	selectedNetworks *selectedNetworks,
-	matchedVRFs sets.Set[string],
+	matchedNetworks sets.Set[string],
 ) *frrtypes.FRRConfiguration {
 	routers := []frrtypes.Router{}
+
+	// go over the source routers
 	for i, router := range source.Spec.BGP.Routers {
-		// match the router VRF with the RA VRF and select the appropriate
-		// prefixes accordingly
-		targetNetwork := ra.Spec.TargetVRF
-		if targetNetwork == "" {
-			targetNetwork = "default"
-		}
-		var targetVRF, matchedVRF string
+
+		targetVRF := ra.Spec.TargetVRF
+		var matchedVRF, matchedNetwork string
 		var receivePrefixes, advertisePrefixes []string
+
+		// check if this router's VRF matches the target VRF
 		switch {
-		case targetNetwork == "auto" && router.VRF == "":
-			targetVRF = router.VRF
-			// prefixes for default network
-			matchedVRF = types.DefaultNetworkName
-			advertisePrefixes = selectedNetworks.hostPrefixes[matchedVRF]
-			receivePrefixes = selectedNetworks.networkPrefixes[matchedVRF]
-		case targetNetwork == "auto":
-			targetVRF = router.VRF
-			// prefixes for this VRF network
+		case targetVRF == "auto" && router.VRF == "":
+			matchedVRF = ""
+			matchedNetwork = types.DefaultNetworkName
+			advertisePrefixes = selectedNetworks.hostNetworkSubnets[matchedNetwork]
+			receivePrefixes = selectedNetworks.networkSubnets[matchedNetwork]
+		case targetVRF == "auto":
 			matchedVRF = router.VRF
-			advertisePrefixes = selectedNetworks.hostPrefixes[matchedVRF]
-			receivePrefixes = selectedNetworks.networkPrefixes[matchedVRF]
-		case targetNetwork == "default":
-			targetVRF = ""
-			matchedVRF = types.DefaultNetworkName
-			advertisePrefixes = selectedNetworks.allHostPrefixes
-			receivePrefixes = selectedNetworks.allNetworkPrefixes
+			matchedNetwork = selectedNetworks.networkVRFs[matchedVRF]
+			advertisePrefixes = selectedNetworks.hostNetworkSubnets[matchedNetwork]
+			receivePrefixes = selectedNetworks.networkSubnets[matchedNetwork]
+		case targetVRF == "":
+			matchedVRF = ""
+			matchedNetwork = types.DefaultNetworkName
+			advertisePrefixes = selectedNetworks.hostSubnets
+			receivePrefixes = selectedNetworks.subnets
 		default:
-			targetVRF = ra.Spec.TargetVRF
-			matchedVRF = ra.Spec.TargetVRF
-			advertisePrefixes = selectedNetworks.allHostPrefixes
-			receivePrefixes = selectedNetworks.allNetworkPrefixes
+			matchedVRF = targetVRF
+			matchedNetwork = selectedNetworks.networkVRFs[matchedVRF]
+			advertisePrefixes = selectedNetworks.hostSubnets
+			receivePrefixes = selectedNetworks.subnets
 		}
-		if targetVRF != router.VRF || len(advertisePrefixes) == 0 {
-			// either we are not targeting this VRF or we don't have prefixes
-			// for it (which might be due to this RA not selecting this network,
-			// but not just)
+		if matchedVRF != router.VRF || len(advertisePrefixes) == 0 {
+			// either this router VRF does not match the target VRF or we don't
+			// have prefixes for it (which might be due to this RA not selecting
+			// this network, but not just)
 			continue
 		}
-		matchedVRFs.Insert(matchedVRF)
+		matchedNetworks.Insert(matchedNetwork)
 
+		// if this router's VRF matches the target VRF, copy it and set the
+		// prefixes as appropriate
 		targetRouter := router
 		targetRouter.Prefixes = advertisePrefixes
 		targetRouter.Neighbors = make([]frrtypes.Neighbor, len(router.Neighbors))
@@ -562,19 +577,23 @@ func (c *Controller) generateFRRConfiguration(
 					neighbor.ToReceive.Allowed.Prefixes = append(neighbor.ToReceive.Allowed.Prefixes,
 						frrtypes.PrefixSelector{
 							Prefix: prefix,
-							LE:     selectedNetworks.hostPrefixLength[prefix],
-							GE:     selectedNetworks.hostPrefixLength[prefix],
+							LE:     selectedNetworks.prefixLength[prefix],
+							GE:     selectedNetworks.prefixLength[prefix],
 						},
 					)
 				}
 			}
 			targetRouter.Neighbors[j] = neighbor
 		}
+
+		// append this router to the list of routers we will include in the
+		// generated FRR config amd tracks its index as we might need to add
+		// imports to it
 		routers = append(routers, targetRouter)
 		targetRouterIndex := len(routers) - 1
 
 		// VRFs are isolated in "auto" so no need to handle imports
-		if targetNetwork == "auto" {
+		if targetVRF == "auto" {
 			continue
 		}
 
@@ -583,28 +602,34 @@ func (c *Controller) generateFRRConfiguration(
 			continue
 		}
 
+		// before handling imports, lets normalize the VRF for the default
+		// network: when doing imports, the default VRF is is referred to as
+		// "default" instead of ""
+		if matchedVRF == "" {
+			matchedVRF = types.DefaultNetworkName
+		}
+
 		// handle imports: when the target VRF is not "auto" we need to leak
 		// between the target VRF and the selected networks, reciprocally
 		// importing from each
-		for _, network := range selectedNetworks.networks { // ordered
-			if network == targetNetwork {
-				// skip self
+		for _, vrf := range selectedNetworks.vrfs { // ordered
+			// skip self
+			if vrf == matchedVRF {
 				continue
 			}
 
-			// note that to import default, the VRF is "default" which matches
-			// our own terminology for the default network
-			routers[targetRouterIndex].Imports = append(routers[targetRouterIndex].Imports, frrtypes.Import{VRF: network})
+			// import all other selected networks into this router's network.
+			routers[targetRouterIndex].Imports = append(routers[targetRouterIndex].Imports, frrtypes.Import{VRF: vrf})
 
 			// add an additional router to import the target VRF into selected
 			// network
 			importRouter := frrtypes.Router{
 				ASN:     router.ASN,
 				ID:      router.ID,
-				Imports: []frrtypes.Import{{VRF: targetNetwork}},
+				Imports: []frrtypes.Import{{VRF: matchedVRF}},
 			}
-			if network != types.DefaultNetworkName {
-				importRouter.VRF = network
+			if vrf != types.DefaultNetworkName {
+				importRouter.VRF = vrf
 			}
 			routers = append(routers, importRouter)
 		}

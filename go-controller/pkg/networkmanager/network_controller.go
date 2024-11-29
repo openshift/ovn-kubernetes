@@ -137,6 +137,11 @@ func (c *networkController) Stop() {
 	}
 	controller.Stop(controllers...)
 	for _, networkControllerState := range c.getAllNetworkStates() {
+		if networkControllerState.controller.GetNetworkName() == types.DefaultNetworkName {
+			// we don't own the lifecycle of the default network, so don't stop
+			// it
+			continue
+		}
 		networkControllerState.controller.Stop()
 	}
 }

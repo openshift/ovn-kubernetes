@@ -349,15 +349,15 @@ func TestController_reconcile(t *testing.T) {
 					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
 					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					Routers: []*testRouter{
-						{ASN: 1, Prefixes: []string{"1.0.1.1", "1.1.0.0/24"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1", "1.1.0.0/24"}, Receive: []string{"1.1.0.0/16/24"}},
+						{ASN: 1, Prefixes: []string{"1.0.1.1/32", "1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1/32", "1.1.0.0/24"}, Receive: []string{"1.1.0.0/16/24"}},
 						}},
 					}},
 			},
 			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
-			name: "reconciles pod RouteAdvertisement for a single restricted FRR config, node, non default networks and default target VRF",
+			name: "reconciles pod RouteAdvertisement for a single FRR config, node, non default networks and default target VRF",
 			ra:   &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -371,10 +371,10 @@ func TestController_reconcile(t *testing.T) {
 				},
 			},
 			nads: []*testNAD{
-				{Name: "red", Namespace: "red", Network: "red", Topology: "layer3", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
-				{Name: "blue", Namespace: "blue", Network: "blue", Topology: "layer3", Subnet: "1.3.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "red", Namespace: "red", Network: "cluster.udn.red", Topology: "layer3", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "blue", Namespace: "blue", Network: "cluster.udn.blue", Topology: "layer3", Subnet: "1.3.0.0/16", Labels: map[string]string{"selected": "true"}},
 			},
-			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\", \"red\":\"1.2.0.0/24\", \"blue\":\"1.3.0.0/24\"}"}},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\", \"cluster.udn.red\":\"1.2.0.0/24\", \"cluster.udn.blue\":\"1.3.0.0/24\"}"}},
 			eips:                 []*testEIP{{Name: "eip", EIPs: map[string]string{"node": "1.0.1.1"}}},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionTrue,
@@ -417,8 +417,8 @@ func TestController_reconcile(t *testing.T) {
 					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
 					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					Routers: []*testRouter{
-						{ASN: 1, VRF: "red", Prefixes: []string{"1.0.1.1"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1"}},
+						{ASN: 1, VRF: "red", Prefixes: []string{"1.0.1.1/32"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1/32"}},
 						}},
 					}},
 			},
@@ -460,8 +460,8 @@ func TestController_reconcile(t *testing.T) {
 					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
 					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					Routers: []*testRouter{
-						{ASN: 1, Prefixes: []string{"1.0.1.1", "1.1.0.0/24"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1", "1.1.0.0/24"}, Receive: []string{"1.1.0.0/16/24"}},
+						{ASN: 1, Prefixes: []string{"1.0.1.1/32", "1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1/32", "1.1.0.0/24"}, Receive: []string{"1.1.0.0/16/24"}},
 						}},
 					},
 				},
@@ -497,8 +497,8 @@ func TestController_reconcile(t *testing.T) {
 			},
 			nads: []*testNAD{
 				{Name: "default", Namespace: "default", Network: "default", Labels: map[string]string{"selected": "true"}},
-				{Name: "red", Namespace: "red", Network: "red", Topology: "layer3", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
-				{Name: "blue", Namespace: "blue", Network: "blue", Topology: "layer3"}, // not selected
+				{Name: "red", Namespace: "red", Network: "cluster.udn.red", Topology: "layer3", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "blue", Namespace: "blue", Network: "cluster.udn.blue", Topology: "layer3"}, // not selected
 			},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -548,8 +548,8 @@ func TestController_reconcile(t *testing.T) {
 				},
 			},
 			nodes: []*testNode{
-				{Name: "node1", Labels: map[string]string{"selected": "true", "node": "node1"}, SubnetsAnnotation: "{\"default\":\"1.1.1.0/24\", \"red\":\"1.2.1.0/24\", \"blue\":\"1.3.1.0/24\"}"},
-				{Name: "node2", Labels: map[string]string{"selected": "true", "node": "node2"}, SubnetsAnnotation: "{\"default\":\"1.1.2.0/24\", \"red\":\"1.2.2.0/24\", \"blue\":\"1.3.2.0/24\"}"},
+				{Name: "node1", Labels: map[string]string{"selected": "true", "node": "node1"}, SubnetsAnnotation: "{\"default\":\"1.1.1.0/24\", \"cluster.udn.red\":\"1.2.1.0/24\", \"cluster.udn.blue\":\"1.3.1.0/24\"}"},
+				{Name: "node2", Labels: map[string]string{"selected": "true", "node": "node2"}, SubnetsAnnotation: "{\"default\":\"1.1.2.0/24\", \"cluster.udn.red\":\"1.2.2.0/24\", \"cluster.udn.blue\":\"1.3.2.0/24\"}"},
 			},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionTrue,
@@ -731,6 +731,48 @@ func TestController_reconcile(t *testing.T) {
 				},
 			},
 			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"red\":\"1.1.0.0/24\", \"blue\":\"1.2.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
+		},
+		{
+			name: "fails to reconcile if network names are too long to fit as a VFR name",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: "cluster.udn.red.name.too.long", Labels: map[string]string{"selected": "true"}},
+			},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, VRF: "red", Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"cluster.udn.red.name.too.long\":\"1.1.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
+		},
+		{
+			name: "fails to reconcile if network is not a cluster UDN",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: "red", Labels: map[string]string{"selected": "true"}},
+			},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, VRF: "red", Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"red\":\"1.1.0.0/24\"}"}},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
