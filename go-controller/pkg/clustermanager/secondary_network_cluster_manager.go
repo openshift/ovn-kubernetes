@@ -121,7 +121,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
 	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
-	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder,
+	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory.ShallowClone(), sncm.recorder,
 		sncm.nadController, sncm.errorReporter)
 	return sncc, nil
 }
