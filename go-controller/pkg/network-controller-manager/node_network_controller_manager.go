@@ -3,11 +3,12 @@ package networkControllerManager
 import (
 	"context"
 	"fmt"
-	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
-	kapi "k8s.io/api/core/v1"
 	"strings"
 	"sync"
 	"time"
+
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	kapi "k8s.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -112,7 +113,7 @@ func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo)
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
 	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient,
-		ncm.ovnNodeClient.UserDefinedNodeClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.routeManager)
+		ncm.ovnNodeClient.UserDefinedNodeClient, ncm.watchFactory.ShallowClone(), ncm.recorder, ncm.name, ncm.routeManager)
 }
 
 // NAD controller should be started on the node side under the following conditions:
