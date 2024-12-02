@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -102,11 +103,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// WatchFactory initializes and manages common kube watches
-type WatchFactory struct {
+type handlerCounter struct {
 	// Must be first member in the struct due to Golang ARM/x86 32-bit
 	// requirements with atomic accesses
-	handlerCounter uint64
+	counter uint64
+}
+
+// WatchFactory initializes and manages common kube watches
+type WatchFactory struct {
+	handlerCounter *handlerCounter
 
 	iFactory             informerfactory.SharedInformerFactory
 	anpFactory           anpinformerfactory.SharedInformerFactory
@@ -125,10 +130,35 @@ type WatchFactory struct {
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
+
+	handlerIndex int
+}
+
+func (wf *WatchFactory) ShallowClone() *WatchFactory {
+	return &WatchFactory{
+		handlerCounter:       wf.handlerCounter,
+		iFactory:             wf.iFactory,
+		anpFactory:           wf.anpFactory,
+		eipFactory:           wf.eipFactory,
+		efFactory:            wf.efFactory,
+		dnsFactory:           wf.dnsFactory,
+		cpipcFactory:         wf.cpipcFactory,
+		egressQoSFactory:     wf.egressQoSFactory,
+		mnpFactory:           wf.mnpFactory,
+		egressServiceFactory: wf.egressServiceFactory,
+		apbRouteFactory:      wf.apbRouteFactory,
+		ipamClaimsFactory:    wf.ipamClaimsFactory,
+		nadFactory:           wf.nadFactory,
+		udnFactory:           wf.udnFactory,
+		udnNodeFactory:       wf.udnNodeFactory,
+		informers:            wf.informers,
+		stopChan:             wf.stopChan,
+		handlerIndex:         rand.IntN(handlerPoolSize),
+	}
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
-var _ ObjectCacheInterface = &WatchFactory{}
+var _ ObjectCacheInterface = &WatchFactory{handlerCounter: &handlerCounter{}}
 
 const (
 	// resync time is 0, none of the resources being watched in ovn-kubernetes have
@@ -255,6 +285,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
+		handlerCounter:		  &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -654,6 +685,7 @@ func (wf *WatchFactory) Stop() {
 // of the localPodSelector or figure out how to deal with selecting all pods everywhere.
 func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
+		handlerCounter:		  &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -827,6 +859,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 // mode process.
 func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
 	wf := &WatchFactory{
+		handlerCounter:		  &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -1250,8 +1283,8 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		return true
 	}
 
-	inf.Lock()
-	defer inf.Unlock()
+	inf.internalInformers[wf.handlerIndex].Lock()
+	defer inf.internalInformers[wf.handlerIndex].Unlock()
 
 	items := make([]interface{}, 0)
 	for _, obj := range inf.inf.GetStore().List() {
@@ -1275,8 +1308,8 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		}
 	}
 
-	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-	handler := inf.addHandler(handlerID, priority, filterFunc, funcs, items)
+	handlerID := atomic.AddUint64(&wf.handlerCounter.counter, 1)
+	handler := inf.addHandler(wf.handlerIndex, handlerID, priority, filterFunc, funcs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
 	return handler, nil
 }
