@@ -281,7 +281,7 @@ func (cm *NetworkControllerManager) createACLLoggingMeter() error {
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
 func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
-	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
+	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory.ShallowClone(), cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 

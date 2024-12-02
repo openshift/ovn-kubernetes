@@ -94,7 +94,7 @@ func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo)
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.routeManager)
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory.ShallowClone(), ncm.recorder, ncm.name, ncm.routeManager)
 }
 
 // NAD controller should be started on the node side under the following conditions:
