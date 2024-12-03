@@ -141,7 +141,6 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 
 				defaultNetExpectations := getDefaultNetExpectedPodsAndSwitches([]testPod{podInfo}, []string{nodeName})
 				expectationOptions := testConfig.expectationOptions
-
 				Eventually(fakeOvn.nbClient).Should(
 					libovsdbtest.HaveData(
 						append(
