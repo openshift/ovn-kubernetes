@@ -15,12 +15,36 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"k8s.io/utils/ptr"
+
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
+
+type lspEnableValue *bool
+
+var (
+	lspEnableNotSpecified    lspEnableValue = nil
+	lspEnableExplicitlyTrue  lspEnableValue = ptr.To(true)
+	lspEnableExplicitlyFalse lspEnableValue = ptr.To(false)
+)
+
+type liveMigrationPodInfo struct {
+	podPhase           v1.PodPhase
+	annotation         map[string]string
+	creationTimestamp  metav1.Time
+	expectedLspEnabled lspEnableValue
+}
+
+type liveMigrationInfo struct {
+	vmName        string
+	sourcePodInfo liveMigrationPodInfo
+	targetPodInfo liveMigrationPodInfo
+}
 
 var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 	var (
@@ -105,7 +129,117 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			icClusterTestConfiguration(),
 		),
 	)
+
+	table.DescribeTable(
+		"reconciles a new kubevirt-related pod during its live-migration phases",
+		func(netInfo secondaryNetInfo, testConfig testConfiguration, migrationInfo *liveMigrationInfo) {
+			const (
+				sourcePodInfoIdx = 0
+				targetPodInfoIdx = 1
+			)
+			sourcePodInfo := dummyL2TestPod(ns, netInfo, sourcePodInfoIdx)
+			if testConfig.configToOverride != nil {
+				config.OVNKubernetesFeature = *testConfig.configToOverride
+			}
+			app.Action = func(ctx *cli.Context) error {
+				sourcePod := newMultiHomedKubevirtPod(
+					migrationInfo.vmName,
+					migrationInfo.sourcePodInfo,
+					sourcePodInfo,
+					netInfo)
+
+				const nodeIPv4CIDR = "192.168.126.202/24"
+				By(fmt.Sprintf("Creating a node named %q, with IP: %s", nodeName, nodeIPv4CIDR))
+				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, sourcePodInfo, sourcePod)).To(Succeed())
+
+				// for layer2 on interconnect, it is the cluster manager that
+				// allocates the OVN annotation; on unit tests, this just
+				// doesn't happen, and we create the pod with these annotations
+				// set. Hence, no point checking they're the expected ones.
+				// TODO: align the mocked annotations with the production code
+				//   - currently missing setting the routes.
+				if !config.OVNKubernetesFeature.EnableInterconnect {
+					By("asserting the pod OVN pod networks annotation are the expected ones")
+					// check that after start networks annotations and nbdb will be updated
+					Eventually(func() string {
+						return getPodAnnotations(fakeOvn.fakeClient.KubeClient, sourcePodInfo.namespace, sourcePodInfo.podName)
+					}).WithTimeout(2 * time.Second).Should(MatchJSON(sourcePodInfo.getAnnotationsJson()))
+				}
+
+				expectationOptions := testConfig.expectationOptions
+				By("asserting the OVN entities provisioned in the NBDB are the expected ones before migration started")
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(
+						newSecondaryNetworkExpectationMachine(
+							fakeOvn,
+							[]testPod{sourcePodInfo},
+							expectationOptions...,
+						).expectedLogicalSwitchesAndPorts()...))
+
+				targetPodInfo := dummyL2TestPod(ns, netInfo, targetPodInfoIdx)
+				targetKvPod := newMultiHomedKubevirtPod(
+					migrationInfo.vmName,
+					migrationInfo.targetPodInfo,
+					targetPodInfo,
+					netInfo)
+
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(targetKvPod.Namespace).Create(context.Background(), targetKvPod, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("asserting the OVN entities provisioned in the NBDB are the expected ones after migration")
+				expectedPodLspEnabled := map[string]*bool{}
+				expectedPodLspEnabled[sourcePodInfo.podName] = migrationInfo.sourcePodInfo.expectedLspEnabled
+				expectedPodLspEnabled[targetPodInfo.podName] = migrationInfo.targetPodInfo.expectedLspEnabled
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(
+						newSecondaryNetworkExpectationMachine(
+							fakeOvn,
+							[]testPod{sourcePodInfo, targetPodInfo},
+							expectationOptions...,
+						).expectedLogicalSwitchesAndPortsWithLspEnabled(expectedPodLspEnabled)...))
+				return nil
+			}
+
+			Expect(app.Run([]string{app.Name})).To(Succeed())
+		},
+
+		table.Entry("on a layer2 topology with user defined secondary network, when target pod is not yet ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		table.Entry("on a layer2 topology with user defined secondary network, when target pod is ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+
+		table.Entry("on a layer2 topology with user defined secondary network and an IC cluster, when target pod is not yet ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		table.Entry("on a layer2 topology with user defined secondary network and an IC cluster, when target pod is ready",
+			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+	)
 })
+
+func dummyLocalnetWithSecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
+	return secondaryNetInfo{
+		netName:  secondaryNetworkName,
+		nadName:  namespacedName(ns, nadName),
+		topology: ovntypes.LocalnetTopology,
+		subnets:  subnets,
+	}
+}
 
 func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	return secondaryNetInfo{
@@ -203,4 +337,39 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 		return err
 	}
 	return err
+}
+
+func notReadyMigrationInfo() *liveMigrationInfo {
+	const vmName = "my-vm"
+	return &liveMigrationInfo{
+		vmName: vmName,
+		sourcePodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now().Add(-time.Hour)),
+			expectedLspEnabled: lspEnableNotSpecified,
+		},
+		targetPodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now()),
+			expectedLspEnabled: lspEnableExplicitlyFalse,
+		},
+	}
+}
+
+func readyMigrationInfo() *liveMigrationInfo {
+	const vmName = "my-vm"
+	return &liveMigrationInfo{
+		vmName: vmName,
+		sourcePodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now().Add(-time.Hour)),
+			expectedLspEnabled: lspEnableExplicitlyFalse,
+		},
+		targetPodInfo: liveMigrationPodInfo{
+			podPhase:           v1.PodRunning,
+			creationTimestamp:  metav1.NewTime(time.Now()),
+			annotation:         map[string]string{kubevirtv1.MigrationTargetReadyTimestamp: "some-timestamp"},
+			expectedLspEnabled: lspEnableExplicitlyTrue,
+		},
+	}
 }
