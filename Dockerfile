@@ -36,7 +36,6 @@ ENV PYTHONDONTWRITEBYTECODE yes
 # more-pkgs file contains the following ovs/ovn packages to be installed in this Dockerfile
 # - openvswitch-devel
 # - openvswitch-ipsec
-# - ovn-vtep
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
