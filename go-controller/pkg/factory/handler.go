@@ -210,7 +210,7 @@ func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct
 		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, 10)
+		qm.queues[j] = make(chan *event, 1000)
 	}
 	return qm
 }
