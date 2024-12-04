@@ -57,7 +57,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(false),
 			nInfo, ncm.vrfManager, ncm.ruleManager, ncm.defaultNodeNetworkController.Gateway)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
@@ -111,9 +111,13 @@ func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo)
 }
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
-func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
+func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo(defaultNet bool) *node.CommonNodeNetworkControllerInfo {
+	wf := ncm.watchFactory
+	if !defaultNet {
+		wf = wf.ShallowClone()
+	}
 	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient,
-		ncm.ovnNodeClient.UserDefinedNodeClient, ncm.watchFactory.ShallowClone(), ncm.recorder, ncm.name, ncm.routeManager)
+		ncm.ovnNodeClient.UserDefinedNodeClient, wf, ncm.recorder, ncm.name, ncm.routeManager)
 }
 
 // NAD controller should be started on the node side under the following conditions:
@@ -160,7 +164,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 
 // initDefaultNodeNetworkController creates the controller for default network
 func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
-	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(true),
 		ncm.nadController)
 	if err != nil {
 		return err

@@ -34,7 +34,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const handlerPoolSize = 20
+const handlerPoolSize = 201
 
 // Handler represents an event handler and is private to the factory module
 type Handler struct {
@@ -202,7 +202,7 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
+func newQueueMap(qSize uint32, numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
 	qm := &queueMap{
 		entries:  make(map[ktypes.NamespacedName]*queueMapEntry),
 		queues:   make([]chan *event, numEventQueues),
@@ -210,7 +210,7 @@ func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct
 		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, 10)
+		qm.queues[j] = make(chan *event, qSize)
 	}
 	return qm
 }
@@ -519,7 +519,9 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// is added, only that handler should receive events for all
 		// existing objects.
 		addsWg := &sync.WaitGroup{}
-		addsMap := newQueueMap(numEventQueues, addsWg, stopChan)
+
+		// Use a smaller queue to avoid... TODO proper comment.
+		addsMap := newQueueMap(10, numEventQueues, addsWg, stopChan)
 		addsMap.start()
 
 		// Distribute the existing items into the handler-specific
@@ -536,7 +538,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	}
 
 	for i := 0; i < handlerPoolSize; i++ {
-		informer.internalInformers[i].queueMap = newQueueMap(numEventQueues, &informer.shutdownWg, stopChan)
+		informer.internalInformers[i].queueMap = newQueueMap(1000, numEventQueues, &informer.shutdownWg, stopChan)
 		informer.internalInformers[i].queueMap.start()
 
 		_, err = informer.inf.AddEventHandler(informer.newFederatedQueuedHandler(i))
