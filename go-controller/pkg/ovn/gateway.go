@@ -143,67 +143,66 @@ func WithLoadBalancerGroups(routerLBGroup, clusterLBGroup, switchLBGroup string)
 	}
 }
 
-// cleanupStalePodSNATs removes SNATs against nodeIP for the given node if the SNAT.logicalIP isn't an active podIP on this node
-// We don't have to worry about missing SNATs that should be added because addLogicalPort takes care of this for all pods
-// when RequestRetryObjs is called for each node add.
-// This is executed only when disableSNATMultipleGateways = true
-// SNATs configured for the join subnet are ignored.
-//
-// NOTE: On startup libovsdb adds back all the pods and this should normally update all existing SNATs
-// accordingly. Due to a stale egressIP cache bug https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding
-// wrong pod->nodeSNATs which won't get cleared up unless explicitly deleted.
+// cleanupStalePodSNATs removes pod SNATs against nodeIP for the given node if
+// the SNAT.logicalIP isn't an active podIP, the pod network is being advertised
+// on this node or disableSNATMultipleGWs=false. We don't have to worry about
+// missing SNATs that should be added because addLogicalPort takes care of this
+// for all pods when RequestRetryObjs is called for each node add.
+// Other non-pod SNATs like join subnet SNATs are ignored.
+// NOTE: On startup libovsdb adds back all the pods and this should normally
+// update all existing SNATs accordingly. Due to a stale egressIP cache bug
+// https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding wrong
+// pod->nodeSNATs which won't get cleared up unless explicitly deleted.
 // NOTE2: egressIP SNATs are synced in EIP controller.
-// TODO (tssurya): Add support cleaning up even if disableSNATMultipleGWs=false, we'd need to remove the perPod
-// SNATs in case someone switches between these modes. See https://github.com/ovn-org/ovn-kubernetes/issues/3232
 func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.IPNet, gwLRPIPs []net.IP) error {
-	if !config.Gateway.DisableSNATMultipleGWs {
-		return nil
-	}
-
-	pods, err := gw.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-	})
-	if err != nil {
-		return fmt.Errorf("unable to list existing pods on node: %s, %w",
-			nodeName, err)
-	}
-
-	podIPsOnNode := sets.NewString() // collects all podIPs on node
-	for _, pod := range pods {
-		pod := *pod
-		if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
-			continue
+	// collect all the pod IPs for which we should be doing the SNAT; if the pod
+	// network is advertised or DisableSNATMultipleGWs==false we consider all
+	// the SNATs stale
+	podIPsWithSNAT := sets.New[string]()
+	if !gw.isRoutingAdvertised(nodeName) && config.Gateway.DisableSNATMultipleGWs {
+		pods, err := gw.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+		})
+		if err != nil {
+			return fmt.Errorf("unable to list existing pods on node: %s, %w",
+				nodeName, err)
 		}
-		if util.PodCompleted(&pod) {
-			collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
-			if err != nil {
-				return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
-			}
-			if collidingPod != nil { //if the ip is in use we should not remove the nat
+		for _, pod := range pods {
+			pod := *pod
+			if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
 				continue
 			}
-		}
-		podIPs, err := util.GetPodIPsOfNetwork(&pod, gw.netInfo)
-		if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
-			// It is possible that the pod is scheduled during this time, but the LSP add or
-			// IP Allocation has not happened and it is waiting for the WatchPods to start
-			// after WatchNodes completes (This function is called during syncNodes). So since
-			// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
-			// this pod from processing and move onto the next one.
-			klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-			continue // no-op
-		} else if err != nil {
-			return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-		for _, podIP := range podIPs {
-			podIPsOnNode.Insert(podIP.String())
+			if util.PodCompleted(&pod) {
+				collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
+				if err != nil {
+					return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
+				}
+				if collidingPod != nil { //if the ip is in use we should not remove the nat
+					continue
+				}
+			}
+			podIPs, err := util.GetPodIPsOfNetwork(&pod, gw.netInfo)
+			if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
+				// It is possible that the pod is scheduled during this time, but the LSP add or
+				// IP Allocation has not happened and it is waiting for the WatchPods to start
+				// after WatchNodes completes (This function is called during syncNodes). So since
+				// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
+				// this pod from processing and move onto the next one.
+				klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+				continue // no-op
+			} else if err != nil {
+				return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+			for _, podIP := range podIPs {
+				podIPsWithSNAT.Insert(podIP.String())
+			}
 		}
 	}
 
-	gatewayRouter := nbdb.LogicalRouter{
+	gatewayRouter := &nbdb.LogicalRouter{
 		Name: gw.gwRouterName,
 	}
-	routerNats, err := libovsdbops.GetRouterNATs(gw.nbClient, &gatewayRouter)
+	routerNats, err := libovsdbops.GetRouterNATs(gw.nbClient, gatewayRouter)
 	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("unable to get NAT entries for router %s on node %s: %w", gatewayRouter.Name, nodeName, err)
 	}
@@ -219,7 +218,7 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 		if !nodeIPset.Has(routerNat.ExternalIP) {
 			continue
 		}
-		if podIPsOnNode.Has(routerNat.LogicalIP) {
+		if podIPsWithSNAT.Has(routerNat.LogicalIP) {
 			continue
 		}
 		if gwLRPIPset.Has(routerNat.LogicalIP) {
@@ -232,12 +231,14 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 		}
 		natsToDelete = append(natsToDelete, routerNat)
 	}
+
 	if len(natsToDelete) > 0 {
-		err := libovsdbops.DeleteNATs(gw.nbClient, &gatewayRouter, natsToDelete...)
+		err := libovsdbops.DeleteNATs(gw.nbClient, gatewayRouter, natsToDelete...)
 		if err != nil {
 			return fmt.Errorf("unable to delete NATs %+v from node %s: %w", natsToDelete, nodeName, err)
 		}
 	}
+
 	return nil
 }
 
@@ -249,14 +250,23 @@ func (gw *GatewayManager) GatewayInit(
 	hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig,
 	sctpSupport bool,
-	gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet,
+	gwLRPJoinIPs, drLRPIfAddrs []*net.IPNet,
 	externalIPs []net.IP,
 	enableGatewayMTU bool,
 ) error {
 
 	gwLRPIPs := make([]net.IP, 0)
-	for _, gwLRPIfAddr := range gwLRPIfAddrs {
-		gwLRPIPs = append(gwLRPIPs, gwLRPIfAddr.IP)
+	for _, gwLRPJoinIP := range gwLRPJoinIPs {
+		gwLRPIPs = append(gwLRPIPs, gwLRPJoinIP.IP)
+	}
+	if gw.netInfo.TopologyType() == types.Layer2Topology {
+		// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
+		// to configure here the .1 address, this will work only for IC with
+		// one node per zone, since ARPs for .1 will not go beyond local switch.
+		// This is being done to add the ICMP SNATs for .1 podSubnet that OVN GR generates
+		for _, subnet := range hostSubnets {
+			gwLRPIPs = append(gwLRPIPs, util.GetNodeGatewayIfAddr(subnet).IP)
+		}
 	}
 
 	// Create a gateway router.
@@ -277,6 +287,19 @@ func (gw *GatewayManager) GatewayInit(
 	// for UDN's OVN will pick a random one
 	if gw.netInfo.GetNetworkName() == types.DefaultNetworkName {
 		logicalRouterOptions["snat-ct-zone"] = "0"
+	}
+	if gw.netInfo.TopologyType() == types.Layer2Topology {
+		// When multiple networks are set of the same logical-router-port
+		// the networks get lexicographically sorted; thus there is no
+		// ordering or telling on which IP will be chosen as the router-ip
+		// when it comes to SNATing traffic after load balancing.
+		// Hence for Layer2 UDPNs let's set the snat-ip explicitly to the
+		// joinsubnetIP
+		joinIPDualStack := make([]string, len(gwLRPJoinIPs))
+		for i, gwLRPJoinIP := range gwLRPJoinIPs {
+			joinIPDualStack[i] = gwLRPJoinIP.IP.String()
+		}
+		logicalRouterOptions["lb_force_snat_ip"] = strings.Join(joinIPDualStack, " ")
 	}
 	logicalRouterExternalIDs := map[string]string{
 		"physical_ip":  physicalIPs[0],
@@ -356,7 +379,7 @@ func (gw *GatewayManager) GatewayInit(
 			types.NetworkExternalID:  gw.netInfo.GetNetworkName(),
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
-		if util.IsNetworkSegmentationSupportEnabled() && gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology {
+		if gw.netInfo.TopologyType() == types.Layer2Topology {
 			node, err := gw.watchFactory.GetNode(nodeName)
 			if err != nil {
 				return fmt.Errorf("failed to fetch node %s from watch factory %w", node, err)
@@ -382,8 +405,16 @@ func (gw *GatewayManager) GatewayInit(
 
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0])
 	gwLRPNetworks := []string{}
-	for _, gwLRPIfAddr := range gwLRPIfAddrs {
-		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
+	for _, gwLRPJoinIP := range gwLRPJoinIPs {
+		gwLRPNetworks = append(gwLRPNetworks, gwLRPJoinIP.String())
+	}
+	if gw.netInfo.TopologyType() == types.Layer2Topology {
+		// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
+		// to configure here the .1 address, this will work only for IC with
+		// one node per zone, since ARPs for .1 will not go beyond local switch.
+		for _, subnet := range hostSubnets {
+			gwLRPNetworks = append(gwLRPNetworks, util.GetNodeGatewayIfAddr(subnet).String())
+		}
 	}
 
 	var options map[string]string
@@ -404,7 +435,7 @@ func (gw *GatewayManager) GatewayInit(
 			types.TopologyExternalID: gw.netInfo.TopologyType(),
 		}
 		_, isNetIPv6 := gw.netInfo.IPMode()
-		if gw.netInfo.IsPrimaryNetwork() && gw.netInfo.TopologyType() == types.Layer2Topology && isNetIPv6 && config.IPv6Mode {
+		if gw.netInfo.TopologyType() == types.Layer2Topology && isNetIPv6 && config.IPv6Mode {
 			logicalRouterPort.Ipv6RaConfigs = map[string]string{
 				"address_mode":      "dhcpv6_stateful",
 				"send_periodic":     "true",
@@ -756,8 +787,7 @@ func (gw *GatewayManager) GatewayInit(
 
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-
-	if !config.Gateway.DisableSNATMultipleGWs {
+	if !config.Gateway.DisableSNATMultipleGWs && !gw.isRoutingAdvertised(nodeName) {
 		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
 		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
 		for _, entry := range clusterIPSubnet {
@@ -1234,13 +1264,20 @@ func (gw *GatewayManager) containsJoinIP(ip net.IP) bool {
 	return util.IsContainedInAnyCIDR(ipNet, gw.netInfo.JoinSubnets()...)
 }
 
+func (gw *GatewayManager) isRoutingAdvertised(node string) bool {
+	if gw.netInfo.IsSecondary() {
+		return false
+	}
+	return util.IsPodNetworkAdvertisedAtNode(gw.netInfo, node)
+}
+
 func (gw *GatewayManager) syncGatewayLogicalNetwork(
 	node *kapi.Node,
 	l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,
 	clusterSubnets []*net.IPNet,
-	gwLRPIPs []*net.IPNet,
+	grLRPJoinIPs []*net.IPNet,
 	isSCTPSupported bool,
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet,
 	externalIPs []net.IP,
@@ -1253,7 +1290,7 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		hostSubnets,
 		l3GatewayConfig,
 		isSCTPSupported,
-		gwLRPIPs,
+		grLRPJoinIPs, // the joinIP allocated to this node's GR for this controller's network
 		ovnClusterLRPToJoinIfAddrs,
 		externalIPs,
 		enableGatewayMTU,
@@ -1300,7 +1337,7 @@ func (gw *GatewayManager) syncNodeGateway(
 	l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,
-	clusterSubnets, gwLRPIPs []*net.IPNet,
+	clusterSubnets, grLRPJoinIPs []*net.IPNet,
 	isSCTPSupported bool,
 	joinSwitchIPs []*net.IPNet,
 	externalIPs []net.IP,
@@ -1316,9 +1353,9 @@ func (gw *GatewayManager) syncNodeGateway(
 			hostSubnets,
 			hostAddrs,
 			clusterSubnets,
-			gwLRPIPs,
+			grLRPJoinIPs, // the joinIP allocated to this node for this controller's network
 			isSCTPSupported,
-			joinSwitchIPs,
+			joinSwitchIPs, // the .1 of this controller's global joinSubnet
 			externalIPs,
 		); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)

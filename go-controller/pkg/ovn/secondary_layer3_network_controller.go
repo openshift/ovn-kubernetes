@@ -17,7 +17,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -159,8 +159,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.NetInfo.GetNetworkName())
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.GetNetworkName())
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -307,7 +307,11 @@ type SecondaryLayer3NetworkController struct {
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer3NetworkController, error) {
+func NewSecondaryLayer3NetworkController(
+	cnci *CommonNetworkControllerInfo,
+	netInfo util.NetInfo,
+	networkManager networkmanager.Interface,
+) (*SecondaryLayer3NetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -326,7 +330,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 			cnci.watchFactory.ServiceCoreInformer(),
 			cnci.watchFactory.EndpointSliceCoreInformer(),
 			cnci.watchFactory.NodeCoreInformer(),
-			nadController,
+			networkManager,
 			cnci.recorder,
 			netInfo,
 		)
@@ -340,7 +344,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
 				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-				NetInfo:                     netInfo,
+				ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 				lsManager:                   lsm.NewLogicalSwitchManager(),
 				logicalPortCache:            newPortCache(stopChan),
 				namespaces:                  make(map[string]*namespaceInfo),
@@ -354,7 +358,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				localZoneNodes:              &sync.Map{},
 				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
-				nadController:               nadController,
+				networkManager:              networkManager,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -376,9 +380,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
-	// disable multicast support for secondary networks
-	// TBD: changes needs to be made to support multicast in secondary networks
-	oc.multicastSupport = false
+	// enable multicast support for UDN only for primaries + multicast enabled
+	// TBD: changes needs to be made to support multicast beyond primary UDN
+	oc.multicastSupport = oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast
 
 	oc.initRetryFramework()
 	return oc, nil
@@ -607,10 +611,18 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
 	}
 
-	// Only configure join switch and GR for user defined primary networks.
+	// Only configure join switch, GR, cluster port groups and multicast default policies for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
+		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.GetNetInfo(), oc.ovnClusterLRPToJoinIfAddrs); err != nil {
 			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
+		}
+
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return fmt.Errorf("failed to create cluster port groups for network %q: %w", oc.GetNetworkName(), err)
+		}
+
+		if err := oc.syncDefaultMulticastPolicies(); err != nil {
+			return fmt.Errorf("failed to sync default multicast policies for network %q: %w", oc.GetNetworkName(), err)
 		}
 	}
 
@@ -619,7 +631,7 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
-		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 		if err != nil {
 			return err
 		}
@@ -709,9 +721,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 					gwConfig.hostSubnets,
 					gwConfig.hostAddrs,
 					gwConfig.clusterSubnets,
-					gwConfig.gwLRPIPs,
+					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
 					oc.SCTPSupport,
-					oc.ovnClusterLRPToJoinIfAddrs,
+					oc.ovnClusterLRPToJoinIfAddrs, // the .1 of this controller's global joinSubnet
 					gwConfig.externalIPs,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
@@ -922,7 +934,7 @@ type SecondaryL3GatewayConfig struct {
 	config         *util.L3GatewayConfig
 	hostSubnets    []*net.IPNet
 	clusterSubnets []*net.IPNet
-	gwLRPIPs       []*net.IPNet
+	gwLRPJoinIPs   []*net.IPNet
 	hostAddrs      []string
 	externalIPs    []net.IP
 }
@@ -972,7 +984,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		return nil, fmt.Errorf("failed to get node %q subnet annotation for network %q: %v", node.Name, oc.GetNetworkName(), err)
 	}
 
-	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
 		return nil, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w", node.Name, networkName, err)
 	}
@@ -984,7 +996,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		config:         l3GatewayConfig,
 		hostSubnets:    hostSubnets,
 		clusterSubnets: clusterSubnets,
-		gwLRPIPs:       gwLRPIPs,
+		gwLRPJoinIPs:   gwLRPJoinIPs,
 		hostAddrs:      hostAddrs,
 		externalIPs:    externalIPs,
 	}, nil
@@ -994,13 +1006,13 @@ func (oc *SecondaryLayer3NetworkController) newClusterRouter() (*nbdb.LogicalRou
 	if oc.multicastSupport {
 		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
 			oc.GetNetworkScopedClusterRouterName(),
-			oc.NetInfo,
+			oc.GetNetInfo(),
 			oc.defaultCOPPUUID,
 		)
 	}
 	return oc.gatewayTopologyFactory.NewClusterRouter(
 		oc.GetNetworkScopedClusterRouterName(),
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.defaultCOPPUUID,
 	)
 }
@@ -1011,7 +1023,7 @@ func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *
 		oc.defaultCOPPUUID,
 		oc.kube,
 		oc.nbClient,
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.gatewayOptions()...,
 	)
@@ -1052,9 +1064,9 @@ func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.Wait
 	go func() {
 		defer wg.Done()
 		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the
-		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
+		// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
+		// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, false)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
