@@ -33,7 +33,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const handlerPoolSize = 200
+const handlerPoolSize = 20
 
 // Handler represents an event handler and is private to the factory module
 type Handler struct {
