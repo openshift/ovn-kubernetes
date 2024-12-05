@@ -58,7 +58,7 @@ type NetworkControllerManager struct {
 }
 
 func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo(false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
@@ -76,7 +76,7 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName string) (nad.NetworkController, error) {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo(false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
@@ -280,15 +280,19 @@ func (cm *NetworkControllerManager) createACLLoggingMeter() error {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
-	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory.ShallowClone(), cm.recorder, cm.nbClient,
+func (cm *NetworkControllerManager) newCommonNetworkControllerInfo(defaultNet bool) (*ovn.CommonNetworkControllerInfo, error) {
+	wf := cm.watchFactory
+	if !defaultNet {
+		wf = cm.watchFactory.ShallowClone()
+	}
+	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, wf, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
 func (cm *NetworkControllerManager) initDefaultNetworkController(nadController *nad.NetAttachDefinitionController,
 	observManager *observability.Manager) error {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo(true)
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
