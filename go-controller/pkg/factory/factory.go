@@ -153,7 +153,7 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		udnNodeFactory:       wf.udnNodeFactory,
 		informers:            wf.informers,
 		stopChan:             wf.stopChan,
-		handlerIndex:         rand.IntN(handlerPoolSize),
+		handlerIndex:         rand.IntN(handlerPoolSize - 1) + 1,
 	}
 }
 
