@@ -90,6 +90,7 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 			KClient: ovnClient.KubeClient,
 		},
 		IPAMClaimsClient: ovnClient.IPAMClaimsClient,
+		UDNNodeClient:    ovnClient.UserDefinedNodeClient,
 	}
 
 	wg := &sync.WaitGroup{}
@@ -186,25 +187,27 @@ func (ncc *networkClusterController) init() error {
 		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() {
 			// if the network is a primary L2 UDN network, then we need to reserve
 			// the IDs used by each node in this network's pod allocator
-			nodes, err := ncc.watchFactory.GetNodes()
+			udnNodes, err := ncc.watchFactory.GetUDNNodes(ncc.NetInfo.GetNetworkName())
 			if err != nil {
-				return fmt.Errorf("failed to list node objects: %w", err)
+				return fmt.Errorf("failed to list udnNode objects: %w", err)
 			}
-			for _, node := range nodes {
-				tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, ncc.GetNetworkName())
-				if err != nil {
-					if util.IsAnnotationNotSetError(err) {
-						klog.Warningf("tunnelID annotation does not exist for the node %s for network %s, err: %v; we need to allocate it...",
-							node.Name, ncc.GetNetworkName(), err)
-					} else {
-						return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %v",
-							node.Name, ncc.GetNetworkName(), err)
-					}
+			for _, udnNode := range udnNodes {
+				nodeName := udnNode.Labels["nodeName"]
+				if len(nodeName) == 0 {
+					klog.Errorf("UDN Node is somehow missing nodeName label!: %#v", udnNode)
+					continue
 				}
-				if tunnelID != util.InvalidID {
-					if err := ncc.tunnelIDAllocator.ReserveID(ncc.GetNetworkName()+"_"+node.Name, tunnelID); err != nil {
-						return fmt.Errorf("unable to reserve id for network %s, node %s: %w", ncc.GetNetworkName(), node.Name, err)
-					}
+				if udnNode.Spec.Layer2TunnelID == nil {
+					klog.Warningf("tunnelID does not exist for UDN Node: %s, node %s for network %s, err: %v; we need to allocate it...",
+						udnNode.Name, nodeName, ncc.GetNetworkName(), err)
+					continue
+				}
+				if *udnNode.Spec.Layer2TunnelID <= util.NoID {
+					klog.Errorf("UDN Node: %q, node: %q has invalid tunnel id: %d", udnNode.Name, nodeName, *udnNode.Spec.Layer2TunnelID)
+					continue
+				}
+				if err := ncc.tunnelIDAllocator.ReserveID(ncc.GetNetworkName()+"_"+nodeName, *udnNode.Spec.Layer2TunnelID); err != nil {
+					return fmt.Errorf("unable to reserve id for network %s, node %s: %w", ncc.GetNetworkName(), nodeName, err)
 				}
 			}
 		}
@@ -212,8 +215,8 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasNodeAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
-
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.NetInfo, ncc.watchFactory.NodeCoreInformer().Lister(),
+			ncc.watchFactory.UserDefinedNodeInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator, ncc.watchFactory)
 		err := ncc.nodeAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)

@@ -3,6 +3,8 @@ package networkControllerManager
 import (
 	"context"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	kapi "k8s.io/api/core/v1"
 	"strings"
 	"sync"
 	"time"
@@ -81,20 +83,36 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ..
 }
 
 func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
-	nodes, err := ncm.watchFactory.GetNodes()
-	if err != nil {
-		return util.InvalidID, err
-	}
-	networkID, err := util.GetNetworkID(nodes, network)
-	if err != nil {
-		return util.InvalidID, err
+	var err error
+	var networkID int
+	if network.IsDefault() {
+		var nodes []*kapi.Node
+		nodes, err = ncm.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidID, err
+		}
+		networkID, err = util.GetNetworkID(nodes, network)
+		if err != nil {
+			return util.InvalidID, err
+		}
+	} else {
+		var udnNodes []*userdefinednodeapi.UDNNode
+		udnNodes, err = ncm.watchFactory.GetUDNNodes(network.GetNetworkName())
+		if err != nil {
+			return util.InvalidID, err
+		}
+		networkID, err = util.GetUDNNetworkID(udnNodes, network.GetNetworkName())
+		if err != nil || networkID <= util.NoID {
+			return util.InvalidID, err
+		}
 	}
 	return networkID, nil
 }
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.routeManager)
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient,
+		ncm.ovnNodeClient.UserDefinedNodeClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.routeManager)
 }
 
 // NAD controller should be started on the node side under the following conditions:
@@ -109,14 +127,18 @@ func isNodeNADControllerRequired() bool {
 func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
 	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
-		name:          name,
-		ovnNodeClient: &util.OVNNodeClientset{KubeClient: ovnClient.KubeClient, AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient},
-		Kube:          &kube.Kube{KClient: ovnClient.KubeClient},
-		watchFactory:  wf,
-		stopChan:      make(chan struct{}),
-		wg:            wg,
-		recorder:      eventRecorder,
-		routeManager:  routeManager,
+		name: name,
+		ovnNodeClient: &util.OVNNodeClientset{
+			KubeClient:             ovnClient.KubeClient,
+			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
+			UserDefinedNodeClient:  ovnClient.UserDefinedNodeClient,
+		},
+		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
+		watchFactory: wf,
+		stopChan:     make(chan struct{}),
+		wg:           wg,
+		recorder:     eventRecorder,
+		routeManager: routeManager,
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
