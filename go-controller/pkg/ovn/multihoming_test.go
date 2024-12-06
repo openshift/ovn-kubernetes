@@ -84,6 +84,7 @@ type secondaryNetworkExpectationMachine struct {
 	pods                  []testPod
 	gatewayConfig         *util.L3GatewayConfig
 	isInterconnectCluster bool
+	hasClusterPortGroup   bool
 }
 
 func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opts ...option) *secondaryNetworkExpectationMachine {
@@ -107,6 +108,12 @@ func withGatewayConfig(config *util.L3GatewayConfig) option {
 func withInterconnectCluster() option {
 	return func(machine *secondaryNetworkExpectationMachine) {
 		machine.isInterconnectCluster = true
+	}
+}
+
+func withClusterPortGroup() option {
+	return func(machine *secondaryNetworkExpectationMachine) {
+		machine.hasClusterPortGroup = true
 	}
 }
 
@@ -269,6 +276,14 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 					},
 				})
 			}
+			if em.hasClusterPortGroup {
+				mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
+				mgmtPortUUID := mgmtPortName + "-UUID"
+
+				clusterPG := newNetworkClusterPortGroup(ocInfo.bnc)
+				clusterPG.Ports = []string{mgmtPortUUID}
+				data = append(data, clusterPG)
+			}
 		}
 
 	}
@@ -386,23 +401,25 @@ func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
 	return featConfig
 }
 
-func icClusterTestConfiguration() testConfiguration {
-	return testConfiguration{
+type testConfigOpt = func(*testConfiguration)
+
+func icClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{
 		configToOverride:   enableICFeatureConfig(),
 		expectationOptions: []option{withInterconnectCluster()},
 	}
-}
-
-func nonICClusterTestConfiguration() testConfiguration {
-	return testConfiguration{}
-}
-
-func icClusterWithDisableSNATTestConfiguration() testConfiguration {
-	return testConfiguration{
-		configToOverride:   enableICFeatureConfig(),
-		expectationOptions: []option{withInterconnectCluster()},
-		gatewayConfig:      &config.GatewayConfig{DisableSNATMultipleGWs: true},
+	for _, opt := range opts {
+		opt(&config)
 	}
+	return config
+}
+
+func nonICClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
 }
 
 func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
