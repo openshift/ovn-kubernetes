@@ -103,6 +103,8 @@ global:
   disablePacketMtuCheck: ""
   # -- Deprecated: iface-id-ver is always enabled
   disableIfaceIdVer: false
+  # -- Enable/disable requested-chassis option on lsp during pod creation. Must be set to true when cluster has DPUs
+  disableRequestedchassis: false
   # -- The largest number of messages per second that gets logged before drop
   # @default 20
   aclLoggingRateLimit: 20
@@ -138,7 +140,17 @@ global:
   ofctrlWaitBeforeClear: ""
   # -- Separate log file for libovsdb client 
   libovsdbClientLogFile: ""
+  # -- Label for indicating that the node is managing its own network
+  noHostSubnetLabel: ""
   image:
+    # -- Image repository for ovn-kubernetes components
+    repository: ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu
+    # -- Specify image tag to run
+    tag: master
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  # -- Image for DPUs
+  dpuImage:
     # -- Image repository for ovn-kubernetes components
     repository: ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu
     # -- Specify image tag to run

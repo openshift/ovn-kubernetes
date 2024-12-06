@@ -1232,10 +1232,10 @@ spec:
 		framework.ExpectNoError(err, "Step 6. Check that the second egressIP object is assigned to node2 (pod2Node/egress1Node), failed: %v", err)
 
 		ginkgo.By("7. Check the OVN DB to ensure no SNATs are added for the standby egressIP")
-		dbPods, err := e2ekubectl.RunKubectl("ovn-kubernetes", "get", "pods", "-l", "name=ovnkube-db", "-o=jsonpath='{.items..metadata.name}'")
+		dbPods, err := e2ekubectl.RunKubectl(ovnNamespace, "get", "pods", "-l", "name=ovnkube-db", "-o=jsonpath='{.items..metadata.name}'")
 		dbContainerName := "nb-ovsdb"
 		if isInterconnectEnabled() {
-			dbPods, err = e2ekubectl.RunKubectl("ovn-kubernetes", "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress1Node.name), "-o=jsonpath='{.items..metadata.name}'")
+			dbPods, err = e2ekubectl.RunKubectl(ovnNamespace, "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress1Node.name), "-o=jsonpath='{.items..metadata.name}'")
 		}
 		if err != nil || len(dbPods) == 0 {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
@@ -1250,7 +1250,7 @@ spec:
 		if IsIPv6Cluster(f.ClientSet) {
 			logicalIP = fmt.Sprintf("logical_ip=\"%s\"", srcPodIP.String())
 		}
-		snats, err := e2ekubectl.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 		}
@@ -1314,7 +1314,7 @@ spec:
 		framework.ExpectNoError(err, "Step 11. Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP3 from object2, failed: %v", err)
 
 		ginkgo.By("12. Check the OVN DB to ensure SNATs are added for only the standby egressIP")
-		snats, err = e2ekubectl.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err = e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for only the standby egressIP, err: %v", err)
 		}
@@ -1349,7 +1349,7 @@ spec:
 		framework.ExpectNoError(err, "Step 14. Ensure egressIP1 from egressIP object1 and egressIP3 from object2 is correctly transferred to egress2Node, failed: %v", err)
 
 		if isInterconnectEnabled() {
-			dbPods, err = e2ekubectl.RunKubectl("ovn-kubernetes", "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress2Node.name), "-o=jsonpath='{.items..metadata.name}'")
+			dbPods, err = e2ekubectl.RunKubectl(ovnNamespace, "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress2Node.name), "-o=jsonpath='{.items..metadata.name}'")
 		}
 		if err != nil || len(dbPods) == 0 {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
@@ -1362,7 +1362,7 @@ spec:
 		}
 
 		ginkgo.By("15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3")
-		snats, err = e2ekubectl.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err = e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, err: %v", err)
 		}
@@ -2536,7 +2536,8 @@ spec:
 			ginkgo.Skip("Node doesn't have VRF kernel module loaded")
 		}
 		var egressIP1 string
-		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
+		isV6Node := utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP))
+		if isV6Node {
 			egressIP1 = "2001:db8:abcd:1234:c001::"
 		} else {
 			egressIP1 = "10.10.10.100"
@@ -2560,6 +2561,35 @@ spec:
 		if egressInterface == "" {
 			framework.Failf("failed to find egress interface name")
 		}
+		// Enslaving a link to a VRF device may cause the removal of the non link local IPv6 address from the interface
+		// Look up the IP address, add it after enslaving the link and perform test.
+		restoreLinkIPv6AddrFn := func() error { return nil }
+		if isV6Node {
+			ginkgo.By("attempting to find IPv6 global address for secondary network")
+			address, err := runCommand(containerRuntime, "inspect", "-f",
+				fmt.Sprintf("'{{ (index .NetworkSettings.Networks \"%s\").GlobalIPv6Address }}'", secondaryNetworkName), egress1Node.name)
+			if err != nil {
+				framework.Failf("failed to get node %s IP address for network %s: %v", egress1Node.name, secondaryNetworkName, err)
+			}
+			address = strings.TrimSuffix(address, "\n")
+			address = strings.Trim(address, "'")
+			ginkgo.By(fmt.Sprintf("found address %q", address))
+			gomega.Expect(net.ParseIP(address)).ShouldNot(gomega.BeNil(), "IPv6 address for secondary network must be present")
+			prefix, err := runCommand(containerRuntime, "inspect", "-f",
+				fmt.Sprintf("'{{ (index .NetworkSettings.Networks \"%s\").GlobalIPv6PrefixLen }}'", secondaryNetworkName), egress1Node.name)
+			if err != nil {
+				framework.Failf("failed to get node %s IP prefix length for network %s: %v", egress1Node.name, secondaryNetworkName, err)
+			}
+			prefix = strings.TrimSuffix(prefix, "\n")
+			prefix = strings.Trim(prefix, "'")
+			_, err = strconv.Atoi(prefix)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "requires valid IPv6 address prefix")
+			restoreLinkIPv6AddrFn = func() error {
+				_, err := runCommand(containerRuntime, "exec", egress1Node.name, "ip", "-6", "address", "add",
+					fmt.Sprintf("%s/%s", address, prefix), "dev", egressInterface, "nodad", "scope", "global")
+				return err
+			}
+		}
 		_, err = runCommand(containerRuntime, "exec", egress1Node.name, "ip", "link", "add", vrfName, "type", "vrf", "table", vrfRoutingTable)
 		if err != nil {
 			framework.Failf("failed to add VRF to node %s: %v", egress1Node.name, err)
@@ -2568,6 +2598,9 @@ spec:
 		_, err = runCommand(containerRuntime, "exec", egress1Node.name, "ip", "link", "set", "dev", egressInterface, "master", vrfName)
 		if err != nil {
 			framework.Failf("failed to enslave interface %s to VRF %s node %s: %v", egressInterface, vrfName, egress1Node.name, err)
+		}
+		if isV6Node {
+			gomega.Expect(restoreLinkIPv6AddrFn()).Should(gomega.Succeed(), "restoring IPv6 address should succeed")
 		}
 		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
 		ginkgo.By("1. Set one node as available for egress")
