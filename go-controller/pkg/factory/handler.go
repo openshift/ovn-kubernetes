@@ -33,7 +33,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const handlerPoolSize = 21
+const handlerPoolSize = 201
 
 // Handler represents an event handler and is private to the factory module
 type Handler struct {
@@ -209,7 +209,7 @@ func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct
 		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, 10)
+		qm.queues[j] = make(chan *event, 1000)
 	}
 	return qm
 }
