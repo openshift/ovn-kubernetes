@@ -451,6 +451,10 @@ type networkClusterControllerEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
+func (h *networkClusterControllerEventHandler) FilterResource(obj interface{}) bool {
+	return true
+}
+
 // networkClusterControllerEventHandler functions
 
 // AddResource adds the specified object to the cluster according to its type and
