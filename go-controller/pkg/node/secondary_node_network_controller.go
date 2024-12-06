@@ -53,7 +53,7 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 		}
 
 		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.NetInfo, networkID, node,
-			snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, ruleManager, defaultNetworkGateway)
+			snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, snnc.udnNodeClient, vrfManager, ruleManager, defaultNetworkGateway)
 		if err != nil {
 			return nil, fmt.Errorf("error creating UDN gateway for network %s: %v", netInfo.GetNetworkName(), err)
 		}
@@ -104,11 +104,11 @@ func (nc *SecondaryNodeNetworkController) Cleanup() error {
 func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
 	if oc.networkID == nil || *oc.networkID == util.InvalidID {
 		oc.networkID = ptr.To(util.InvalidID)
-		nodes, err := oc.watchFactory.GetNodes()
+		udnNodes, err := oc.watchFactory.GetUDNNodes(oc.GetNetworkName())
 		if err != nil {
 			return util.InvalidID, err
 		}
-		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		*oc.networkID, err = util.GetUDNNetworkID(udnNodes, oc.GetNetworkName())
 		if err != nil {
 			return util.InvalidID, err
 		}

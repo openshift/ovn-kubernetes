@@ -7,6 +7,7 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"net"
 	"os"
 	"path/filepath"
@@ -46,6 +47,7 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
+	userdefinednodeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 )
@@ -65,6 +67,7 @@ type OVNClientset struct {
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 // OVNMasterClientset
@@ -82,9 +85,9 @@ type OVNMasterClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
-// OVNNetworkControllerManagerClientset
 type OVNKubeControllerClientset struct {
 	KubeClient               kubernetes.Interface
 	ANPClient                anpclientset.Interface
@@ -98,6 +101,7 @@ type OVNKubeControllerClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -107,6 +111,7 @@ type OVNNodeClientset struct {
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -122,6 +127,7 @@ type OVNClusterManagerClientset struct {
 	IPAMClaimsClient         ipamclaimssclientset.Interface
 	OCPNetworkClient         ocpnetworkclientset.Interface
 	UserDefinedNetworkClient userdefinednetworkclientset.Interface
+	UserDefinedNodeClient    userdefinednodeclientset.Interface
 }
 
 const (
@@ -134,6 +140,7 @@ var (
 	certUsages = []certificatesv1.KeyUsage{certificatesv1.UsageDigitalSignature, certificatesv1.UsageClientAuth}
 )
 
+// GetMasterClientset is for runMode.clusterManager && runMode.ovnkubeController
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	return &OVNMasterClientset{
 		KubeClient:               cs.KubeClient,
@@ -152,6 +159,10 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	}
 }
 
+// GetOVNKubeControllerClientset for
+// a) ovnkube controller + cluster manager or
+// b) ovnkube controller + node
+// c) all-in-one a.k.a ovnkube controller + cluster-manager + node
 func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClientset {
 	return &OVNKubeControllerClientset{
 		KubeClient:               cs.KubeClient,
@@ -166,9 +177,11 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
+// GetOVNKubeControllerClientset for runMode.ovnkubeController
 func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClientset {
 	return &OVNKubeControllerClientset{
 		KubeClient:               cs.KubeClient,
@@ -183,6 +196,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
@@ -200,6 +214,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		OCPNetworkClient:         cs.OCPNetworkClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
@@ -211,6 +226,7 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
 		NetworkAttchDefClient:    cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient: cs.UserDefinedNetworkClient,
+		UserDefinedNodeClient:    cs.UserDefinedNodeClient,
 	}
 }
 
@@ -492,6 +508,8 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	userDefinedNodeClientSet, err := userdefinednodeclientset.NewForConfig(kconfig)
+
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		ANPClient:                anpClientset,
@@ -506,6 +524,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		AdminPolicyRouteClient:   adminPolicyBasedRouteClientset,
 		IPAMClaimsClient:         ipamClaimsClientset,
 		UserDefinedNetworkClient: userDefinedNetworkClientSet,
+		UserDefinedNodeClient:    userDefinedNodeClientSet,
 	}, nil
 }
 
@@ -715,6 +734,14 @@ func NoHostSubnet(node *kapi.Node) bool {
 	}
 
 	return config.Kubernetes.NoHostSubnetNodes.Matches(labels.Set(node.Labels))
+}
+
+func NoHostSubnetUDNNode(udnNode *userdefinednodeapi.UDNNode) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
+	}
+
+	return config.Kubernetes.NoHostSubnetNodes.Matches(labels.Set(udnNode.Labels))
 }
 
 // getSelectedEligibleEndpoints does the following:

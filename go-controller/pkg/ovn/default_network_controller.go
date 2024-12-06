@@ -164,9 +164,11 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
+		cnci.watchFactory.UserDefinedNodeInformer(),
 		nadController,
 		cnci.recorder,
 		&util.DefaultNetInfo{},
+		cnci.watchFactory,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
@@ -606,6 +608,10 @@ type defaultNetworkControllerEventHandler struct {
 	oc              *DefaultNetworkController
 	extraParameters interface{}
 	syncFunc        func([]interface{}) error
+}
+
+func (h *defaultNetworkControllerEventHandler) FilterResource(obj interface{}) bool {
+	return true
 }
 
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
