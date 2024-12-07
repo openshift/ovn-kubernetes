@@ -281,6 +281,11 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
 				em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
 				transitSwitchName := ocInfo.bnc.GetNetworkName() + "_transit_switch"
+				extIDs := map[string]string{
+					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
+					ovntypes.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(ocInfo.bnc.IsPrimaryNetwork()),
+					ovntypes.TopologyExternalID:    ocInfo.bnc.TopologyType(),
+				}
 				data = append(data, &nbdb.LogicalSwitch{
 					UUID: transitSwitchName + "-UUID",
 					Name: transitSwitchName,
@@ -291,6 +296,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 						"requested-tnl-key":        "16711685",
 						"mcast_snoop":              "true",
 					},
+					ExternalIDs: extIDs,
 				})
 			}
 			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
