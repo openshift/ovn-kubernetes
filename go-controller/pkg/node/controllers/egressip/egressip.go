@@ -1353,12 +1353,6 @@ func clearSrcFromRoutes(routes []netlink.Route) {
 	}
 }
 
-func clearSrcFromRoutes(routes []netlink.Route) {
-	for i := range routes {
-		routes[i].Src = nil
-	}
-}
-
 func findLinkOnSameNetworkAsIP(ip net.IP, v4, v6 bool) (bool, netlink.Link, error) {
 	found, link, err := findLinkOnSameNetworkAsIPUsingLPM(ip, v4, v6)
 	if err != nil {

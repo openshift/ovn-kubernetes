@@ -98,7 +98,6 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 
 	// Add or delete iptables rules from FORWARD chain based on DisableForwarding. This is
 	// to imitate addition or deletion of iptales rules done in newNodePortWatcher().
-	var subnets []*net.IPNet
 	for _, subnet := range config.Default.ClusterSubnets {
 		subnets = append(subnets, subnet.CIDR)
 	}
@@ -107,15 +106,9 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
 			return fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", linkName, err)
 		}
-		if err := initExternalBridgeDropForwardingRules(linkName); err != nil {
-			return fmt.Errorf("failed to add drop rules in forwarding table for bridge %s: err %v", linkName, err)
-		}
 	} else {
 		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
 			return fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", linkName, err)
-		}
-		if err := delExternalBridgeDropForwardingRules(linkName); err != nil {
-			return fmt.Errorf("failed to delete drop rules in forwarding table for bridge %s: err %v", linkName, err)
 		}
 	}
 

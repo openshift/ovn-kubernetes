@@ -967,19 +967,16 @@ var _ = Describe("Egress Service Operations", func() {
 					&v1.ServiceList{
 						Items: []v1.Service{
 							service,
-							service2,
 						},
 					},
 					&discovery.EndpointSliceList{
 						Items: []discovery.EndpointSlice{
 							endpointSlice,
-							endpointSlice2,
 						},
 					},
 					&egressserviceapi.EgressServiceList{
 						Items: []egressserviceapi.EgressService{
 							egressService,
-							egressService2,
 						},
 					},
 				)
@@ -1074,7 +1071,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1202,7 +1199,7 @@ var _ = Describe("Egress Service Operations", func() {
 				}
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1220,7 +1217,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1238,7 +1235,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {

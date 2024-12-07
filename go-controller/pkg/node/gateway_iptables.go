@@ -405,12 +405,6 @@ func delExternalBridgeServiceForwardingRules(cidrs []*net.IPNet) error {
 	return deleteIptRules(getGatewayForwardRules(cidrs))
 }
 
-// delExternalBridgeDropForwardingRules removes iptables rules which might
-// have been added to disable forwarding
-func delExternalBridgeDropForwardingRules(ifName string) error {
-	return deleteIptRules(getGatewayDropRules(ifName))
-}
-
 func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	protocol := getIPTablesProtocol(cidr.IP.String())
