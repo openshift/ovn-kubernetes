@@ -285,7 +285,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, vlanID)
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
+			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC), ovntypes.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -308,7 +308,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset
 			// can only be deterministic when WatchNamespaces() handles this host network namespace.
 
-			gwLRPIPs, err := util.ParseNodeGatewayRouterLRPAddrs(&testNode)
+			gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(&testNode, ovntypes.DefaultNetworkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 			err = fakeOvn.controller.WatchNamespaces()
@@ -338,6 +339,121 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			for _, lrpIP := range gwLRPIPs {
 				allowIPs = append(allowIPs, lrpIP.IP.String())
 			}
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(hostNetworkNamespace, allowIPs)
+		})
+
+		ginkgo.It("creates an address set for hybrid overlay nodes when the host network traffic namespace is created", func() {
+			config.HybridOverlay.Enabled = true
+			config.Kubernetes.NoHostSubnetNodes, _ = metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{"hybrid-overlay-node": "true"},
+			})
+			config.Gateway.Mode = config.GatewayModeShared
+			config.Gateway.NodeportEnable = true
+			var err error
+			config.Default.ClusterSubnets, err = config.ParseClusterSubnetEntries(clusterCIDR)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			node1 := tNode{
+				Name:       "node1",
+				NodeIP:     "1.2.3.4",
+				NodeSubnet: "10.1.1.0/24",
+				NodeGWIP:   "10.1.1.1/24",
+			}
+			// create a test node and annotate it with host subnet
+			testNode := v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   node1.Name,
+					Labels: map[string]string{"hybrid-overlay-node": "true"},
+					Annotations: map[string]string{
+						"k8s.ovn.org/hybrid-overlay-node-subnet": node1.NodeSubnet,
+						"k8s.ovn.org/node-subnets":               fmt.Sprintf("{\"default\":\"%s\"}", node1.NodeSubnet),
+					},
+				},
+			}
+
+			hostNetworkNamespace := "test-host-network-ns"
+			config.Kubernetes.HostNetworkNamespace = hostNetworkNamespace
+
+			expectedClusterLBGroup := newLoadBalancerGroup(ovntypes.ClusterLBGroupName)
+			expectedSwitchLBGroup := newLoadBalancerGroup(ovntypes.ClusterSwitchLBGroupName)
+			expectedRouterLBGroup := newLoadBalancerGroup(ovntypes.ClusterRouterLBGroupName)
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						newClusterJoinSwitch(),
+						expectedOVNClusterRouter,
+						expectedNodeSwitch,
+						expectedClusterRouterPortGroup,
+						expectedClusterPortGroup,
+						expectedClusterLBGroup,
+						expectedSwitchLBGroup,
+						expectedRouterLBGroup,
+					},
+				},
+				&v1.NamespaceList{
+					Items: []v1.Namespace{
+						*newNamespace(hostNetworkNamespace),
+					},
+				},
+				&v1.NodeList{
+					Items: []v1.Node{
+						testNode,
+					},
+				},
+			)
+			fakeOvn.controller.multicastSupport = false
+			fakeOvn.controller.SCTPSupport = true
+			fakeOvn.controller.inMigrationMode = true
+
+			err = fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.WatchNodes()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.StartServiceController(wg, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// check the namespace again and ensure the address set
+			// being created with the right set of IPs in it.
+			ip, _, _ := net.ParseCIDR(node1.NodeGWIP)
+			allowIPs := []string{ip.String()}
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(hostNetworkNamespace, allowIPs)
+
+			// switch the node from a ho node to a ovn node
+			ovn_node1 := tNode{
+				Name:                 "node1",
+				NodeIP:               "1.2.3.4",
+				NodeLRPMAC:           "0a:58:0a:01:01:01",
+				LrpIP:                "100.64.0.2",
+				LrpIPv6:              "fd98::2",
+				DrLrpIP:              "100.64.0.1",
+				PhysicalBridgeMAC:    "11:22:33:44:55:66",
+				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+				NodeSubnet:           "10.1.1.0/24",
+				GWRouter:             ovntypes.GWRouterPrefix + "node1",
+				GatewayRouterIPMask:  "172.16.16.2/24",
+				GatewayRouterIP:      "172.16.16.2",
+				GatewayRouterNextHop: "172.16.16.1",
+				PhysicalBridgeName:   "br-eth0",
+				NodeGWIP:             "10.1.1.1/24",
+				NodeMgmtPortIP:       "10.1.1.2",
+				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
+				DnatSnatIP:           "169.254.0.1",
+			}
+			ovnTestNode := ovn_node1.k8sNode("2")
+			ovnTestNode.Annotations["k8s.ovn.org/hybrid-overlay-node-subnet"] = testNode.Annotations["k8s.ovn.org/hybrid-overlay-node-subnet"]
+			ovnTestNode.Annotations["k8s.ovn.org/node-subnets"] = testNode.Annotations["k8s.ovn.org/node-subnets"]
+
+			fakeOvn.fakeClient.GetNodeClientset().KubeClient.CoreV1().Nodes().Update(context.TODO(), &ovnTestNode, metav1.UpdateOptions{})
+			// check the namespace again and ensure the ho node gateway IP is removed from the address_set
+			// and the ovn ips are added instead.
+			allowIPs = []string{"10.1.1.2", "100.64.0.2"}
 			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(hostNetworkNamespace, allowIPs)
 		})
 

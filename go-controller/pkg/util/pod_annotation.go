@@ -71,6 +71,22 @@ type PodAnnotation struct {
 
 	// TunnelID assigned to each pod for layer2 secondary networks
 	TunnelID int
+
+	// Role defines what role this network plays for the given pod.
+	// Expected values are:
+	// (1) "primary" if this network is the primary network of the pod.
+	//     The "default" network is the primary network of any pod usually
+	//     unless user-defined-network-segmentation feature has been activated.
+	//     If network segmentation feature is enabled then any user defined
+	//     network can be the primary network of the pod.
+	// (2) "secondary" if this network is the secondary network of the pod.
+	//     Only user defined networks can be secondary networks for a pod.
+	// (3) "infrastructure-locked" is applicable only to "default" network if
+	//     a user defined network is the "primary" network for this pod. This
+	//     signifies the "default" network is only used for probing and
+	//     is otherwise locked for all intents and purposes.
+	// At a given time a pod can have only 1 network with role:"primary"
+	Role string
 }
 
 // PodRoute describes any routes to be added to the pod's network namespace
@@ -95,7 +111,8 @@ type podAnnotation struct {
 	IP      string `json:"ip_address,omitempty"`
 	Gateway string `json:"gateway_ip,omitempty"`
 
-	TunnelID int `json:"tunnel_id,omitempty"`
+	TunnelID int    `json:"tunnel_id,omitempty"`
+	Role     string `json:"role,omitempty"`
 }
 
 // Internal struct used to marshal PodRoute to the pod annotation
@@ -116,6 +133,7 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 	pa := podAnnotation{
 		TunnelID: podInfo.TunnelID,
 		MAC:      podInfo.MAC.String(),
+		Role:     podInfo.Role,
 	}
 
 	if len(podInfo.IPs) == 1 {
@@ -191,6 +209,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadName string) (*Pod
 
 	podAnnotation := &PodAnnotation{
 		TunnelID: a.TunnelID,
+		Role:     a.Role,
 	}
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
 	if err != nil {
@@ -424,19 +443,40 @@ func IsValidPodAnnotation(podAnnotation *PodAnnotation) bool {
 	return podAnnotation != nil && len(podAnnotation.MAC) > 0
 }
 
-func joinSubnetToRoute(isIPv6 bool, gatewayIP net.IP) PodRoute {
-	joinSubnet := config.Gateway.V4JoinSubnet
+func joinSubnetToRoute(netinfo NetInfo, isIPv6 bool, gatewayIP net.IP) PodRoute {
+	joinSubnet := netinfo.JoinSubnetV4()
 	if isIPv6 {
-		joinSubnet = config.Gateway.V6JoinSubnet
+		joinSubnet = netinfo.JoinSubnetV6()
 	}
-	_, subnet, err := net.ParseCIDR(joinSubnet)
-	if err != nil {
-		// Join subnet should have been validated already by config
-		panic(fmt.Sprintf("Failed to parse join subnet %q: %v", joinSubnet, err))
-	}
-
 	return PodRoute{
-		Dest:    subnet,
+		Dest:    joinSubnet,
+		NextHop: gatewayIP,
+	}
+}
+
+func serviceCIDRToRoute(isIPv6 bool, gatewayIP net.IP) []PodRoute {
+	var podRoutes []PodRoute
+	for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+		if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
+			podRoutes = append(podRoutes, PodRoute{
+				Dest:    serviceSubnet,
+				NextHop: gatewayIP,
+			})
+		}
+	}
+	return podRoutes
+}
+
+func hairpinMasqueradeIPToRoute(isIPv6 bool, gatewayIP net.IP) PodRoute {
+	ip := config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP
+	if isIPv6 {
+		ip = config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP
+	}
+	return PodRoute{
+		Dest: &net.IPNet{
+			IP:   ip,
+			Mask: GetIPFullMask(ip),
+		},
 		NextHop: gatewayIP,
 	}
 }
@@ -458,8 +498,28 @@ func AddRoutesGatewayIP(
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
 		topoType := netinfo.TopologyType()
 		switch topoType {
-		case types.Layer2Topology, types.LocalnetTopology:
+		case types.LocalnetTopology:
 			// no route needed for directly connected subnets
+			return nil
+		case types.Layer2Topology:
+			if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
+				return nil
+			}
+			for _, podIfAddr := range podAnnotation.IPs {
+				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+				nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
+				if err != nil {
+					return err
+				}
+				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
+				// Ensure default service network traffic always goes to OVN
+				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+				// Ensure UDN join subnet traffic always goes to UDN LSP
+				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
+				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
+					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
+				}
+			}
 			return nil
 		case types.Layer3Topology:
 			for _, podIfAddr := range podAnnotation.IPs {
@@ -476,6 +536,16 @@ func AddRoutesGatewayIP(
 							NextHop: gatewayIPnet.IP,
 						})
 					}
+				}
+				if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
+					continue
+				}
+				// Ensure default service network traffic always goes to OVN
+				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+				// Ensure UDN join subnet traffic always goes to UDN LSP
+				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
+				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
+					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 				}
 			}
 			return nil
@@ -522,26 +592,22 @@ func AddRoutesGatewayIP(
 			}
 		}
 
-		// Ensure default service network traffic always goes to OVN
-		for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
-			if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
-				podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
-					Dest:    serviceSubnet,
-					NextHop: gatewayIPnet.IP,
-				})
+		if podAnnotation.Role == types.NetworkRolePrimary {
+			// Ensure default service network traffic always goes to OVN
+			podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+			// Ensure service hairpin masquerade traffic always goes to OVN
+			podAnnotation.Routes = append(podAnnotation.Routes, hairpinMasqueradeIPToRoute(isIPv6, gatewayIPnet.IP))
+			otherDefaultRoute := otherDefaultRouteV4
+			if isIPv6 {
+				otherDefaultRoute = otherDefaultRouteV6
+			}
+			if !otherDefaultRoute {
+				podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 			}
 		}
 
-		otherDefaultRoute := otherDefaultRouteV4
-		if isIPv6 {
-			otherDefaultRoute = otherDefaultRouteV6
-		}
-		if !otherDefaultRoute {
-			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
-		}
-
 		// Ensure default join subnet traffic always goes to OVN
-		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(isIPv6, gatewayIPnet.IP))
+		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
 	}
 
 	return nil

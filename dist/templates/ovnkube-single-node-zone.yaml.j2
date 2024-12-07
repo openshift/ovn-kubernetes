@@ -74,7 +74,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
         - name: OVN_NORTHD_BACKOFF_INTERVAL
@@ -144,7 +144,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
@@ -211,7 +211,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
@@ -304,7 +304,7 @@ spec:
         - name: OVN_EGRESSSERVICE_ENABLE
           value: "{{ ovn_egress_service_enable }}"
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_node_loglevel }}"
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -399,6 +399,10 @@ spec:
           value: "{{ ovn_v4_join_subnet }}"
         - name: OVN_V6_JOIN_SUBNET
           value: "{{ ovn_v6_join_subnet }}"
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: "{{ ovn_v4_masquerade_subnet }}"
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: "{{ ovn_v6_masquerade_subnet }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_UNPRIVILEGED_MODE
@@ -423,6 +427,8 @@ spec:
           value: "{{ ovn_lflow_cache_limit_kb }}"
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "{{ ovn_multi_network_enable }}"
+        - name: OVN_NETWORK_SEGMENTATION_ENABLE
+          value: "{{ ovn_network_segmentation_enable }}"
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
           value: "{{ ovnkube_node_mgmt_port_netdev }}"
         - name: OVN_EMPTY_LB_EVENTS
@@ -446,6 +452,8 @@ spec:
           value: "{{ ovn_enable_ovnkube_identity }}"
         - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
           value: "{{ ovn_enable_svc_template_support }}"
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: "{{ ovn_enable_dnsnameresolver }}"
 
         readinessProbe:
           exec:
@@ -488,7 +496,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_CONTROLLER
           value: "{{ ovn_loglevel_controller }}"
         - name: K8S_APISERVER
@@ -544,7 +552,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: K8S_NODE_IP
           valueFrom:
             fieldRef:

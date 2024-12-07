@@ -19,12 +19,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -120,11 +120,13 @@ func NewController(stopCh <-chan struct{}, returnMark, thisNode string,
 
 	c.endpointSliceLister = discoverylisters.NewEndpointSliceLister(endpointSliceInformer.GetIndexer())
 	c.endpointSlicesSynced = endpointSliceInformer.HasSynced
-	_, err = endpointSliceInformer.AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onEndpointSliceAdd,
-		UpdateFunc: c.onEndpointSliceUpdate,
-		DeleteFunc: c.onEndpointSliceDelete,
-	}))
+	_, err = endpointSliceInformer.AddEventHandler(factory.WithUpdateHandlingForObjReplace(
+		// TODO: Stop ignoring mirrored EndpointSlices and add support for user-defined networks
+		util.GetDefaultEndpointSlicesEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onEndpointSliceAdd,
+			UpdateFunc: c.onEndpointSliceUpdate,
+			DeleteFunc: c.onEndpointSliceDelete,
+		})))
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +332,7 @@ func (c *Controller) repair() error {
 		errorList = append(errorList, err)
 	}
 
-	return errors.NewAggregate(errorList)
+	return utilerrors.Join(errorList...)
 }
 
 // Remove stale ip rules, update caches with valid existing ones.
@@ -456,7 +458,7 @@ func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServi
 			}
 		}
 
-		return errors.NewAggregate(errorList)
+		return utilerrors.Join(errorList...)
 	}
 
 	errorList := []error{}
@@ -474,7 +476,7 @@ func (c *Controller) repairIPRules(v4EpsToServices, v6EpsToServices, cipsToServi
 		}
 	}
 
-	return errors.NewAggregate(errorList)
+	return utilerrors.Join(errorList...)
 }
 
 // Remove stale iptables rules, update caches with valid existing ones.
@@ -617,7 +619,7 @@ func (c *Controller) repairIPTables(v4EpsToServices, v6EpsToServices map[string]
 			}
 		}
 
-		return errors.NewAggregate(errorList)
+		return utilerrors.Join(errorList...)
 	}
 
 	errorList := []error{}
@@ -656,7 +658,7 @@ func (c *Controller) repairIPTables(v4EpsToServices, v6EpsToServices map[string]
 		}
 	}
 
-	return errors.NewAggregate(errorList)
+	return utilerrors.Join(errorList...)
 }
 
 func (c *Controller) runEgressServiceWorker(wg *sync.WaitGroup) {
@@ -1061,7 +1063,7 @@ func (c *Controller) clearServiceIPRules(state *svcState) error {
 		state.v6NodePorts.Delete(port)
 	}
 
-	return errors.NewAggregate(errorList)
+	return utilerrors.Join(errorList...)
 }
 
 // Clears all of the iptables rules that relate to the service and removes it from the cache.

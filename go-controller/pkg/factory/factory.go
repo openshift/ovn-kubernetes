@@ -42,9 +42,11 @@ import (
 	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
 
-	"github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
+	nadinformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
+	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpscheme "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme"
@@ -64,7 +66,13 @@ import (
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimsscheme "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/scheme"
 	ipamclaimsfactory "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions"
+	ipamclaimsinformer "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
+
+	userdefinednetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	userdefinednetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
+	userdefinednetworkapiinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
+	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -103,6 +111,8 @@ type WatchFactory struct {
 	egressServiceFactory egressserviceinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
+	nadFactory           nadinformerfactory.SharedInformerFactory
+	udnFactory           userdefinednetworkapiinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -142,9 +152,6 @@ type egressIPPod struct{}
 type egressIPNamespace struct{}
 type egressNode struct{}
 
-// types for handlers related to egress Firewall
-type egressFwNode struct{}
-
 // types for handlers in use by ovn-k node
 type namespaceExGw struct{}
 type endpointSliceForStaleConntrackRemoval struct{}
@@ -165,7 +172,6 @@ var (
 	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
 	EgressIPPodType                       reflect.Type = reflect.TypeOf(&egressIPPod{})
 	EgressNodeType                        reflect.Type = reflect.TypeOf(&egressNode{})
-	EgressFwNodeType                      reflect.Type = reflect.TypeOf(&egressFwNode{})
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
 	EgressServiceType                     reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
@@ -178,6 +184,7 @@ var (
 	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
 	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
+	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -204,6 +211,19 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 			return nil, err
 		}
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
+			return nil, err
+		}
+
+		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
+		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -244,12 +264,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
-	}
-
-	if config.OVNKubernetesFeature.EnableMultiNetwork &&
-		config.OVNKubernetesFeature.EnablePersistentIPs &&
-		!config.OVNKubernetesFeature.EnableInterconnect {
-		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
 	}
 
 	if err := anpapi.AddToScheme(anpscheme.Scheme); err != nil {
@@ -304,7 +318,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	var err error
@@ -376,12 +390,19 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork &&
-		config.OVNKubernetesFeature.EnablePersistentIPs &&
-		!config.OVNKubernetesFeature.EnableInterconnect {
-		wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {
 			return nil, err
+		}
+
+		if config.OVNKubernetesFeature.EnablePersistentIPs && !config.OVNKubernetesFeature.EnableInterconnect {
+			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
+			wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -495,7 +516,65 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if wf.nadFactory != nil {
+		wf.nadFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.nadFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && wf.udnFactory != nil {
+		wf.udnFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.udnFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
+}
+
+// Stop stops the factory informers, and waits for their handlers to stop
+func (wf *WatchFactory) Stop() {
+	klog.Info("Stopping watch factory")
+	wf.iFactory.Shutdown()
+	if wf.anpFactory != nil {
+		wf.anpFactory.Shutdown()
+	}
+	if wf.eipFactory != nil {
+		wf.eipFactory.Shutdown()
+	}
+	if wf.efFactory != nil {
+		wf.efFactory.Shutdown()
+	}
+	if wf.dnsFactory != nil {
+		wf.dnsFactory.Shutdown()
+	}
+	if wf.cpipcFactory != nil {
+		wf.cpipcFactory.Shutdown()
+	}
+	if wf.egressQoSFactory != nil {
+		wf.egressQoSFactory.Shutdown()
+	}
+	// FIXME(trozet) when https://github.com/k8snetworkplumbingwg/multi-networkpolicy/issues/22 is resolved
+	// wf.mnpFactory.Shutdown()
+	// wf.nadFactory.Shutdown()
+	if wf.egressServiceFactory != nil {
+		wf.egressServiceFactory.Shutdown()
+	}
+	if wf.apbRouteFactory != nil {
+		wf.apbRouteFactory.Shutdown()
+	}
+	if wf.ipamClaimsFactory != nil {
+		wf.ipamClaimsFactory.Shutdown()
+	}
+
+	if wf.udnFactory != nil {
+		wf.udnFactory.Shutdown()
+	}
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
@@ -521,6 +600,9 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		return nil, err
 	}
 	if err := adminbasedpolicyapi.AddToScheme(adminbasedpolicyscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := nadapi.AddToScheme(nadscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -568,7 +650,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
@@ -616,6 +698,17 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
 	}
 
+	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode.
+	// need to know what is the primary network for a namespace on the CNI side, which
+	// needs the NAD factory whenever the UDN feature is used.
+	if config.OVNKubernetesFeature.EnableMultiNetwork || config.OVNKubernetesFeature.EnableNetworkSegmentation {
+		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -636,12 +729,6 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		stopChan:             make(chan struct{}),
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork &&
-		config.OVNKubernetesFeature.EnablePersistentIPs &&
-		config.OVNKubernetesFeature.EnableInterconnect {
-		wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-	}
-
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
 		return nil, err
 	}
@@ -652,10 +739,16 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	if err := ipamclaimsapi.AddToScheme(ipamclaimsscheme.Scheme); err != nil {
 		return nil, err
 	}
+	if err := nadapi.AddToScheme(nadscheme.Scheme); err != nil {
+		return nil, err
+	}
 	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := ocpnetworkapiv1alpha1.Install(ocpnetworkscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -676,7 +769,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
+			getEndpointSliceSelector())
 	})
 
 	var err error
@@ -717,16 +810,25 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect && config.OVNKubernetesFeature.EnableMultiNetwork {
-		wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues)
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {
 			return nil, err
 		}
 
-		if config.OVNKubernetesFeature.EnablePersistentIPs {
-			wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues)
 			if err != nil {
 				return nil, err
+			}
+
+			if config.OVNKubernetesFeature.EnablePersistentIPs {
+				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
+				wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -746,6 +848,14 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
+		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -756,6 +866,8 @@ func (wf *WatchFactory) Shutdown() {
 	for _, inf := range wf.informers {
 		inf.shutdown()
 	}
+	// Stop all non-custom informers and wait (closing the above channel will not wait)
+	wf.Stop()
 }
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
@@ -828,7 +940,7 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // This is relevant only for handlers that are sharing the same resources:
 // Pods: shared by PodType (0), EgressIPPodType (1), AddressSetPodSelectorType (2), LocalPodSelectorType (3)
 // Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (3), AddressSetNamespaceAndPodSelectorType (4)
-// Nodes: shared by NodeType (0), EgressNodeType (1), EgressFwNodeType (1)
+// Nodes: shared by NodeType (0), EgressNodeType (1)
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
 // Example: EgressIPPodType will always get the pod event after PodType and AddressSetPodSelectorType will always get the event after PodType and EgressIPPodType
 // NOTE: If you are touching this function to add a new object type that uses shared objects, please make sure to update `minHandlerPriority` if needed
@@ -847,8 +959,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 	case AddressSetNamespaceAndPodSelectorType:
 		return 3
 	case EgressNodeType:
-		return 1
-	case EgressFwNodeType:
 		return 1
 	default:
 		return defaultHandlerPriority
@@ -876,7 +986,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddMultiNetworkPolicyHandler(funcs, processExisting)
 		}, nil
 
-	case NodeType, EgressNodeType, EgressFwNodeType:
+	case NodeType, EgressNodeType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNodeHandler(funcs, processExisting, priority)
@@ -921,7 +1031,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 	case EndpointSliceForStaleConntrackRemovalType, EndpointSliceForGatewayType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
-			return wf.AddEndpointSliceHandler(funcs, processExisting)
+			return wf.AddFilteredEndpointSliceHandler(namespace, sel, funcs, processExisting)
 		}, nil
 
 	case IPAMClaimsType:
@@ -1033,9 +1143,9 @@ func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 	wf.removeHandler(ServiceType, handler)
 }
 
-// AddEndpointSliceHandler adds a handler function that will be executed on EndpointSlice object changes
-func (wf *WatchFactory) AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
-	return wf.addHandler(EndpointSliceType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
+// AddFilteredEndpointSliceHandler adds a handler function that will be executed on EndpointSlice object changes
+func (wf *WatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(EndpointSliceType, namespace, sel, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // RemoveEndpointSliceHandler removes a EndpointSlice object event handler function
@@ -1262,13 +1372,32 @@ func (wf *WatchFactory) GetEndpointSlice(namespace, name string) (*discovery.End
 	return endpointSliceLister.EndpointSlices(namespace).Get(name)
 }
 
-// GetServiceEndpointSlice returns the endpointSlice associated with a service
-func (wf *WatchFactory) GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error) {
-	esLabelSelector := labels.Set(map[string]string{
-		discovery.LabelServiceName: svcName,
-	}).AsSelectorPreValidated()
+// GetEndpointSlicesBySelector returns a list of EndpointSlices in a given namespace by the label selector
+func (wf *WatchFactory) GetEndpointSlicesBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*discovery.EndpointSlice, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
+	if err != nil {
+		return nil, err
+	}
 	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
-	return endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
+	return endpointSliceLister.EndpointSlices(namespace).List(selector)
+}
+
+// GetServiceEndpointSlices returns the endpointSlices associated with a service for the specified network
+// if network is DefaultNetworkName the default endpointSlices are returned, otherwise the function looks for mirror endpointslices
+// for the specified network.
+func (wf *WatchFactory) GetServiceEndpointSlices(namespace, svcName, network string) ([]*discovery.EndpointSlice, error) {
+	var selector metav1.LabelSelector
+	if network == types.DefaultNetworkName {
+		selector = metav1.LabelSelector{MatchLabels: map[string]string{
+			discovery.LabelServiceName: svcName,
+		}}
+	} else {
+		selector = metav1.LabelSelector{MatchLabels: map[string]string{
+			types.LabelUserDefinedServiceName:          svcName,
+			types.LabelUserDefinedEndpointSliceNetwork: network,
+		}}
+	}
+	return wf.GetEndpointSlicesBySelector(namespace, selector)
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
@@ -1308,10 +1437,22 @@ func (wf *WatchFactory) CertificateSigningRequestInformer() certificatesinformer
 	return wf.iFactory.Certificates().V1().CertificateSigningRequests()
 }
 
-// GetIPAMClaim gets a specific multinetwork policy by the namespace/name
+// GetIPAMClaim gets a specific IPAMClaim by the namespace/name
 func (wf *WatchFactory) GetIPAMClaim(namespace, name string) (*ipamclaimsapi.IPAMClaim, error) {
 	ipamClaimsLister := wf.informers[IPAMClaimsType].lister.(ipamclaimslister.IPAMClaimLister)
 	return ipamClaimsLister.IPAMClaims(namespace).Get(name)
+}
+
+// GetNAD gets a specific NAD by the namespace/name
+func (wf *WatchFactory) GetNAD(namespace, name string) (*nadapi.NetworkAttachmentDefinition, error) {
+	nadLister := wf.informers[NetworkAttachmentDefinitionType].lister.(nadlister.NetworkAttachmentDefinitionLister)
+	return nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
+}
+
+// GetNAD gets all NADs by the namespace
+func (wf *WatchFactory) GetNADs(namespace string) ([]*nadapi.NetworkAttachmentDefinition, error) {
+	nadLister := wf.informers[NetworkAttachmentDefinitionType].lister.(nadlister.NetworkAttachmentDefinitionLister)
+	return nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
@@ -1388,8 +1529,16 @@ func (wf *WatchFactory) EgressFirewallInformer() egressfirewallinformer.EgressFi
 	return wf.efFactory.K8s().V1().EgressFirewalls()
 }
 
-func (wf *WatchFactory) IPAMClaimsInformer() v1alpha1.IPAMClaimInformer {
+func (wf *WatchFactory) IPAMClaimsInformer() ipamclaimsinformer.IPAMClaimInformer {
 	return wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims()
+}
+
+func (wf *WatchFactory) NADInformer() nadinformer.NetworkAttachmentDefinitionInformer {
+	return wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions()
+}
+
+func (wf *WatchFactory) UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer {
+	return wf.udnFactory.K8s().V1().UserDefinedNetworks()
 }
 
 func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {
@@ -1424,6 +1573,22 @@ func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOpti
 
 	return func(options *metav1.ListOptions) {
 		options.LabelSelector = selector.String()
+	}
+}
+
+// noHeadlessServiceSelector returns a LabelSelector (added to the
+// watcher for EndpointSlices) that will only choose EndpointSlices without "service.kubernetes.io/headless"
+// label.
+func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// headless service label must not be there
+	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = noHeadlessService.String()
 	}
 }
 
@@ -1478,4 +1643,17 @@ type waitForCacheSyncer interface {
 
 func waitForCacheSyncWithTimeout(factory waitForCacheSyncer, stopCh <-chan struct{}) map[reflect.Type]bool {
 	return factory.WaitForCacheSync(util.GetChildStopChanWithTimeout(stopCh, types.InformerSyncTimeout))
+}
+
+// getEndpointSliceSelector returns an EndpointSlice selector function used in watchers.
+// When network segmentation is enabled it returns a selector that ignores EndpointSlices for headless services.
+// Otherwise, it returns a selector that excludes EndpointSlices a with missing default service name too.
+func getEndpointSliceSelector() func(options *metav1.ListOptions) {
+	endpointSliceSelector := withServiceNameAndNoHeadlessServiceSelector()
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// When network segmentation is enabled we need to watch for mirrored EndpointSlices that do not contain the
+		// default service name.
+		endpointSliceSelector = noHeadlessServiceSelector()
+	}
+	return endpointSliceSelector
 }

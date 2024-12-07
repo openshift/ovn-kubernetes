@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,8 +28,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kexec "k8s.io/utils/exec"
 )
@@ -541,7 +542,9 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				ovnClientset,
 				watchFactory,
 				runMode.identity,
-				eventRecorder)
+				wg,
+				eventRecorder,
+				routemanager.NewController())
 			if err != nil {
 				nodeErr = fmt.Errorf("failed to create node network controller: %w", err)
 				return
@@ -580,7 +583,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	wg.Wait()
 	klog.Infof("Stopped ovnkube")
 
-	err = errors.Join(managerErr, controllerErr, nodeErr)
+	err = utilerrors.Join(managerErr, controllerErr, nodeErr)
 	if err != nil {
 		return fmt.Errorf("failed to run ovnkube: %w", err)
 	}
@@ -628,11 +631,13 @@ func (m leaderMetrics) Off(string) {
 	}
 }
 
+func (m leaderMetrics) SlowpathExercised(string) {}
+
 type ovnkubeMetricsProvider struct {
 	runMode *ovnkubeRunMode
 }
 
-func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.LeaderMetric {
 	return &leaderMetrics{p.runMode}
 }
 

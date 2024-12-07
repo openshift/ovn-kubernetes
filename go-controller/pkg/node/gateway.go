@@ -13,13 +13,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 
-	"github.com/pkg/errors"
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -81,7 +81,7 @@ func (g *gateway) AddService(svc *kapi.Service) error {
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (g *gateway) UpdateService(old, new *kapi.Service) error {
@@ -108,7 +108,7 @@ func (g *gateway) UpdateService(old, new *kapi.Service) error {
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (g *gateway) DeleteService(svc *kapi.Service) error {
@@ -135,7 +135,7 @@ func (g *gateway) DeleteService(svc *kapi.Service) error {
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (g *gateway) SyncServices(objs []interface{}) error {
@@ -175,7 +175,7 @@ func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 
 }
 
@@ -193,7 +193,7 @@ func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.Endpoint
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 
 }
 
@@ -211,7 +211,7 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 			errors = append(errors, err)
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 
 }
 
@@ -229,6 +229,19 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	}
 
 	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+		if err != nil {
+			return err
+		}
+		if _, err = endpointSlicesRetryFramework.WatchResourceFiltered("", labels.NewSelector().Add(*req)); err != nil {
+			return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
+		}
+		return nil
+	}
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
@@ -269,13 +282,13 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	*bridgeConfiguration, *bridgeConfiguration, error) {
 	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", gwIntf)
+		return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", gwIntf, err)
 	}
 	var egressGWBridge *bridgeConfiguration
 	if egressGatewayIntf != "" {
 		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nil)
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", egressGatewayIntf)
+			return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", egressGatewayIntf, err)
 		}
 	}
 
@@ -339,6 +352,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
+		BridgeID:       gatewayBridge.bridgeName,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
@@ -390,7 +404,7 @@ func (g *gateway) Reconcile() error {
 	}
 	subnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {
-		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update", node.Name)
+		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
 	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
 		return err
@@ -398,7 +412,7 @@ func (g *gateway) Reconcile() error {
 	// Services create OpenFlow flows as well, need to update them all
 	if g.servicesRetryFramework != nil {
 		if errs := g.addAllServices(); errs != nil {
-			err := kerrors.NewAggregate(errs)
+			err := utilerrors.Join(errs...)
 			return err
 		}
 	}
@@ -427,15 +441,15 @@ func (g *gateway) addAllServices() []error {
 
 type bridgeConfiguration struct {
 	sync.Mutex
+	nodeName    string
 	bridgeName  string
 	uplinkName  string
 	ips         []*net.IPNet
 	interfaceID string
 	macAddress  net.HardwareAddr
-	patchPort   string
-	ofPortPatch string
 	ofPortPhys  string
 	ofPortHost  string
+	netConfig   map[string]*bridgeUDNConfiguration
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -469,14 +483,22 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
-	res := bridgeConfiguration{}
+	defaultNetConfig := &bridgeUDNConfiguration{
+		masqCTMark: ctMarkOVN,
+	}
+	res := bridgeConfiguration{
+		nodeName: nodeName,
+		netConfig: map[string]*bridgeUDNConfiguration{
+			types.DefaultNetworkName: defaultNetConfig,
+		},
+	}
 	gwIntf := intfName
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to find nic name for bridge %s", bridgeName)
+			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)
 		}
 		res.bridgeName = bridgeName
 		res.uplinkName = uplinkName
@@ -486,7 +508,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		// and add cluster.GatewayIntf as a port of that bridge.
 		bridgeName, err := util.NicToBridge(intfName)
 		if err != nil {
-			return nil, errors.Wrapf(err, "NicToBridge failed for %s", intfName)
+			return nil, fmt.Errorf("nicToBridge failed for %s: %w", intfName, err)
 		}
 		res.bridgeName = bridgeName
 		res.uplinkName = intfName
@@ -498,7 +520,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 			if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink {
 				klog.Infof("Could not find uplink for %s, setup gateway bridge with no uplink port, egress IP and egress GW will not work", intfName)
 			} else {
-				return nil, errors.Wrapf(err, "Failed to find intfName for %s", intfName)
+				return nil, fmt.Errorf("failed to find intfName for %s: %w", intfName, err)
 			}
 		} else {
 			res.uplinkName = uplinkName
@@ -515,13 +537,13 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		// error out.
 		res.ips, err = getNetworkInterfaceIPAddresses(gwIntf)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get interface details for %s", gwIntf)
+			return nil, fmt.Errorf("failed to get interface details for %s: %w", gwIntf, err)
 		}
 	}
 
 	res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get MAC address for ovs port %s", gwIntf)
+		return nil, fmt.Errorf("failed to get MAC address for ovs port %s: %w", gwIntf, err)
 	}
 
 	res.interfaceID, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, physicalNetworkName)
@@ -531,7 +553,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	defaultNetConfig.patchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

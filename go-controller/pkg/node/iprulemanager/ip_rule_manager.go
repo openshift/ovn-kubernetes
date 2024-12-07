@@ -5,15 +5,17 @@ import (
 	"sync"
 	"time"
 
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 
 	"github.com/vishvananda/netlink"
+
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 type ipRule struct {
-	rule   *netlink.Rule
-	delete bool
+	rule     *netlink.Rule
+	metadata string
+	delete   bool
 }
 
 type Controller struct {
@@ -60,13 +62,27 @@ func (rm *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 func (rm *Controller) Add(rule netlink.Rule) error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-	// check if we are already managing this route and if so, no-op
+	// check if we are already managing this rule and if so, no-op
 	for _, existingRule := range rm.rules {
 		if areNetlinkRulesEqual(existingRule.rule, &rule) {
 			return nil
 		}
 	}
-	rm.rules = append(rm.rules, ipRule{rule: &rule})
+	rm.rules = append(rm.rules, ipRule{rule: &rule}) // empty metadata
+	return rm.reconcile()
+}
+
+// AddWithMetadata ensures an IP rule along with its metadata is applied even if it is altered by something else, it will be restored
+func (rm *Controller) AddWithMetadata(rule netlink.Rule, metadata string) error {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	// check if we are already managing this rule and if so, no-op
+	for _, existingRule := range rm.rules {
+		if areNetlinkRulesEqual(existingRule.rule, &rule) {
+			return nil
+		}
+	}
+	rm.rules = append(rm.rules, ipRule{rule: &rule, metadata: metadata})
 	return rm.reconcile()
 }
 
@@ -80,6 +96,26 @@ func (rm *Controller) Delete(rule netlink.Rule) error {
 			rm.rules[i].delete = true
 			reconcileNeeded = true
 			break
+		}
+	}
+	if reconcileNeeded {
+		return rm.reconcile()
+	}
+	return nil
+}
+
+// Delete stops managing all IP rules with the provided metadata and ensures they are all deleted
+func (rm *Controller) DeleteWithMetadata(metadata string) error {
+	if metadata == "" {
+		return nil
+	}
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	var reconcileNeeded bool
+	for i, r := range rm.rules {
+		if r.metadata == metadata {
+			rm.rules[i].delete = true // marks all rules matching that metadata as ready for deletion
+			reconcileNeeded = true
 		}
 	}
 	if reconcileNeeded {
@@ -164,7 +200,7 @@ func (rm *Controller) reconcile() error {
 	}
 
 	rm.rules = rulesToKeep
-	return utilerrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func areNetlinkRulesEqual(r1, r2 *netlink.Rule) bool {

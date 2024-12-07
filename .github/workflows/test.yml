@@ -6,6 +6,7 @@ on:
     branches: [ master ]
   schedule:
     - cron: '0 */12 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.21"
-  K8S_VERSION: v1.29.2
+  GO_VERSION: 1.22.0
+  K8S_VERSION: v1.30.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -82,8 +83,8 @@ jobs:
             exit 0
         fi
 
-        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master; then
-            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master ovn-daemonset-f:dev
+        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master; then
+            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master ovn-daemonset-fedora:dev
 
             echo "MASTER_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -119,7 +120,7 @@ jobs:
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-fedora:dev -f Dockerfile.fedora .
         popd
 
     - name: Cache master image
@@ -133,7 +134,7 @@ jobs:
         if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
             rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz
         fi
-        docker save ovn-daemonset-f:dev -o ${CI_IMAGE_MASTER_TAR}
+        docker save ovn-daemonset-fedora:dev -o ${CI_IMAGE_MASTER_TAR}
         mkdir -p ${CI_IMAGE_CACHE}
         cp ${CI_IMAGE_MASTER_TAR} ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
         gzip ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
@@ -208,9 +209,9 @@ jobs:
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
+          docker build -t ovn-daemonset-fedora:pr -f Dockerfile.fedora .
           mkdir _output
-          docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
+          docker save ovn-daemonset-fedora:pr > _output/${CI_IMAGE_PR_TAR}
         popd
 
     - name: Submit code coverage to Coveralls
@@ -319,7 +320,7 @@ jobs:
 
     - name: kind setup
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:dev"
+        export OVN_IMAGE="ovn-daemonset-fedora:dev"
         make -C test install-kind
 
     - name: Export kind logs
@@ -357,7 +358,7 @@ jobs:
 
     - name: ovn upgrade
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test upgrade-ovn
 
     - name: Runner Diagnostics
@@ -385,7 +386,6 @@ jobs:
 
   e2e:
     name: e2e
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
@@ -405,20 +405,22 @@ jobs:
         # num-workers : "<integer value>"
         # num-nodes-per-zone : "<integer value>"
         # forwarding : ["", "disable-forwarding"]
+        # dns-name-resolver : ["", "enable-dns-name-resolver"]
         include:
-          - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-disabled",          "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          - {"target": "control-plane-helm", "ha": "HA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
-          - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "control-plane-helm","ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled", "dns-name-resolver": "enable-dns-name-resolver"}
+          - {"target": "control-plane-helm","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "dns-name-resolver": "enable-dns-name-resolver"}
+          - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
-          - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
+          - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "multi-homing-helm", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "compact-mode",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
@@ -431,20 +433,25 @@ jobs:
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled", "num-workers": "3"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3"}
           - {"target": "control-plane", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
     needs: [ build-pr ]
     env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
+      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
       OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws == 'noSnatGW' }}"
-      KIND_INSTALL_METALLB: "${{ matrix.target == 'control-plane' }}"
+      KIND_INSTALL_METALLB: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' }}"
+      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' }}"
+      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools'}}"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
       OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'compact-mode' }}"
@@ -452,7 +459,8 @@ jobs:
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
-      USE_HELM: "${{ matrix.target == 'control-plane-helm' }}"
+      USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
+      OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
     steps:
 
     - name: Install VRF kernel module
@@ -510,7 +518,7 @@ jobs:
     - name: kind setup
       timeout-minutes: 30
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test install-kind
 
     - name: Runner Diagnostics
@@ -519,12 +527,12 @@ jobs:
     - name: Run Tests
       # e2e tests take ~60 minutes normally, 120 should be more than enough
       # set 3 hours for control-plane tests as these might take a while
-      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
+      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || matrix.target == 'control-plane-helm' && 180 || matrix.target == 'external-gateway' && 180 || 120 }}
       run: |
         # used by e2e diagnostics package
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         
-        if [ "${{ matrix.target }}" == "multi-homing" ]; then
+        if [ "${{ matrix.target }}" == "multi-homing" ] || [ "${{ matrix.target }}" == "multi-homing-helm" ]; then
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
           make -C test control-plane WHAT="Node IP and MAC address migration"
@@ -538,6 +546,12 @@ jobs:
           make -C test control-plane WHAT="Kubevirt Virtual Machines"
         elif [ "${{ matrix.target }}" == "control-plane-helm" ]; then
           make -C test control-plane
+          make -C test conformance
+        elif [ "${{ matrix.target }}" == "network-segmentation" ]; then
+          make -C test control-plane WHAT="Network Segmentation"
+        elif [ "${{ matrix.target }}" == "tools" ]; then
+          make -C go-controller build
+          make -C test tools
         else
           make -C test ${{ matrix.target }}
           if [ "${{ matrix.ipfamily }}" != "ipv6" ]; then
@@ -620,7 +634,7 @@ jobs:
 
     - name: kind IPv4 setup
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test install-kind
 
     - name: Convert IPv4 cluster to Dual Stack
@@ -673,84 +687,3 @@ jobs:
       with:
         name: kind-ovndbs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/ovndbs
-
-  e2e-periodic:
-    name: e2e-periodic
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ["shard-conformance"]
-        ha: ["HA"]
-        gateway-mode: ["local"]
-        ipfamily: ["ipv4", "ipv6", "dualstack"]
-    needs: [ build-pr ]
-    env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}"
-      OVN_HA: "${{ matrix.ha == 'HA' }}"
-      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
-      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
-      OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
-    steps:
-
-      - name: Free up disk space
-        run: |
-          sudo apt-get update
-          sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
-
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: "**/*.sum"
-        id: go
-
-      - name: Set up environment
-        run: |
-          export GOPATH=$(go env GOPATH)
-          echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-          echo "$GOPATH/bin" >> $GITHUB_PATH
-      - name: Disable ufw
-        # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-        # Not needed for KIND deployments, so just disable all the time.
-        run: |
-          sudo ufw disable
-      - uses: actions/download-artifact@v4
-        with:
-          name: test-image-pr
-      - name: Load docker image
-        run: |
-          docker load --input ${CI_IMAGE_PR_TAR} && rm -rf ${CI_IMAGE_PR_TAR}
-      - name: kind setup
-        run: |
-          export OVN_IMAGE="ovn-daemonset-f:pr"
-          make -C test install-kind
-
-      - name: Runner Diagnostics
-        uses: ./.github/actions/diagnostics
-
-      - name: Run Tests
-        run: |
-          make -C test ${{ matrix.target }}
-
-      - name: Runner Diagnostics
-        uses: ./.github/actions/diagnostics
-
-      - name: Export logs
-        if: always()
-        run: |
-          mkdir -p /tmp/kind/logs
-          kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
-          path: /tmp/kind/logs
-

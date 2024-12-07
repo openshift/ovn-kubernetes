@@ -5,13 +5,15 @@ package util
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
 	"strings"
 	"time"
 
-	"github.com/j-keck/arping"
+	"github.com/mdlayher/arp"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -26,11 +28,14 @@ type NetLinkOps interface {
 	LinkByName(ifaceName string) (netlink.Link, error)
 	LinkByIndex(index int) (netlink.Link, error)
 	LinkSetDown(link netlink.Link) error
+	LinkAdd(link netlink.Link) error
 	LinkDelete(link netlink.Link) error
 	LinkSetName(link netlink.Link, newName string) error
 	LinkSetUp(link netlink.Link) error
 	LinkSetNsFd(link netlink.Link, fd int) error
 	LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error
+	LinkSetMaster(link netlink.Link, master netlink.Link) error
+	LinkSetNoMaster(link netlink.Link) error
 	LinkSetMTU(link netlink.Link, mtu int) error
 	LinkSetTxQLen(link netlink.Link, qlen int) error
 	IsLinkNotFoundError(err error) bool
@@ -47,6 +52,7 @@ type NetLinkOps interface {
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
+	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
 }
 
 type defaultNetLinkOps struct {
@@ -85,6 +91,10 @@ func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
 	return netlink.LinkSetDown(link)
 }
 
+func (defaultNetLinkOps) LinkAdd(link netlink.Link) error {
+	return netlink.LinkAdd(link)
+}
+
 func (defaultNetLinkOps) LinkDelete(link netlink.Link) error {
 	return netlink.LinkDel(link)
 }
@@ -103,6 +113,14 @@ func (defaultNetLinkOps) LinkSetNsFd(link netlink.Link, fd int) error {
 
 func (defaultNetLinkOps) LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error {
 	return netlink.LinkSetHardwareAddr(link, hwaddr)
+}
+
+func (defaultNetLinkOps) LinkSetMaster(link netlink.Link, master netlink.Link) error {
+	return netlink.LinkSetMaster(link, master)
+}
+
+func (defaultNetLinkOps) LinkSetNoMaster(link netlink.Link) error {
+	return netlink.LinkSetNoMaster(link)
 }
 
 func (defaultNetLinkOps) LinkSetMTU(link netlink.Link, mtu int) error {
@@ -177,6 +195,15 @@ func getFamily(ip net.IP) int {
 	}
 }
 
+// LinkByName returns the netlink device
+func LinkByName(interfaceName string) (netlink.Link, error) {
+	link, err := netLinkOps.LinkByName(interfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %w", interfaceName, err)
+	}
+	return link, nil
+}
+
 // LinkSetUp returns the netlink device with its state marked up
 func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	link, err := netLinkOps.LinkByName(interfaceName)
@@ -237,6 +264,21 @@ func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 	return false, nil
 }
 
+// LinkAddrGetIPNet returns IPNet given the IP of an address present on given link
+func LinkAddrGetIPNet(link netlink.Link, ip net.IP) (*net.IPNet, error) {
+	addrs, err := netLinkOps.AddrList(link, getFamily(ip))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses for the link %s: %v",
+			link.Attrs().Name, err)
+	}
+	for _, addr := range addrs {
+		if addr.IPNet.IP.Equal(ip) {
+			return addr.IPNet, nil
+		}
+	}
+	return nil, nil
+}
+
 // LinkAddrAdd adds a new address. If both preferredLifetime & validLifetime,
 // are zero, then they are not applied, but if either parameters are not zero, both are applied.
 func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags, preferredLifetime, validLifetime int) error {
@@ -244,6 +286,7 @@ func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags, preferredLifetime
 	if err != nil {
 		return fmt.Errorf("failed to add address %s on link %s: %v", address.String(), link.Attrs().Name, err)
 	}
+
 	return nil
 }
 
@@ -408,12 +451,24 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 	return nil
 }
 
-func SetARPTimeout() {
-	arping.SetTimeout(50 * time.Millisecond) // hard-coded for now
-}
-
 func GetMACAddressFromARP(neighIP net.IP) (net.HardwareAddr, error) {
-	hwAddr, _, err := arping.Ping(neighIP)
+	selectedIface, err := findUsableInterfaceForNetwork(neighIP)
+	if err != nil {
+		return nil, err
+	}
+	cli, err := arp.Dial(selectedIface)
+	if err != nil {
+		return nil, err
+	}
+	defer cli.Close()
+	if err := cli.SetDeadline(time.Now().Add(50 * time.Millisecond)); err != nil { // hard-coded for now
+		return nil, err
+	}
+	neighAddr, err := netip.ParseAddr(neighIP.String())
+	if err != nil {
+		return nil, err
+	}
+	hwAddr, err := cli.Resolve(neighAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -675,4 +730,53 @@ func GetIPFamily(v6 bool) int {
 		return netlink.FAMILY_V6
 	}
 	return netlink.FAMILY_V4
+}
+
+func (defaultNetLinkOps) LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error {
+	return netlink.LinkSetVfHardwareAddr(pfLink, vfIndex, hwaddr)
+}
+
+func findUsableInterfaceForNetwork(ipAddr net.IP) (*net.Interface, error) {
+	ifaces, err := net.Interfaces()
+
+	if err != nil {
+		return nil, err
+	}
+
+	isDown := func(iface net.Interface) bool {
+		return iface.Flags&1 == 0
+	}
+
+	for _, iface := range ifaces {
+		if isDown(iface) {
+			continue
+		}
+		found, err := ipAddrExistsAtInterface(ipAddr, iface)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			continue
+		}
+
+		return &iface, nil
+	}
+	return nil, errors.New("no usable interface found")
+}
+
+func ipAddrExistsAtInterface(ipAddr net.IP, iface net.Interface) (bool, error) {
+	addrs, err := iface.Addrs()
+
+	if err != nil {
+		return false, err
+	}
+
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			if ipnet.Contains(ipAddr) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

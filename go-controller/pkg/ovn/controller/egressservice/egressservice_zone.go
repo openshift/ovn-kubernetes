@@ -19,11 +19,10 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -45,13 +44,16 @@ const (
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName string) error
+	controllerName, clusterRouter string) error
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName string, nodeLister corelisters.NodeLister) error
-type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(libovsdbclient.Client, string) error
-type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, nodeName string) error
+	controllerName, clusterRouter string, nodeLister corelisters.NodeLister) error
+type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error
+type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error
 
 type Controller struct {
+	// network information
+	util.NetInfo
+
 	controllerName string
 	client         kubernetes.Interface
 	nbClient       libovsdbclient.Client
@@ -112,6 +114,7 @@ type nodeState struct {
 }
 
 func NewController(
+	netInfo util.NetInfo,
 	controllerName string,
 	client kubernetes.Interface,
 	nbClient libovsdbclient.Client,
@@ -129,6 +132,7 @@ func NewController(
 	klog.Info("Setting up event handlers for Egress Services")
 
 	c := &Controller{
+		NetInfo:                                  netInfo,
 		controllerName:                           controllerName,
 		client:                                   client,
 		nbClient:                                 nbClient,
@@ -172,11 +176,13 @@ func NewController(
 
 	c.endpointSliceLister = endpointSliceInformer.Lister()
 	c.endpointSlicesSynced = endpointSliceInformer.Informer().HasSynced
-	_, err = endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onEndpointSliceAdd,
-		UpdateFunc: c.onEndpointSliceUpdate,
-		DeleteFunc: c.onEndpointSliceDelete,
-	}))
+	_, err = endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
+		// TODO: Stop ignoring mirrored EndpointSlices and add support for user-defined networks
+		util.GetDefaultEndpointSlicesEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onEndpointSliceAdd,
+			UpdateFunc: c.onEndpointSliceUpdate,
+			DeleteFunc: c.onEndpointSliceDelete,
+		})))
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +232,7 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 		klog.Errorf("Failed to repair Egress Services entries: %v", err)
 	}
 
-	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName)
+	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.GetNetworkScopedClusterRouterName())
 	if err != nil {
 		klog.Errorf("Failed to init Egress Services cluster policies: %v", err)
 	}
@@ -456,10 +462,10 @@ func (c *Controller) repair() error {
 
 	errorList := []error{}
 	ops := []libovsdb.Operation{}
-	ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrpPredicate)
+	ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, c.GetNetworkScopedClusterRouterName(), lrpPredicate)
 	if err != nil {
 		errorList = append(errorList,
-			fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", ovntypes.OVNClusterRouter, err))
+			fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", c.GetNetworkScopedClusterRouterName(), err))
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
@@ -527,10 +533,10 @@ func (c *Controller) repair() error {
 			svcKeyToRemoteConfiguredV6Endpoints[svcKey] = append(svcKeyToLocalConfiguredV6Endpoints[svcKey], logicalIP)
 			return false
 		}
-		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrpICPredicate)
+		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, c.GetNetworkScopedClusterRouterName(), lrpICPredicate)
 		if err != nil {
 			errorList = append(errorList,
-				fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", ovntypes.OVNClusterRouter, err))
+				fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", c.GetNetworkScopedClusterRouterName(), err))
 		}
 	}
 
@@ -563,7 +569,7 @@ func (c *Controller) repair() error {
 		errorList = append(errorList, fmt.Errorf("failed to set pod IPs in the egressservice address set, err: %v", err))
 	}
 
-	return errors.NewAggregate(errorList)
+	return utilerrors.Join(errorList...)
 }
 
 // onEgressServiceAdd queues the EgressService for processing.
@@ -881,7 +887,7 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 	}
 
 	deleteOps := []libovsdb.Operation{}
-	deleteOps, err := libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, deleteOps, ovntypes.OVNClusterRouter, p)
+	deleteOps, err := libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, deleteOps, c.GetNetworkScopedClusterRouterName(), p)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -195,18 +194,18 @@ func (nb *northBoundClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.Gate
 	if config.Gateway.DisableSNATMultipleGWs {
 		// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
 		// a pod cannot be used for multiple-external-gateways and egressIPs at the same time)
-		if err := nb.deletePodSNAT(pod.Spec.NodeName, []*net.IPNet{}, podIPs); err != nil {
+		if err := nb.deletePodSNAT(pod.Spec.NodeName, util.GetGatewayRouterFromNode(pod.Spec.NodeName), []*net.IPNet{}, podIPs); err != nil {
 			klog.Error(err.Error())
 		}
 	}
 	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-	return true, nb.addGWRoutesForPod(egress.Elems(), podIPs, podNsName, pod.Spec.NodeName)
+	return true, nb.addGWRoutesForPod(egress.Elems(), podIPs, podNsName, pod.Spec.NodeName, util.GetGatewayRouterFromNode(pod.Spec.NodeName))
 }
 
 // deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be deleted
 // used when disableSNATMultipleGWs=true
-func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*net.IPNet) error {
+func (nb *northBoundClient) deletePodSNAT(nodeName, gwRouterName string, extIPs, podIPNets []*net.IPNet) error {
 	node, err := nb.nodeLister.Get(nodeName)
 	if err != nil {
 		return err
@@ -220,7 +219,7 @@ func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*
 		return err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.GWRouterPrefix + nodeName,
+		Name: gwRouterName,
 	}
 	err = libovsdbops.DeleteNATs(nb.nbClient, &logicalRouter, nats...)
 	if err != nil {
@@ -230,7 +229,7 @@ func (nb *northBoundClient) deletePodSNAT(nodeName string, extIPs, podIPNets []*
 }
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
-func (nb *northBoundClient) addGWRoutesForPod(gateways []*gateway_info.GatewayInfo, podIfAddrs []*net.IPNet, podNsName ktypes.NamespacedName, node string) error {
+func (nb *northBoundClient) addGWRoutesForPod(gateways []*gateway_info.GatewayInfo, podIfAddrs []*net.IPNet, podNsName ktypes.NamespacedName, node, gr string) error {
 	pod, err := nb.podLister.Pods(podNsName.Namespace).Get(podNsName.Name)
 	if err != nil {
 		return err
@@ -243,8 +242,6 @@ func (nb *northBoundClient) addGWRoutesForPod(gateways []*gateway_info.GatewayIn
 		klog.V(4).Infof("APB will not add exgw routes for pod %s not in the local zone %s", podNsName, nb.zone)
 		return nil
 	}
-
-	gr := util.GetGatewayRouterFromNode(node)
 
 	routesAdded := 0
 	portPrefix, err := nb.extSwitchPrefix(node)
@@ -417,9 +414,7 @@ func (nb *northBoundClient) createOrUpdateBFDStaticRoute(bfdEnabled bool, gw str
 	return nil
 }
 
-func (nb *northBoundClient) updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP, gwIP, nodeName string, bfdEnabled bool, namespacedName ktypes.NamespacedName) error {
-	gr := util.GetGatewayRouterFromNode(nodeName)
-
+func (nb *northBoundClient) updateExternalGWInfoCacheForPodIPWithGatewayIP(podIP, gwIP, nodeName, gr string, bfdEnabled bool, namespacedName ktypes.NamespacedName) error {
 	return nb.externalGatewayRouteInfo.CreateOrLoad(namespacedName, func(routeInfo *RouteInfo) error {
 		// if route was already programmed, skip it
 		if foundGR, ok := routeInfo.PodExternalRoutes[podIP][gwIP]; ok && foundGR == gr {
@@ -611,11 +606,11 @@ func (nb *northBoundClient) delHybridRoutePolicyForPod(podIP net.IP, node string
 func (nb *northBoundClient) extSwitchPrefix(nodeName string) (string, error) {
 	node, err := nb.nodeLister.Get(nodeName)
 	if err != nil {
-		return "", errors.Wrapf(err, "extSwitchPrefix: failed to find node %s", nodeName)
+		return "", fmt.Errorf("extSwitchPrefix failed to find node %s: %w", nodeName, err)
 	}
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
-		return "", errors.Wrapf(err, "extSwitchPrefix: failed to parse l3 gateway annotation for node %s", nodeName)
+		return "", fmt.Errorf("extSwitchPrefix failed to parse l3 gateway annotation for node %s: %w", nodeName, err)
 	}
 
 	if l3GatewayConfig.EgressGWInterfaceID != "" {

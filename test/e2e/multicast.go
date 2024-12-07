@@ -8,6 +8,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -23,6 +24,7 @@ const (
 	mcastSource  = "pod-client"
 	mcastServer1 = "pod-server1"
 	mcastServer2 = "pod-server2"
+	mcastServer3 = "pod-server3"
 )
 
 var _ = ginkgo.Describe("Multicast", func() {
@@ -119,6 +121,18 @@ var _ = ginkgo.Describe("Multicast", func() {
 		mcastServerPod2.Spec.NodeName = serverNodeInfo.name
 		e2epod.NewPodClient(fr).CreateSync(context.TODO(), mcastServerPod2)
 
+		// Start a multicast listener on the same groups and verify it received the traffic (iperf server is the multicast listener)
+		// join multicast group (-B 224.3.3.3), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
+		ginkgo.By("creating first multicast listener pod in node " + clientNodeInfo.name)
+		iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroup)
+		if IsIPv6Cluster(cs) {
+			iperf = iperf + " -V"
+		}
+		cmd = []string{"/bin/sh", "-c", iperf}
+		mcastServerPod3 := newAgnhostPod(fr.Namespace.Name, mcastServer3, cmd...)
+		mcastServerPod3.Spec.NodeName = clientNodeInfo.name
+		e2epod.NewPodClient(fr).CreateSync(context.TODO(), mcastServerPod3)
+
 		ginkgo.By("checking if pod server1 received multicast traffic")
 		gomega.Eventually(func() (string, error) {
 			return e2epod.GetPodLogs(context.TODO(), cs, ns, mcastServer1, mcastServer1)
@@ -130,6 +144,13 @@ var _ = ginkgo.Describe("Multicast", func() {
 			return e2epod.GetPodLogs(context.TODO(), cs, ns, mcastServer2, mcastServer2)
 		},
 			30*time.Second, 1*time.Second).ShouldNot(gomega.ContainSubstring("connected"))
+
+		ginkgo.By("checking if pod server3 received multicast traffic")
+		gomega.Eventually(func() (string, error) {
+			return e2epod.GetPodLogs(context.TODO(), cs, ns, mcastServer3, mcastServer3)
+		},
+			30*time.Second, 1*time.Second).Should(gomega.ContainSubstring("connected"))
+
 	})
 
 })
@@ -138,7 +159,6 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	const (
 		svcname              string = "igmp-test"
 		ovnNs                string = "ovn-kubernetes"
-		port                 string = "8080"
 		ovnWorkerNode        string = "ovn-worker"
 		ovnWorkerNode2       string = "ovn-worker2"
 		mcastGroup           string = "224.1.1.1"
@@ -211,5 +231,4 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 			framework.Failf("failed to retrieve multicast IGMP query: igmp messages on the tcpdump logfile not found")
 		}
 	})
-
 })

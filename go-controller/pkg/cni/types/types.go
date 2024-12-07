@@ -9,7 +9,14 @@ import (
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
-
+	// Role is valid only on L3 / L2 topologies. Not on localnet.
+	// It allows for using this network to be either secondary or
+	// primary user defined network for the pod.
+	// primary user defined networks are used in order to achieve
+	// native network isolation.
+	// In order to ensure backwards compatibility, if empty the
+	// network is considered secondary
+	Role string `json:"role,omitempty"`
 	// specifies the OVN topology for this network configuration
 	// when not specified, by default it is Layer3AttachDefTopoType
 	Topology string `json:"topology,omitempty"`
@@ -25,6 +32,16 @@ type NetConf struct {
 	// valid for layer2 and localnet network topology
 	// eg. "10.1.130.0/27, 10.1.130.122/32"
 	ExcludeSubnets string `json:"excludeSubnets,omitempty"`
+	// join subnet cidr is required for supporting
+	// services and ingress for user defined networks
+	// in case of dualstack cluster, please do a comma-seperated list
+	// expected format:
+	// 1) V4 single stack: "v4CIDR" (eg: "100.65.0.0/16")
+	// 2) V6 single stack: "v6CIDR" (eg: "fd99::/64")
+	// 3) dualstack: "v4CIDR,v6CIDR" (eg: "100.65.0.0/16,fd99::/64")
+	// valid for UDN layer3/layer2 network topology
+	// default value: 100.65.0.0/16,fd99::/64 if not provided
+	JoinSubnet string `json:"joinSubnet,omitempty"`
 	// VLANID, valid in localnet topology network only
 	VLANID int `json:"vlanID,omitempty"`
 	// AllowPersistentIPs is valid on both localnet / layer topologies.

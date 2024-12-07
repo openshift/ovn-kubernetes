@@ -14,6 +14,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -21,9 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
-	utilnet "k8s.io/utils/net"
-	"k8s.io/utils/pointer"
-
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -33,6 +31,8 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
+	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/pointer"
 )
 
 const (
@@ -518,7 +518,7 @@ var _ = ginkgo.Describe("Services", func() {
 		const (
 			v6ExternAddr = "2001:db8:3333:4444:CCCC:DDDD:EEEE:FFFF"
 			v4ExternAddr = "8.8.8.8"
-			hostMasqIPv4 = "169.254.169.2"
+			hostMasqIPv4 = "169.254.0.2"
 			hostMasqIPv6 = "fd69::2"
 		)
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, e2eservice.MaxNodesForEndpointsTests)
@@ -1066,7 +1066,7 @@ spec:
 				etpClusterServiceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s",
 				etpClusterServiceName, f.Namespace.Name)
-			
+
 			ginkgo.By("Checking connectivity to the external container from egressIP pod " + egressPod.Name + " and verify that the source IP is the secondary NIC egress IP")
 			framework.Logf("Destination IPs for external container are ip=%v", targetSecondaryNode.nodeIP)
 			err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetSecondaryNode, egressPod.Name,
@@ -1318,7 +1318,7 @@ func getServiceBackendsFromPod(execPod *v1.Pod, serviceIP string, servicePort in
 
 // This test ensures that - when a pod that's a backend for a service curls the
 // service ip; if the traffic was DNAT-ed to the same src pod (hairpin/loopback case) -
-// the srcIP of reply traffic is SNATed to the special masqurade IP 169.254.169.5
+// the srcIP of reply traffic is SNATed to the special masqurade IP 169.254.0.5
 // or "fd69::5"
 var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 	const (
@@ -1326,7 +1326,7 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 		backendName             = "hairpin-backend-pod"
 		endpointHTTPPort        = "80"
 		serviceHTTPPort         = 6666
-		V4LBHairpinMasqueradeIP = "169.254.169.5"
+		V4LBHairpinMasqueradeIP = "169.254.0.5"
 		V6LBHairpinMasqueradeIP = "fd69::5"
 	)
 
@@ -2151,7 +2151,6 @@ spec:
 			framework.Failf("could not get expected srcIP!")
 		}
 	})
-
 })
 
 func getEndpointsForService(c clientset.Interface, namespace, serviceName string) (*v1.Endpoints, error) {

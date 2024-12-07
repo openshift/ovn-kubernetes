@@ -49,7 +49,7 @@ var (
 	// ovn-kubernetes build date
 	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
-	Version = "0.3.0"
+	Version = "1.0.0"
 	// version of the go runtime used to compile ovn-kubernetes
 	GoVersion = runtime.Version()
 	// os and architecture used to build ovn-kubernetes
@@ -405,6 +405,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEgressService             bool `gcfg:"enable-egress-service"`
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
+	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
@@ -1033,6 +1034,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use MultiNetworkPolicy CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetworkPolicy,
 		Value:       OVNKubernetesFeature.EnableMultiNetworkPolicy,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-network-segmentation",
+		Usage:       "Configure to use network segmentation feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkSegmentation,
+		Value:       OVNKubernetesFeature.EnableNetworkSegmentation,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-stateless-netpol",
@@ -1870,7 +1877,7 @@ func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeI
 	if err != nil || utilnet.IsIPv6(v4MasqueradeCIDR.IP) {
 		return fmt.Errorf("invalid gateway v4 masquerade subnet specified, subnet: %s: error: %v", Gateway.V4MasqueradeSubnet, err)
 	}
-	if err = allocateV4MasqueradeIPs(v4MasqueradeIP, masqueradeIPs); err != nil {
+	if err = AllocateV4MasqueradeIPs(v4MasqueradeIP, masqueradeIPs); err != nil {
 		return fmt.Errorf("unable to allocate V4MasqueradeIPs: %s", err)
 	}
 
@@ -1878,7 +1885,7 @@ func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeI
 	if err != nil || !utilnet.IsIPv6(v6MasqueradeCIDR.IP) {
 		return fmt.Errorf("invalid gateway v6 masquerade subnet specified, subnet: %s: error: %v", Gateway.V6MasqueradeSubnet, err)
 	}
-	if err = allocateV6MasqueradeIPs(v6MasqueradeIP, masqueradeIPs); err != nil {
+	if err = AllocateV6MasqueradeIPs(v6MasqueradeIP, masqueradeIPs); err != nil {
 		return fmt.Errorf("unable to allocate V6MasqueradeIPs: %s", err)
 	}
 
@@ -2046,18 +2053,19 @@ func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
 
 // completeClusterManagerConfig completes the ClusterManager config by parsing raw values
 // into their final form.
-func completeClusterManagerConfig() error {
+func completeClusterManagerConfig(allSubnets *configSubnets) error {
 	// Validate v4 and v6 transit switch subnets
-	v4IP, _, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
+	v4IP, v4TransitCIDR, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
 		return fmt.Errorf("invalid transit switch v4 subnet specified, subnet: %s: error: %v", ClusterManager.V4TransitSwitchSubnet, err)
 	}
 
-	v6IP, _, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
+	v6IP, v6TransitCIDR, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
 	if err != nil || !utilnet.IsIPv6(v6IP) {
 		return fmt.Errorf("invalid transit switch v6 subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
 	}
-
+	allSubnets.append(configSubnetTransit, v4TransitCIDR)
+	allSubnets.append(configSubnetTransit, v6TransitCIDR)
 	return nil
 }
 
@@ -2337,7 +2345,7 @@ func completeConfig() error {
 		return err
 	}
 
-	if err := completeClusterManagerConfig(); err != nil {
+	if err := completeClusterManagerConfig(allSubnets); err != nil {
 		return err
 	}
 

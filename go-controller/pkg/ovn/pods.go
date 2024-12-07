@@ -13,8 +13,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -95,22 +97,41 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			expectedLogicalPorts[expectedLogicalPortName] = true
 		}
 
-		// delete the outdated hybrid overlay subnet route if it exists
-		newRoutes := []util.PodRoute{}
-		// HO is IPv4 only
-		ipv4Subnets := util.MatchAllIPNetFamily(false, oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName))
-		for _, route := range annotations.Routes {
-			if !util.IsNodeHybridOverlayIfAddr(route.NextHop, ipv4Subnets) {
-				newRoutes = append(newRoutes, route)
+		// only update annotations for pods belonging to my zone
+		if oc.isPodScheduledinLocalZone(pod) {
+			// delete the outdated hybrid overlay subnet route if it exists
+			newRoutes := []util.PodRoute{}
+			// HO is IPv4 only
+			ipv4Subnets := util.MatchAllIPNetFamily(false, oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName))
+			for _, route := range annotations.Routes {
+				if !util.IsNodeHybridOverlayIfAddr(route.NextHop, ipv4Subnets) {
+					newRoutes = append(newRoutes, route)
+				}
 			}
-		}
-		// checking the length because cannot compare the slices directly and if routes are removed
-		// the length will be different
-		if len(annotations.Routes) != len(newRoutes) {
-			annotations.Routes = newRoutes
-			err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
-			if err != nil {
-				return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+
+			syncPodAnnotations := false
+
+			// checking the length because cannot compare the slices directly and if routes are removed
+			// the length will be different
+			if len(annotations.Routes) != len(newRoutes) {
+				annotations.Routes = newRoutes
+				syncPodAnnotations = true
+			}
+			// the ovn pod annotation role field is mandatory for default pod network, update old pods
+			// it it's missing
+			if util.IsNetworkSegmentationSupportEnabled() {
+				if annotations.Role == "" {
+					// Hardcode directly to primary since we don't support primary role networks at namespaces with
+					// pods in it, do not make sense to call GetNetworkRole here.
+					annotations.Role = types.NetworkRolePrimary
+					syncPodAnnotations = true
+				}
+			}
+			if syncPodAnnotations {
+				err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
+				if err != nil {
+					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+				}
 			}
 		}
 	}
@@ -227,6 +248,18 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		return err
 	}
 
+	// If default network is not primary, update secondaryPods port group to isolate default network
+	networkRole, err := oc.GetNetworkRole(pod)
+	if err != nil {
+		return err
+	}
+	if networkRole != ovntypes.NetworkRolePrimary && util.IsNetworkSegmentationSupportEnabled() {
+		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
+		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
+			return err
+		}
+	}
+
 	// Ensure the namespace/nsInfo exists
 	routingExternalGWs, routingPodGWs, addOps, err := oc.addLocalPodToNamespace(pod.Namespace, podAnnotation.IPs, lsp.UUID)
 	if err != nil {
@@ -263,7 +296,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		} else if ops, err = addOrUpdatePodSNATOps(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs, ops); err != nil {
+		} else if ops, err = addOrUpdatePodSNATOps(oc.nbClient, oc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs, ops); err != nil {
 			return err
 		}
 	}
@@ -315,7 +348,7 @@ func (oc *DefaultNetworkController) allocateSyncPodsIPs(pod *kapi.Pod) (string, 
 	if err != nil {
 		return "", nil, nil
 	}
-	expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, ovntypes.DefaultNetworkName, pod.Spec.NodeName)
+	expectedLogicalPortName, err := oc.allocatePodIPsOnSwitch(pod, annotations, oc.GetNetworkName(), oc.GetNetworkScopedSwitchName(pod.Spec.NodeName))
 	if err != nil {
 		return "", nil, err
 	}
@@ -326,7 +359,7 @@ func (oc *DefaultNetworkController) allocateSyncMigratablePodIPsOnZone(vms map[k
 	allocatePodIPsOnSwitchWrapFn := func(liveMigratablePod *kapi.Pod, liveMigratablePodAnnotation *util.PodAnnotation, switchName, nadName string) (string, error) {
 		return oc.allocatePodIPsOnSwitch(liveMigratablePod, liveMigratablePodAnnotation, switchName, nadName)
 	}
-	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, ovntypes.DefaultNetworkName, pod, allocatePodIPsOnSwitchWrapFn)
+	vmKey, expectedLogicalPortName, podAnnotation, err := kubevirt.AllocateSyncMigratablePodIPsOnZone(oc.watchFactory, oc.lsManager, oc.GetNetworkName(), pod, allocatePodIPsOnSwitchWrapFn)
 	if err != nil {
 		return nil, "", nil, err
 	}

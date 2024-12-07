@@ -21,23 +21,12 @@ import (
 // bridgedGatewayNodeSetup enables forwarding on bridge interface, sets up the physical network name mappings for the bridge,
 // and returns an ifaceID created from the bridge name and the node name
 func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (string, error) {
-	// enable forwarding on bridge interface always
-	createForwardingRule := func(family string) error {
-		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, bridgeName))
-		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, bridgeName) {
-			return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-				bridgeName, stdout, stderr, err)
-		}
-		return nil
-	}
+	// IPv6 forwarding is enabled globally
 	if config.IPv4Mode {
-		if err := createForwardingRule("ipv4"); err != nil {
-			return "", fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
-		}
-	}
-	if config.IPv6Mode {
-		if err := createForwardingRule("ipv6"); err != nil {
-			return "", fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
+		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", bridgeName))
+		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", bridgeName) {
+			return "", fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				bridgeName, stdout, stderr, err)
 		}
 	}
 
@@ -314,7 +303,10 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 		}
 		subnetCopy := *subnet
 		gwIPCopy := gwIP[0]
-		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, Src: srcIP, MTU: mtu})
+		err = routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, Src: srcIP, MTU: mtu})
+		if err != nil {
+			return fmt.Errorf("unable to add gateway IP route for subnet: %v, %v", subnet, err)
+		}
 	}
 	return nil
 }
@@ -420,7 +412,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	}
 
 	waiter.AddWait(readyGwFunc, initGwFunc)
-	nc.gateway = gw
+	nc.Gateway = gw
 
 	return nc.validateVTEPInterfaceMTU()
 }
@@ -468,12 +460,24 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return err
 	}
 
+	// Delete stale masquerade resources if there are any. This is to make sure that there
+	// are no Linux resources with IP from old masquerade subnet when masquerade subnet
+	// gets changed as part of day2 operation.
+	if err := deleteStaleMasqueradeResources(gwIntf, nc.name, nc.watchFactory); err != nil {
+		return fmt.Errorf("failed to remove stale masquerade resources: %w", err)
+	}
+
 	if err := setNodeMasqueradeIPOnExtBridge(gwIntf); err != nil {
 		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
 	}
 
 	if err := addMasqueradeRoute(nc.routeManager, gwIntf, nc.name, ifAddrs, nc.watchFactory); err != nil {
 		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+	}
+
+	// Masquerade config mostly done on node, update annotation
+	if err := updateMasqueradeAnnotation(nc.name, nc.Kube); err != nil {
+		return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nc.name, err)
 	}
 
 	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops)
@@ -507,7 +511,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 
 	err = gw.Init(nc.stopChan, nc.wg)
-	nc.gateway = gw
+	nc.Gateway = gw
 	return err
 }
 
@@ -541,7 +545,7 @@ func CleanupClusterNode(name string) error {
 }
 
 func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) error {
-	if nc.gateway.GetGatewayBridgeIface() != link.Attrs().Name {
+	if nc.Gateway.GetGatewayBridgeIface() != link.Attrs().Name {
 		return nil
 	}
 
@@ -558,8 +562,8 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 		return nil
 	}
 	// MAC must have changed, update node
-	nc.gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
-	if err := nc.gateway.Reconcile(); err != nil {
+	nc.Gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
+	if err := nc.Gateway.Reconcile(); err != nil {
 		return fmt.Errorf("failed to reconcile gateway for MAC address update: %w", err)
 	}
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
