@@ -26,6 +26,7 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -121,10 +122,10 @@ func checkMgmtPortTestIptables(configs []managementPortTestConfig, mgmtPortName 
 			"mangle": {},
 		}
 		if cfg.protocol == iptables.ProtocolIPv4 {
-			err = fakeIpv4.MatchState(expectedTables)
+			err = fakeIpv4.MatchState(expectedTables, nil)
 			Expect(err).NotTo(HaveOccurred())
 		} else {
-			err = fakeIpv6.MatchState(expectedTables)
+			err = fakeIpv6.MatchState(expectedTables, nil)
 			Expect(err).NotTo(HaveOccurred())
 		}
 	}
@@ -221,15 +222,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		"ovs-vsctl --timeout=15 set interface " + mgtPort + " " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
 	})
 	for _, cfg := range configs {
+		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-			})
-		} else {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv6.conf.ovn-k8s-mp0.forwarding=1",
-				Output: "net.ipv6.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
 	}
@@ -262,11 +259,17 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 		Items: []v1.Node{existingNode},
 	})
+	fakeNodeClient := &util.OVNNodeClientset{
+		KubeClient: fakeClient,
+	}
 
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
-
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
+	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}
+	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
+	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(watchFactory.Start()).To(Succeed())
 	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
 	rm := routemanager.NewController()
@@ -289,7 +292,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		netdevName, rep := "", ""
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
+		_, err = mgmtPorts[0].Create(rm, &existingNode, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		return nil
@@ -306,7 +309,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
@@ -323,6 +326,11 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	)
 
 	// OVS cmd setup
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int datapath_type",
+		Output: "",
+	})
+
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort,
 		fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s "+
@@ -355,11 +363,18 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 		Items: []v1.Node{existingNode},
 	})
+	fakeNodeClient := &util.OVNNodeClientset{
+		KubeClient: fakeClient,
+	}
 
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}, existingNode.Name)
+	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}
+	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
+	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(watchFactory.Start()).To(Succeed())
 	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
 	rm := routemanager.NewController()
@@ -381,7 +396,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		netdevName, rep := "pf0vf0", "pf0vf0"
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, nodeAnnotator, waiter)
+		_, err = mgmtPorts[0].Create(rm, &existingNode, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		// make sure interface was renamed and mtu was set
 		l, err := netlink.LinkByName(mgtPort)
@@ -400,7 +415,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddresses(updatedNode, types.DefaultNetworkName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
@@ -422,16 +437,11 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	})
 
 	for _, cfg := range configs {
+		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-			})
-		}
-		if cfg.family == netlink.FAMILY_V6 {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv6.conf.ovn-k8s-mp0.forwarding=1",
-				Output: "net.ipv6.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
 	}
@@ -471,7 +481,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		netdevName, rep := "pf0vf0", ""
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(rm, nil, nil)
+		_, err = mgmtPorts[0].Create(rm, nil, nil, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		// check mgmt port MAC, mtu and link state

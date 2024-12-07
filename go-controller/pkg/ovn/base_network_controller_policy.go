@@ -17,11 +17,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -250,13 +250,13 @@ func getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP, controller string) *libovsdb
 // There is no delete function for this ACL type, because the ACL is applied on a node switch.
 // When the node is deleted, switch will be deleted by the node sync, and the dependent ACLs will be
 // garbage-collected.
-func (bnc *BaseNetworkController) addAllowACLFromNode(nodeName string, mgmtPortIP net.IP) error {
+func (bnc *BaseNetworkController) addAllowACLFromNode(switchName string, mgmtPortIP net.IP) error {
 	ipFamily := "ip4"
 	if utilnet.IsIPv6(mgmtPortIP) {
 		ipFamily = "ip6"
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
-	dbIDs := getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP.String(), bnc.controllerName)
+	dbIDs := getAllowFromNodeACLDbIDs(switchName, mgmtPortIP.String(), bnc.controllerName)
 	nodeACL := libovsdbutil.BuildACL(dbIDs, types.DefaultAllowPriority, match,
 		nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
 
@@ -265,9 +265,9 @@ func (bnc *BaseNetworkController) addAllowACLFromNode(nodeName string, mgmtPortI
 		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
 	}
 
-	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, nodeName, nodeACL)
+	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, switchName, nodeACL)
 	if err != nil {
-		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, nodeName, err)
+		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, switchName, err)
 	}
 
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
@@ -747,7 +747,7 @@ func (bnc *BaseNetworkController) handleLocalPodSelectorAddFunc(np *networkPolic
 	}
 
 	if len(errs) > 0 {
-		return kerrorsutil.NewAggregate(errs)
+		return utilerrors.Join(errs...)
 	}
 	return nil
 }
@@ -1335,7 +1335,7 @@ func (bnc *BaseNetworkController) handlePeerNamespaceSelectorAdd(np *networkPoli
 			errors = append(errors, err)
 		}
 	}
-	return kerrorsutil.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 
 }
 

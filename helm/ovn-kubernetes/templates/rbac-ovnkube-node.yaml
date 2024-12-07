@@ -139,6 +139,10 @@ rules:
       resources:
           - endpointslices
       verbs: [ "get", "list", "watch" ]
+    - apiGroups: ["k8s.cni.cncf.io"]
+      resources:
+          - network-attachment-definitions
+      verbs: ["list", "get", "watch"]
     {{- if eq (hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false) true }}
     - apiGroups: ["networking.k8s.io"]
       resources:
@@ -146,13 +150,18 @@ rules:
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
-          - network-attachment-definitions
+          - ipamclaims
           - multi-networkpolicies
       verbs: ["list", "get", "watch"]
+    - apiGroups: [ "k8s.cni.cncf.io" ]
+      resources:
+          - ipamclaims/status
+      verbs: [ "patch", "update" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
           - egressfirewalls/status
           - adminpolicybasedexternalroutes/status
+          - egressqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:
@@ -195,6 +204,12 @@ rules:
           - pods/status # In IC ovnkube-controller, and ovnkube-node in DPU mode updates pod annotations for local pods
           - nodes/status
       verbs: [ "patch", "update" ]
+    {{- if eq (hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false) true }}
+    - apiGroups: ["network.openshift.io"]
+      resources:
+          - dnsnameresolvers
+      verbs: [ "get", "list", "watch" ]
+    {{- end }}
 
 # Without IC endpoints are read by ovnkube-node on startup
 # With IC endpoints are created by ovnkube-zone-controller/sb-ovsdb startup script in multinode-zone for IC

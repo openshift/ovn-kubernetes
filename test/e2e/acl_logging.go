@@ -8,14 +8,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/client-go/util/retry"
-	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
 const (
@@ -120,12 +120,21 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		It("the ACL logs are updated accordingly", func() {
 			clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
 			composedPolicyNameRegex := fmt.Sprintf("NP:%s:%s", nsName, egressDefaultDenySuffix)
-			Eventually(func() (bool, error) {
-				return assertACLLogs(
+			clientPod := pods[pokerPodIndex]
+			pokedPod := pods[pokedPodIndex]
+			Eventually(func() (success bool, err error) {
+				success, err = assertACLLogs(
 					clientPodScheduledPodName,
 					composedPolicyNameRegex,
 					denyACLVerdict,
 					updatedAllowACLLogSeverity)
+				if err == nil && !success {
+					By("poking some more...")
+					Expect(
+						pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)).To(HaveOccurred(),
+						"traffic should be blocked since we only use a deny all traffic policy")
+				}
+				return
 			}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 		})
 	})

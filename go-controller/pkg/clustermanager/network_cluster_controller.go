@@ -12,10 +12,12 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	cache "k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	idallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -61,10 +63,13 @@ type networkClusterController struct {
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
+
 	util.NetInfo
 }
 
-func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
+func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
@@ -81,12 +86,13 @@ func newNetworkClusterController(networkIDAllocator idallocator.NamedAllocator, 
 		stopChan:           make(chan struct{}),
 		wg:                 wg,
 		networkIDAllocator: networkIDAllocator,
+		recorder:           recorder,
 	}
 
 	return ncc
 }
 
-func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory) *networkClusterController {
+func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
 	// use an allocator that can only allocate a single network ID for the
 	// defaiult network
 	networkIDAllocator, err := idallocator.NewIDAllocator(types.DefaultNetworkName, 1)
@@ -100,7 +106,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 	}
 
 	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf)
+	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -166,6 +172,7 @@ func (ncc *networkClusterController) init() error {
 		var (
 			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
 			ipamClaimsReconciler   persistentips.PersistentAllocations
+			nadLister              nadlister.NetworkAttachmentDefinitionLister
 		)
 
 		if ncc.allowPersistentIPs() {
@@ -184,8 +191,11 @@ func (ncc *networkClusterController) init() error {
 			ncc.kube,
 			ipamClaimsReconciler,
 		)
-
-		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator, ipamClaimsReconciler)
+		if util.IsNetworkSegmentationSupportEnabled() {
+			nadLister = ncc.watchFactory.NADInformer().Lister()
+		}
+		ncc.podAllocator = pod.NewPodAllocator(ncc.NetInfo, podAllocationAnnotator, ipAllocator,
+			ipamClaimsReconciler, nadLister, ncc.recorder)
 		if err := ncc.podAllocator.Init(); err != nil {
 			return fmt.Errorf("failed to initialize pod ip allocator: %w", err)
 		}
@@ -266,13 +276,13 @@ func (ncc *networkClusterController) newRetryFramework(objectType reflect.Type, 
 }
 
 // Cleanup the subnet annotations from the node for the secondary networks
-func (ncc *networkClusterController) Cleanup(netName string) error {
+func (ncc *networkClusterController) Cleanup() error {
 	if !ncc.IsSecondary() {
 		return fmt.Errorf("default network can't be cleaned up")
 	}
 
 	if ncc.hasNodeAllocation() {
-		err := ncc.nodeAllocator.Cleanup(netName)
+		err := ncc.nodeAllocator.Cleanup()
 		if err != nil {
 			return err
 		}
@@ -307,8 +317,7 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		}
 		err := h.ncc.podAllocator.Reconcile(nil, pod)
 		if err != nil {
-			klog.Infof("Pod add failed for %s/%s, will try again later: %v",
-				pod.Namespace, pod.Name, err)
+			return err
 		}
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -347,8 +356,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		}
 		err := h.ncc.podAllocator.Reconcile(old, new)
 		if err != nil {
-			klog.Infof("Pod update failed for %s/%s, will try again later: %v",
-				new.Namespace, new.Name, err)
+			return err
 		}
 	case factory.NodeType:
 		node, ok := newObj.(*corev1.Node)
@@ -380,8 +388,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		err := h.ncc.podAllocator.Reconcile(pod, nil)
 		if err != nil {
-			klog.Infof("Pod delete failed for %s/%s, will try again later: %v",
-				pod.Namespace, pod.Name, err)
+			return err
 		}
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -538,17 +545,37 @@ func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
 
 	subnets := netInfo.Subnets()
 	ipNets := make([]*net.IPNet, 0, len(subnets))
+	excludeSubnets := netInfo.ExcludeSubnets()
 	for _, subnet := range subnets {
 		ipNets = append(ipNets, subnet.CIDR)
+		if isLayer2UserDefinedPrimaryNetwork(netInfo) {
+			excludeSubnets = append(
+				excludeSubnets,
+				autoExcludeCIDRs(subnet.CIDR)...,
+			)
+		}
 	}
 
 	if err := ipAllocator.AddOrUpdateSubnet(
 		netInfo.GetNetworkName(),
 		ipNets,
-		netInfo.ExcludeSubnets()...,
+		excludeSubnets...,
 	); err != nil {
 		return nil, err
 	}
 
 	return ipAllocator, nil
+}
+
+func isLayer2UserDefinedPrimaryNetwork(netInfo util.NetInfo) bool {
+	return netInfo.IsPrimaryNetwork() && netInfo.TopologyType() == types.Layer2Topology
+}
+
+func autoExcludeCIDRs(subnet *net.IPNet) []*net.IPNet {
+	gwIP := util.GetNodeGatewayIfAddr(subnet).IP
+	mgmtPortIP := util.GetNodeManagementIfAddr(subnet).IP
+	return []*net.IPNet{
+		{IP: gwIP, Mask: util.GetIPFullMask(gwIP)},
+		{IP: mgmtPortIP, Mask: util.GetIPFullMask(mgmtPortIP)},
+	}
 }

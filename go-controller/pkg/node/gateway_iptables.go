@@ -7,15 +7,16 @@ import (
 	"fmt"
 	"net"
 
+	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -340,56 +341,53 @@ func getGatewayForwardRules(cidrs []*net.IPNet) []nodeipt.Rule {
 		if protocol == iptables.ProtocolIPv6 {
 			masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
 		}
-		returnRules = append(returnRules, []nodeipt.Rule{
-			{
-				Table: "filter",
-				Chain: "FORWARD",
-				Args: []string{
-					"-s", masqueradeIP.String(),
-					"-j", "ACCEPT",
-				},
-				Protocol: protocol,
-			},
-			{
-				Table: "filter",
-				Chain: "FORWARD",
-				Args: []string{
-					"-d", masqueradeIP.String(),
-					"-j", "ACCEPT",
-				},
-				Protocol: protocol,
-			},
-		}...)
+		returnRules = append(returnRules, getMasqueradeIpTablesForwardRules(masqueradeIP, protocol)...)
 	}
 
 	return returnRules
 }
 
-func getGatewayDropRules(ifName string) []nodeipt.Rule {
-	var dropRules []nodeipt.Rule
-	for _, protocol := range clusterIPTablesProtocols() {
-		dropRules = append(dropRules, []nodeipt.Rule{
-			{
-				Table: "filter",
-				Chain: "FORWARD",
-				Args: []string{
-					"-i", ifName,
-					"-j", "DROP",
-				},
-				Protocol: protocol,
+// getStaleMasqueradeIptablesRules returns all iptables rules may get added for a given masquerade IP.
+func getStaleMasqueradeIptablesRules(masqueradeIP net.IP) []nodeipt.Rule {
+	return append(getMasqueradeIpTablesForwardRules(masqueradeIP, getIPTablesProtocol(masqueradeIP.String())),
+		getMasqueradeIpTablesNATRules(masqueradeIP, getIPTablesProtocol(masqueradeIP.String()))...)
+}
+
+func getMasqueradeIpTablesForwardRules(masqueradeIP net.IP, protocol iptables.Protocol) []nodeipt.Rule {
+	return []nodeipt.Rule{
+		{
+			Table: "filter",
+			Chain: "FORWARD",
+			Args: []string{
+				"-s", masqueradeIP.String(),
+				"-j", "ACCEPT",
 			},
-			{
-				Table: "filter",
-				Chain: "FORWARD",
-				Args: []string{
-					"-o", ifName,
-					"-j", "DROP",
-				},
-				Protocol: protocol,
+			Protocol: protocol,
+		},
+		{
+			Table: "filter",
+			Chain: "FORWARD",
+			Args: []string{
+				"-d", masqueradeIP.String(),
+				"-j", "ACCEPT",
 			},
-		}...)
+			Protocol: protocol,
+		},
 	}
-	return dropRules
+}
+
+func getMasqueradeIpTablesNATRules(masqueradeIP net.IP, protocol iptables.Protocol) []nodeipt.Rule {
+	return []nodeipt.Rule{
+		{
+			Table: "nat",
+			Chain: "POSTROUTING",
+			Args: []string{
+				"-s", masqueradeIP.String(),
+				"-j", "MASQUERADE",
+			},
+			Protocol: protocol,
+		},
+	}
 }
 
 // initExternalBridgeForwardingRules sets up iptables rules for br-* interface svc traffic forwarding
@@ -405,14 +403,6 @@ func initExternalBridgeServiceForwardingRules(cidrs []*net.IPNet) error {
 // have been added to disable forwarding
 func delExternalBridgeServiceForwardingRules(cidrs []*net.IPNet) error {
 	return deleteIptRules(getGatewayForwardRules(cidrs))
-}
-
-// initExternalBridgeDropRules sets up iptables rules to block forwarding
-// in br-* interfaces (also for 2ndary bridge) - we block for v4 and v6 based on clusterStack
-// -A FORWARD -i breth1 -j DROP
-// -A FORWARD -o breth1 -j DROP
-func initExternalBridgeDropForwardingRules(ifName string) error {
-	return appendIptRules(getGatewayDropRules(ifName))
 }
 
 // delExternalBridgeDropForwardingRules removes iptables rules which might
@@ -564,7 +554,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 	if err = restoreIptRulesFiltered(keepIPTRules, filter); err != nil {
 		errors = append(errors, err)
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 // getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables rules for service.

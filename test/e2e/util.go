@@ -14,8 +14,8 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -39,6 +39,8 @@ const (
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// ovnNodeZoneNameAnnotation is the node annotation name to store the node zone name.
 	ovnNodeZoneNameAnnotation = "k8s.ovn.org/zone-name"
+	// ovnGatewayMTUSupport annotation determines if options:gateway_mtu shall be set for a node's gateway router
+	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
 
 var containerRuntime = "docker"
@@ -67,6 +69,8 @@ type PodAnnotation struct {
 	Gateways []net.IP
 	// Routes are additional routes to add to the pod's network namespace
 	Routes []PodRoute
+	// Primary reveals if this network is the primary network of the pod or not
+	Primary bool
 }
 
 // PodRoute describes any routes to be added to the pod's network namespace
@@ -86,6 +90,7 @@ type podAnnotation struct {
 
 	IP      string `json:"ip_address,omitempty"`
 	Gateway string `json:"gateway_ip,omitempty"`
+	Primary bool   `json:"primary"`
 }
 
 // Internal struct used to marshal PodRoute to the pod annotation
@@ -164,7 +169,7 @@ func newAnnotationNotSetError(format string, args ...interface{}) error {
 }
 
 // UnmarshalPodAnnotation returns the default network info from pod.Annotations
-func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, error) {
+func unmarshalPodAnnotation(annotations map[string]string, networkName string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[podNetworkAnnotation]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
@@ -175,10 +180,10 @@ func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	tempA := podNetworks["default"]
+	tempA := podNetworks[networkName]
 	a := &tempA
 
-	podAnnotation := &PodAnnotation{}
+	podAnnotation := &PodAnnotation{Primary: a.Primary}
 	var err error
 
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
@@ -575,18 +580,6 @@ func getMACAddressesForNetwork(container, network string) string {
 	return strings.TrimSuffix(macAddr, "\n")
 }
 
-// deletePodSyncNS deletes a pod and wait for its deletion.
-// accept the namespace as a parameter.
-func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {
-	err := clientSet.CoreV1().Pods(namespace).Delete(context.Background(), podName, metav1.DeleteOptions{})
-	framework.ExpectNoError(err, "Failed to delete pod %s in the default namespace", podName)
-
-	gomega.Eventually(func() bool {
-		_, err := clientSet.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
-		return apierrors.IsNotFound(err)
-	}, 3*time.Minute, 5*time.Second).Should(gomega.BeTrue(), "Pod was not being deleted")
-}
-
 // waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,
 // as well as all nodes are healthy
 func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, controlPlanePodName string) error {
@@ -638,7 +631,7 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 			return false, fmt.Errorf("failed to list ovn-kube master pods: %w", err)
 		}
 		if len(podList.Items) != numControlPlanePods {
-			framework.Logf("Not enough running %s pods, want %d, have %d", numControlPlanePods, numControlPlanePods, len(podList.Items))
+			framework.Logf("Not enough running %s pods, want %d, have %d", controlPlanePodName, numControlPlanePods, len(podList.Items))
 			return false, nil
 		}
 
@@ -1220,4 +1213,34 @@ func CaptureContainerOutput(ctx context.Context, c clientset.Interface, namespac
 	}
 
 	return matchMap, nil
+}
+
+// It checks whether config.DisablePacketMTUCheck is set or not
+func isDisablePacketMTUCheckEnabled() bool {
+	val, present := os.LookupEnv("OVN_DISABLE_PKT_MTU_CHECK")
+	return present && val == "true"
+}
+
+// getGatewayMTUSupport returns true if gateway-mtu-support annotataion
+// is not set on the node, otherwise it returns false as the value of the
+// annotation also get set to false
+func getGatewayMTUSupport(node *v1.Node) bool {
+	_, ok := node.Annotations[ovnGatewayMTUSupport]
+	if !ok {
+		return true
+	}
+	return false
+}
+
+func isKernelModuleLoaded(nodeName, kernelModuleName string) bool {
+	out, err := runCommand(containerRuntime, "exec", nodeName, "lsmod")
+	if err != nil {
+		framework.Failf("failed to list kernel modules for node %s: %v", nodeName, err)
+	}
+	for _, module := range strings.Split(out, "\n") {
+		if strings.HasPrefix(module, kernelModuleName) {
+			return true
+		}
+	}
+	return false
 }

@@ -9,21 +9,24 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
@@ -102,10 +105,24 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 			if fromRetryLoop {
 				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
 				_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
+				_, syncMgmtPort := h.oc.mgmtPortFailed.Load(node.Name)
+				_, syncGw := h.oc.gatewaysFailed.Load(node.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
-				nodeParams = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
+				nodeParams = &nodeSyncs{
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          syncMgmtPort,
+					syncZoneIC:            syncZoneIC,
+					syncGw:                syncGw,
+				}
 			} else {
-				nodeParams = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeParams = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncGw:                true,
+				}
 			}
 			if err := h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
 				klog.Errorf("Node add failed for %s, will try again later: %v",
@@ -148,14 +165,33 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
+				syncMgmtPort := failed || macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) || nodeSubnetChanged
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
-				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
+				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
+				syncGw := failed ||
+					gatewayChanged(oldNode, newNode) ||
+					nodeSubnetChanged ||
+					hostCIDRsChanged(oldNode, newNode) ||
+					nodeGatewayMTUSupportChanged(oldNode, newNode)
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          syncMgmtPort,
+					syncZoneIC:            syncZoneIC,
+					syncGw:                syncGw,
+				}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node. Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncGw:                true,
+				}
 			}
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
@@ -235,9 +271,17 @@ type SecondaryLayer3NetworkController struct {
 	BaseSecondaryNetworkController
 
 	// Node-specific syncMaps used by node event handler
+	mgmtPortFailed              sync.Map
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 	syncZoneICFailed            sync.Map
+	gatewaysFailed              sync.Map
+
+	// Cluster-wide router default Control Plane Protection (COPP) UUID
+	defaultCOPPUUID string
+
+	gatewayManagers        sync.Map
+	gatewayTopologyFactory *topology.GatewayTopologyFactory
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
@@ -273,9 +317,13 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				cancelableCtx:               util.NewCancelableContext(),
 			},
 		},
+		mgmtPortFailed:              sync.Map{},
 		addNodeFailed:               sync.Map{},
 		nodeClusterRouterPortFailed: sync.Map{},
 		syncZoneICFailed:            sync.Map{},
+		gatewaysFailed:              sync.Map{},
+		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
+		gatewayManagers:             sync.Map{},
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -334,6 +382,7 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+
 	if err := oc.Init(ctx); err != nil {
 		return err
 	}
@@ -364,13 +413,13 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
+func (oc *SecondaryLayer3NetworkController) Cleanup() error {
 	// cleans up related OVN logical entities
 	var ops []ovsdb.Operation
 	var err error
 
 	// Note : Cluster manager removes the subnet annotation for the node.
-
+	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
 	// first delete node logical switches
 	ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, ops,
@@ -381,6 +430,22 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
+	oc.gatewayManagers.Range(func(nodeName, value any) bool {
+		gwManager, isGWManagerType := value.(*GatewayManager)
+		if !isGWManagerType {
+			klog.Errorf(
+				"Failed to cleanup GW manager for network %q on node %s: could not retrieve GWManager",
+				netName,
+				nodeName,
+			)
+			return true
+		}
+		if err := gwManager.Cleanup(); err != nil {
+			klog.Errorf("Failed to cleanup GW manager for network %q on node %s: %v", netName, nodeName, err)
+		}
+		return true
+	})
+
 	// now delete cluster router
 	ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(oc.nbClient, ops,
 		func(item *nbdb.LogicalRouter) bool {
@@ -390,8 +455,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 	}
 
-	controllerName := getNetworkControllerName(netName)
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
 	}
@@ -451,8 +515,29 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 }
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
-	_, err := oc.createOvnClusterRouter()
-	return err
+	if err := oc.gatherJoinSwitchIPs(); err != nil {
+		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	// Create default Control Plane Protection (COPP) entry for routers
+	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
+	if err != nil {
+		return fmt.Errorf("unable to create router control plane protection: %w", err)
+	}
+	oc.defaultCOPPUUID = defaultCOPPUUID
+
+	clusterRouter, err := oc.newClusterRouter()
+	if err != nil {
+		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
+	}
+
+	// Only configure join switch and GR for user defined primary networks.
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
+			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
+		}
+	}
+	return nil
 }
 
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -475,7 +560,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.syncZoneICFailed.Store(node.Name, true)
+			oc.gatewaysFailed.Store(node.Name, true)
 			err = fmt.Errorf("nodeAdd: error adding node %q for network %s: %w", node.Name, oc.GetNetworkName(), err)
 			oc.recordNodeErrorEvent(node, err)
 			return err
@@ -492,10 +579,71 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if nSyncs.syncMgmtPort {
+			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+			if err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				_, err = oc.syncNodeManagementPortRouteHostSubnets(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets)
+				if err != nil {
+					errs = append(errs, err)
+					oc.mgmtPortFailed.Store(node.Name, true)
+				} else {
+					oc.mgmtPortFailed.Delete(node.Name)
+				}
+			}
+		}
+	}
+
 	// ensure pods that already exist on this node have their logical ports created
 	if nSyncs.syncNode { // do this only if it is a new node add
 		errors := oc.addAllPodsOnNode(node.Name)
 		errs = append(errs, errors...)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if nSyncs.syncGw {
+			gwManager := oc.gatewayManagerForNode(node.Name)
+			oc.gatewayManagers.Store(node.Name, gwManager)
+
+			gwConfig, err := oc.nodeGatewayConfig(node)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
+				oc.gatewaysFailed.Store(node.Name, true)
+			} else {
+				if err := gwManager.syncNodeGateway(
+					node,
+					gwConfig.config,
+					gwConfig.hostSubnets,
+					gwConfig.hostAddrs,
+					gwConfig.hostSubnets,
+					gwConfig.gwLRPIPs,
+					oc.SCTPSupport,
+					oc.ovnClusterLRPToJoinIfAddrs,
+					gwConfig.externalIPs,
+				); err != nil {
+					errs = append(errs, fmt.Errorf(
+						"failed to sync node GW for network %q: %v",
+						gwManager.netInfo.GetNetworkName(),
+						err,
+					))
+					oc.gatewaysFailed.Store(node.Name, true)
+				} else {
+					oc.gatewaysFailed.Delete(node.Name)
+				}
+			}
+		}
+
+		// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
+		_, gwFailed := oc.gatewaysFailed.Load(node.Name)
+		if !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
+			if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
+				errors := oc.addAllPodsOnNode(node.Name)
+				errs = append(errs, errors...)
+			}
+		}
 	}
 
 	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
@@ -507,7 +655,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 		}
 	}
 
-	err = kerrors.NewAggregate(errs)
+	err = utilerrors.Join(errs...)
 	if err != nil {
 		oc.recordNodeErrorEvent(node, err)
 	}
@@ -559,10 +707,15 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 		return err
 	}
 
+	if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
+		return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+	}
+	oc.gatewayManagers.Delete(node.Name)
 	oc.localZoneNodes.Delete(node.Name)
 
 	oc.lsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
 	oc.addNodeFailed.Delete(node.Name)
+	oc.mgmtPortFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
@@ -626,4 +779,142 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 	}
 
 	return nil
+}
+
+func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
+	// Allocate IPs for logical router port prefixed with
+	// `GwRouterToJoinSwitchPrefix` for the network managed by this controller.
+	// This should always allocate the first IPs in the join switch subnets.
+	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch IP for network %s: %v", oc.GetNetworkName(), err)
+	}
+	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
+	return nil
+}
+
+type SecondaryL3GatewayConfig struct {
+	config      *util.L3GatewayConfig
+	hostSubnets []*net.IPNet
+	gwLRPIPs    []*net.IPNet
+	hostAddrs   []string
+	externalIPs []net.IP
+}
+
+func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (*SecondaryL3GatewayConfig, error) {
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
+	}
+
+	networkName := oc.GetNetworkName()
+	networkID, err := oc.getNetworkID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get networkID for network %q: %v", networkName, err)
+	}
+
+	var (
+		masqIPs  []*net.IPNet
+		v4MasqIP *net.IPNet
+		v6MasqIP *net.IPNet
+	)
+
+	if config.IPv4Mode {
+		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", networkName, networkID, err)
+		}
+		v4MasqIP = v4MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v4MasqIP)
+	}
+	if config.IPv6Mode {
+		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", networkName, networkID, err)
+		}
+		v6MasqIP = v6MasqIPs.GatewayRouter
+		masqIPs = append(masqIPs, v6MasqIP)
+	}
+
+	l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses, masqIPs...)
+
+	// Always SNAT to the per network masquerade IP.
+	var externalIPs []net.IP
+	if config.IPv4Mode && v4MasqIP != nil {
+		externalIPs = append(externalIPs, v4MasqIP.IP)
+	}
+	if config.IPv6Mode && v6MasqIP != nil {
+		externalIPs = append(externalIPs, v6MasqIP.IP)
+	}
+
+	var hostAddrs []string
+	for _, externalIP := range externalIPs {
+		hostAddrs = append(hostAddrs, externalIP.String())
+	}
+
+	// Use the host subnets present in the network attachment definition.
+	hostSubnets := make([]*net.IPNet, 0, len(oc.Subnets()))
+	for _, subnet := range oc.Subnets() {
+		hostSubnets = append(hostSubnets, subnet.CIDR)
+	}
+
+	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	if err != nil {
+		return nil, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w", node.Name, networkName, err)
+	}
+
+	// Overwrite the primary interface ID with the correct, per-network one.
+	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
+
+	return &SecondaryL3GatewayConfig{
+		config:      l3GatewayConfig,
+		hostSubnets: hostSubnets,
+		gwLRPIPs:    gwLRPIPs,
+		hostAddrs:   hostAddrs,
+		externalIPs: externalIPs,
+	}, nil
+}
+
+func (oc *SecondaryLayer3NetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
+	if oc.multicastSupport {
+		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
+			oc.GetNetworkScopedClusterRouterName(),
+			oc.NetInfo,
+			oc.defaultCOPPUUID,
+		)
+	}
+	return oc.gatewayTopologyFactory.NewClusterRouter(
+		oc.GetNetworkScopedClusterRouterName(),
+		oc.NetInfo,
+		oc.defaultCOPPUUID,
+	)
+}
+
+func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *GatewayManager {
+	return NewGatewayManager(
+		nodeName,
+		oc.defaultCOPPUUID,
+		oc.kube,
+		oc.nbClient,
+		oc.NetInfo,
+		oc.watchFactory,
+	)
+}
+
+func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName string) *GatewayManager {
+	obj, isFound := oc.gatewayManagers.Load(nodeName)
+	if !isFound {
+		return oc.newGatewayManager(nodeName)
+	} else {
+		gwManager, isGWManagerType := obj.(*GatewayManager)
+		if !isGWManagerType {
+			klog.Errorf(
+				"failed to extract a gateway manager from the network %q on node %s; creating new one",
+				oc.GetNetworkName(),
+				nodeName,
+			)
+			return oc.newGatewayManager(nodeName)
+		}
+		return gwManager
+	}
 }

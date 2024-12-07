@@ -31,6 +31,10 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
     spec:
+      {{- if .Values.global.imagePullSecretName }}
+      imagePullSecrets:
+      - name: {{ .Values.global.imagePullSecretName }}
+      {{- end }}
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
@@ -76,7 +80,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: {{ default "-vconsole:info -vfile:info" .Values.northdLogLevel | quote }}
         - name: K8S_APISERVER
@@ -172,7 +176,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.logLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -235,7 +239,7 @@ spec:
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: {{ default "" .Values.global.hybridOverlayNetCidr | quote }}
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
-          value: {{ default "" .Values.disableSnatMultipleGws | quote }}
+          value: {{ default "" .Values.global.disableSnatMultipleGws | quote }}
         - name: OVN_DISABLE_FORWARDING
           value: {{ default "" .Values.global.disableForwarding | quote }}
         - name: OVN_ENCAP_PORT
@@ -271,6 +275,10 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_ENABLE_PERSISTENT_IPS
+          value: {{ hasKey .Values.global "enablePersistentIPs" | ternary .Values.global.enablePersistentIPs false | quote }}
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
       # end of container
       volumes:
       # TODO: Need to check why we need this?

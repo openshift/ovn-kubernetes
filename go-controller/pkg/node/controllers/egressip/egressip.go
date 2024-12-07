@@ -24,13 +24,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -230,7 +230,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 	}
 	syncWg.Wait()
 	if len(syncErrs) != 0 {
-		return kerrors.NewAggregate(syncErrs)
+		return utilerrors.Join(syncErrs...)
 	}
 
 	wg.Add(1)
@@ -644,7 +644,7 @@ func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error
 		return nil, fmt.Errorf("failed to get routes for link %s: %v", link.Attrs().Name, err)
 	}
 	linkRoutes = ensureAtLeastOneDefaultRoute(linkRoutes, link.Attrs().Index, isV6)
-	overwriteRoutesTableID(linkRoutes, getRouteTableID(link.Attrs().Index))
+	overwriteRoutesTableID(linkRoutes, util.CalculateRouteTableID(link.Attrs().Index))
 	clearSrcFromRoutes(linkRoutes)
 	return linkRoutes, nil
 }
@@ -739,7 +739,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		}
 		if !isEIPOnLink {
 			for _, routeToDelete := range existing.eIPConfig.routes {
-				c.routeManager.Del(routeToDelete)
+				err = c.routeManager.Del(routeToDelete)
+				if err != nil {
+					return fmt.Errorf("failed to delete egress IP route: %w", err)
+				}
 			}
 		}
 	} else if update != nil && update.eIPConfig != nil && len(update.eIPConfig.routes) > 0 &&
@@ -747,7 +750,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		// delete delta between existing and update
 		routesToDelete := routeDifference(existing.eIPConfig.routes, update.eIPConfig.routes)
 		for _, routeToDelete := range routesToDelete {
-			c.routeManager.Del(routeToDelete)
+			err := c.routeManager.Del(routeToDelete)
+			if err != nil {
+				return fmt.Errorf("failed to delete egress IP route: %w", err)
+			}
 		}
 	}
 	// apply new changes
@@ -782,7 +788,9 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		existing.eIPConfig.addr = update.eIPConfig.addr
 		// route manager manages retry
 		for _, routeToAdd := range update.eIPConfig.routes {
-			c.routeManager.Add(routeToAdd)
+			if err := c.routeManager.Add(routeToAdd); err != nil {
+				return err
+			}
 		}
 		existing.eIPConfig.routes = update.eIPConfig.routes
 	}
@@ -894,7 +902,7 @@ func (c *Controller) repairNode() error {
 				assignedAddrStrToAddrs[addressStr] = address
 			}
 		}
-		filter, mask := filterRouteByLinkTable(linkIdx, getRouteTableID(linkIdx))
+		filter, mask := filterRouteByLinkTable(linkIdx, util.CalculateRouteTableID(linkIdx))
 		existingRoutes, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
 		if err != nil {
 			return fmt.Errorf("unable to get route list using filter (%s): %v", filter.String(), err)
@@ -1232,7 +1240,9 @@ func (c *Controller) removeStaleIPRoutes(staleIPRoutes sets.Set[string], routeSt
 		if !ok {
 			return fmt.Errorf("expected to find route %q in map: %+v", ipRoute, routeStrToNetlinkRoute)
 		}
-		c.routeManager.Del(route)
+		if err := c.routeManager.Del(route); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1337,8 +1347,10 @@ func overwriteRoutesTableID(routes []netlink.Route, tableID int) {
 	}
 }
 
-func getRouteTableID(ifIndex int) int {
-	return ifIndex + routingTableIDStart
+func clearSrcFromRoutes(routes []netlink.Route) {
+	for i := range routes {
+		routes[i].Src = nil
+	}
 }
 
 func clearSrcFromRoutes(routes []netlink.Route) {
@@ -1460,7 +1472,7 @@ func getNetlinkAddress(addr *net.IPNet, ifindex int) *netlink.Addr {
 // from the links 'ifindex'
 func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	r := *netlink.NewRule()
-	r.Table = getRouteTableID(ifIndex)
+	r.Table = util.CalculateRouteTableID(ifIndex)
 	r.Priority = rulePriority
 	var ipFullMask string
 	if isIPv6 {

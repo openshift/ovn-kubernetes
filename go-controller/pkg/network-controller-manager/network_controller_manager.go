@@ -114,10 +114,10 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
-	existingNetworksMap := map[string]struct{}{}
-	for _, oc := range allControllers {
-		existingNetworksMap[oc.GetNetworkName()] = struct{}{}
+func (cm *NetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
+	existingNetworksMap := map[string]string{}
+	for _, network := range validNetworks {
+		existingNetworksMap[network.GetNetworkName()] = network.TopologyType()
 	}
 
 	// Get all the existing secondary networks and its logical entities
@@ -129,12 +129,12 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	staleNetworkControllers := map[string]nad.NetworkController{}
 	for _, ls := range switches {
 		netName := ls.ExternalIDs[ovntypes.NetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
+		// TopologyExternalID always co-exists with NetworkExternalID
+		topoType := ls.ExternalIDs[ovntypes.TopologyExternalID]
+		if existingNetworksMap[netName] == topoType {
 			// network still exists, no cleanup to do
 			continue
 		}
-		// TopologyExternalID always co-exists with NetworkExternalID
-		topoType := ls.ExternalIDs[ovntypes.TopologyExternalID]
 		// Create dummy network controllers to clean up logical entities
 		klog.V(5).Infof("Found stale %s network %s", topoType, netName)
 		if oc, err := cm.newDummyNetworkController(topoType, netName); err == nil {
@@ -144,12 +144,12 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	}
 	for _, lr := range routers {
 		netName := lr.ExternalIDs[ovntypes.NetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
+		// TopologyExternalID always co-exists with NetworkExternalID
+		topoType := lr.ExternalIDs[ovntypes.TopologyExternalID]
+		if existingNetworksMap[netName] == topoType {
 			// network still exists, no cleanup to do
 			continue
 		}
-		// TopologyExternalID always co-exists with NetworkExternalID
-		topoType := lr.ExternalIDs[ovntypes.TopologyExternalID]
 		// Create dummy network controllers to clean up logical entities
 		klog.V(5).Infof("Found stale %s network %s", topoType, netName)
 		if oc, err := cm.newDummyNetworkController(topoType, netName); err == nil {
@@ -160,7 +160,7 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 
 	for netName, oc := range staleNetworkControllers {
 		klog.Infof("Cleanup entities for stale network %s", netName)
-		err = oc.Cleanup(netName)
+		err = oc.Cleanup()
 		if err != nil {
 			klog.Errorf("Failed to delete stale OVN logical entities for network %s: %v", netName, err)
 		}
@@ -200,7 +200,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 
 	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, ovnClient.NetworkAttchDefClient, cm.recorder)
+		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, wf)
 		if err != nil {
 			return nil, err
 		}

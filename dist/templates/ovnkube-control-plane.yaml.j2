@@ -85,7 +85,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_master_loglevel }}"
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -144,6 +144,8 @@ spec:
           value: "{{ ovn_egress_qos_enable }}"
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "{{ ovn_multi_network_enable }}"
+        - name: OVN_NETWORK_SEGMENTATION_ENABLE
+          value: "{{ ovn_network_segmentation_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
@@ -177,6 +179,8 @@ spec:
           value: "{{ ovn_v6_transit_switch_subnet }}"
         - name: OVN_ENABLE_PERSISTENT_IPS
           value: "{{ ovn_enable_persistent_ips }}"
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: "{{ ovn_enable_dnsnameresolver }}"
       # end of container
 
       volumes:

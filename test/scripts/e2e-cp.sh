@@ -17,8 +17,6 @@ export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 # TODO: Fix metalLB integration with KIND on IPV6 in LGW mode and enable those service tests.See
 # https://github.com/ovn-org/ovn-kubernetes/issues/4131 for details.
 # TODO: Fix EIP tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4130 for details.
-# TODO: Fix EFW tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4133 for details.
-# TODO: Fix CPU Pinning tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4134 for details.
 # TODO: Fix MTU tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4160 for details.
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
@@ -26,26 +24,14 @@ should provide Internet connection continuously when ovnkube-node pod is killed|
 should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed|\
 should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane|\
 should provide Internet connection continuously when all ovnkube-control-plane pods are killed|\
-Should validate the egress firewall policy functionality against remote hosts|\
-Should validate the egress firewall policy functionality against cluster nodes by using node selector|\
-Should validate ICMP connectivity to multiple external gateways for an ECMP scenario|\
-Should validate ICMP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
-Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
-Should validate TCP/UDP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
-Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
 can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
 egress IP validation|\
-e2e egress firewall policy validation|\
-OVS CPU affinity pinning|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
 ipv4 pod"
-
-METALLB_SKIPPED_TESTS="EgressService|\
-Load Balancer Service Tests with MetalLB"
 
 SKIPPED_TESTS=""
 
@@ -166,12 +152,13 @@ if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
   SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
 fi
 
-# Skip tests that require metal-lb, if such is not being installed
-if [ "${KIND_INSTALL_METALLB}" == "false" ];then
+# Only run network segmentation tests if they are explicitly requested
+NETWORK_SEGMENTATION_TESTS="Network Segmentation"
+if [ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}" ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi
-  SKIPPED_TESTS+=$METALLB_SKIPPED_TESTS
+  SKIPPED_TESTS+=$NETWORK_SEGMENTATION_TESTS
 fi
 
 # setting these is required to make RuntimeClass tests work ... :/

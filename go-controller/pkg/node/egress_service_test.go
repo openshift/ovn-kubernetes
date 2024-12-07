@@ -291,7 +291,7 @@ var _ = Describe("Egress Service Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -400,7 +400,7 @@ var _ = Describe("Egress Service Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
@@ -415,7 +415,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -629,11 +629,11 @@ var _ = Describe("Egress Service Operations", func() {
 				}
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					err := f4.MatchState(expectedTables)
+					err := f4.MatchState(expectedTables, nil)
 					if err == nil {
 						return nil
 					}
-					return f4.MatchState(expectedTables2)
+					return f4.MatchState(expectedTables2, nil)
 				}).ShouldNot(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
@@ -651,7 +651,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -836,13 +836,216 @@ var _ = Describe("Egress Service Operations", func() {
 				}
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
 					return fakeOvnNode.fakeExec.CalledMatchesExpected()
 				}).Should(BeTrue())
 
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule del prio 5000 from 10.129.0.2 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule del prio 5000 from 10.128.0.3 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule del prio 5000 from 10.129.0.10 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule del prio 5000 from 10.128.0.11 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ip -4 rule del prio 5000 from %s sport 30300 table mynetwork", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP),
+					Err: nil,
+				})
+
+				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service1", metav1.DeleteOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				err = fakeOvnNode.fakeClient.EgressServiceClient.K8sV1().EgressServices("namespace1").Delete(context.TODO(), "service2", metav1.DeleteOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() error {
+					return f4.MatchState(expectedTables, nil)
+				}).ShouldNot(HaveOccurred())
+
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpected()
+				}).Should(BeTrue())
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("updates network ip rules for LoadBalancer egress service when ETP changes", func() {
+			app.Action = func(ctx *cli.Context) error {
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ip -4 --json rule show",
+					Output: "[]",
+					Err:    nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule add prio 5000 from 10.129.0.2 table mynetwork",
+					Err: nil,
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ip -4 rule add prio 5000 from 10.128.0.3 table mynetwork",
+					Err: nil,
+				})
+				epPortName := "https"
+				epPortValue := int32(443)
+
+				egressService := egressserviceapi.EgressService{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service1",
+						Namespace: "namespace1",
+					},
+					Spec: egressserviceapi.EgressServiceSpec{
+						Network: "mynetwork",
+					},
+					Status: egressserviceapi.EgressServiceStatus{
+						Host: "ALL",
+					},
+				}
+
+				service := *newService("service1", "namespace1", "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							NodePort: int32(30300),
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "5.5.5.5",
+							}},
+						},
+					},
+					false, false,
+				)
+
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.128.0.3"},
+					NodeName:  &fakeNodeName,
+				}
+				epPort := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
+				}
+
+				// host-networked endpoint, should not have an ip rule created
+				ep2 := discovery.Endpoint{
+					Addresses: []string{"192.168.18.15"},
+					NodeName:  &fakeNodeName,
+				}
+
+				// ep that does not belong to our node should not have an ip rule created
+				someOtherNode := "someOtherNode"
+				ep3 := discovery.Endpoint{
+					Addresses: []string{"10.128.1.5"},
+					NodeName:  &someOtherNode,
+				}
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1, ep2, ep3},
+					[]discovery.EndpointPort{epPort})
+
+				fakeOvnNode.start(ctx,
+					&v1.ServiceList{
+						Items: []v1.Service{
+							service,
+							service2,
+						},
+					},
+					&discovery.EndpointSliceList{
+						Items: []discovery.EndpointSlice{
+							endpointSlice,
+							endpointSlice2,
+						},
+					},
+					&egressserviceapi.EgressServiceList{
+						Items: []egressserviceapi.EgressService{
+							egressService,
+							egressService2,
+						},
+					},
+				)
+
+				wf := fakeOvnNode.watcher.(*factory.WatchFactory)
+				c, err := egressservice.NewController(fakeOvnNode.stopChan, ovnKubeNodeSNATMark, fakeOvnNode.nc.name,
+					wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
+				Expect(err).ToNot(HaveOccurred())
+				err = c.Run(fakeOvnNode.wg, 1)
+				Expect(err).ToNot(HaveOccurred())
+
+				expectedTables := map[string]util.FakeTable{
+					"nat": {
+						"OVN-KUBE-EGRESS-SVC": []string{
+							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
+						},
+					},
+					"filter": {},
+					"mangle": {},
+				}
+				f4 := iptV4.(*util.FakeIPTables)
+				Eventually(func() error {
+					return f4.MatchState(expectedTables, nil)
+				}).ShouldNot(HaveOccurred())
+
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpected()
+				}).Should(BeTrue())
+
+				By("switching to ETP=Local an ip rule should be created for the masquerade IP")
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ip -4 rule add prio 5000 from %s sport 30300 table mynetwork", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP),
+					Err: nil,
+				})
+				service.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
+				service.ResourceVersion = "100"
+				_, err = fakeOvnNode.fakeClient.KubeClient.CoreV1().Services("namespace1").Update(context.TODO(), &service, metav1.UpdateOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() error {
+					return f4.MatchState(expectedTables, nil)
+				}).ShouldNot(HaveOccurred())
+
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpected()
+				}).Should(BeTrue())
+
+				By("switching back to ETP=Cluster the masquerade ip rule should be deleted")
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ip -4 rule del prio 5000 from %s sport 30300 table mynetwork", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP),
+					Err: nil,
+				})
+				service.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyCluster
+				service.ResourceVersion = "110"
+				_, err = fakeOvnNode.fakeClient.KubeClient.CoreV1().Services("namespace1").Update(context.TODO(), &service, metav1.UpdateOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() error {
+					return f4.MatchState(expectedTables, nil)
+				}).ShouldNot(HaveOccurred())
+
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpected()
+				}).Should(BeTrue())
+
+				By("deleting the egress service the ip rules should be deleted")
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ip -4 rule del prio 5000 from 10.129.0.2 table mynetwork",
 					Err: nil,
@@ -1056,7 +1259,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {

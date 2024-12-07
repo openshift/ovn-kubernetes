@@ -1,4 +1,4 @@
-site_name: OVN Kubernetes
+site_name: OVN-Kubernetes
 site_url: https://www.ovn.org/ovn-kubernetes/
 repo_url: https://github.com/ovn-org/ovn-kubernetes
 repo_name: ovn-org/ovn-kubernetes
@@ -64,8 +64,8 @@ markdown_extensions:
   - toc:
       permalink: true
 nav:
-  - Introduction: index.md
   - Overview:
+    - Introduction: index.md
     - Architecture: design/architecture.md
     - Network Topology: design/topology.md
     - Gateway Modes: design/gateway-modes.md
@@ -78,42 +78,40 @@ nav:
     - Internal Subnets: design/ovn-kubernetes-subnets.md
     - Kubevirt VM Live Migration: design/live-migration.md
   - Getting Started:
-    - OVN Kubernetes Overview: getting-started/overview.md
-    - Launching OVN Kubernetes: getting-started/launching-ovn-kubernetes.md
-    - Deploying Workloads on OVN Kubernetes cluster: getting-started/example-pod-creation.md
-    - Deploying Services on OVN Kubernetes cluster: getting-started/example-service-creation.md
-    - Setup and Building: getting-started/building-ovn-kubernetes.md
-    - Run OVN Kubernetes From Release Image: getting-started/running-release.md
-    - Run OVN Kubernetes From RPM: getting-started/running-rpm.md
-    - CLI Guide: getting-started/cli-guide.md
+    - Launching OVN-Kubernetes: installation/launching-ovn-kubernetes-on-kind.md
+    - Launching OVN-Kubernetes Using Helm: installation/launching-ovn-kubernetes-with-helm.md
     - Configuration Guide: getting-started/configuration.md
+    - CLI Guide: getting-started/cli-guide.md
+    - Deploying Workloads on OVN-Kubernetes cluster: getting-started/example-pod-creation.md
+    - Deploying Services on OVN-Kubernetes cluster: getting-started/example-service-creation.md
+    - Setup and Building: getting-started/building-ovn-kubernetes.md
   - Developer Guide:
       - Contributing Guide: governance/CONTRIBUTING.md
       - Reviewing Guide: governance/REVIEWING.md
       - Coding Guide: developer-guide/developer.md
-      - Kubernetes CRD API-Reference Guide:
-        - EgressIP: developer-guide/egress-ip-api-spec.md
-        - EgressService: developer-guide/egress-service-api-spec.md
-        - EgressQoS: developer-guide/egress-qos-api-spec.md
-        - EgressFirewall: developer-guide/egress-firewall-api-spec.md
-        - AdminPolicyBasedExternalRoutes: developer-guide/admin-epbr-api-spec.md
-      - OVN Kubernetes Container Images: developer-guide/image-build.md
+      - OVN-Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
-      - Local Testing Guide: developer-guide/testing.md
+      - Local Testing Guide: developer-guide/local_testing_guide.md
       - CI Testing Guide: ci/ci.md
-      - Web Design Guide: developer-guide/web-design.md
       - Debugging: developer-guide/debugging.md
-      - Releasing: developer-guide/release.md
+      - Release Guide: developer-guide/release.md
+  - API Reference Guide:
+      - Introduction: api-reference/introduction.md
+      - EgressIP: api-reference/egress-ip-api-spec.md
+      - EgressService: api-reference/egress-service-api-spec.md
+      - EgressQoS: api-reference/egress-qos-api-spec.md
+      - EgressFirewall: api-reference/egress-firewall-api-spec.md
+      - AdminPolicyBasedExternalRoutes: api-reference/admin-epbr-api-spec.md
   - Features:
+    - NetworkSecurityControls:
+      - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
+      - NetworkPolicy: features/network-security-controls/network-policy.md
+      - EgressFirewall: features/network-security-controls/egress-firewall.md
     - ClusterEgressControls:
       - EgressIP: features/cluster-egress-controls/egress-ip.md
       - EgressService: features/cluster-egress-controls/egress-service.md
       - EgressQoS: features/cluster-egress-controls/egress-qos.md
       - EgressGateway: features/cluster-egress-controls/egress-gateway.md
-    - NetworkSecurityControls:
-      - NetworkPolicy: features/network-security-controls/network-policy.md
-      - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
-      - EgressFirewall: features/network-security-controls/egress-firewall.md
     - InfrastructureSecurityControls:
       - NodeIdentity: features/infrastructure-security-controls/node-identity.md
     - MultiNetworking:
@@ -123,14 +121,18 @@ nav:
     - Multicast: features/multicast.md
     - LiveMigration: features/live-migration.md
     - HybridOverlay: features/hybrid-overlay.md
-    - Hardware Offload:
-      - OVS Offload: features/hardware-offload/ovs_offload.md
-      - Support DPU Acceleration: features/hardware-offload/dpu-acceleration.md
+    - Hardware Acceleration:
+      - OVS Acceleration with kernel datapath: features/hardware-offload/ovs-kernel.md
+      - OVS Acceleration with DOCA datapath: features/hardware-offload/ovs-doca.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
     - OVNKube Trace: troubleshooting/ovnkube-trace.md
     - Logging: troubleshooting/logging.md
   - Observability:
     - Metrics: observability/metrics.md
+    - SDN Dashboard: observability/sdn-dashboard.md
+  - Enhancement Proposals:
+    # - FeatureName: okeps/<filename.md>
+    - Template: okeps/okep-4368-template.md
   - Blog:
     - blog/index.md

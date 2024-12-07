@@ -192,6 +192,7 @@ type testPod struct {
 	portName     string
 	routes       []util.PodRoute
 	noIfaceIdVer bool
+	networkRole  string
 
 	secondaryPodInfos map[string]*secondaryPodInfo
 }
@@ -200,16 +201,18 @@ type secondaryPodInfo struct {
 	nodeSubnet  string
 	nodeMgtIP   string
 	nodeGWIP    string
+	role        string
 	routes      []util.PodRoute
 	allportInfo map[string]portInfo
 }
 
 type portInfo struct {
-	portUUID string
-	podIP    string
-	podMAC   string
-	portName string
-	tunnelID int
+	portUUID  string
+	podIP     string
+	podMAC    string
+	portName  string
+	tunnelID  int
+	prefixLen int
 }
 
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) testPod {
@@ -226,6 +229,7 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 		podName:           podName,
 		namespace:         namespace,
 		secondaryPodInfos: map[string]*secondaryPodInfo{},
+		networkRole:       ovntypes.NetworkRolePrimary, // all tests here run with network-segmentation disabled by default by default
 	}
 
 	var routeSources []*net.IPNet
@@ -246,6 +250,13 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 				routeSources = append(routeSources, sc)
 			}
 		}
+		hairpinMasqueradeIP := config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP.String()
+		mask := 32
+		if isIPv6 {
+			hairpinMasqueradeIP = config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP.String()
+			mask = 128
+		}
+		routeSources = append(routeSources, ovntest.MustParseIPNet(fmt.Sprintf("%s/%d", hairpinMasqueradeIP, mask)))
 		joinNet := config.Gateway.V4JoinSubnet
 		if isIPv6 {
 			joinNet = config.Gateway.V6JoinSubnet
@@ -253,7 +264,10 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 		routeSources = append(routeSources, ovntest.MustParseIPNet(joinNet))
 	}
 
-	gwIPs := strings.Split(nodeGWIP, " ")
+	var gwIPs []string
+	if nodeGWIP != "" {
+		gwIPs = strings.Split(nodeGWIP, " ")
+	}
 	var gwIPv4, gwIPv6 *net.IP
 	for _, gwIP := range gwIPs {
 		gwNetIP := ovntest.MustParseIP(gwIP)
@@ -269,6 +283,9 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 		gwIP := gwIPv4
 		if isIPv6 {
 			gwIP = gwIPv6
+		}
+		if gwIP == nil {
+			continue
 		}
 		to.routes = append(to.routes, util.PodRoute{rs, *gwIP})
 	}
@@ -299,6 +316,7 @@ func (p testPod) getAnnotationsJson() string {
 		Gateways []string   `json:"gateway_ips,omitempty"`
 		Routes   []podRoute `json:"routes,omitempty"`
 		TunnelID int        `json:"tunnel_id,omitempty"`
+		Role     string     `json:"role,omitempty"`
 	}
 
 	var address string
@@ -315,7 +333,10 @@ func (p testPod) getAnnotationsJson() string {
 		address = addresses[0]
 	}
 
-	nodeGWIPs := strings.Split(p.nodeGWIP, " ")
+	var nodeGWIPs []string
+	if p.nodeGWIP != "" {
+		nodeGWIPs = strings.Split(p.nodeGWIP, " ")
+	}
 	var nodeGWIP string
 	if len(nodeGWIPs) == 1 {
 		nodeGWIP = nodeGWIPs[0]
@@ -334,14 +355,25 @@ func (p testPod) getAnnotationsJson() string {
 			Gateway:  nodeGWIP,
 			Gateways: nodeGWIPs,
 			Routes:   routes,
+			Role:     p.networkRole,
 		},
 	}
 
 	for _, portInfos := range p.secondaryPodInfos {
+		var secondaryIfaceRoutes []podRoute
+		for _, route := range portInfos.routes {
+			secondaryIfaceRoutes = append(
+				secondaryIfaceRoutes,
+				podRoute{Dest: route.Dest.String(), NextHop: route.NextHop.String()},
+			)
+		}
 		for nad, portInfo := range portInfos.allportInfo {
 			ipPrefix := 24
 			if ovntest.MustParseIP(p.podIP).To4() == nil {
 				ipPrefix = 64
+			}
+			if portInfo.prefixLen != 0 {
+				ipPrefix = portInfo.prefixLen
 			}
 			ip := fmt.Sprintf("%s/%d", portInfo.podIP, ipPrefix)
 			podAnnotation := podAnnotation{
@@ -349,6 +381,12 @@ func (p testPod) getAnnotationsJson() string {
 				IP:       ip,
 				IPs:      []string{ip},
 				TunnelID: portInfo.tunnelID,
+				Role:     portInfos.role,
+				Routes:   secondaryIfaceRoutes,
+			}
+			if portInfos.nodeGWIP != "" {
+				podAnnotation.Gateway = portInfos.nodeGWIP
+				podAnnotation.Gateways = []string{portInfos.nodeGWIP}
 			}
 			podAnnotations[nad] = podAnnotation
 		}
@@ -366,7 +404,7 @@ func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
 	podObj.Annotations[util.OvnPodAnnotationName] = testPod.getAnnotationsJson()
 }
 
-func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
+func getDefaultNetExpectedPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
 	return getExpectedDataPodsSwitchesPortGroup(pods, nodes, "")
 }
 
@@ -592,7 +630,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 
@@ -648,7 +686,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 
 				ginkgo.By("Allocating all of the rest of the node subnet")
 				// allocate all the rest of the IPs in the subnet
@@ -676,7 +714,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(myPod2Key, true, fakeOvn.controller.retryPods)
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				ginkgo.By("Marking myPod as completed should free IP")
 				myPod.Status.Phase = v1.PodSucceeded
 
@@ -704,7 +742,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
 				}, 2).Should(gomega.MatchJSON(t2.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t2}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t2}, []string{"node1"})))
 				return nil
 			}
 
@@ -760,7 +798,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 
 				ginkgo.By("Allocating all of the rest of the node subnet")
 				// allocate all the rest of the IPs in the subnet
@@ -788,7 +826,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				myPod2Key, err := retry.GetResourceKey(myPod2)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(myPod2Key, true, fakeOvn.controller.retryPods)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				ginkgo.By("Marking myPod as completed should free IP")
 				myPod.Status.Phase = v1.PodSucceeded
 
@@ -818,7 +856,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
 				}, 2).Should(gomega.MatchJSON(t2.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t2}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t2}, []string{"node1"})))
 				// 2nd pod should now have the IP
 				myPod2, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(),
 					t2.podName, metav1.GetOptions{})
@@ -844,7 +882,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.lsManager.AllocateIPs(t.nodeName, annotation.IPs)
 				gomega.Expect(err).To(gomega.Equal(ipallocator.ErrAllocated))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t2}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t2}, []string{"node1"})))
 
 				ginkgo.By("Deleting the completed pod should not allow a third pod to take the IP")
 				// now delete the completed pod
@@ -876,7 +914,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(myPod3Key, true, fakeOvn.controller.retryPods)
 				// TODO validate that the pods also have correct GW SNATs and route policies
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t2}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t2}, []string{"node1"})))
 				return nil
 			}
 
@@ -923,7 +961,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				expectedData := []libovsdbtest.TestData{getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})}
+				expectedData := []libovsdbtest.TestData{getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
 				fakeOvn.asf.ExpectAddressSetWithAddresses(namespaceT.Name, []string{})
 				return nil
@@ -1044,7 +1082,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.asf.ExpectAddressSetWithAddresses(podTest.namespace, []string{podTest.podIP})
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})...))
 
 				// inject transient problem, nbdb is down
 				fakeOvn.controller.nbClient.Close()
@@ -1072,7 +1110,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.asf.ExpectAddressSetWithAddresses(podTest.namespace, []string{podTest.podIP})
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{podTest}, []string{"node1"})...))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{podTest}, []string{"node1"})...))
 				// check the retry cache no longer has the entry
 				retry.CheckRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
 				return nil
@@ -1096,7 +1134,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespace1.Name,
 				)
 				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
-				expectedData := []libovsdbtest.TestData{getExpectedDataPodsAndSwitches([]testPod{podTest}, []string{"node1"})}
+				expectedData := []libovsdbtest.TestData{getDefaultNetExpectedPodsAndSwitches([]testPod{podTest}, []string{"node1"})}
 				key, err := retry.GetResourceKey(pod)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.startWithDBSetup(initialDB,
@@ -1149,7 +1187,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				fakeOvn.asf.ExpectEmptyAddressSet(podTest.namespace)
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})...))
 				// check the retry cache no longer has the entry
 				retry.CheckRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
 				return nil
@@ -1200,7 +1238,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				fakeOvn.asf.ExpectAddressSetWithAddresses(podTest.namespace, []string{podTest.podIP})
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})...))
 
 				// inject transient problem, nbdb is down
 				fakeOvn.controller.nbClient.Close()
@@ -1262,7 +1300,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// check that pod doesn't appear in OVN
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
-					getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...))
+					getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})...))
 
 				return nil
 			}
@@ -1285,7 +1323,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespace1.Name,
 				)
 				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
-				expectedData := []libovsdbtest.TestData{getExpectedDataPodsAndSwitches(
+				expectedData := []libovsdbtest.TestData{getDefaultNetExpectedPodsAndSwitches(
 					[]testPod{podTest},
 					[]string{"node1"})}
 				key, err := retry.GetResourceKey(pod)
@@ -1398,7 +1436,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespace1.Name,
 				)
 				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
-				expectedData := []libovsdbtest.TestData{getExpectedDataPodsAndSwitches([]testPod{podTest}, []string{"node1"})}
+				expectedData := []libovsdbtest.TestData{getDefaultNetExpectedPodsAndSwitches([]testPod{podTest}, []string{"node1"})}
 				key, err := retry.GetResourceKey(pod)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.startWithDBSetup(initialDB,
@@ -1440,7 +1478,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// OVN db should be empty now
 				fakeOvn.asf.ExpectEmptyAddressSet(podTest.namespace)
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})...))
 
 				// Once again, get pod from api with its metadata filled in
 				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(context.TODO(), podTest.podName, metav1.GetOptions{})
@@ -1559,7 +1597,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1568,7 +1606,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(pod).To(gomega.BeNil())
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})))
 				return nil
 			}
 
@@ -1634,7 +1672,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 
@@ -1680,7 +1718,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// Add Pod logical port should succeed even without namespace
 				gomega.Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(gomega.MatchJSON(podJSON))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 
 				return nil
 			}
@@ -1743,7 +1781,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
 				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 
@@ -1796,7 +1834,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// check nbdb data is added
 				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				// check that the pod annotations are preserved
 				// makes sense only when handling is finished, therefore check after nbdb is updated
 				annotations = getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
@@ -2020,7 +2058,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// check db values are updated to correlate with test pods settings
 				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t1, t2, t3}, []string{"node1", "node2"})))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t1, t2, t3}, []string{"node1", "node2"})))
 				// check annotations are preserved
 				// makes sense only when handling is finished, therefore check after nbdb is updated
 				annotations := getPodAnnotations(fakeOvn.fakeClient.KubeClient, t1.namespace, t1.podName)
@@ -2313,7 +2351,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				}, 2).Should(gomega.MatchJSON(expectedAnnotations))
 
 				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+					libovsdbtest.HaveData(getDefaultNetExpectedPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 

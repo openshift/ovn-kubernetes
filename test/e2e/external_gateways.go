@@ -11,10 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
+	"github.com/google/go-cmp/cmp"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -448,7 +449,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 					for _, gwContainer := range gwContainers {
-						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 					}
 
@@ -594,7 +596,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 				ginkgo.By("Verifying connectivity to the pod from external gateways")
 				for _, gwContainer := range gwContainers {
-					_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+					// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+					_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 					framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 				}
 
@@ -696,10 +699,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gatewayPodName2 string = "e2e-gateway-pod2"
 			)
 
-			var (
-				servingNamespace string
-			)
-
 			f := wrappedTestFramework(svcname)
 
 			var (
@@ -708,6 +707,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				nodes                    *v1.NodeList
 				err                      error
 				clientSet                kubernetes.Interface
+				servingNamespace         string
 			)
 
 			ginkgo.BeforeEach(func() {
@@ -971,7 +971,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 						ginkgo.By("Verifying connectivity to the pod from external gateways")
 						for _, gwContainer := range gwContainers {
-							_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+							// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+							_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 							framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 						}
 
@@ -1164,7 +1165,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 					annotateNamespaceForGateway(f.Namespace.Name, true, addresses.gatewayIPs[:]...)
 					for _, gwContainer := range gwContainers {
-						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 					}
 
@@ -1336,10 +1338,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				addressesv4, addressesv6 gatewayTestIPs
 				clientSet                kubernetes.Interface
 				servingNamespace         string
-			)
-
-			var (
-				gwContainers []string
+				gwContainers             []string
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -1377,7 +1376,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 					for _, gwContainer := range gwContainers {
-						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 					}
 
@@ -1637,7 +1637,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 				ginkgo.By("Verifying connectivity to the pod from external gateways")
 				for _, gwContainer := range gwContainers {
-					_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+					// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+					_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 					framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 				}
 
@@ -1738,13 +1739,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gatewayPodName2 string = "e2e-gateway-pod2"
 			)
 
-			var (
-				servingNamespace string
-			)
-
 			f := wrappedTestFramework(svcname)
 
 			var (
+				servingNamespace         string
 				addressesv4, addressesv6 gatewayTestIPs
 				sleepCommand             []string
 				nodes                    *v1.NodeList
@@ -1958,10 +1956,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					addressesv4, addressesv6 gatewayTestIPs
 					clientSet                kubernetes.Interface
 					servingNamespace         string
-				)
-
-				var (
-					gwContainers []string
+					gwContainers             []string
 				)
 
 				f := wrappedTestFramework(svcname)
@@ -2002,7 +1997,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 						ginkgo.By("Verifying connectivity to the pod from external gateways")
 						for _, gwContainer := range gwContainers {
-							_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+							// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+							_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 							framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 						}
 
@@ -2367,10 +2363,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				addressesv4, addressesv6 gatewayTestIPs
 				clientSet                kubernetes.Interface
 				servingNamespace         string
-			)
-
-			var (
-				gwContainers []string
+				gwContainers             []string
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -2413,7 +2406,8 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					ginkgo.By("Validate ICMP connectivity again with only CR policy to support it")
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 					for _, gwContainer := range gwContainers {
-						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-c", testTimeout, addresses.srcPodIP)
+						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
+						_, err := runCommand(containerRuntime, "exec", gwContainer, "ping", "-I", addresses.targetIPs[0], "-c", testTimeout, addresses.srcPodIP)
 						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
 					}
 					tcpDumpSync := sync.WaitGroup{}
@@ -2514,18 +2508,15 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			)
 
 			var (
-				servingNamespace string
-			)
-
-			f := wrappedTestFramework(svcname)
-
-			var (
+				servingNamespace         string
 				addressesv4, addressesv6 gatewayTestIPs
 				sleepCommand             []string
 				nodes                    *v1.NodeList
 				err                      error
 				clientSet                kubernetes.Interface
 			)
+
+			f := wrappedTestFramework(svcname)
 
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
@@ -2682,7 +2673,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			svcname          string = "novxlan-externalgw-ecmp"
 			gwContainer1     string = "gw-test-container1"
 			gwContainer2     string = "gw-test-container2"
-			testTimeout      string = "30"
 			ecmpRetry        int    = 20
 			srcPodName              = "e2e-exgw-src-pod"
 			externalTCPPort         = 80
@@ -3079,19 +3069,6 @@ func annotateNamespaceForGateway(namespace string, bfd bool, gateways ...string)
 		annotateArgs = append(annotateArgs, "k8s.ovn.org/bfd-enabled=\"\"")
 	}
 	framework.Logf("Annotating the external gateway test namespace to container gateways: %s", externalGateways)
-	e2ekubectl.RunKubectlOrDie(namespace, annotateArgs...)
-}
-
-func removeStaticGatewayAnnotationInNamespace(namespace string) {
-
-	// annotate the test namespace with multiple gateways defined
-	annotateArgs := []string{
-		"annotate",
-		"namespace",
-		namespace,
-		"k8s.ovn.org/routing-external-gws-",
-		"--overwrite",
-	}
 	e2ekubectl.RunKubectlOrDie(namespace, annotateArgs...)
 }
 

@@ -1,30 +1,29 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	"github.com/pkg/errors"
-
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -38,11 +37,16 @@ const (
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
 	// Create default Control Plane Protection (COPP) entry for routers
-	logicalRouter, err := oc.createOvnClusterRouter()
+	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
+	if err != nil {
+		return fmt.Errorf("unable to create router control plane protection: %w", err)
+	}
+	oc.defaultCOPPUUID = defaultCOPPUUID
+
+	logicalRouter, err := oc.newClusterRouter()
 	if err != nil {
 		return err
 	}
-	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
 	pgIDs := oc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
 	pg := &nbdb.PortGroup{
@@ -107,168 +111,79 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	logicalSwitch := nbdb.LogicalSwitch{
-		Name: types.OVNJoinSwitch,
-	}
-	// nothing is updated here, so no reason to pass fields
-	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
-	}
-
-	// Connect the distributed router to OVNJoinSwitch.
-	drSwitchPort := types.JoinSwitchToGWRouterPrefix + types.OVNClusterRouter
-	drRouterPort := types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter
-
-	gwLRPMAC := util.IPAddrToHWAddr(oc.ovnClusterLRPToJoinIfAddrs[0].IP)
-	gwLRPNetworks := []string{}
-	for _, gwLRPIfAddr := range oc.ovnClusterLRPToJoinIfAddrs {
-		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
-	}
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     drRouterPort,
-		MAC:      gwLRPMAC.String(),
-		Networks: gwLRPNetworks,
-	}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, logicalRouter,
-		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
-	if err != nil {
-		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, logicalRouter.Name, err)
-	}
-
-	// Create OVNJoinSwitch that will be used to connect gateway routers to the
-	// distributed router and connect it to said dsitributed router.
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name: drSwitchPort,
-		Type: "router",
-		Options: map[string]string{
-			"router-port": drRouterPort,
-		},
-		Addresses: []string{"router"},
-	}
-	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, types.OVNJoinSwitch, err)
-	}
-
-	return nil
+	return oc.gatewayTopologyFactory.NewJoinSwitch(logicalRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs)
 }
 
-func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
-	if err != nil {
-		return err
+func (oc *DefaultNetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
+	if oc.multicastSupport {
+		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
+			oc.GetNetworkScopedClusterRouterName(),
+			oc.NetInfo,
+			oc.defaultCOPPUUID,
+		)
 	}
-
-	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-		if err != nil {
-			return err
-		}
-	}
-
-	var v4Subnet *net.IPNet
-	addresses := macAddress.String()
-	for _, hostSubnet := range hostSubnets {
-		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		addresses += " " + mgmtIfAddr.IP.String()
-
-		if err := oc.addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
-			return err
-		}
-
-		if !utilnet.IsIPv6CIDR(hostSubnet) {
-			v4Subnet = hostSubnet
-		}
-		if config.Gateway.Mode == config.GatewayModeLocal {
-			lrsr := nbdb.LogicalRouterStaticRoute{
-				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				IPPrefix: hostSubnet.String(),
-				Nexthop:  mgmtIfAddr.IP.String(),
-			}
-			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
-			}
-			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient, types.OVNClusterRouter,
-				&lrsr, p, &lrsr.Nexthop)
-			if err != nil {
-				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
-			}
-		}
-	}
-
-	// Create this node's management logical port on the node switch
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.K8sPrefix + node.Name,
-		Addresses: []string{addresses},
-	}
-	sw := nbdb.LogicalSwitch{Name: node.Name}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
-	if err != nil {
-		return err
-	}
-
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), logicalSwitchPort.UUID)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return err
-	}
-
-	if v4Subnet != nil {
-		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, v4Subnet); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return oc.gatewayTopologyFactory.NewClusterRouter(
+		oc.GetNetworkScopedClusterRouterName(),
+		oc.NetInfo,
+		oc.defaultCOPPUUID,
+	)
 }
 
-func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet, hostAddrs []string) error {
-	var err error
-	var gwLRPIPs, clusterSubnets []*net.IPNet
+func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) error {
+	mgmtPortIPs, err := oc.syncNodeManagementPortRouteHostSubnets(node, switchName, hostSubnets)
+	if err == nil {
+		return oc.setupUDNACLs(mgmtPortIPs)
+	}
+	return err
+}
+
+func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
+	node *kapi.Node,
+	l3GatewayConfig *util.L3GatewayConfig,
+	hostSubnets []*net.IPNet,
+	hostAddrs []string,
+) error {
+	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	gwLRPIPs, err = util.ParseNodeGatewayRouterLRPAddrs(node)
+	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
-		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
-	}
-
-	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
-
-	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, oc.ovnClusterLRPToJoinIfAddrs,
-		enableGatewayMTU)
-	if err != nil {
-		return fmt.Errorf("failed to init shared interface gateway: %v", err)
-	}
-
-	for _, subnet := range hostSubnets {
-		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
-		if err != nil {
-			return err
-		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
-		if err != nil && err != util.ErrorNoIP {
-			return err
-		}
-		if err := oc.addPolicyBasedRoutes(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP, relevantHostIPs); err != nil {
-			return err
+		if util.IsAnnotationNotSetError(err) {
+			// FIXME(tssurya): This is present for backwards compatibility
+			// Remove me a few months from now
+			var err1 error
+			gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+			if err1 != nil {
+				return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+			}
 		}
 	}
 
-	return err
+	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
+	for i, ip := range l3GatewayConfig.IPAddresses {
+		externalIPs[i] = ip.IP
+	}
+
+	return oc.newGatewayManager(node.Name).syncGatewayLogicalNetwork(
+		node,
+		l3GatewayConfig,
+		hostSubnets,
+		hostAddrs,
+		clusterSubnets,
+		gwLRPIPs,
+		oc.SCTPSupport,
+		oc.ovnClusterLRPToJoinIfAddrs,
+		externalIPs,
+	)
 }
 
 func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	// Node subnet for the default network is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
 	// to create OVN Northbound resources.
-	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +278,7 @@ func (oc *DefaultNetworkController) cleanupNodeResources(nodeName string) error 
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := oc.gatewayCleanup(nodeName); err != nil {
+	if err := oc.newGatewayManager(nodeName).Cleanup(); err != nil {
 		return fmt.Errorf("failed to clean up node %s gateway: (%w)", nodeName, err)
 	}
 
@@ -455,6 +370,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 	// Find stale external logical switches, based on well known prefix and node name
 	lookupExtSwFunction := func(item *nbdb.LogicalSwitch) bool {
+		_, ok := item.ExternalIDs[types.NetworkExternalID]
+		if ok {
+			return false
+		}
 		nodeName := strings.TrimPrefix(item.Name, types.ExternalSwitchPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
 			staleNodes.Insert(nodeName)
@@ -469,6 +388,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 	// Find stale gateway routers, based on well known prefix and node name
 	lookupGwRouterFunction := func(item *nbdb.LogicalRouter) bool {
+		_, ok := item.ExternalIDs[types.NetworkExternalID]
+		if ok {
+			return false
+		}
 		nodeName := strings.TrimPrefix(item.Name, types.GWRouterPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
 			staleNodes.Insert(nodeName)
@@ -657,21 +580,30 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		} else {
 			oc.nodeClusterRouterPortFailed.Delete(node.Name)
 		}
-	}
-
-	if nSyncs.syncMgmtPort {
-		err := oc.syncNodeManagementPort(node, hostSubnets)
-		if err != nil {
+		// delete stale chassis in SBDB if any
+		if err := oc.deleteStaleNodeChassis(node); err != nil {
 			errs = append(errs, err)
-			oc.mgmtPortFailed.Store(node.Name, true)
-		} else {
-			oc.mgmtPortFailed.Delete(node.Name)
 		}
 	}
 
-	// delete stale chassis in SBDB if any
-	if err := oc.deleteStaleNodeChassis(node); err != nil {
-		errs = append(errs, err)
+	if nSyncs.syncMgmtPort {
+		if hostSubnets == nil {
+			hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+			if err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			}
+		}
+
+		// If we succcessfully discovered the host subnets then add the management port.
+		if hostSubnets != nil {
+			if err = oc.syncNodeManagementPortDefault(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
+			}
+		}
 	}
 
 	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
@@ -734,7 +666,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		}
 	}
 
-	return kerrors.NewAggregate(errs)
+	return utilerrors.Join(errs...)
 }
 
 func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
@@ -833,37 +765,9 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 	return nil
 }
 
-// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
-// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
-// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
-// always be the first IP from these subnets.
-func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
-	joinSubnetsConfig := []string{}
-	if config.IPv4Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V4JoinSubnet)
-	}
-	if config.IPv6Mode {
-		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V6JoinSubnet)
-	}
-	for _, joinSubnetString := range joinSubnetsConfig {
-		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
-		}
-		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
-		ipnet := &net.IPNet{
-			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
-			Mask: joinSubnet.Mask,
-		}
-		gwLRPIPs = append(gwLRPIPs, ipnet)
-	}
-
-	return gwLRPIPs, nil
-}
-
 // addUpdateHoNodeEvent reconsile ovn nodes when a hybrid overlay node is added.
 func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *kapi.Node) error {
-	if subnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName); len(subnets) > 0 {
+	if subnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName()); len(subnets) > 0 {
 		klog.Infof("Node %q is used to be a OVN-K managed node, deleting it from OVN topology", node.Name)
 		if err := oc.deleteOVNNodeEvent(node); err != nil {
 			return err
@@ -1021,4 +925,29 @@ func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *k
 		return err
 	}
 	return nil
+}
+
+func (oc *DefaultNetworkController) newGatewayManager(nodeName string) *GatewayManager {
+	gatewayManager := NewGatewayManager(
+		nodeName,
+		oc.defaultCOPPUUID,
+		oc.kube,
+		oc.nbClient,
+		oc.NetInfo,
+		oc.watchFactory,
+		oc.gatewayOptions()...,
+	)
+	return gatewayManager
+}
+
+func (oc *DefaultNetworkController) gatewayOptions() []GatewayOption {
+	var opts []GatewayOption
+	if oc.clusterLoadBalancerGroupUUID != "" {
+		opts = append(opts, WithLoadBalancerGroups(
+			oc.routerLoadBalancerGroupUUID,
+			oc.clusterLoadBalancerGroupUUID,
+			oc.switchLoadBalancerGroupUUID,
+		))
+	}
+	return opts
 }

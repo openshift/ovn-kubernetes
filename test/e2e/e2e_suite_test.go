@@ -8,7 +8,9 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
+
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -43,7 +45,7 @@ func handleFlags() {
 
 var _ = ginkgo.BeforeSuite(func() {
 	// Make sure the framework's kubeconfig is set.
-	framework.ExpectNotEqual(framework.TestContext.KubeConfig, "", fmt.Sprintf("%s env var not set", clientcmd.RecommendedConfigPathEnvVar))
+	gomega.Expect(framework.TestContext.KubeConfig).NotTo(gomega.Equal(""), fmt.Sprintf("%s env var not set", clientcmd.RecommendedConfigPathEnvVar))
 
 	_, err := framework.LoadClientset()
 	framework.ExpectNoError(err)

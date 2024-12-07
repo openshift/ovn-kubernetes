@@ -11,6 +11,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -23,6 +24,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 	var (
 		app      *cli.App
 		f        *factory.WatchFactory
+		recorder record.EventRecorder
 		stopChan chan struct{}
 		wg       *sync.WaitGroup
 	)
@@ -36,6 +38,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
+		recorder = record.NewFakeRecorder(10)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -54,6 +57,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "node1",
 							Annotations: map[string]string{
+								ovnNodeIDAnnotaton:         "3",
 								"k8s.ovn.org/node-subnets": "{\"default\":[\"10.128.0.0/24\", \"fd02:0:0:2::2895/64\"]}",
 							},
 						},
@@ -75,7 +79,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ncc := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, fakeClient, f)
+				ncc := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, fakeClient, f, recorder)
 				ncc.Start(ctx.Context)
 				defer ncc.Stop()
 
@@ -104,6 +108,9 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "node1",
+							Annotations: map[string]string{
+								ovnNodeIDAnnotaton: "3",
+							},
 						},
 					},
 				}
@@ -123,7 +130,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ncc := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, fakeClient, f)
+				ncc := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, fakeClient, f, recorder)
 				ncc.Start(ctx.Context)
 				defer ncc.Stop()
 
@@ -154,6 +161,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 							Name: "node1",
 							Annotations: map[string]string{
 								"k8s.ovn.org/node-subnets": "{\"default\":[\"10.128.0.0/24\", \"1.2.3.0/24\"]}",
+								ovnNodeIDAnnotaton:         "3",
 							},
 						},
 					},
@@ -174,7 +182,7 @@ var _ = ginkgo.Describe("Network Cluster Controller", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ncc := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, fakeClient, f)
+				ncc := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, fakeClient, f, recorder)
 				ncc.Start(ctx.Context)
 				defer ncc.Stop()
 

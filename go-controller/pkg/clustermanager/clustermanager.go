@@ -6,18 +6,21 @@ import (
 	"net"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/dnsnameresolver"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
+	udncontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
+	udntemplate "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -37,10 +40,13 @@ type ClusterManager struct {
 	secondaryNetClusterManager  *secondaryNetworkClusterManager
 	// Controller used for programming node allocation for egress IP
 	// The OVN DB setup is handled by egressIPZoneController that runs in ovnkube-controller
-	eIPC                    *egressIPClusterController
-	egressServiceController *egressservice.Controller
+	eIPC                          *egressIPClusterController
+	egressServiceController       *egressservice.Controller
+	endpointSliceMirrorController *endpointslicemirror.Controller
 	// Controller used for maintaining dns name resolver objects
 	dnsNameResolverController *dnsnameresolver.Controller
+	// Controller for managing user-defined-network CRD
+	userDefinedNetworkController *udncontroller.Controller
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -54,7 +60,7 @@ type ClusterManager struct {
 func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
 	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
 
-	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf)
+	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf, recorder)
 
 	zoneClusterController, err := newZoneClusterController(ovnClient, wf)
 	if err != nil {
@@ -107,6 +113,12 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 			return nil, err
 		}
 	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if config.Kubernetes.OVNEmptyLbEvents {
 		if _, err := unidling.NewUnidledAtController(&kube.Kube{KClient: ovnClient.KubeClient}, wf.ServiceInformer()); err != nil {
 			return nil, err
@@ -115,6 +127,17 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController = dnsnameresolver.NewController(ovnClient, wf)
 	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		udnController := udncontroller.New(
+			ovnClient.NetworkAttchDefClient, wf.NADInformer(),
+			ovnClient.UserDefinedNetworkClient, wf.UserDefinedNetworkInformer(),
+			udntemplate.RenderNetAttachDefManifest,
+			wf.PodCoreInformer(),
+		)
+		cm.userDefinedNetworkController = udnController
+	}
+
 	return cm, nil
 }
 
@@ -153,12 +176,23 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if err := cm.endpointSliceMirrorController.Start(ctx, 1); err != nil {
+			return err
+		}
+	}
 	if err := cm.statusManager.Start(); err != nil {
 		return err
 	}
 
 	if util.IsDNSNameResolverEnabled() {
 		if err := cm.dnsNameResolverController.Start(); err != nil {
+			return err
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if err := cm.userDefinedNetworkController.Run(); err != nil {
 			return err
 		}
 	}
@@ -179,8 +213,14 @@ func (cm *ClusterManager) Stop() {
 	if config.OVNKubernetesFeature.EnableEgressService {
 		cm.egressServiceController.Stop()
 	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		cm.endpointSliceMirrorController.Stop()
+	}
 	cm.statusManager.Stop()
 	if util.IsDNSNameResolverEnabled() {
 		cm.dnsNameResolverController.Stop()
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		cm.userDefinedNetworkController.Shutdown()
 	}
 }

@@ -12,7 +12,7 @@ set -e
 if [ "${KUBECONFIG}" == "" ]; then
   export KUBECONFIG=${HOME}/ovn.conf
 fi
-export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-f:pr}
+export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-fedora:pr}
 
 DIR=$(dirname "${BASH_SOURCE[0]}")
 
@@ -496,6 +496,9 @@ if ovnkube_trace ${src_pods[0]} ${dst_svc[0]} -udp; then
   echo "The result of this test should be a failure condition"
   exit 1
 fi
+
+echo "Run ovnkube-trace to dump UDN VRF table IDs"
+ovnkube_trace --dump-udn-vrf-table-ids
 
 if [ ${POST_CLEANUP} == true ]; then
   cleanup

@@ -32,6 +32,10 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
     spec:
+      {{- if .Values.global.imagePullSecretName }}
+      imagePullSecrets:
+      - name: {{ .Values.global.imagePullSecretName }}
+      {{- end }}
       priorityClassName: "system-cluster-critical"
       serviceAccountName: ovnkube-identity
       hostNetwork: true
@@ -56,7 +60,7 @@ spec:
             name: webhook-cert
         env:
           - name: OVN_DAEMONSET_VERSION
-            value: "3"
+            value: "1.0.0"
           - name: K8S_APISERVER
             valueFrom:
               configMapKeyRef:
