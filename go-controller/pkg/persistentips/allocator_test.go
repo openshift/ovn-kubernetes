@@ -112,7 +112,9 @@ var _ = Describe("Persistent IP allocator operations", func() {
 		},
 			Entry("no objects to sync with"),
 			Entry("an IPAMClaim without persisted IPs", emptyDummyIPAMClaim(namespace, claimName, networkName)),
-			Entry("an IPAMClaim with persisted IPs", ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64")),
+			Entry("an IPAMClaim with persisted IPs",
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.2/24", "fd10::1/64"),
+				ipamClaimWithIPs(namespace, claimName, networkName, "192.168.200.3/24", "fd10::2/64")),
 		)
 	})
 
@@ -167,7 +169,7 @@ var _ = Describe("Persistent IP allocator operations", func() {
 			initialIPs = []string{"192.168.200.2/24", "fd10::1/64"}
 			ipAllocator := subnet.NewAllocator()
 			Expect(ipAllocator.AddOrUpdateSubnet(subnetName, ovntest.MustParseIPNets("192.168.200.0/24", "fd10::/64"))).To(Succeed())
-			Expect(ipAllocator.AllocateIPs(subnetName, ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
+			Expect(ipAllocator.AllocateIPPerSubnet(subnetName, ovntest.MustParseIPNets(initialIPs...))).To(Succeed())
 			namedAllocator = ipAllocator.ForSubnet(subnetName)
 
 			netInfo, err := util.NewNetInfo(dummyNetconf(networkName))
