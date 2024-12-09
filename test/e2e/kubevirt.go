@@ -1462,7 +1462,7 @@ chpasswd: { expire: False }`
 				test:     restart,
 				topology: "layer2",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachine,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1472,7 +1472,7 @@ chpasswd: { expire: False }`
 				test:     liveMigrate,
 				topology: "layer2",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1486,6 +1486,11 @@ chpasswd: { expire: False }`
 				resource: virtualMachineInstance,
 				test:     liveMigrateFailed,
 				topology: "layer2",
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineInstance,
+				test:     liveMigrateFailed,
+				topology: "localnet",
 			}),
 		)
 	})
