@@ -18,7 +18,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -48,66 +47,12 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		return err
 	}
 
-	pgIDs := oc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
-	pg := &nbdb.PortGroup{
-		Name: libovsdbutil.GetPortGroupName(pgIDs),
-	}
-	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+	if err := oc.setupClusterPortGroups(); err != nil {
 		return err
 	}
-	if pg == nil {
-		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
-		// Create a cluster-wide port group that all logical switch ports are part of
-		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
-		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
-		if err != nil {
-			klog.Errorf("Failed to create cluster port group: %v", err)
-			return err
-		}
-	}
 
-	pgIDs = oc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
-	pg = &nbdb.PortGroup{
-		Name: libovsdbutil.GetPortGroupName(pgIDs),
-	}
-	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+	if err := oc.syncDefaultMulticastPolicies(); err != nil {
 		return err
-	}
-	if pg == nil {
-		// we didn't find an existing clusterRtrPG, let's create a new empty PG (fresh cluster install)
-		// Create a cluster-wide port group with all node-to-cluster router
-		// logical switch ports. Currently the only user is multicast but it might
-		// be used for other features in the future.
-		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
-		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
-		if err != nil {
-			klog.Errorf("Failed to create cluster port group: %v", err)
-			return err
-		}
-	}
-
-	// If supported, enable IGMP relay on the router to forward multicast
-	// traffic between nodes.
-	if oc.multicastSupport {
-		// Drop IP multicast globally. Multicast is allowed only if explicitly
-		// enabled in a namespace.
-		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
-			return err
-		}
-
-		// Allow IP multicast from node switch to cluster router and from
-		// cluster router to node switch.
-		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
-			return err
-		}
-	} else {
-		if err = oc.disableMulticast(); err != nil {
-			return fmt.Errorf("failed to delete default multicast policy, error: %v", err)
-		}
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
@@ -361,10 +306,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
 
-	staleNodes := sets.NewString()
+	staleSwitches := sets.NewString()
 	for _, nodeSwitch := range nodeSwitches {
-		if nodeSwitch.Name != types.TransitSwitch && !foundNodes.Has(nodeSwitch.Name) {
-			staleNodes.Insert(nodeSwitch.Name)
+		if !strings.HasSuffix(nodeSwitch.Name, types.TransitSwitch) && !foundNodes.Has(nodeSwitch.Name) {
+			staleSwitches.Insert(nodeSwitch.Name)
 		}
 	}
 
@@ -376,7 +321,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 		nodeName := strings.TrimPrefix(item.Name, types.ExternalSwitchPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
-			staleNodes.Insert(nodeName)
+			staleSwitches.Insert(nodeName)
 			return true
 		}
 		return false
@@ -394,7 +339,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 		nodeName := strings.TrimPrefix(item.Name, types.GWRouterPrefix)
 		if nodeName != item.Name && len(nodeName) > 0 && !foundNodes.Has(nodeName) {
-			staleNodes.Insert(nodeName)
+			staleSwitches.Insert(nodeName)
 			return true
 		}
 		return false
@@ -405,9 +350,9 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	}
 
 	// Cleanup stale nodes (including gateway routers and external logical switches)
-	for _, staleNode := range staleNodes.UnsortedList() {
-		if err := oc.cleanupNodeResources(staleNode); err != nil {
-			return fmt.Errorf("failed to cleanup node resources:%s, err:%w", staleNode, err)
+	for _, staleSwitch := range staleSwitches.UnsortedList() {
+		if err := oc.cleanupNodeResources(staleSwitch); err != nil {
+			return fmt.Errorf("failed to cleanup node resources:%s, err:%w", staleSwitch, err)
 		}
 	}
 
