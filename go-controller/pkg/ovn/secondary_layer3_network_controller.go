@@ -134,6 +134,13 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
 
+		start := time.Now()
+		perfEntry := perf[h.oc.GetNetworkName()]
+		defer func() {
+			perfEntry.AddEntry(fmt.Sprintf("AddResource_Node_%s", node.Name), start)
+		}()
+
+
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -189,6 +196,13 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
+
+		start := time.Now()
+		perfEntry := perf[h.oc.GetNetworkName()]
+		defer func() {
+			perfEntry.AddEntry(fmt.Sprintf("UpdateResource_Node_%s", newNode.Name), start)
+		}()
+
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.NetInfo.GetNetworkName())
 		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
@@ -459,23 +473,67 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 	)
 }
 
+type PerfEntry struct {
+	name string
+	time time.Duration
+}
+type CtrlPerf struct {
+	sync.Mutex
+	Startups      int
+	Name          string
+	LastStartTime time.Time
+	Entries       []PerfEntry
+}
+
+func (r *CtrlPerf) AddEntry(name string, startTime time.Time) {
+	r.Lock()
+	defer r.Unlock()
+	r.Entries = append(r.Entries, PerfEntry{
+		name: fmt.Sprintf("%s[%d]", name, r.Startups),
+		time: time.Since(startTime),
+	})
+}
+
+func (r *CtrlPerf) String() string {
+	res := fmt.Sprintf("Name: %s, LastStartTime: %s, Startups: %d", r.Name, r.LastStartTime, r.Startups)
+	for _, e := range r.Entries {
+		res += fmt.Sprintf(", %s:%s", e.name, e.time)
+	}
+	return res
+}
+
+var perf = make(map[string]*CtrlPerf, 100)
+
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	netName := oc.GetNetworkName()
+	var ctrlPerf *CtrlPerf
+	var exists bool
+	if ctrlPerf, exists = perf[netName]; !exists {
+		ctrlPerf = &CtrlPerf{Name: netName}
+		perf[netName] = ctrlPerf
+	}
+	ctrlPerf.Startups += 1
+	ctrlPerf.LastStartTime = time.Now()
 	_, err := oc.getNetworkID()
 	if err != nil {
 		return fmt.Errorf("unable to set networkID on secondary L3 controller for network %s, err: %w", oc.GetNetworkName(), err)
 	}
+	ctrlPerf.AddEntry("network_id_received", ctrlPerf.LastStartTime)
+
+	t := time.Now()
 	if err = oc.Init(ctx); err != nil {
 		return err
 	}
-
+	ctrlPerf.AddEntry("init", t)
 	return oc.Run()
 }
 
 // Stop gracefully stops the controller, and delete all logical entities for this network if requested
 func (oc *SecondaryLayer3NetworkController) Stop() {
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	klog.Infof("Controller performance numbers: %s", perf[oc.GetNetworkName()])
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
@@ -568,11 +626,13 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	if err := oc.WatchNamespaces(); err != nil {
 		return err
 	}
+	ctrlPerf := perf[oc.GetNetworkName()]
+	ctrlPerf.AddEntry("WatchNamespaces", start)
 
+	t := time.Now()
 	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
-
 	if oc.svcController != nil {
 		startSvc := time.Now()
 		// Services should be started after nodes to prevent LB churn
@@ -584,23 +644,28 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 			return err
 		}
 	}
-
+	t = time.Now()
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
+	ctrlPerf.AddEntry("WatchPods", t)
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
+		t = time.Now()
 		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
 		if err := oc.WatchMultiNetworkPolicy(); err != nil {
 			return err
 		}
+		ctrlPerf.AddEntry("WatchMultiNetworkPolicy", t)
 	}
 
 	if oc.IsPrimaryNetwork() {
+		t = time.Now()
 		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 		if err := oc.WatchNetworkPolicy(); err != nil {
 			return err
 		}
+		ctrlPerf.AddEntry("WatchNetworkPolicy", t)
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
@@ -625,26 +690,33 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 	if err := oc.gatherJoinSwitchIPs(); err != nil {
 		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", oc.GetNetworkName(), err)
 	}
-
+	ctrlPerf := perf[oc.GetNetworkName()]
+	t := time.Now()
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
 		return fmt.Errorf("unable to create router control plane protection: %w", err)
 	}
 	oc.defaultCOPPUUID = defaultCOPPUUID
+	ctrlPerf.AddEntry("EnsureDefaultCOPP", t)
 
+	t = time.Now()
 	clusterRouter, err := oc.newClusterRouter()
 	if err != nil {
 		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
 	}
+	ctrlPerf.AddEntry("newClusterRouter", t)
 
 	// Only configure join switch and GR for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		t = time.Now()
 		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
 			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
 		}
+		ctrlPerf.AddEntry("NewJoinSwitch", t)
 	}
 
+	t = time.Now()
 	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
 	// use IsTableSupported(nbdb.LoadBalancerGroup).
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
@@ -658,6 +730,7 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 		oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
 		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
+	ctrlPerf.AddEntry("nbctl_list_lb_", t)
 	return nil
 }
 

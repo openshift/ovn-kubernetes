@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -61,9 +62,49 @@ func NewSecondaryNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, n
 	return snnc, nil
 }
 
+type PerfEntry struct {
+	name string
+	time time.Duration
+}
+type CtrlPerf struct {
+	sync.Mutex
+	Startups      int
+	Name          string
+	LastStartTime time.Time
+	Entries       []PerfEntry
+}
+
+func (r *CtrlPerf) AddEntry(name string, startTime time.Time) {
+	r.Lock()
+	defer r.Unlock()
+	r.Entries = append(r.Entries, PerfEntry{
+		name: fmt.Sprintf("%s[%d]", name, r.Startups),
+		time: time.Since(startTime),
+	})
+}
+
+func (r *CtrlPerf) String() string {
+	res := fmt.Sprintf("Name: %s, LastStartTime: %s, Startups: %d", r.Name, r.LastStartTime, r.Startups)
+	for _, e := range r.Entries {
+		res += fmt.Sprintf(", %s:%s", e.name, e.time)
+	}
+	return res
+}
+
+var perfNode = make(map[string]*CtrlPerf, 100)
+
 // Start starts the default controller; handles all events and creates all needed logical entities
 func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
+
+	var ctrlPerf *CtrlPerf
+	var exists bool
+	if ctrlPerf, exists = perfNode[nc.GetNetworkName()]; !exists {
+		ctrlPerf = &CtrlPerf{Name: nc.GetNetworkName()}
+		perfNode[nc.GetNetworkName()] = ctrlPerf
+	}
+	ctrlPerf.Startups += 1
+	ctrlPerf.LastStartTime = time.Now()
 
 	// enable adding ovs ports for dpu pods in both primary and secondary user defined networks
 	if (config.OVNKubernetesFeature.EnableMultiNetwork || util.IsNetworkSegmentationSupportEnabled()) && config.OvnKubeNode.Mode == types.NodeModeDPU {
@@ -78,12 +119,15 @@ func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
 		}
+		ctrlPerf.AddEntry("gateway_AddNetwork", ctrlPerf.LastStartTime)
 	}
 	return nil
 }
 
 // Stop gracefully stops the controller
 func (nc *SecondaryNodeNetworkController) Stop() {
+	klog.Infof("Node performance numbers: %s", perfNode[nc.GetNetworkName()])
+	
 	klog.Infof("Stop secondary node network controller of network %s", nc.GetNetworkName())
 	close(nc.stopChan)
 	nc.wg.Wait()
