@@ -23,22 +23,36 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Fake is a fake implementation of Interface
 type Fake struct {
 	nftContext
+	// mutex is used to protect Table and LastTransaction.
+	// When Table and LastTransaction are accessed directly, the caller must acquire Fake.RLock
+	// and release when finished.
+	sync.RWMutex
 
 	nextHandle int
 
 	// Table contains the Interface's table. This will be `nil` until you `tx.Add()`
 	// the table.
+	// Make sure to acquire Fake.RLock before accessing Table in a concurrent environment.
 	Table *FakeTable
+
+	// LastTransaction is the last transaction passed to Run(). It will remain set until the
+	// next time Run() is called. (It is not affected by Check().)
+	// Make sure to acquire Fake.RLock before accessing LastTransaction in a concurrent environment.
+	LastTransaction *Transaction
 }
 
 // FakeTable wraps Table for the Fake implementation
 type FakeTable struct {
 	Table
+
+	// Flowtables contains the table's flowtables, keyed by name
+	Flowtables map[string]*FakeFlowtable
 
 	// Chains contains the table's chains, keyed by name
 	Chains map[string]*FakeChain
@@ -48,6 +62,11 @@ type FakeTable struct {
 
 	// Maps contains the table's maps, keyed by name
 	Maps map[string]*FakeMap
+}
+
+// FakeFlowtable wraps Flowtable for the Fake implementation
+type FakeFlowtable struct {
+	Flowtable
 }
 
 // FakeChain wraps Chain for the Fake implementation
@@ -90,6 +109,8 @@ var _ Interface = &Fake{}
 
 // List is part of Interface.
 func (fake *Fake) List(_ context.Context, objectType string) ([]string, error) {
+	fake.RLock()
+	defer fake.RUnlock()
 	if fake.Table == nil {
 		return nil, notFoundError("no such table %q", fake.table)
 	}
@@ -97,6 +118,10 @@ func (fake *Fake) List(_ context.Context, objectType string) ([]string, error) {
 	var result []string
 
 	switch objectType {
+	case "flowtable", "flowtables":
+		for name := range fake.Table.Flowtables {
+			result = append(result, name)
+		}
 	case "chain", "chains":
 		for name := range fake.Table.Chains {
 			result = append(result, name)
@@ -119,18 +144,32 @@ func (fake *Fake) List(_ context.Context, objectType string) ([]string, error) {
 
 // ListRules is part of Interface
 func (fake *Fake) ListRules(_ context.Context, chain string) ([]*Rule, error) {
+	fake.RLock()
+	defer fake.RUnlock()
 	if fake.Table == nil {
-		return nil, notFoundError("no such chain %q", chain)
+		return nil, notFoundError("no such table %q", fake.table)
 	}
-	ch := fake.Table.Chains[chain]
-	if ch == nil {
-		return nil, notFoundError("no such chain %q", chain)
+
+	rules := []*Rule{}
+	if chain == "" {
+		// Include all rules across all chains.
+		for _, ch := range fake.Table.Chains {
+			rules = append(rules, ch.Rules...)
+		}
+	} else {
+		ch := fake.Table.Chains[chain]
+		if ch == nil {
+			return nil, notFoundError("no such chain %q", chain)
+		}
+		rules = append(rules, ch.Rules...)
 	}
-	return ch.Rules, nil
+	return rules, nil
 }
 
 // ListElements is part of Interface
 func (fake *Fake) ListElements(_ context.Context, objectType, name string) ([]*Element, error) {
+	fake.RLock()
+	defer fake.RUnlock()
 	if fake.Table == nil {
 		return nil, notFoundError("no such %s %q", objectType, name)
 	}
@@ -155,6 +194,9 @@ func (fake *Fake) NewTransaction() *Transaction {
 
 // Run is part of Interface
 func (fake *Fake) Run(_ context.Context, tx *Transaction) error {
+	fake.Lock()
+	defer fake.Unlock()
+	fake.LastTransaction = tx
 	updatedTable, err := fake.run(tx)
 	if err == nil {
 		fake.Table = updatedTable
@@ -164,10 +206,13 @@ func (fake *Fake) Run(_ context.Context, tx *Transaction) error {
 
 // Check is part of Interface
 func (fake *Fake) Check(_ context.Context, tx *Transaction) error {
+	fake.RLock()
+	defer fake.RUnlock()
 	_, err := fake.run(tx)
 	return err
 }
 
+// must be called with fake.lock held
 func (fake *Fake) run(tx *Transaction) (*FakeTable, error) {
 	if tx.err != nil {
 		return nil, tx.err
@@ -203,13 +248,37 @@ func (fake *Fake) run(tx *Transaction) (*FakeTable, error) {
 				table := *obj
 				table.Handle = PtrTo(fake.nextHandle)
 				updatedTable = &FakeTable{
-					Table:  table,
-					Chains: make(map[string]*FakeChain),
-					Sets:   make(map[string]*FakeSet),
-					Maps:   make(map[string]*FakeMap),
+					Table:      table,
+					Flowtables: make(map[string]*FakeFlowtable),
+					Chains:     make(map[string]*FakeChain),
+					Sets:       make(map[string]*FakeSet),
+					Maps:       make(map[string]*FakeMap),
 				}
 			case deleteVerb:
 				updatedTable = nil
+			default:
+				return nil, fmt.Errorf("unhandled operation %q", op.verb)
+			}
+
+		case *Flowtable:
+			existingFlowtable := updatedTable.Flowtables[obj.Name]
+			err := checkExists(op.verb, "flowtable", obj.Name, existingFlowtable != nil)
+			if err != nil {
+				return nil, err
+			}
+			switch op.verb {
+			case addVerb, createVerb:
+				if existingFlowtable != nil {
+					continue
+				}
+				flowtable := *obj
+				flowtable.Handle = PtrTo(fake.nextHandle)
+				updatedTable.Flowtables[obj.Name] = &FakeFlowtable{
+					Flowtable: flowtable,
+				}
+			case deleteVerb:
+				// FIXME delete-by-handle
+				delete(updatedTable.Flowtables, obj.Name)
 			default:
 				return nil, fmt.Errorf("unhandled operation %q", op.verb)
 			}
@@ -341,7 +410,7 @@ func (fake *Fake) run(tx *Transaction) (*FakeTable, error) {
 				return nil, fmt.Errorf("unhandled operation %q", op.verb)
 			}
 		case *Element:
-			if len(obj.Value) == 0 {
+			if obj.Set != "" {
 				existingSet := updatedTable.Sets[obj.Set]
 				if existingSet == nil {
 					return nil, notFoundError("no such set %q", obj.Set)
@@ -428,9 +497,13 @@ func checkRuleRefs(rule *Rule, table *FakeTable) error {
 	for i, word := range words {
 		if strings.HasPrefix(word, "@") {
 			name := word[1:]
-			if i > 0 && (words[i] == "map" || words[i] == "vmap") {
+			if i > 0 && (words[i-1] == "map" || words[i-1] == "vmap") {
 				if table.Maps[name] == nil {
 					return notFoundError("no such map %q", name)
+				}
+			} else if i > 0 && words[i-1] == "offload" {
+				if table.Flowtables[name] == nil {
+					return notFoundError("no such flowtable %q", name)
 				}
 			} else {
 				// recent nft lets you use a map in a set lookup
@@ -465,6 +538,8 @@ func checkElementRefs(element *Element, table *FakeTable) error {
 
 // Dump dumps the current contents of fake, in a way that looks like an nft transaction.
 func (fake *Fake) Dump() string {
+	fake.RLock()
+	defer fake.RUnlock()
 	if fake.Table == nil {
 		return ""
 	}
@@ -472,6 +547,7 @@ func (fake *Fake) Dump() string {
 	buf := &strings.Builder{}
 
 	table := fake.Table
+	flowtables := sortKeys(table.Flowtables)
 	chains := sortKeys(table.Chains)
 	sets := sortKeys(table.Sets)
 	maps := sortKeys(table.Maps)
@@ -479,6 +555,10 @@ func (fake *Fake) Dump() string {
 	// Write out all of the object adds first.
 
 	table.writeOperation(addVerb, &fake.nftContext, buf)
+	for _, fname := range flowtables {
+		ft := table.Flowtables[fname]
+		ft.writeOperation(addVerb, &fake.nftContext, buf)
+	}
 	for _, cname := range chains {
 		ch := table.Chains[cname]
 		ch.writeOperation(addVerb, &fake.nftContext, buf)
@@ -535,7 +615,7 @@ func (fake *Fake) ParseDump(data string) (err error) {
 		}
 	}()
 	tx := fake.NewTransaction()
-	commonRegexp := regexp.MustCompile(fmt.Sprintf(`add %s %s %s (.*)`, noSpaceGroup, fake.family, fake.table))
+	commonRegexp := regexp.MustCompile(fmt.Sprintf(`add ([^ ]*) %s %s( (.*))?`, fake.family, fake.table))
 
 	for i, line = range lines {
 		line = strings.TrimSpace(line)
@@ -550,6 +630,8 @@ func (fake *Fake) ParseDump(data string) (err error) {
 		switch match[1] {
 		case "table":
 			obj = &Table{}
+		case "flowtable":
+			obj = &Flowtable{}
 		case "chain":
 			obj = &Chain{}
 		case "rule":
@@ -563,7 +645,7 @@ func (fake *Fake) ParseDump(data string) (err error) {
 		default:
 			return fmt.Errorf("unknown object %s", match[1])
 		}
-		err = obj.parse(match[2])
+		err = obj.parse(match[3])
 		if err != nil {
 			return err
 		}
@@ -608,10 +690,16 @@ func (table *FakeTable) copy() *FakeTable {
 	}
 
 	tcopy := &FakeTable{
-		Table:  table.Table,
-		Chains: make(map[string]*FakeChain),
-		Sets:   make(map[string]*FakeSet),
-		Maps:   make(map[string]*FakeMap),
+		Table:      table.Table,
+		Flowtables: make(map[string]*FakeFlowtable),
+		Chains:     make(map[string]*FakeChain),
+		Sets:       make(map[string]*FakeSet),
+		Maps:       make(map[string]*FakeMap),
+	}
+	for name, flowtable := range table.Flowtables {
+		tcopy.Flowtables[name] = &FakeFlowtable{
+			Flowtable: flowtable.Flowtable,
+		}
 	}
 	for name, chain := range table.Chains {
 		tcopy.Chains[name] = &FakeChain{

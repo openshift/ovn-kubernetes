@@ -6,6 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/safchain/ethtool"
+	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	k8sretry "k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -14,13 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
-
-	"github.com/safchain/ethtool"
-	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
-	"k8s.io/klog/v2"
 )
 
 // Gateway responds to Service and Endpoint K8s events
@@ -33,7 +33,8 @@ type Gateway interface {
 	Start()
 	GetGatewayBridgeIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
-	Reconcile() error
+	SetPodNetworkAdvertised(bool)
+	Reconcile()
 }
 
 type gateway struct {
@@ -55,6 +56,9 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+	reconcile    chan struct{}
+
+	isPodNetworkAdvertised bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -166,8 +170,12 @@ func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || epSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -184,8 +192,12 @@ func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.Endpoint
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || newEpSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -202,8 +214,12 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || epSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -227,19 +243,6 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	}
 
 	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
-
-	if util.IsNetworkSegmentationSupportEnabled() {
-		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
-		// Only default EndpointSlices contain the discovery.LabelServiceName label
-		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
-		if err != nil {
-			return err
-		}
-		if _, err = endpointSlicesRetryFramework.WatchResourceFiltered("", labels.NewSelector().Add(*req)); err != nil {
-			return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
-		}
-		return nil
-	}
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
@@ -255,6 +258,30 @@ func (g *gateway) Start() {
 		klog.Info("Spawning Conntrack Rule Check Thread")
 		g.openflowManager.Run(g.stopChan, g.wg)
 	}
+
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		for {
+			select {
+			case <-g.stopChan:
+				return
+			case <-g.reconcile:
+				err := k8sretry.OnError(
+					wait.Backoff{
+						Duration: 10 * time.Millisecond,
+						Steps:    4,
+						Factor:   5.0,
+					},
+					func(error) bool { return true },
+					g.doReconcile,
+				)
+				if err != nil {
+					klog.Errorf("Failed to reconcile gateway: %v", err)
+				}
+			}
+		}
+	}()
 }
 
 // sets up an uplink interface for UDP Generic Receive Offload forwarding as part of
@@ -393,8 +420,19 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
 }
 
+func (g *gateway) SetPodNetworkAdvertised(isPodNetworkAdvertised bool) {
+	g.isPodNetworkAdvertised = isPodNetworkAdvertised
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
-func (g *gateway) Reconcile() error {
+func (g *gateway) Reconcile() {
+	select {
+	case g.reconcile <- struct{}{}:
+	default:
+	}
+}
+
+func (g *gateway) doReconcile() error {
 	klog.Info("Reconciling gateway with updates")
 	node, err := g.watchFactory.GetNode(g.nodeIPManager.nodeName)
 	if err != nil {
@@ -404,7 +442,11 @@ func (g *gateway) Reconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isPodNetworkAdvertised); err != nil {
+		return err
+	}
+	err = g.updateSNATRules()
+	if err != nil {
 		return err
 	}
 	// Services create OpenFlow flows as well, need to update them all
@@ -435,6 +477,23 @@ func (g *gateway) addAllServices() []error {
 	}
 	g.servicesRetryFramework.RequestRetryObjs()
 	return errs
+}
+
+func (g *gateway) updateSNATRules() error {
+	var ipnets []*net.IPNet
+	if g.nodeIPManager.mgmtPortConfig.ipv4 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv4.ifAddr)
+	}
+	if g.nodeIPManager.mgmtPortConfig.ipv6 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv6.ifAddr)
+	}
+	subnets := util.IPsToNetworkIPs(ipnets...)
+
+	if g.isPodNetworkAdvertised || config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNATRules(subnets...)
+	}
+
+	return addLocalGatewayPodSubnetNATRules(subnets...)
 }
 
 type bridgeConfiguration struct {

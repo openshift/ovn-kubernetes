@@ -12,7 +12,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	. "github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
@@ -29,14 +28,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
-	fakenad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -264,7 +263,7 @@ func checkDefaultSvcIsolationOVSFlows(flows []string, defaultConfig *bridgeUDNCo
 	Expect(nTable2Flows).To(Equal(1))
 }
 
-func checkUDNSvcIsolationOVSFlows(flows []string, netConfig *bridgeUDNConfiguration, netName, ofPortHost, bridgeMAC string, svcCIDR *net.IPNet, expectedNFlows int) {
+func checkUDNSvcIsolationOVSFlows(flows []string, netConfig *bridgeUDNConfiguration, netName, bridgeMAC string, svcCIDR *net.IPNet, expectedNFlows int) {
 	By(fmt.Sprintf("Checking UDN %s service isolation flows for %s; expected %d flows",
 		netName, svcCIDR.String(), expectedNFlows))
 
@@ -306,7 +305,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		wg             sync.WaitGroup
 		stopCh         chan struct{}
 		v4NodeSubnet   = "100.128.0.0/24"
-		v6NodeSubnet   = "ae70::66/112"
+		v6NodeSubnet   = "ae70::/64"
 		mgtPort        = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
 		v4NodeIP       = "192.168.1.10/24"
 		v6NodeIP       = "fc00:f853:ccd:e793::3/64"
@@ -385,7 +384,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
@@ -406,7 +405,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			exists, err := util.LinkAddrExist(mpLink, ovntest.MustParseIPNet("100.128.0.2/24"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exists).To(BeTrue())
-			exists, err = util.LinkAddrExist(mpLink, ovntest.MustParseIPNet("ae70::2/112"))
+			exists, err = util.LinkAddrExist(mpLink, ovntest.MustParseIPNet("ae70::2/64"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exists).To(BeTrue())
 			return nil
@@ -425,7 +424,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
 		// must be defined so that the primary user defined network can match the ip families of the underlying cluster
 		config.IPv4Mode = true
 		config.IPv6Mode = true
@@ -453,12 +452,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					"k8s.ovn.org/network-ids": fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
+					"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),
 				},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer2Topology, "100.128.0.0/16,ae70::/60", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
@@ -492,12 +492,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					"k8s.ovn.org/network-ids": fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
+					"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),
 				},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer2Topology, "100.128.0.0/16,ae70::/60", types.NetworkRolePrimary)
 		// must be defined so that the primary user defined network can match the ip families of the underlying cluster
 		config.IPv4Mode = true
 		config.IPv6Mode = true
@@ -520,6 +521,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should create and delete correct openflows on breth0 for a L3 user defined network", func() {
+		config.IPv4Mode = true
 		config.IPv6Mode = true
 		config.Gateway.Interface = "eth0"
 		config.Gateway.NodeportEnable = true
@@ -534,12 +536,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				},
 			},
 			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
-				{corev1.NodeInternalIP, strings.Split(v4NodeIP, "/")[0]},
-				{corev1.NodeInternalIP, strings.Split(v6NodeIP, "/")[0]}},
+				{Type: corev1.NodeInternalIP, Address: strings.Split(v4NodeIP, "/")[0]},
+				{Type: corev1.NodeInternalIP, Address: strings.Split(v6NodeIP, "/")[0]}},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		setUpGatewayFakeOVSCommands(fexec)
@@ -572,6 +574,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, _ = util.SetFakeIPTablesHelpers()
+		_ = nodenft.SetFakeNFTablesHelper()
 
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
@@ -593,6 +596,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ipv4:      &fakeMgmtPortV4IPFamilyConfig,
 			ipv6:      &fakeMgmtPortV6IPFamilyConfig,
 		}
+		err = setupManagementPortNFTables(&fakeMgmtPortConfig)
+		Expect(err).NotTo(HaveOccurred())
+
 		nodeAnnotatorMock := &kubemocks.Annotator{}
 		nodeAnnotatorMock.On("Delete", mock.Anything).Return(nil)
 		nodeAnnotatorMock.On("Set", mock.Anything, map[string]*util.L3GatewayConfig{
@@ -621,13 +627,23 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			defer GinkgoRecover()
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			testNCM := &fakenad.FakeNetworkControllerManager{}
-			nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
 
 			// make preparations for creating openflow manager in DNCC which can be used for SNCC
-			localGw, err := newGateway(nodeName, ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotatorMock, &fakeMgmtPortConfig, &kubeMock, wf, rm, nadController, config.GatewayModeLocal)
+			localGw, err := newGateway(
+				nodeName,
+				ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet),
+				gatewayNextHops,
+				gatewayIntf,
+				"",
+				ifAddrs,
+				nodeAnnotatorMock,
+				&fakeMgmtPortConfig,
+				&kubeMock,
+				wf,
+				rm,
+				networkmanager.Default().Interface(),
+				config.GatewayModeLocal,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
@@ -662,8 +678,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // only default network
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(len(flowMap["DEFAULT"])).To(Equal(62))                                // 16 UDN Flows are added by default
+			Expect(len(flowMap["DEFAULT"])).To(Equal(64))                                // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["default"]
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["bluenet"]
@@ -687,7 +706,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				checkDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect exactly one flow per UDN for table 2 for service isolation.
-				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", ofPortHost, bridgeMAC, svcCIDR, 1)
+				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", bridgeMAC, svcCIDR, 1)
 			}
 
 			// The second call to checkPorts() will return no ofPort for the UDN - simulating a deletion that already was
@@ -697,7 +716,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
+
 			Expect(udnGateway.DelNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
 			Expect(len(flowMap["DEFAULT"])).To(Equal(46))                                // only default network flows are present
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
@@ -717,7 +740,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				checkDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect no more flows per UDN for table 2 for service isolation.
-				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", ofPortHost, bridgeMAC, svcCIDR, 0)
+				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", bridgeMAC, svcCIDR, 0)
 			}
 			return nil
 		})
@@ -725,6 +748,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 	ovntest.OnSupportedPlatformsIt("should create and delete correct openflows on breth0 for a L2 user defined network", func() {
+		config.IPv4Mode = true
 		config.IPv6Mode = true
 		config.Gateway.Interface = "eth0"
 		config.Gateway.NodeportEnable = true
@@ -734,17 +758,17 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				Name: nodeName,
 				Annotations: map[string]string{
 					"k8s.ovn.org/network-ids":  fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
-					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\"]}", v4NodeSubnet),
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":[\"%s\"],\"%s\":[\"%s\", \"%s\"]}", v4NodeSubnet, netName, v4NodeSubnet, v6NodeSubnet),
 					"k8s.ovn.org/host-cidrs":   fmt.Sprintf("[\"%s\", \"%s\"]", v4NodeIP, v6NodeIP),
 				},
 			},
 			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
-				{corev1.NodeInternalIP, strings.Split(v4NodeIP, "/")[0]},
-				{corev1.NodeInternalIP, strings.Split(v6NodeIP, "/")[0]}},
+				{Type: corev1.NodeInternalIP, Address: strings.Split(v4NodeIP, "/")[0]},
+				{Type: corev1.NodeInternalIP, Address: strings.Split(v6NodeIP, "/")[0]}},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer2Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer2Topology, "100.128.0.0/16,ae70::/64", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		setUpGatewayFakeOVSCommands(fexec)
@@ -778,8 +802,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 
 		_, _ = util.SetFakeIPTablesHelpers()
+		_ = nodenft.SetFakeNFTablesHelper()
 
 		Expect(err).NotTo(HaveOccurred())
+
+		_, _ = util.SetFakeIPTablesHelpers()
+
 		cnode := node.DeepCopy()
 		cnode.Annotations[util.OvnNodeManagementPortMacAddresses] = `{"bluenet":"00:00:00:55:66:77"}`
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
@@ -800,6 +828,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			ipv4:      &fakeMgmtPortV4IPFamilyConfig,
 			ipv6:      &fakeMgmtPortV6IPFamilyConfig,
 		}
+		err = setupManagementPortNFTables(&fakeMgmtPortConfig)
+		Expect(err).NotTo(HaveOccurred())
+
 		nodeAnnotatorMock := &kubemocks.Annotator{}
 		nodeAnnotatorMock.On("Delete", mock.Anything).Return(nil)
 		nodeAnnotatorMock.On("Set", mock.Anything, map[string]*util.L3GatewayConfig{
@@ -828,12 +859,22 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			defer GinkgoRecover()
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			testNCM := &fakenad.FakeNetworkControllerManager{}
-			nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-			Expect(err).NotTo(HaveOccurred())
 			// make preparations for creating openflow manager in DNCC which can be used for SNCC
-			localGw, err := newGateway(nodeName, ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotatorMock, &fakeMgmtPortConfig, &kubeMock, wf, rm, nadController, config.GatewayModeLocal)
+			localGw, err := newGateway(
+				nodeName,
+				ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet),
+				gatewayNextHops,
+				gatewayIntf,
+				"",
+				ifAddrs,
+				nodeAnnotatorMock,
+				&fakeMgmtPortConfig,
+				&kubeMock,
+				wf,
+				rm,
+				networkmanager.Default().Interface(),
+				config.GatewayModeLocal,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
@@ -866,8 +907,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // only default network
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(len(flowMap["DEFAULT"])).To(Equal(62))                                // 16 UDN Flows are added by default
+			Expect(len(flowMap["DEFAULT"])).To(Equal(64))                                // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["default"]
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["bluenet"]
@@ -891,7 +935,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				checkDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect exactly one flow per UDN for tables 0 and 2 for service isolation.
-				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", ofPortHost, bridgeMAC, svcCIDR, 1)
+				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", bridgeMAC, svcCIDR, 1)
 			}
 
 			// The second call to checkPorts() will return no ofPort for the UDN - simulating a deletion that already was
@@ -901,7 +945,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
+
 			Expect(udnGateway.DelNetwork()).To(Succeed())
+			// since we did not start the shared gw, reconcile manually
+			Expect(localGw.doReconcile()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
 			Expect(len(flowMap["DEFAULT"])).To(Equal(46))                                // only default network flows are present
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
@@ -921,7 +969,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				checkDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect no more flows per UDN for tables 0 and 2 for service isolation.
-				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", ofPortHost, bridgeMAC, svcCIDR, 0)
+				checkUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", bridgeMAC, svcCIDR, 0)
 			}
 			return nil
 		})
@@ -935,10 +983,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),
+				},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, nil, &gateway{})
@@ -954,7 +1005,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			routes, err := udnGateway.computeRoutesForUDN(vrfTableId, mplink)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(len(routes)).To(Equal(3))
+			Expect(len(routes)).To(Equal(7))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(*routes[0].Dst).To(Equal(*ovntest.MustParseIPNet("172.16.1.0/24"))) // default service subnet
 			Expect(routes[0].LinkIndex).To(Equal(bridgelink.Attrs().Index))
@@ -967,6 +1018,26 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(*routes[2].Dst).To(Equal(*cidr))
 			Expect(routes[2].LinkIndex).To(Equal(mplink.Attrs().Index))
+
+			// IPv4 ETP=Local service masquerade IP route
+			Expect(*routes[3].Dst).To(Equal(*ovntest.MustParseIPNet("169.254.169.3/32"))) // ETP=Local svc masq IP
+			Expect(routes[3].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[3].Gw.Equal(ovntest.MustParseIP("100.128.0.1"))).To(BeTrue())
+
+			// IPv4 cluster subnet route
+			Expect(*routes[4].Dst).To(Equal(*ovntest.MustParseIPNet("100.128.0.0/16"))) // cluster subnet route
+			Expect(routes[4].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[4].Gw.Equal(ovntest.MustParseIP("100.128.0.1"))).To(BeTrue())
+
+			// IPv6 ETP=Local service masquerade IP route
+			Expect(*routes[5].Dst).To(Equal(*ovntest.MustParseIPNet("fd69::3/128"))) // ETP=Local svc masq IP
+			Expect(routes[5].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[5].Gw.Equal(ovntest.MustParseIP("ae70::1"))).To(BeTrue())
+
+			// IPv6 cluster subnet route
+			Expect(*routes[6].Dst).To(Equal(*ovntest.MustParseIPNet("ae70::/60"))) // cluster subnet route
+			Expect(routes[6].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[6].Gw.Equal(ovntest.MustParseIP("ae70::1"))).To(BeTrue())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -980,10 +1051,13 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),
+				},
 			},
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer3Topology, "100.128.0.0/16/24,ae70::66/60", types.NetworkRolePrimary)
+			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, nil, &gateway{})
@@ -1000,7 +1074,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			routes, err := udnGateway.computeRoutesForUDN(vrfTableId, mplink)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(len(routes)).To(Equal(4))
+			Expect(len(routes)).To(Equal(8))
 			Expect(err).NotTo(HaveOccurred())
 			// 1st and 2nd routes are the service routes from user-provided config value
 			Expect(*routes[0].Dst).To(Equal(*config.Kubernetes.ServiceCIDRs[0]))
@@ -1015,6 +1089,26 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(*routes[3].Dst).To(Equal(*cidr))
 			Expect(routes[3].LinkIndex).To(Equal(mplink.Attrs().Index))
+
+			// IPv4 ETP=Local service masquerade IP route
+			Expect(*routes[4].Dst).To(Equal(*ovntest.MustParseIPNet("169.254.169.3/32"))) // ETP=Local svc masq IP
+			Expect(routes[4].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[4].Gw.Equal(ovntest.MustParseIP("100.128.0.1"))).To(BeTrue())
+
+			// IPv4 cluster subnet route
+			Expect(*routes[5].Dst).To(Equal(*ovntest.MustParseIPNet("100.128.0.0/16"))) // cluster subnet route
+			Expect(routes[5].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[5].Gw.Equal(ovntest.MustParseIP("100.128.0.1"))).To(BeTrue())
+
+			// IPv6 ETP=Local service masquerade IP route
+			Expect(*routes[6].Dst).To(Equal(*ovntest.MustParseIPNet("fd69::3/128"))) // ETP=Local svc masq IP
+			Expect(routes[6].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[6].Gw.Equal(ovntest.MustParseIP("ae70::1"))).To(BeTrue())
+
+			// IPv6 cluster subnet route
+			Expect(*routes[7].Dst).To(Equal(*ovntest.MustParseIPNet("ae70::/60"))) // cluster subnet route
+			Expect(routes[7].LinkIndex).To(Equal(mplink.Attrs().Index))
+			Expect(routes[7].Gw.Equal(ovntest.MustParseIP("ae70::1"))).To(BeTrue())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -1038,6 +1132,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 		priority int
 		family   int
 		table    int
+		mark     int
 		dst      net.IPNet
 	}
 	type testConfig struct {
@@ -1062,6 +1157,12 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
 					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
 				},
 			},
@@ -1071,6 +1172,12 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 			desc:       "v6 rule test",
 			vrftableID: 1009,
 			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					mark:     0x1003,
+				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
@@ -1088,7 +1195,19 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
 					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					mark:     0x1003,
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
@@ -1105,7 +1224,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 	config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
-			g := gomega.NewWithT(t)
+			g := NewWithT(t)
 			config.IPv4Mode = test.v4mode
 			config.IPv6Mode = test.v6mode
 			cidr := ""
@@ -1114,9 +1233,9 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 
 			}
 			if config.IPv4Mode && config.IPv6Mode {
-				cidr += ",ae70::66/60"
+				cidr += ",ae70::/60/64"
 			} else if config.IPv6Mode {
-				cidr = "ae70::66/60"
+				cidr = "ae70::/60/64"
 			}
 			nad := ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 				types.Layer3Topology, cidr, types.NetworkRolePrimary)
@@ -1125,12 +1244,16 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, nil, nil, nil, nil, nil, &gateway{})
 			g.Expect(err).NotTo(HaveOccurred())
 			rules, err := udnGateway.constructUDNVRFIPRules(test.vrftableID)
-			g.Expect(err).To(gomega.BeNil())
+			g.Expect(err).To(BeNil())
 			for i, rule := range rules {
-				g.Expect(rule.Priority).To(gomega.Equal(test.expectedRules[i].priority))
-				g.Expect(rule.Table).To(gomega.Equal(test.expectedRules[i].table))
-				g.Expect(rule.Family).To(gomega.Equal(test.expectedRules[i].family))
-				g.Expect(*rule.Dst).To(gomega.Equal(test.expectedRules[i].dst))
+				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
+				g.Expect(rule.Table).To(Equal(test.expectedRules[i].table))
+				g.Expect(rule.Family).To(Equal(test.expectedRules[i].family))
+				if rule.Dst != nil {
+					g.Expect(*rule.Dst).To(Equal(test.expectedRules[i].dst))
+				} else {
+					g.Expect(rule.Mark).To(Equal(test.expectedRules[i].mark))
+				}
 			}
 		})
 	}
