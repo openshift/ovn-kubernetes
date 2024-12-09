@@ -6,7 +6,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
@@ -129,6 +129,7 @@ var _ = Describe("Healthcheck tests", func() {
 
 		BeforeEach(func() {
 			// setup kube output
+			factoryMock.On("NADInformer").Return(nil)
 			ncm, err = NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
@@ -144,7 +145,6 @@ var _ = Describe("Healthcheck tests", func() {
 						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod iface-id-ver=pod-stale-uuid-3 vf-netdev-name=blah\n",
 					Err: nil,
 				})
-
 				// mock calls to remove only stale-port
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genDeleteStaleRepPortCmd("stale-pod-ifc"),
@@ -204,7 +204,7 @@ var _ = Describe("Healthcheck tests", func() {
 			Expect(testutils.UnmountNS(testNS)).To(Succeed())
 		})
 
-		It("check vrf devices are cleaned for deleted networks", func() {
+		ovntest.OnSupportedPlatformsIt("check vrf devices are cleaned for deleted networks", func() {
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 
@@ -223,6 +223,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
 			factoryMock.On("GetNodes").Return(nodeList, nil)
 			factoryMock.On("NADInformer").Return(nil)
+			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
 
 			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())

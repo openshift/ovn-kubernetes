@@ -8,7 +8,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
@@ -32,6 +32,161 @@ import (
 )
 
 var _ = Describe("SecondaryNodeNetworkController", func() {
+	var (
+		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
+		fexec      *ovntest.FakeExec
+		mgtPortMAC string = "00:00:00:55:66:77" // dummy MAC used for fake commands
+	)
+	BeforeEach(func() {
+		// Restore global default values before each testcase
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		// Use a larger masq subnet to allow OF manager to allocate IPs for UDNs.
+		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/17"
+		// Set up a fake vsctl command mock interface
+		fexec = ovntest.NewFakeExec()
+		Expect(util.SetExec(fexec)).To(Succeed())
+	})
+	AfterEach(func() {
+		util.ResetRunner()
+	})
+
+	It("should return networkID from one of the nodes in the cluster", func() {
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: fake.NewSimpleClientset(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
+					},
+				},
+			}),
+		}
+		controller := SecondaryNodeNetworkController{}
+		var err error
+		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, "worker1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(controller.watchFactory.Start()).To(Succeed())
+
+		controller.NetInfo, err = util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+
+		networkID, err := controller.getNetworkID()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(networkID).To(Equal(3))
+	})
+
+	It("should return invalid networkID if network not found", func() {
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: fake.NewSimpleClientset(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"othernet": "3"}`,
+					},
+				},
+			}),
+		}
+		controller := SecondaryNodeNetworkController{}
+		var err error
+		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, "worker1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(controller.watchFactory.Start()).To(Succeed())
+
+		controller.NetInfo, err = util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+
+		networkID, err := controller.getNetworkID()
+		Expect(err).To(HaveOccurred())
+		Expect(networkID).To(Equal(util.InvalidID))
+	})
+	It("ensure UDNGateway is not invoked when feature gate is OFF", func() {
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = false
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		factoryMock := factoryMocks.NodeWatchFactory{}
+		nodeList := []*corev1.Node{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
+					},
+				},
+			},
+		}
+		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
+		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
+		factoryMock.On("GetNodes").Return(nodeList, nil)
+		NetInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
+		Expect(err).NotTo(HaveOccurred())
+		err = controller.Start(context.Background())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(controller.gateway).To(BeNil())
+	})
+	It("ensure UDNGateway is invoked for Primary UDNs when feature gate is ON", func() {
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		factoryMock := factoryMocks.NodeWatchFactory{}
+		nodeList := []*corev1.Node{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
+					},
+				},
+			},
+		}
+		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
+		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
+		factoryMock.On("GetNodes").Return(nodeList, nil)
+		nodeInformer := coreinformermocks.NodeInformer{}
+		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
+		nodeLister := v1mocks.NodeLister{}
+		nodeInformer.On("Lister").Return(&nodeLister)
+		NetInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		getCreationFakeCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
+		Expect(err).NotTo(HaveOccurred())
+		err = controller.Start(context.Background())
+		Expect(err).To(HaveOccurred()) // we don't have the gateway pieces setup so its expected to fail here
+		Expect(err.Error()).To(ContainSubstring("could not create management port"), err.Error())
+		Expect(controller.gateway).To(Not(BeNil()))
+	})
+	It("ensure UDNGateway is not invoked for Primary UDNs when feature gate is ON but network is not Primary", func() {
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		factoryMock := factoryMocks.NodeWatchFactory{}
+		nodeList := []*corev1.Node{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
+					},
+				},
+			},
+		}
+		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
+		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
+		factoryMock.On("GetNodes").Return(nodeList, nil)
+		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
+		NetInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
+		Expect(err).NotTo(HaveOccurred())
+		err = controller.Start(context.Background())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(controller.gateway).To(BeNil())
+	})
+})
+
+var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gateway functionality", func() {
 	var (
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
@@ -119,139 +274,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		wg.Wait()
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
+		util.ResetRunner()
 	})
 
-	It("should return networkID from one of the nodes in the cluster", func() {
-		fakeClient := &util.OVNNodeClientset{
-			KubeClient: fake.NewSimpleClientset(&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "worker1",
-					Annotations: map[string]string{
-						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
-					},
-				},
-			}),
-		}
-		controller := SecondaryNodeNetworkController{}
-		var err error
-		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, "worker1")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(controller.watchFactory.Start()).To(Succeed())
-
-		controller.NetInfo, err = util.ParseNADInfo(nad)
-		Expect(err).NotTo(HaveOccurred())
-
-		networkID, err := controller.getNetworkID()
-		Expect(err).ToNot(HaveOccurred())
-		Expect(networkID).To(Equal(3))
-	})
-
-	It("should return invalid networkID if network not found", func() {
-		fakeClient := &util.OVNNodeClientset{
-			KubeClient: fake.NewSimpleClientset(&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "worker1",
-					Annotations: map[string]string{
-						"k8s.ovn.org/network-ids": `{"othernet": "3"}`,
-					},
-				},
-			}),
-		}
-		controller := SecondaryNodeNetworkController{}
-		var err error
-		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, "worker1")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(controller.watchFactory.Start()).To(Succeed())
-
-		controller.NetInfo, err = util.ParseNADInfo(nad)
-		Expect(err).NotTo(HaveOccurred())
-
-		networkID, err := controller.getNetworkID()
-		Expect(err).To(HaveOccurred())
-		Expect(networkID).To(Equal(util.InvalidNetworkID))
-	})
-	It("ensure UDNGateway is not invoked when feature gate is OFF", func() {
-		config.OVNKubernetesFeature.EnableNetworkSegmentation = false
-		config.OVNKubernetesFeature.EnableMultiNetwork = true
-		factoryMock := factoryMocks.NodeWatchFactory{}
-		nodeList := []*corev1.Node{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "worker1",
-					Annotations: map[string]string{
-						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
-					},
-				},
-			},
-		}
-		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
-		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
-		factoryMock.On("GetNodes").Return(nodeList, nil)
-		NetInfo, err := util.ParseNADInfo(nad)
-		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
-		Expect(err).NotTo(HaveOccurred())
-		err = controller.Start(context.Background())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(controller.gateway).To(BeNil())
-	})
-	It("ensure UDNGateway is invoked for Primary UDNs when feature gate is ON", func() {
-		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-		config.OVNKubernetesFeature.EnableMultiNetwork = true
-		factoryMock := factoryMocks.NodeWatchFactory{}
-		nodeList := []*corev1.Node{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "worker1",
-					Annotations: map[string]string{
-						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
-					},
-				},
-			},
-		}
-		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
-		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
-		factoryMock.On("GetNodes").Return(nodeList, nil)
-		nodeInformer := coreinformermocks.NodeInformer{}
-		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
-		nodeLister := v1mocks.NodeLister{}
-		nodeInformer.On("Lister").Return(&nodeLister)
-		NetInfo, err := util.ParseNADInfo(nad)
-		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
-		Expect(err).NotTo(HaveOccurred())
-		err = controller.Start(context.Background())
-		Expect(err).To(HaveOccurred()) // we don't have the gateway pieces setup so its expected to fail here
-		Expect(err.Error()).To(ContainSubstring("could not create management port"), err.Error())
-		Expect(controller.gateway).To(Not(BeNil()))
-	})
-	It("ensure UDNGateway is not invoked for Primary UDNs when feature gate is ON but network is not Primary", func() {
-		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-		config.OVNKubernetesFeature.EnableMultiNetwork = true
-		factoryMock := factoryMocks.NodeWatchFactory{}
-		nodeList := []*corev1.Node{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "worker1",
-					Annotations: map[string]string{
-						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
-					},
-				},
-			},
-		}
-		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
-		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
-		factoryMock.On("GetNodes").Return(nodeList, nil)
-		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
-			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
-		NetInfo, err := util.ParseNADInfo(nad)
-		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
-		Expect(err).NotTo(HaveOccurred())
-		err = controller.Start(context.Background())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(controller.gateway).To(BeNil())
-	})
 	ovntest.OnSupportedPlatformsIt("ensure UDNGateway and VRFManager and IPRulesManager are invoked for Primary UDNs when feature gate is ON", func() {
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
@@ -300,8 +325,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			getCreationFakeOVSCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
+			getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
 			getVRFCreationFakeOVSCommands(fexec)
+			getRPFilterLooseModeFakeCommands(fexec)
 			getDeletionFakeOVSCommands(fexec, mgtPort)
 
 			By("starting secondary network controller for user defined primary network")

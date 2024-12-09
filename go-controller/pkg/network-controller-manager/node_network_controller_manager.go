@@ -36,7 +36,7 @@ type nodeNetworkControllerManager struct {
 	wg            *sync.WaitGroup
 	recorder      record.EventRecorder
 
-	defaultNodeNetworkController nad.BaseNetworkController
+	defaultNodeNetworkController *node.DefaultNodeNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
@@ -54,12 +54,8 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		dnnc, ok := ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController)
-		if !ok {
-			return nil, fmt.Errorf("unable to deference default node network controller object")
-		}
 		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
-			nInfo, ncm.vrfManager, ncm.ruleManager, dnnc.Gateway)
+			nInfo, ncm.vrfManager, ncm.ruleManager, ncm.defaultNodeNetworkController.Gateway)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -87,11 +83,11 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ..
 func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
 	nodes, err := ncm.watchFactory.GetNodes()
 	if err != nil {
-		return util.InvalidNetworkID, err
+		return util.InvalidID, err
 	}
 	networkID, err := util.GetNetworkID(nodes, network)
 	if err != nil {
-		return util.InvalidNetworkID, err
+		return util.InvalidID, err
 	}
 	return networkID, nil
 }
@@ -105,8 +101,8 @@ func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.
 // (1) dpu mode is enabled when secondary networks feature is enabled
 // (2) primary user defined networks is enabled (all modes)
 func isNodeNADControllerRequired() bool {
-	return ((config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == ovntypes.NodeModeDPU) ||
-		util.IsNetworkSegmentationSupportEnabled())
+	return (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode == ovntypes.NodeModeDPU) ||
+		util.IsNetworkSegmentationSupportEnabled()
 }
 
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
@@ -127,21 +123,22 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	// need to start NAD controller on node side for programming gateway pieces for UDNs
 	var err error
 	if isNodeNADControllerRequired() {
-		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf)
+		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
 		ncm.vrfManager = vrfmanager.NewController(ncm.routeManager)
 		ncm.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
-	}
-	if err != nil {
-		return nil, err
 	}
 	return ncm, nil
 }
 
 // initDefaultNodeNetworkController creates the controller for default network
 func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
-	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+		ncm.nadController)
 	if err != nil {
 		return err
 	}
@@ -171,6 +168,7 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	// make sure we clean up after ourselves on failure
 	defer func() {
 		if err != nil {
+			klog.Errorf("Stopping node network controller manager, err=%v", err)
 			ncm.Stop()
 		}
 	}()
@@ -194,18 +192,23 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	if err != nil {
 		return fmt.Errorf("failed to init default node network controller: %v", err)
 	}
-	err = ncm.defaultNodeNetworkController.Start(ctx)
+	err = ncm.defaultNodeNetworkController.PreStart(ctx) // partial gateway init + OpenFlow Manager
 	if err != nil {
 		return fmt.Errorf("failed to start default node network controller: %v", err)
 	}
 
-	// nadController is nil if multi-network is disabled
 	if ncm.nadController != nil {
 		err = ncm.nadController.Start()
 		if err != nil {
 			return fmt.Errorf("failed to start NAD controller: %w", err)
 		}
 	}
+
+	err = ncm.defaultNodeNetworkController.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start default node network controller: %v", err)
+	}
+
 	if ncm.vrfManager != nil {
 		// Let's create VRF manager that will manage VRFs for all UDNs
 		err = ncm.vrfManager.Run(ncm.stopChan, ncm.wg)
