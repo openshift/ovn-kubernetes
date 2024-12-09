@@ -69,8 +69,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		controller.NetInfo, err = util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
+		controller.ReconcilableNetInfo = util.NewReconcilableNetInfo(netInfo)
 
 		networkID, err := controller.getNetworkID()
 		Expect(err).ToNot(HaveOccurred())
@@ -94,8 +95,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		controller.NetInfo, err = util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
+		controller.ReconcilableNetInfo = util.NewReconcilableNetInfo(netInfo)
 
 		networkID, err := controller.getNetworkID()
 		Expect(err).To(HaveOccurred())
@@ -335,7 +337,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			Expect(err).NotTo(HaveOccurred())
 
 			By("check management interface and VRF device is created for the network")
-			vrfDeviceName := util.GetVRFDeviceNameForUDN(netID)
+			vrfDeviceName := util.GetNetworkVRFName(NetInfo)
 			vrfLink, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(vrfLink.Type()).To(Equal("vrf"))
@@ -354,7 +356,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 				return err
 			}).WithTimeout(120 * time.Second).Should(BeNil())
 
-			By("check masquerade iprules are created for the network")
+			By("check iprules are created for the network")
 			rulesFound, err := netlink.RuleList(netlink.FAMILY_ALL)
 			Expect(err).NotTo(HaveOccurred())
 			var udnRules []netlink.Rule
@@ -363,7 +365,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 					udnRules = append(udnRules, rule)
 				}
 			}
-			Expect(udnRules).To(HaveLen(2))
+			Expect(udnRules).To(HaveLen(3))
 
 			By("delete the network and ensure its associated VRF device is also deleted")
 			cnode = node.DeepCopy()

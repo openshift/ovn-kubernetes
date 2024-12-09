@@ -465,6 +465,8 @@ func TestParseNetconf(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			if test.unsupportedReason != "" {
 				t.Skip(test.unsupportedReason)
 			}
@@ -824,7 +826,9 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 			netInfo, err := NewNetInfo(test.inputNetConf)
 			g.Expect(err).To(gomega.BeNil())
 			if test.inputNetConf.NADName != "" {
-				netInfo.AddNADs(test.inputNetConf.NADName)
+				mutableNetInfo := NewMutableNetInfo(netInfo)
+				mutableNetInfo.AddNADs(test.inputNetConf.NADName)
+				netInfo = mutableNetInfo
 			}
 
 			pod := &corev1.Pod{
@@ -1017,7 +1021,9 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 			netInfo, err := NewNetInfo(test.inputNetConf)
 			g.Expect(err).To(gomega.BeNil())
 			if test.inputNetConf.NADName != "" {
-				netInfo.AddNADs(test.inputNetConf.NADName)
+				mutableNetInfo := NewMutableNetInfo(netInfo)
+				mutableNetInfo.AddNADs(test.inputNetConf.NADName)
+				netInfo = mutableNetInfo
 			}
 
 			var primaryUDNNetInfo NetInfo
@@ -1025,7 +1031,9 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 				primaryUDNNetInfo, err = NewNetInfo(test.inputPrimaryUDNConfig)
 				g.Expect(err).To(gomega.BeNil())
 				if test.inputPrimaryUDNConfig.NADName != "" {
-					primaryUDNNetInfo.AddNADs(test.inputPrimaryUDNConfig.NADName)
+					mutableNetInfo := NewMutableNetInfo(primaryUDNNetInfo)
+					mutableNetInfo.AddNADs(test.inputPrimaryUDNConfig.NADName)
+					primaryUDNNetInfo = mutableNetInfo
 				}
 			}
 
@@ -1083,7 +1091,7 @@ func TestSubnetOverlapCheck(t *testing.T) {
                     "netAttachDefName": "ns1/nad1"
                 }
 			`,
-			expectedError: fmt.Errorf("invalid subnet cnfiguration: pod or join subnet overlaps with already configured internal subnets: " +
+			expectedError: fmt.Errorf("invalid subnet configuration: pod or join subnet overlaps with already configured internal subnets: " +
 				"illegal network configuration: user defined subnet \"10.129.0.0/16\" overlaps cluster subnet \"10.128.0.0/14\""),
 		},
 		{
@@ -1099,7 +1107,7 @@ func TestSubnetOverlapCheck(t *testing.T) {
                     "netAttachDefName": "ns1/nad1"
                 }
 			`,
-			expectedError: fmt.Errorf("invalid subnet cnfiguration: pod or join subnet overlaps with already configured internal subnets: " +
+			expectedError: fmt.Errorf("invalid subnet configuration: pod or join subnet overlaps with already configured internal subnets: " +
 				"illegal network configuration: user defined join subnet \"100.64.0.0/24\" overlaps built-in join subnet \"100.64.0.0/16\""),
 		},
 		{
@@ -1115,7 +1123,7 @@ func TestSubnetOverlapCheck(t *testing.T) {
                     "netAttachDefName": "ns1/nad1"
                 }
 			`,
-			expectedError: fmt.Errorf("invalid subnet cnfiguration: pod or join subnet overlaps with already configured internal subnets: " +
+			expectedError: fmt.Errorf("invalid subnet configuration: pod or join subnet overlaps with already configured internal subnets: " +
 				"illegal network configuration: user defined subnet \"fe01::/24\" overlaps service subnet \"fe01::/16\""),
 		},
 		{
@@ -1131,7 +1139,7 @@ func TestSubnetOverlapCheck(t *testing.T) {
                     "netAttachDefName": "ns1/nad1"
                 }
 			`,
-			expectedError: fmt.Errorf("invalid subnet cnfiguration: pod or join subnet overlaps with already configured internal subnets: " +
+			expectedError: fmt.Errorf("invalid subnet configuration: pod or join subnet overlaps with already configured internal subnets: " +
 				"illegal network configuration: user defined join subnet \"fd69::/112\" overlaps masquerade subnet \"fd69::/125\""),
 		},
 		{

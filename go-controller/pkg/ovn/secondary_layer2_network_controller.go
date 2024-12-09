@@ -17,7 +17,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -30,7 +30,6 @@ import (
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -148,19 +147,19 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if !ok {
 			return fmt.Errorf("could not cast %T object to Node", newObj)
 		}
-		oldNode, ok := oldObj.(*kapi.Node)
+		oldNode, ok := oldObj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update and combine that with what failed previously
 				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
 				shouldSyncMgmtPort := mgmtUpdateFailed ||
-					macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) ||
+					macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) ||
 					nodeSubnetChanged
 				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
 				shouldSyncGW := gwUpdateFailed ||
@@ -260,7 +259,11 @@ type SecondaryLayer2NetworkController struct {
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer2NetworkController, error) {
+func NewSecondaryLayer2NetworkController(
+	cnci *CommonNetworkControllerInfo,
+	netInfo util.NetInfo,
+	networkManager networkmanager.Interface,
+) (*SecondaryLayer2NetworkController, error) {
 
 	stopChan := make(chan struct{})
 
@@ -280,7 +283,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			cnci.watchFactory.ServiceCoreInformer(),
 			cnci.watchFactory.EndpointSliceCoreInformer(),
 			cnci.watchFactory.NodeCoreInformer(),
-			nadController,
+			networkManager,
 			cnci.recorder,
 			netInfo,
 		)
@@ -296,7 +299,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-					NetInfo:                     netInfo,
+					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 					lsManager:                   lsManagerFactoryFn(),
 					logicalPortCache:            newPortCache(stopChan),
 					namespaces:                  make(map[string]*namespaceInfo),
@@ -309,7 +312,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					wg:                          &sync.WaitGroup{},
 					localZoneNodes:              &sync.Map{},
 					cancelableCtx:               util.NewCancelableContext(),
-					nadController:               nadController,
+					networkManager:              networkManager,
 				},
 			},
 		},
@@ -320,7 +323,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.NetInfo, oc.nbClient, oc.sbClient, oc.watchFactory)
+		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.GetNetInfo(), oc.nbClient, oc.sbClient, oc.watchFactory)
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -328,7 +331,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 		if oc.allowPersistentIPs() {
 			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
 				oc.kube,
-				oc.NetInfo,
+				oc.GetNetInfo(),
 				oc.watchFactory.IPAMClaimsInformer().Lister(),
 			)
 			oc.ipamClaimsReconciler = ipamClaimsReconciler
@@ -341,9 +344,9 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			claimsReconciler)
 	}
 
-	// disable multicast support for secondary networks
-	// TBD: changes needs to be made to support multicast in secondary networks
-	oc.multicastSupport = false
+	// enable multicast support for UDN only for primaries + multicast enabled
+	// TBD: changes needs to be made to support multicast beyond primary UDN
+	oc.multicastSupport = oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast
 
 	oc.initRetryFramework()
 	return oc, nil
@@ -418,7 +421,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	}
 	oc.defaultCOPPUUID = defaultCOPPUUID
 
-	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 	if err != nil {
 		return err
 	}
@@ -437,6 +440,17 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 		return err
 	}
 
+	// Configure cluster port groups and multicast default policies for user defined primary networks.
+	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() {
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return fmt.Errorf("failed to create cluster port groups for network %q: %w", oc.GetNetworkName(), err)
+		}
+
+		if err := oc.syncDefaultMulticastPolicies(); err != nil {
+			return fmt.Errorf("failed to sync default multicast policies for network %q: %w", oc.GetNetworkName(), err)
+		}
+	}
+
 	return err
 }
 
@@ -448,7 +462,7 @@ func (oc *SecondaryLayer2NetworkController) Stop() {
 func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
+	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
 		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
 	}
 
@@ -511,7 +525,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					gwConfig.hostSubnets,
 					nil,
 					gwConfig.hostSubnets,
-					gwConfig.gwLRPIPs,
+					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
 					oc.SCTPSupport,
 					nil, // no need for ovnClusterLRPToJoinIfAddrs
 					gwConfig.externalIPs,
@@ -519,31 +533,31 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					errs = append(errs, err)
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
-					if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-						if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node); err != nil {
-							errs = append(errs, err)
-							oc.gatewaysFailed.Store(node.Name, true)
-						} else {
-							oc.gatewaysFailed.Delete(node.Name)
-						}
+					if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node); err != nil {
+						errs = append(errs, err)
+						oc.gatewaysFailed.Store(node.Name, true)
+					} else {
+						oc.gatewaysFailed.Delete(node.Name)
 					}
 				}
 			}
 		}
-		if nSyncs.syncMgmtPort {
-			// Layer 2 networks have a single, large subnet, that's the one
-			// associated to the controller.  Take the management port IP from
-			// there.
-			subnets := oc.Subnets()
-			hostSubnets := make([]*net.IPNet, 0, len(subnets))
-			for _, subnet := range oc.Subnets() {
-				hostSubnets = append(hostSubnets, subnet.CIDR)
-			}
-			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
-				errs = append(errs, err)
-				oc.mgmtPortFailed.Store(node.Name, true)
-			} else {
-				oc.mgmtPortFailed.Delete(node.Name)
+		if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+			if nSyncs.syncMgmtPort {
+				// Layer 2 networks have a single, large subnet, that's the one
+				// associated to the controller.  Take the management port IP from
+				// there.
+				subnets := oc.Subnets()
+				hostSubnets := make([]*net.IPNet, 0, len(subnets))
+				for _, subnet := range oc.Subnets() {
+					hostSubnets = append(hostSubnets, subnet.CIDR)
+				}
+				if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+					errs = append(errs, err)
+					oc.mgmtPortFailed.Store(node.Name, true)
+				} else {
+					oc.mgmtPortFailed.Delete(node.Name)
+				}
 			}
 		}
 	}
@@ -654,7 +668,7 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *kapi.Node) error {
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *corev1.Node) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
 	if err != nil {
@@ -674,10 +688,10 @@ func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localP
 }
 
 type SecondaryL2GatewayConfig struct {
-	config      *util.L3GatewayConfig
-	hostSubnets []*net.IPNet
-	gwLRPIPs    []*net.IPNet
-	externalIPs []net.IP
+	config       *util.L3GatewayConfig
+	hostSubnets  []*net.IPNet
+	gwLRPJoinIPs []*net.IPNet
+	externalIPs  []net.IP
 }
 
 func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL2GatewayConfig, error) {
@@ -716,25 +730,18 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 
 	// at layer2 the GR LRP should be different per node same we do for layer3
 	// since they should not collide at the distributed switch later on
-	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
+	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
-	}
-
-	// At layer2 GR LRP acts as the layer3 ovn_cluster_router so we need
-	// to configure here the .1 address, this will work only for IC with
-	// one node per zone, since ARPs for .1 will not go beyond local switch.
-	for _, subnet := range oc.Subnets() {
-		gwLRPIPs = append(gwLRPIPs, util.GetNodeGatewayIfAddr(subnet.CIDR))
 	}
 
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 	return &SecondaryL2GatewayConfig{
-		config:      l3GatewayConfig,
-		hostSubnets: hostSubnets,
-		gwLRPIPs:    gwLRPIPs,
-		externalIPs: externalIPs,
+		config:       l3GatewayConfig,
+		hostSubnets:  hostSubnets,
+		gwLRPJoinIPs: gwLRPJoinIPs,
+		externalIPs:  externalIPs,
 	}, nil
 }
 
@@ -744,7 +751,7 @@ func (oc *SecondaryLayer2NetworkController) newGatewayManager(nodeName string) *
 		oc.defaultCOPPUUID,
 		oc.kube,
 		oc.nbClient,
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.gatewayOptions()...,
 	)
@@ -785,9 +792,9 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 	go func() {
 		defer wg.Done()
 		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the
-		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
+		// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
+		// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, false)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
