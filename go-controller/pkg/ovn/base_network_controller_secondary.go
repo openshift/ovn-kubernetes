@@ -225,7 +225,6 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 // ensurePodForSecondaryNetwork tries to set up secondary network for a pod. It returns nil on success and error
 // on failure; failure indicates the pod set up should be retried later.
 func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *kapi.Pod, addPort bool) error {
-
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return nil
@@ -234,6 +233,12 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 	if util.PodWantsHostNetwork(pod) && !addPort {
 		return nil
 	}
+
+	perfEntry := perf[bsnc.GetNetworkName()]
+	t := time.Now()
+	defer func() {
+		perfEntry.AddEntry(fmt.Sprintf("ensurePodForSecondaryNetwork_%s_%s", pod.Name, pod.ResourceVersion), t)
+	}()
 
 	// If a node does not have an assigned hostsubnet don't wait for the logical switch to appear
 	switchName, err := bsnc.getExpectedSwitchName(pod)
@@ -658,7 +663,10 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 	defer func() {
 		klog.Infof("[%s] adding namespace took %v for network %s", ns.Name, time.Since(start), bsnc.GetNetworkName())
 	}()
-
+	perfEntry := perf[bsnc.GetNetworkName()]
+	defer func() {
+		perfEntry.AddEntry(fmt.Sprintf("AddNamespaceForSecondaryNetwork_%s", ns.Name), start)
+	}()
 	_, nsUnlock, err := bsnc.ensureNamespaceLockedForSecondaryNetwork(ns.Name, false, ns)
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
@@ -677,6 +685,12 @@ func (bsnc *BaseSecondaryNetworkController) ensureNamespaceLockedForSecondaryNet
 func (bsnc *BaseSecondaryNetworkController) updateNamespaceForSecondaryNetwork(old, newer *kapi.Namespace) error {
 	var errors []error
 	klog.Infof("[%s] updating namespace for network %s", old.Name, bsnc.GetNetworkName())
+
+	perfEntry := perf[bsnc.GetNetworkName()]
+	t := time.Now()
+	defer func() {
+		perfEntry.AddEntry(fmt.Sprintf("updateNamespaceForSecondaryNetwork_%s", newer.Name), t)
+	}()
 
 	nsInfo, nsUnlock := bsnc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {
