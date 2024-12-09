@@ -108,6 +108,10 @@ rules:
       verbs: [ "patch", "update" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
+          - udnnodes
+      verbs: [ "create", "delete", "get", "list", "watch", "update", "patch"]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
           - egressfirewalls/status
           - egressips
           - egressqoses
