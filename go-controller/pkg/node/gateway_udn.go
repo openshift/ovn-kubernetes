@@ -120,11 +120,11 @@ func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
 //
 // NOTE: if the network configuration can't be found or if the network is not patched by OVN
 // yet this returns nil.
-func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(nInfo util.NetInfo) *bridgeUDNConfiguration {
+func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(networkName string) *bridgeUDNConfiguration {
 	b.Lock()
 	defer b.Unlock()
 
-	if netConfig, found := b.netConfig[nInfo.GetNetworkName()]; found && netConfig.ofPortPatch != "" {
+	if netConfig, found := b.netConfig[networkName]; found && netConfig.ofPortPatch != "" {
 		result := *netConfig
 		return &result
 	}
@@ -267,11 +267,13 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {
 			if err := setBridgeNetworkOfPorts(udng.openflowManager.defaultBridge, udng.GetNetworkName()); err != nil {
-				return false, fmt.Errorf("failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
+				klog.V(3).Infof("Failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
+				return false, nil
 			}
 			if udng.openflowManager.externalGatewayBridge != nil {
 				if err := setBridgeNetworkOfPorts(udng.openflowManager.externalGatewayBridge, udng.GetNetworkName()); err != nil {
-					return false, fmt.Errorf("failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
+					klog.V(3).Infof("Failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
+					return false, nil
 				}
 			}
 			return true, nil
