@@ -149,7 +149,7 @@ func (nm *networkManagerImpl) getAllNetworkStates() []*networkControllerState {
 
 func (nm *networkManagerImpl) sync(network string) error {
 	startTime := time.Now()
-	klog.V(5).Infof("%s: sync network %s", nm.name, network)
+	klog.V(4).Infof("%s: sync network %s", nm.name, network)
 	defer func() {
 		klog.V(4).Infof("%s: finished syncing network %s, took %v", nm.name, network, time.Since(startTime))
 	}()
