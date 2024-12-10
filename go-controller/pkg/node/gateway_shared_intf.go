@@ -1440,10 +1440,10 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
 					"actions=NORMAL", defaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
 
-			// table0, Geneve packets coming from LOCAL. Skip conntrack and go directly to external
+			// table0, Geneve packets coming from LOCAL/Host OFPort. Skip conntrack and go directly to external
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-					"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+					"actions=output:%s", defaultOpenFlowCookie, ofPortHost, config.Default.EncapPort, ofPortPhys))
 		}
 		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
@@ -2148,7 +2148,15 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 				hostRep, stderr, err)
 		}
 	} else {
-		bridge.ofPortHost = ovsLocalPort
+		var err error
+		if bridge.gwIfaceRep != "" {
+			bridge.ofPortHost, _, err = util.RunOVSVsctl("get", "interface", bridge.gwIfaceRep, "ofport")
+			if err != nil {
+				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", bridge.gwIfaceRep, err)
+			}
+		} else {
+			bridge.ofPortHost = ovsLocalPort
+		}
 	}
 
 	return nil
@@ -2303,15 +2311,15 @@ func newGateway(
 			// Delete stale masquerade resources if there are any. This is to make sure that there
 			// are no Linux resources with IP from old masquerade subnet when masquerade subnet
 			// gets changed as part of day2 operation.
-			if err := deleteStaleMasqueradeResources(gwBridge.bridgeName, nodeName, watchFactory); err != nil {
+			if err := deleteStaleMasqueradeResources(gwBridge.getGatewayIface(), nodeName, watchFactory); err != nil {
 				return fmt.Errorf("failed to remove stale masquerade resources: %w", err)
 			}
 
-			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
-				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.getGatewayIface()); err != nil {
+				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.getGatewayIface(), err)
 			}
 
-			if err := addMasqueradeRoute(routeManager, gwBridge.bridgeName, nodeName, gwIPs, watchFactory); err != nil {
+			if err := addMasqueradeRoute(routeManager, gwBridge.getGatewayIface(), nodeName, gwIPs, watchFactory); err != nil {
 				return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 			}
 
@@ -2364,7 +2372,7 @@ func newGateway(
 			gw.openflowManager.requestFlowSync()
 		}
 
-		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+		if err := addHostMACBindings(gwBridge.getGatewayIface()); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 		}
 
@@ -2421,11 +2429,11 @@ func newNodePortWatcher(
 	subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
 	if config.Gateway.DisableForwarding {
 		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
+			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.getGatewayIface(), err)
 		}
 	} else {
 		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
+			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.getGatewayIface(), err)
 		}
 	}
 
@@ -2443,7 +2451,7 @@ func newNodePortWatcher(
 		gatewayIPv4:    gatewayIPv4,
 		gatewayIPv6:    gatewayIPv6,
 		ofportPhys:     ofportPhys,
-		gwBridge:       gwBridge.bridgeName,
+		gwBridge:       gwBridge.getGatewayIface(),
 		serviceInfo:    make(map[ktypes.NamespacedName]*serviceConfig),
 		nodeIPManager:  nodeIPManager,
 		ofm:            ofm,
