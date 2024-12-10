@@ -169,14 +169,33 @@ func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error
 }
 
 func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error {
-	bridge.Lock()
-	defer bridge.Unlock()
 
-	netConfig, found := bridge.netConfig[netName]
+	netConfig, err := func() (bridgeUDNConfiguration, error) {
+		bridge.Lock()
+		defer bridge.Unlock()
+		netConfig, found := bridge.netConfig[netName]
+		if !found {
+			return bridgeUDNConfiguration{}, fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
+		}
+		return *netConfig, nil
+	}()
+
+	if err != nil {
+		return err
+	}
+
+	err = netConfig.setBridgeNetworkOfPortsInternal()
+	if err != nil {
+		return err
+	}
+	bridge.Lock()
+	netConfigNew, found := bridge.netConfig[netName]
 	if !found {
 		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
 	}
-	return netConfig.setBridgeNetworkOfPortsInternal()
+	netConfigNew.ofPortPatch = netConfig.ofPortPatch
+	bridge.Unlock()
+	return nil
 }
 
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
