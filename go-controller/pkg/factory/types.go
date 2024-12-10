@@ -77,6 +77,8 @@ type NodeWatchFactory interface {
 	GetServiceEndpointSlices(namespace, svcName, network string) ([]*discovery.EndpointSlice, error)
 
 	GetNamespace(name string) (*kapi.Namespace, error)
+
+	ShallowClone() *WatchFactory
 }
 
 type Shutdownable interface {

@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -95,11 +96,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// WatchFactory initializes and manages common kube watches
-type WatchFactory struct {
+type handlerCounter struct {
 	// Must be first member in the struct due to Golang ARM/x86 32-bit
 	// requirements with atomic accesses
-	handlerCounter uint64
+	counter uint64
+}
+
+// WatchFactory initializes and manages common kube watches
+type WatchFactory struct {
+	handlerCounter *handlerCounter
 
 	iFactory             informerfactory.SharedInformerFactory
 	anpFactory           anpinformerfactory.SharedInformerFactory
@@ -117,10 +122,34 @@ type WatchFactory struct {
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
+
+	handlerIndex int
+}
+
+func (wf *WatchFactory) ShallowClone() *WatchFactory {
+	return &WatchFactory{
+		handlerCounter:       wf.handlerCounter,
+		iFactory:             wf.iFactory,
+		anpFactory:           wf.anpFactory,
+		eipFactory:           wf.eipFactory,
+		efFactory:            wf.efFactory,
+		dnsFactory:           wf.dnsFactory,
+		cpipcFactory:         wf.cpipcFactory,
+		egressQoSFactory:     wf.egressQoSFactory,
+		mnpFactory:           wf.mnpFactory,
+		egressServiceFactory: wf.egressServiceFactory,
+		apbRouteFactory:      wf.apbRouteFactory,
+		ipamClaimsFactory:    wf.ipamClaimsFactory,
+		nadFactory:           wf.nadFactory,
+		udnFactory:           wf.udnFactory,
+		informers:            wf.informers,
+		stopChan:             wf.stopChan,
+		handlerIndex:         rand.IntN(handlerPoolSize - 1) + 1,
+	}
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
-var _ ObjectCacheInterface = &WatchFactory{}
+var _ ObjectCacheInterface = &WatchFactory{handlerCounter: &handlerCounter{}}
 
 const (
 	// resync time is 0, none of the resources being watched in ovn-kubernetes have
@@ -135,6 +164,8 @@ const (
 
 	// namespace, node, and pod handlers
 	defaultNumEventQueues uint32 = 15
+	// rest of handlers
+	minNumEventQueues = 1
 
 	// default priorities for various handlers (also the highest priority)
 	defaultHandlerPriority int = 0
@@ -208,7 +239,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	}
 	wf.cpipcFactory = ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval)
 	if util.PlatformTypeIsEgressIPCloudProvider() {
-		wf.informers[CloudPrivateIPConfigType], err = newInformer(CloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		wf.informers[CloudPrivateIPConfigType], err = newQueuedInformer(CloudPrivateIPConfigType,
+			wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -243,6 +275,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
+		handlerCounter:		  &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -321,11 +354,13 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newQueuedInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer(),
+		wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[PolicyType], err = newInformer(PolicyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
+	wf.informers[PolicyType], err = newQueuedInformer(PolicyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer(),
+		wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -339,28 +374,33 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[EndpointSliceType], err = newInformer(EndpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+	wf.informers[EndpointSliceType], err = newQueuedInformer(EndpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer(),
+		wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
-		wf.informers[AdminNetworkPolicyType], err = newInformer(AdminNetworkPolicyType, wf.anpFactory.Policy().V1alpha1().AdminNetworkPolicies().Informer())
+		wf.informers[AdminNetworkPolicyType], err = newQueuedInformer(AdminNetworkPolicyType,
+			wf.anpFactory.Policy().V1alpha1().AdminNetworkPolicies().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[BaselineAdminNetworkPolicyType], err = newInformer(BaselineAdminNetworkPolicyType, wf.anpFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies().Informer())
+		wf.informers[BaselineAdminNetworkPolicyType], err = newQueuedInformer(BaselineAdminNetworkPolicyType,
+			wf.anpFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		wf.informers[EgressIPType], err = newQueuedInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer(), wf.stopChan,
+			minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		wf.informers[EgressFirewallType], err = newInformer(EgressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+		wf.informers[EgressFirewallType], err = newQueuedInformer(EgressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer(),
+			wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -371,13 +411,15 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressQoS {
-		wf.informers[EgressQoSType], err = newInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer())
+		wf.informers[EgressQoSType], err = newQueuedInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer(),
+			wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressService {
-		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		wf.informers[EgressServiceType], err = newQueuedInformer(EgressServiceType,
+			wf.egressServiceFactory.K8s().V1().EgressServices().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -385,14 +427,16 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
-		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(NetworkAttachmentDefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 
 		if config.OVNKubernetesFeature.EnablePersistentIPs && !config.OVNKubernetesFeature.EnableInterconnect {
 			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-			wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+			wf.informers[IPAMClaimsType], err = newQueuedInformer(IPAMClaimsType,
+				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(), wf.stopChan, minNumEventQueues)
 			if err != nil {
 				return nil, err
 			}
@@ -401,19 +445,22 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		wf.informers[UserDefinedNetworkType], err = newQueuedInformer(UserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 
-		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		wf.informers[ClusterUserDefinedNetworkType], err = newQueuedInformer(ClusterUserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
-		wf.informers[MultiNetworkPolicyType], err = newInformer(MultiNetworkPolicyType, wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
+		wf.informers[MultiNetworkPolicyType], err = newQueuedInformer(MultiNetworkPolicyType,
+			wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -591,6 +638,7 @@ func (wf *WatchFactory) Stop() {
 // of the localPodSelector or figure out how to deal with selecting all pods everywhere.
 func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
+		handlerCounter:		  &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -659,7 +707,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			getEndpointSliceSelector())
 	})
 
-	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
+	wf.informers[NamespaceType], err = newQueuedInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
+		wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -668,32 +717,35 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[ServiceType], err = newInformer(
+	wf.informers[ServiceType], err = newQueuedInformer(
 		ServiceType,
-		wf.iFactory.Core().V1().Services().Informer())
+		wf.iFactory.Core().V1().Services().Informer(), wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[EndpointSliceType], err = newInformer(
+	wf.informers[EndpointSliceType], err = newQueuedInformer(
 		EndpointSliceType,
-		wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+		wf.iFactory.Discovery().V1().EndpointSlices().Informer(), wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 
-	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	wf.informers[NodeType], err = newQueuedInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
+		minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
-		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		wf.informers[EgressServiceType], err = newQueuedInformer(EgressServiceType,
+			wf.egressServiceFactory.K8s().V1().EgressServices().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		wf.informers[EgressIPType], err = newQueuedInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer(),
+			wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -709,7 +761,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	// needs the NAD factory whenever the UDN feature is used.
 	if config.OVNKubernetesFeature.EnableMultiNetwork || config.OVNKubernetesFeature.EnableNetworkSegmentation {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
-		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(NetworkAttachmentDefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -717,12 +770,14 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		wf.informers[UserDefinedNetworkType], err = newQueuedInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer(),
+			wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 
-		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		wf.informers[ClusterUserDefinedNetworkType], err = newQueuedInformer(ClusterUserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -736,6 +791,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 // mode process.
 func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
 	wf := &WatchFactory{
+		handlerCounter:		  &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -793,37 +849,42 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	var err error
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newQueuedInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer(),
+		wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 
-	wf.informers[EndpointSliceType], err = newInformer(
+	wf.informers[EndpointSliceType], err = newQueuedInformer(
 		EndpointSliceType,
-		wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+		wf.iFactory.Discovery().V1().EndpointSlices().Informer(), wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 
-	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	wf.informers[NodeType], err = newQueuedInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer(),
+		wf.stopChan, minNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		wf.informers[EgressIPType], err = newQueuedInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer(),
+			wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if util.PlatformTypeIsEgressIPCloudProvider() {
-		wf.informers[CloudPrivateIPConfigType], err = newInformer(CloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		wf.informers[CloudPrivateIPConfigType], err = newQueuedInformer(CloudPrivateIPConfigType,
+			wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
-		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		wf.informers[EgressServiceType], err = newQueuedInformer(EgressServiceType,
+			wf.egressServiceFactory.K8s().V1().EgressServices().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -831,20 +892,23 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
-		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(NetworkAttachmentDefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
 
 		if config.OVNKubernetesFeature.EnableInterconnect {
-			wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues)
+			wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(),
+				wf.stopChan, defaultNumEventQueues)
 			if err != nil {
 				return nil, err
 			}
 
 			if config.OVNKubernetesFeature.EnablePersistentIPs {
 				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-				wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+				wf.informers[IPAMClaimsType], err = newQueuedInformer(IPAMClaimsType,
+					wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(), wf.stopChan, minNumEventQueues)
 				if err != nil {
 					return nil, err
 				}
@@ -869,11 +933,13 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		wf.informers[UserDefinedNetworkType], err = newQueuedInformer(UserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		wf.informers[ClusterUserDefinedNetworkType], err = newQueuedInformer(ClusterUserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer(), wf.stopChan, minNumEventQueues)
 		if err != nil {
 			return nil, err
 		}
@@ -956,6 +1022,22 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case IPAMClaimsType:
 		if persistentips, ok := obj.(*ipamclaimsapi.IPAMClaim); ok {
 			return &persistentips.ObjectMeta, nil
+		}
+	case EgressQoSType:
+		if egressQoS, ok := obj.(*egressqosapi.EgressQoS); ok {
+			return &egressQoS.ObjectMeta, nil
+		}
+	case EgressServiceType:
+		if egressService, ok := obj.(*egressserviceapi.EgressService); ok {
+			return &egressService.ObjectMeta, nil
+		}
+	case UserDefinedNetworkType:
+		if udn, ok := obj.(*userdefinednetworkapi.UserDefinedNetwork); ok {
+			return &udn.ObjectMeta, nil
+		}
+	case ClusterUserDefinedNetworkType:
+		if cudn, ok := obj.(*userdefinednetworkapi.ClusterUserDefinedNetwork); ok {
+			return &cudn.ObjectMeta, nil
 		}
 	}
 
@@ -1097,8 +1179,8 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		return true
 	}
 
-	inf.Lock()
-	defer inf.Unlock()
+	inf.internalInformers[wf.handlerIndex].Lock()
+	defer inf.internalInformers[wf.handlerIndex].Unlock()
 
 	items := make([]interface{}, 0)
 	for _, obj := range inf.inf.GetStore().List() {
@@ -1122,8 +1204,8 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		}
 	}
 
-	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-	handler := inf.addHandler(handlerID, priority, filterFunc, funcs, items)
+	handlerID := atomic.AddUint64(&wf.handlerCounter.counter, 1)
+	handler := inf.addHandler(wf.handlerIndex, handlerID, priority, filterFunc, funcs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
 	return handler, nil
 }

@@ -57,7 +57,7 @@ func newSecondaryNetworkClusterManager(ovnClient *util.OVNClusterManagerClientse
 		recorder:           recorder,
 	}
 
-	sncm.nadController, err = nad.NewNetAttachDefinitionController("cluster-manager", sncm, wf, recorder)
+	sncm.nadController, err = nad.NewNetAttachDefinitionController("cluster-manager", sncm, wf, recorder, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 	klog.Infof("Creating new network controller for network %s of topology %s", nInfo.GetNetworkName(), nInfo.TopologyType())
 
 	namedIDAllocator := sncm.networkIDAllocator.ForName(nInfo.GetNetworkName())
-	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory, sncm.recorder,
+	sncc := newNetworkClusterController(namedIDAllocator, nInfo, sncm.ovnClient, sncm.watchFactory.ShallowClone(), sncm.recorder,
 		sncm.nadController, sncm.errorReporter)
 	return sncc, nil
 }

@@ -37,7 +37,7 @@ type networkManager interface {
 	getNetwork(string) util.NetInfo
 }
 
-func newNetworkManager(name string, ncm NetworkControllerManager) networkManager {
+func newNetworkManager(name string, ncm NetworkControllerManager, threadiness int) networkManager {
 	nc := &networkManagerImpl{
 		name:               fmt.Sprintf("[%s network manager]", name),
 		ncm:                ncm,
@@ -49,7 +49,7 @@ func newNetworkManager(name string, ncm NetworkControllerManager) networkManager
 	config := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.sync,
-		Threadiness: 1,
+		Threadiness: threadiness,
 	}
 	nc.controller = controller.NewReconciler(
 		nc.name,
@@ -149,7 +149,7 @@ func (nm *networkManagerImpl) getAllNetworkStates() []*networkControllerState {
 
 func (nm *networkManagerImpl) sync(network string) error {
 	startTime := time.Now()
-	klog.V(5).Infof("%s: sync network %s", nm.name, network)
+	klog.V(4).Infof("%s: sync network %s", nm.name, network)
 	defer func() {
 		klog.V(4).Infof("%s: finished syncing network %s, took %v", nm.name, network, time.Since(startTime))
 	}()
