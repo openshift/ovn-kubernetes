@@ -3,11 +3,12 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/labels"
 	"net"
 	"reflect"
 	"sync"
 	"time"
+
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
 
@@ -838,10 +839,12 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(udnNode *use
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if nSyncs.syncMgmtPort {
-			mac, err := net.ParseMAC(udnNode.Spec.ManagementPortMACAddress)
-			if err != nil {
-				return fmt.Errorf("failed to parse MAC for network %q on node %q, mac string: %q", oc.GetNetworkName(), node.Name, udnNode.Spec.ManagementPortMACAddress)
+			// calculate mac
+			if len(oc.Subnets()) == 0 {
+				return fmt.Errorf("unable to generate MAC address, no subnets provided for network: %s", oc.GetNetworkName())
 			}
+			mac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(oc.Subnets()[0].CIDR).IP)
+
 			_, err = oc.syncNodeManagementPort(mac, node.Name, oc.GetNetworkScopedSwitchName(node.Name), oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 			if err != nil {
 				errs = append(errs, err)
@@ -990,11 +993,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(udnNode *us
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
 func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, nodeName string, udnNode *userdefinednodeapi.UDNNode) error {
 	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(nodeName)
-	mac, err := net.ParseMAC(udnNode.Spec.ManagementPortMACAddress)
-	if err != nil {
-		return fmt.Errorf("failed to parse MAC for network %q on node %q, mac string: %q", oc.GetNetworkName(), nodeName, udnNode.Spec.ManagementPortMACAddress)
-	}
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, nodeName, mac)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
 			oc.GetNetworkName(), nodeName, err)

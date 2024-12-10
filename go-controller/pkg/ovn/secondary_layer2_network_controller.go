@@ -593,6 +593,15 @@ func (oc *SecondaryLayer2NetworkController) newRetryFramework(
 func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(udnNode *userdefinednodeapi.UDNNode, node *corev1.Node, nSyncs *nodeSyncs) error {
 	var errs []error
 	var macAddr net.HardwareAddr
+
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		// calculate mac
+		if len(oc.Subnets()) == 0 {
+			return fmt.Errorf("unable to generate MAC address, no subnets provided for network: %s", oc.GetNetworkName())
+		}
+		macAddr = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(oc.Subnets()[0].CIDR).IP)
+	}
+
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if nSyncs.syncGw {
 
@@ -630,17 +639,11 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(udnNode *use
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
 					if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-						macAddr, err = net.ParseMAC(udnNode.Spec.ManagementPortMACAddress)
-						if err != nil {
-							errs = append(errs, fmt.Errorf("failed to parse MAC for network %q on node %q, mac string: %q", oc.GetNetworkName(), node.Name, udnNode.Spec.ManagementPortMACAddress))
+						if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node.Name); err != nil {
+							errs = append(errs, err)
 							oc.gatewaysFailed.Store(node.Name, true)
 						} else {
-							if err := oc.addUDNClusterSubnetEgressSNAT(macAddr, gwConfig.hostSubnets, gwManager.gwRouterName, node.Name); err != nil {
-								errs = append(errs, err)
-								oc.gatewaysFailed.Store(node.Name, true)
-							} else {
-								oc.gatewaysFailed.Delete(node.Name)
-							}
+							oc.gatewaysFailed.Delete(node.Name)
 						}
 					}
 				}
@@ -655,21 +658,11 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(udnNode *use
 			for _, subnet := range oc.Subnets() {
 				hostSubnets = append(hostSubnets, subnet.CIDR)
 			}
-			var err error
-			if macAddr == nil {
-				macAddr, err = net.ParseMAC(udnNode.Spec.ManagementPortMACAddress)
-				if err != nil {
-					errs = append(errs, fmt.Errorf("failed to parse MAC for network %q on node %q, mac string: %q", oc.GetNetworkName(), node.Name, udnNode.Spec.ManagementPortMACAddress))
-					oc.mgmtPortFailed.Store(node.Name, true)
-				}
-			}
-			if macAddr != nil {
-				if _, err := oc.syncNodeManagementPort(macAddr, node.Name, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
-					errs = append(errs, err)
-					oc.mgmtPortFailed.Store(node.Name, true)
-				} else {
-					oc.mgmtPortFailed.Delete(node.Name)
-				}
+			if _, err := oc.syncNodeManagementPort(macAddr, node.Name, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
 			}
 		}
 	}
@@ -775,9 +768,9 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(nodeName string) err
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(macAddr net.HardwareAddr, localPodSubnets []*net.IPNet, routerName, nodeName string) error {
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName, nodeName string) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, nodeName, macAddr)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, nodeName)
 	if err != nil {
 		return err
 	}

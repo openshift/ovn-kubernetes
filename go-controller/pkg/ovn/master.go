@@ -130,9 +130,19 @@ func (oc *DefaultNetworkController) newClusterRouter() (*nbdb.LogicalRouter, err
 }
 
 func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) error {
-	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, oc.GetNetworkName())
-	if err != nil {
+	var macAddress net.HardwareAddr
+	var err error
+	// find suitable MAC address
+	// check node annotation first, to ensure we are not picking a new MAC when one was already configured
+	if macAddress, err = util.ParseNodeManagementPortMACAddresses(node, oc.GetNetworkName()); err != nil && !util.IsAnnotationNotSetError(err) {
 		return err
+	}
+	if len(macAddress) == 0 {
+		// calculate mac
+		if len(hostSubnets) == 0 {
+			return fmt.Errorf("unable to generate MAC address, no subnets provided for network: %s", oc.GetNetworkName())
+		}
+		macAddress = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(hostSubnets[0]).IP)
 	}
 	mgmtPortIPs, err := oc.syncNodeManagementPort(macAddress, node.Name, switchName, oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 	if err == nil {
