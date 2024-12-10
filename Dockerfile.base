@@ -12,7 +12,7 @@ RUN dnf install -y --nodocs \
 	selinux-policy procps-ng && \
 	dnf clean all
 
-ARG ovsver=3.4.0-1.el9fdp
+ARG ovsver=3.4.0-18.el9fdp
 ARG ovnver=24.09.0-33.el9fdp
 # NOTE: Ensure that the versions of OVS and OVN are overriden for OKD in each of the subsequent layers.
 # Centos and RHEL releases for ovn are built out of sync, so please make sure to bump for OKD with
