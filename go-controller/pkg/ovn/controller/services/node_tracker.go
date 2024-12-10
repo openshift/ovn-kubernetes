@@ -169,7 +169,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
 	}
 
-	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
+	klog.V(5).Infof("Node %s switch + router changed, syncing services", nodeName)
 
 	nt.Lock()
 	defer nt.Unlock()
@@ -220,7 +220,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 	}
 	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
-		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
+		klog.V(5).Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
 		nt.removeNode(node.Name)
 		return
 	}
@@ -235,7 +235,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 	// so, set the router name
 	gwConf, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil || gwConf == nil {
-		klog.Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
+		klog.V(5).Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
 	} else if gwConf.Mode != globalconfig.GatewayModeDisabled {
 		grName = nt.netInfo.GetNetworkScopedGWRouterName(node.Name)
 		// L3 GW IP addresses are not network-specific, we can take them from the default L3 GW annotation
