@@ -224,7 +224,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
 	}
 
-	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
+	klog.V(5).Infof("Node %s switch + router changed, syncing services", nodeName)
 
 	nt.Lock()
 	defer nt.Unlock()
@@ -283,7 +283,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 	}
 	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
-		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
+		klog.V(5).Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
 		nt.removeNode(node.Name)
 		return
 	}
@@ -300,7 +300,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		var gwConf *util.L3GatewayConfig
 		gwConf, err = util.ParseNodeL3GatewayAnnotation(node)
 		if err != nil || gwConf == nil {
-			klog.Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
+			klog.V(5).Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
 		} else if gwConf.Mode != globalconfig.GatewayModeDisabled {
 			for _, ip := range gwConf.IPAddresses {
 				l3gatewayAddresses = append(l3gatewayAddresses, ip.IP)
@@ -311,14 +311,14 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		if udnNode == nil {
 			udnNode, err = nt.watchFactory.GetUDNNodeByLabels(node.Name, nt.netInfo.GetNetworkName())
 			if err != nil {
-				klog.Infof("Node %s has invalid / no udn config: %v", node.Name, err)
+				klog.V(5).Infof("Node %s has invalid / no udn config: %v", node.Name, err)
 			}
 		}
 		if udnNode != nil {
 			joinCIDRs, err := util.ParseNodeUDNGatewayRouterJoinAddrs(udnNode)
 			// ignore gateway disabled mode, from l3gw config. Assume if join addrs exist then it must not be disabled
 			if err != nil {
-				klog.Infof("UDN Node %s has invalid / no gateway config: %v", node.Name, err)
+				klog.V(5).Infof("UDN Node %s has invalid / no gateway config: %v", node.Name, err)
 			} else {
 				for _, cidr := range joinCIDRs {
 					l3gatewayAddresses = append(l3gatewayAddresses, cidr.IP)
