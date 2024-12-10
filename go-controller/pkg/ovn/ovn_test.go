@@ -329,7 +329,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 
 	var nadController *nad.NetAttachDefinitionController
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		nadController, err = nad.NewNetAttachDefinitionController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil)
+		nadController, err = nad.NewNetAttachDefinitionController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil, 1)
 		if err != nil {
 			return nil, err
 		}
