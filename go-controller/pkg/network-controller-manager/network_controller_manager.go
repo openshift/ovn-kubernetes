@@ -207,7 +207,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 
 	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, wf, nil)
+		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, wf, nil, 15)
 		if err != nil {
 			return nil, err
 		}

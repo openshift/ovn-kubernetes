@@ -86,7 +86,7 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 		}
 	}
 	testNCM := &nad.FakeNetworkControllerManager{}
-	nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, factoryMock, nil)
+	nadController, err := networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, factoryMock, nil, 1)
 	if err != nil {
 		return nil, err
 	}

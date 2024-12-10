@@ -37,7 +37,7 @@ type networkManager interface {
 	getNetwork(string) util.NetInfo
 }
 
-func newNetworkManager(name string, ncm NetworkControllerManager) networkManager {
+func newNetworkManager(name string, ncm NetworkControllerManager, threadiness int) networkManager {
 	nc := &networkManagerImpl{
 		name:               fmt.Sprintf("[%s network manager]", name),
 		ncm:                ncm,
@@ -49,7 +49,7 @@ func newNetworkManager(name string, ncm NetworkControllerManager) networkManager
 	config := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.sync,
-		Threadiness: 15,
+		Threadiness: threadiness,
 	}
 	nc.controller = controller.NewReconciler(
 		nc.name,
