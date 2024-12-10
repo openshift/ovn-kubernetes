@@ -87,13 +87,14 @@ func NewNetAttachDefinitionController(
 	ncm NetworkControllerManager,
 	wf watchFactory,
 	recorder record.EventRecorder,
+	threadiness int,
 ) (*NetAttachDefinitionController, error) {
 	nadController := &NetAttachDefinitionController{
 		name:           fmt.Sprintf("[%s NAD controller]", name),
 		recorder:       recorder,
 		nads:           map[string]string{},
 		primaryNADs:    map[string]string{},
-		networkManager: newNetworkManager(name, ncm),
+		networkManager: newNetworkManager(name, ncm, threadiness),
 	}
 
 	config := &controller.ControllerConfig[nettypes.NetworkAttachmentDefinition]{

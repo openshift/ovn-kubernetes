@@ -127,7 +127,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 	// need to start NAD controller on node side for programming gateway pieces for UDNs
 	var err error
 	if isNodeNADControllerRequired() {
-		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf, nil)
+		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf, nil, 1)
 		if err != nil {
 			return nil, err
 		}
