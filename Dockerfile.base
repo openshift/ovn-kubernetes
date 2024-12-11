@@ -13,12 +13,12 @@ RUN dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs \
 	dnf clean all
 
 ARG ovsver=3.4.0-18.el9fdp
-ARG ovnver=24.09.0-33.el9fdp
+ARG ovnver=24.09.1-10.el9fdp
 # NOTE: Ensure that the versions of OVS and OVN are overriden for OKD in each of the subsequent layers.
 # Centos and RHEL releases for ovn are built out of sync, so please make sure to bump for OKD with
 # the corresponding Centos version when updating the OCP version.
 ARG ovsver_okd=3.4.0-12.el9s
-ARG ovnver_okd=24.09.0-41.el9s
+ARG ovnver_okd=24.09.1-10.el9s
 
 RUN INSTALL_PKGS="iptables nftables" && \
     source /etc/os-release && \
