@@ -376,9 +376,9 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
-	// disable multicast support for secondary networks
-	// TBD: changes needs to be made to support multicast in secondary networks
-	oc.multicastSupport = false
+	// enable multicast support for UDN only for primaries + multicast enabled
+	// TBD: changes needs to be made to support multicast beyond primary UDN
+	oc.multicastSupport = oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() && config.EnableMulticast
 
 	oc.initRetryFramework()
 	return oc, nil
@@ -607,10 +607,18 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
 	}
 
-	// Only configure join switch and GR for user defined primary networks.
+	// Only configure join switch, GR, cluster port groups and multicast default policies for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
 		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
 			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
+		}
+
+		if err := oc.setupClusterPortGroups(); err != nil {
+			return fmt.Errorf("failed to create cluster port groups for network %q: %w", oc.GetNetworkName(), err)
+		}
+
+		if err := oc.syncDefaultMulticastPolicies(); err != nil {
+			return fmt.Errorf("failed to sync default multicast policies for network %q: %w", oc.GetNetworkName(), err)
 		}
 	}
 
@@ -709,9 +717,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 					gwConfig.hostSubnets,
 					gwConfig.hostAddrs,
 					gwConfig.clusterSubnets,
-					gwConfig.gwLRPIPs,
+					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
 					oc.SCTPSupport,
-					oc.ovnClusterLRPToJoinIfAddrs,
+					oc.ovnClusterLRPToJoinIfAddrs, // the .1 of this controller's global joinSubnet
 					gwConfig.externalIPs,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
@@ -922,7 +930,7 @@ type SecondaryL3GatewayConfig struct {
 	config         *util.L3GatewayConfig
 	hostSubnets    []*net.IPNet
 	clusterSubnets []*net.IPNet
-	gwLRPIPs       []*net.IPNet
+	gwLRPJoinIPs   []*net.IPNet
 	hostAddrs      []string
 	externalIPs    []net.IP
 }
@@ -972,7 +980,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		return nil, fmt.Errorf("failed to get node %q subnet annotation for network %q: %v", node.Name, oc.GetNetworkName(), err)
 	}
 
-	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
 	if err != nil {
 		return nil, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w", node.Name, networkName, err)
 	}
@@ -984,7 +992,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (
 		config:         l3GatewayConfig,
 		hostSubnets:    hostSubnets,
 		clusterSubnets: clusterSubnets,
-		gwLRPIPs:       gwLRPIPs,
+		gwLRPJoinIPs:   gwLRPJoinIPs,
 		hostAddrs:      hostAddrs,
 		externalIPs:    externalIPs,
 	}, nil
@@ -1052,9 +1060,9 @@ func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.Wait
 	go func() {
 		defer wg.Done()
 		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the
-		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
+		// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
+		// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, false)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 		}
