@@ -597,14 +597,16 @@ func IsUDNEnabledService(key string) bool {
 // in the given network
 func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netInfo NetInfo) (k8stypes.NamespacedName, error) {
 	labelKey := discovery.LabelServiceName
-	if netInfo.IsPrimaryNetwork() {
-		if eps.Labels[types.LabelUserDefinedEndpointSliceNetwork] != netInfo.GetNetworkName() {
-			return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
-		}
+	if IsNetworkSegmentationSupportEnabled() {
 		labelKey = types.LabelUserDefinedServiceName
+		if netInfo.IsPrimaryNetwork() {
+			if eps.Labels[types.LabelUserDefinedEndpointSliceNetwork] != netInfo.GetNetworkName() {
+				return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
+			}
+		}
 	}
-	svcName := eps.Labels[labelKey]
 
+	svcName := eps.Labels[labelKey]
 	if svcName == "" {
 		return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s: empty value for label %s in network %s",
 			eps.Namespace, eps.Name, labelKey, netInfo.GetNetworkName())
