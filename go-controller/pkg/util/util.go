@@ -597,18 +597,39 @@ func IsUDNEnabledService(key string) bool {
 // in the given network
 func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netInfo NetInfo) (k8stypes.NamespacedName, error) {
 	labelKey := discovery.LabelServiceName
-	if netInfo.IsPrimaryNetwork() {
-		if eps.Labels[types.LabelUserDefinedEndpointSliceNetwork] != netInfo.GetNetworkName() {
-			return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
+	klog.Infof("ServiceFromEndpointSlice(). labelKey: %s", labelKey)
+	if IsNetworkSegmentationSupportEnabled() {
+		klog.Infof("ServiceFromEndpointSlice().IsNetworkSegmentationSupportEnabled() labelKey: %s", labelKey)
+		if eps.Labels[types.LabelUserDefinedServiceName] == "" {
+			klog.Infof("ServiceFromEndpointSlice().IsNetworkSegmentationSupportEnabled().discovery.LabelServiceName.null labelKey: %s", labelKey)
+			if eps.Labels[discovery.LabelServiceName] == "" {
+				klog.Infof("ServiceFromEndpointSlice().IsNetworkSegmentationSupportEnabled().discovery.LabelServiceName.null.discovery.LabelServiceName.null labelKey: %s", labelKey)
+				return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s: empty value for label %s in network %s",
+					eps.Namespace, eps.Name, labelKey, netInfo.GetNetworkName())
+			}
+			labelKey = discovery.LabelServiceName
+			klog.Infof("ServiceFromEndpointSlice().IsNetworkSegmentationSupportEnabled() labelKey: %s", labelKey)
+		} else {
+			labelKey = types.LabelUserDefinedServiceName
+			klog.Infof("ServiceFromEndpointSlice().!IsNetworkSegmentationSupportEnabled() labelKey: %s", labelKey)
 		}
-		labelKey = types.LabelUserDefinedServiceName
+		if netInfo.IsPrimaryNetwork() {
+			klog.Infof("ServiceFromEndpointSlice().!IsNetworkSegmentationSupportEnabled().IsPrimaryNetwork().checking.LabelUserDefinedEndpointSliceNetwork labelKey: %s", labelKey)
+			if eps.Labels[types.LabelUserDefinedEndpointSliceNetwork] != netInfo.GetNetworkName() {
+				return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
+			}
+		}
 	}
+
 	svcName := eps.Labels[labelKey]
+	klog.Infof("ServiceFromEndpointSlice(). labelKey: %s, svcName: %s", labelKey, svcName)
 
 	if svcName == "" {
+		klog.Infof("ServiceFromEndpointSlice().svcName.null labelKey: %s, svcName: %s", labelKey, svcName)
 		return k8stypes.NamespacedName{}, fmt.Errorf("endpointslice %s/%s: empty value for label %s in network %s",
 			eps.Namespace, eps.Name, labelKey, netInfo.GetNetworkName())
 	}
 
+	klog.Infof("ServiceFromEndpointSlice().end labelKey: %s, svcName: %s", labelKey, svcName)
 	return k8stypes.NamespacedName{Namespace: eps.Namespace, Name: svcName}, nil
 }
