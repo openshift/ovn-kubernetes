@@ -240,6 +240,36 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			icClusterTestConfiguration(),
 			failedMigrationInfo(),
 		),
+
+		table.Entry("on a localnet topology with user defined secondary network, when target pod is not yet ready",
+			dummyLocalnetWithSecondaryUserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		table.Entry("on a localnet topology with user defined secondary network, when target pod is ready",
+			dummyLocalnetWithSecondaryUserDefinedNetwork("100.200.0.0/16"),
+			nonICClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+
+		table.Entry("on a localnet topology with user defined secondary network and an IC cluster, when target pod is not yet ready",
+			dummyLocalnetWithSecondaryUserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			notReadyMigrationInfo(),
+		),
+
+		table.Entry("on a localnet topology with user defined secondary network and an IC cluster, when target pod is ready",
+			dummyLocalnetWithSecondaryUserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			readyMigrationInfo(),
+		),
+
+		table.Entry("on a localnet topology with user defined secondary network and an IC cluster, when target pod failed",
+			dummyLocalnetWithSecondaryUserDefinedNetwork("100.200.0.0/16"),
+			icClusterTestConfiguration(),
+			failedMigrationInfo(),
+		),
 	)
 })
 

@@ -177,7 +177,8 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 			// TODO: once we start the "full" SecondaryLayer2NetworkController (instead of just Base)
 			// we can drop this, and compare all objects created by the controller (right now we're
 			// missing all the meters, and the COPP)
-			if ocInfo.bnc.TopologyType() == ovntypes.Layer2Topology {
+			if ocInfo.bnc.TopologyType() == ovntypes.Layer2Topology ||
+				ocInfo.bnc.TopologyType() == ovntypes.LocalnetTopology {
 				otherConfig = nil
 			}
 
@@ -320,9 +321,10 @@ func dummyOVNPodNetworkAnnotations(secondaryPodInfos map[string]*secondaryPodInf
 	podAnnotations := map[string]podAnnotation{}
 	for i, netConfig := range multiHomingConfigs {
 		// we need to inject a dummy OVN annotation into the pods for each multihoming config
-		// for layer2 topology since allocating the annotation for this cluster configuration
+		// for layer2 & localnet topology since allocating the annotation for this cluster configuration
 		// is performed by cluster manager - which doesn't exist in the unit tests.
-		if netConfig.topology == ovntypes.Layer2Topology {
+		if netConfig.topology == ovntypes.Layer2Topology ||
+			netConfig.topology == ovntypes.LocalnetTopology {
 			portInfo := secondaryPodInfos[netConfig.netName].allportInfo[netConfig.nadName]
 			podAnnotations[netConfig.nadName] = dummyOVNPodNetworkAnnotationForNetwork(portInfo, netConfig, i+1)
 		}
