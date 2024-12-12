@@ -34,16 +34,6 @@ type SpecGetter interface {
 	GetLayer2() *userdefinednetworkv1.Layer2Config
 }
 
-// This function has a copy in go-controller/observability-lib/sampledecoder/sample_decoder.go
-// Please update together with this function.
-func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
-	parts := strings.Split(networkName, ".")
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return "", ""
-}
-
 func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*netv1.NetworkAttachmentDefinition, error) {
 	if obj == nil {
 		return nil, nil
@@ -60,11 +50,11 @@ func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*net
 	case *userdefinednetworkv1.UserDefinedNetwork:
 		ownerRef = *metav1.NewControllerRef(obj, userdefinednetworkv1.SchemeGroupVersion.WithKind("UserDefinedNetwork"))
 		spec = &o.Spec
-		networkName = targetNamespace + "." + obj.GetName()
+		networkName = util.GenerateUDNNetworkName(targetNamespace, obj.GetName())
 	case *userdefinednetworkv1.ClusterUserDefinedNetwork:
 		ownerRef = *metav1.NewControllerRef(obj, userdefinednetworkv1.SchemeGroupVersion.WithKind("ClusterUserDefinedNetwork"))
 		spec = &o.Spec.Network
-		networkName = "cluster.udn." + obj.GetName()
+		networkName = util.GenerateCUDNNetworkName(obj.GetName())
 	default:
 		return nil, fmt.Errorf("unknown type %T", obj)
 	}
