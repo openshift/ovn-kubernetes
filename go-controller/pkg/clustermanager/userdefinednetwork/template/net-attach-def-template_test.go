@@ -297,7 +297,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 				"cniVersion": "1.0.0",
 				"type": "ovn-k8s-cni-overlay",
-				"name": "mynamespace.test-net",
+				"name": "mynamespace_test-net",
 				"netAttachDefName": "mynamespace/test-net",
 				"role": "primary",
 				"topology": "layer3",
@@ -321,7 +321,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 			  "cniVersion": "1.0.0",
 			  "type": "ovn-k8s-cni-overlay",
-			  "name": "mynamespace.test-net",
+			  "name": "mynamespace_test-net",
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
@@ -347,7 +347,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 			  "cniVersion": "1.0.0",
 			  "type": "ovn-k8s-cni-overlay",
-			  "name": "mynamespace.test-net",
+			  "name": "mynamespace_test-net",
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
@@ -372,7 +372,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 			  "cniVersion": "1.0.0",
 			  "type": "ovn-k8s-cni-overlay",
-			  "name": "mynamespace.test-net",
+			  "name": "mynamespace_test-net",
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "secondary",
 			  "topology": "layer2",
@@ -430,7 +430,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 				"cniVersion": "1.0.0",
 				"type": "ovn-k8s-cni-overlay",
-				"name": "cluster.udn.test-net",
+				"name": "cluster_udn_test-net",
 				"netAttachDefName": "mynamespace/test-net",
 				"role": "primary",
 				"topology": "layer3",
@@ -454,7 +454,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 			  "cniVersion": "1.0.0",
 			  "type": "ovn-k8s-cni-overlay",
-			  "name": "cluster.udn.test-net",
+			  "name": "cluster_udn_test-net",
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
@@ -480,7 +480,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 			  "cniVersion": "1.0.0",
 			  "type": "ovn-k8s-cni-overlay",
-			  "name": "cluster.udn.test-net",
+			  "name": "cluster_udn_test-net",
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
@@ -505,7 +505,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			`{
 			  "cniVersion": "1.0.0",
 			  "type": "ovn-k8s-cni-overlay",
-			  "name": "cluster.udn.test-net",
+			  "name": "cluster_udn_test-net",
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "secondary",
 			  "topology": "layer2",
