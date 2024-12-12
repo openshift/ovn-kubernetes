@@ -3,8 +3,9 @@ package node
 import (
 	"fmt"
 	"net"
-	"strings"
 	"time"
+
+	userdefinednodeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1/apis/clientset/versioned"
 
 	v1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -44,9 +45,10 @@ type UserDefinedNetworkGateway struct {
 	// stores the networkID of this network
 	networkID int
 	// node that its programming things on
-	node          *v1.Node
-	nodeLister    listers.NodeLister
-	kubeInterface kube.Interface
+	node             *v1.Node
+	nodeLister       listers.NodeLister
+	kubeInterface    kube.Interface
+	udnNodeInterface userdefinednodeclientset.Interface
 	// vrf manager that creates and manages vrfs for all UDNs
 	// used with a lock since its shared between all network controllers
 	vrfManager *vrfmanager.Controller
@@ -120,11 +122,11 @@ func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
 //
 // NOTE: if the network configuration can't be found or if the network is not patched by OVN
 // yet this returns nil.
-func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(nInfo util.NetInfo) *bridgeUDNConfiguration {
+func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(networkName string) *bridgeUDNConfiguration {
 	b.Lock()
 	defer b.Unlock()
 
-	if netConfig, found := b.netConfig[nInfo.GetNetworkName()]; found && netConfig.ofPortPatch != "" {
+	if netConfig, found := b.netConfig[networkName]; found && netConfig.ofPortPatch != "" {
 		result := *netConfig
 		return &result
 	}
@@ -169,18 +171,37 @@ func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error
 }
 
 func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error {
-	bridge.Lock()
-	defer bridge.Unlock()
 
-	netConfig, found := bridge.netConfig[netName]
+	netConfig, err := func() (bridgeUDNConfiguration, error) {
+		bridge.Lock()
+		defer bridge.Unlock()
+		netConfig, found := bridge.netConfig[netName]
+		if !found {
+			return bridgeUDNConfiguration{}, fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
+		}
+		return *netConfig, nil
+	}()
+
+	if err != nil {
+		return err
+	}
+
+	err = netConfig.setBridgeNetworkOfPortsInternal()
+	if err != nil {
+		return err
+	}
+	bridge.Lock()
+	netConfigNew, found := bridge.netConfig[netName]
 	if !found {
 		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, bridge.bridgeName)
 	}
-	return netConfig.setBridgeNetworkOfPortsInternal()
+	netConfigNew.ofPortPatch = netConfig.ofPortPatch
+	bridge.Unlock()
+	return nil
 }
 
 func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
-	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller,
+	kubeInterface kube.Interface, udnInterface userdefinednodeclientset.Interface, vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller,
 	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
 	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.
 	var (
@@ -208,17 +229,18 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 	}
 
 	return &UserDefinedNetworkGateway{
-		NetInfo:       netInfo,
-		networkID:     networkID,
-		node:          node,
-		nodeLister:    nodeLister,
-		kubeInterface: kubeInterface,
-		vrfManager:    vrfManager,
-		masqCTMark:    masqCTMark,
-		v4MasqIPs:     v4MasqIPs,
-		v6MasqIPs:     v6MasqIPs,
-		gateway:       gw,
-		ruleManager:   ruleManager,
+		NetInfo:          netInfo,
+		networkID:        networkID,
+		node:             node,
+		nodeLister:       nodeLister,
+		kubeInterface:    kubeInterface,
+		udnNodeInterface: udnInterface,
+		vrfManager:       vrfManager,
+		masqCTMark:       masqCTMark,
+		v4MasqIPs:        v4MasqIPs,
+		v6MasqIPs:        v6MasqIPs,
+		gateway:          gw,
+		ruleManager:      ruleManager,
 	}, nil
 }
 
@@ -227,7 +249,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	// port is created first and its MAC address configured. The IP(s) on that link are added after enslaving to a VRF device (addUDNManagementPortIPs)
 	// because IPv6 addresses are removed by the kernel (if not link local) when enslaved to a VRF device.
-	mplink, macAddress, err := udng.addUDNManagementPort()
+	mplink, err := udng.addUDNManagementPort()
 	if err != nil {
 		return fmt.Errorf("could not create management port netdevice for network %s: %w", udng.GetNetworkName(), err)
 	}
@@ -242,9 +264,6 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	}
 	if err = udng.addUDNManagementPortIPs(mplink); err != nil {
 		return fmt.Errorf("unable to add management port IP(s) for link %s, for network %s: %w", mplink.Attrs().Name, udng.GetNetworkName(), err)
-	}
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, macAddress, udng.GetNetworkName()); err != nil {
-		return fmt.Errorf("unable to update mac address annotation for node %s, for network %s, err: %w", udng.node.Name, udng.GetNetworkName(), err)
 	}
 	// create the iprules for this network
 	udnReplyIPRules, err := udng.constructUDNVRFIPRules(vrfTableId)
@@ -267,11 +286,13 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {
 			if err := setBridgeNetworkOfPorts(udng.openflowManager.defaultBridge, udng.GetNetworkName()); err != nil {
-				return false, fmt.Errorf("failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
+				klog.V(3).Infof("Failed to set network %s's openflow ports for default bridge; error: %v", udng.GetNetworkName(), err)
+				return false, nil
 			}
 			if udng.openflowManager.externalGatewayBridge != nil {
 				if err := setBridgeNetworkOfPorts(udng.openflowManager.externalGatewayBridge, udng.GetNetworkName()); err != nil {
-					return false, fmt.Errorf("failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
+					klog.V(3).Infof("Failed to set network %s's openflow ports for secondary bridge; error: %v", udng.GetNetworkName(), err)
+					return false, nil
 				}
 			}
 			return true, nil
@@ -327,39 +348,35 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 // STEP3: sets up the management port link on the host
 // STEP4: enables IPv4 forwarding on the interface if the network has a v4 subnet
 // Returns a netlink Link which is the UDN management port interface along with its MAC address
-func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net.HardwareAddr, error) {
+func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, error) {
 	var err error
 	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
+	networkLocalSubnets, err := udng.getLocalSubnets()
+	if err != nil {
+		return nil, err
+	}
+	if len(networkLocalSubnets) == 0 {
+		return nil, fmt.Errorf("cannot determine subnets while configuring management port for network: %s", udng.GetNetworkName())
+	}
+	macAddr := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(networkLocalSubnets[0]).IP)
+
 	// STEP1
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--may-exist", "add-port", "br-int", interfaceName,
-		"--", "set", "interface", interfaceName,
+		"--", "set", "interface", interfaceName, fmt.Sprintf("mac=\"%s\"", macAddr.String()),
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", udng.NetInfo.MTU()),
 		"external-ids:iface-id="+udng.GetNetworkScopedK8sMgmtIntfName(udng.node.Name),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
+		return nil, fmt.Errorf("failed to add port to br-int for network %s, stdout: %q, stderr: %q, error: %w",
 			udng.GetNetworkName(), stdout, stderr, err)
 	}
 	klog.V(3).Infof("Added OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
 
 	// STEP2
-	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get management port MAC address for network %s: %v", udng.GetNetworkName(), err)
-	}
-	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to persist MAC address %q for %q while plumbing network %s: stderr:%s (%v)",
-			macAddress.String(), interfaceName, udng.GetNetworkName(), stderr, err)
-	}
-
-	// STEP3
 	mplink, err := util.LinkSetUp(interfaceName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
+		return nil, fmt.Errorf("failed to set the link up for interface %s while plumbing network %s, err: %v",
 			interfaceName, udng.GetNetworkName(), err)
 	}
 	klog.V(3).Infof("Setup management port link %s for network %s succeeded", interfaceName, udng.GetNetworkName())
@@ -369,22 +386,67 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net
 	if ipv4, _ := udng.IPMode(); ipv4 {
 		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", interfaceName))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", interfaceName) {
-			return nil, nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+			return nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
 				interfaceName, stdout, stderr, err)
 		}
 	}
-	return mplink, macAddress, nil
+	return mplink, nil
+}
+
+// getLocalSubnets returns pod subnets used by the current node.
+// For L3 networks it parses the ovnNodeSubnets annotation, for L2 networks it returns the network subnets.
+func (udng *UserDefinedNetworkGateway) getLocalSubnets() ([]*net.IPNet, error) {
+	var networkLocalSubnets []*net.IPNet
+
+	// fetch subnets which we will use to get management port IP(s)
+	if udng.TopologyType() == types.Layer3Topology {
+		udnNode, err := udng.watchFactory.GetUDNNodeByLabels(udng.node.Name, udng.GetNetworkName())
+		if err != nil {
+			return nil, fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
+				udng.node.Name, udng.GetNetworkName(), err)
+		}
+		if len(udnNode.Spec.NodeSubnets) == 0 {
+			return nil, fmt.Errorf("subnets are empty for UDN Node: %s, for node: %s, network %s",
+				udnNode.Name, udng.node.Name, udng.GetNetworkName())
+		}
+		for _, subnet := range udnNode.Spec.NodeSubnets {
+			_, n, err := net.ParseCIDR(string(subnet))
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse CIDR %q for node %s, network %s: %w",
+					subnet, udng.node.Name, udng.GetNetworkName(), err)
+			}
+			networkLocalSubnets = append(networkLocalSubnets, n)
+		}
+	} else if udng.TopologyType() == types.Layer2Topology {
+		// NOTE: We don't support L2 networks without subnets as primary UDNs
+		globalFlatL2Networks := udng.Subnets()
+		for _, globalFlatL2Network := range globalFlatL2Networks {
+			networkLocalSubnets = append(networkLocalSubnets, globalFlatL2Network.CIDR)
+		}
+	}
+	return networkLocalSubnets, nil
 }
 
 func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Link) error {
-	var err error
 	var networkLocalSubnets []*net.IPNet
 	// fetch subnets which we will use to get management port IP(s)
 	if udng.TopologyType() == types.Layer3Topology {
-		networkLocalSubnets, err = util.ParseNodeHostSubnetAnnotation(udng.node, udng.GetNetworkName())
+		udnNode, err := udng.watchFactory.GetUDNNodeByLabels(udng.node.Name, udng.GetNetworkName())
 		if err != nil {
 			return fmt.Errorf("waiting for node %s to start, no annotation found on node for network %s: %w",
 				udng.node.Name, udng.GetNetworkName(), err)
+		}
+		if len(udnNode.Spec.NodeSubnets) == 0 {
+			return fmt.Errorf("subnets are empty for UDN Node: %s, for node: %s, network %s",
+				udnNode.Name, udng.node.Name, udng.GetNetworkName())
+		}
+		for _, subnet := range udnNode.Spec.NodeSubnets {
+			_, n, err := net.ParseCIDR(string(subnet))
+			if err != nil {
+				return fmt.Errorf("failed to parse CIDR %q for node %s, network %s: %w",
+					subnet, udng.node.Name, udng.GetNetworkName(), err)
+			}
+			networkLocalSubnets = append(networkLocalSubnets, n)
 		}
 	} else if udng.TopologyType() == types.Layer2Topology {
 		// NOTE: We don't support L2 networks without subnets as primary UDNs
@@ -426,11 +488,6 @@ func (udng *UserDefinedNetworkGateway) deleteUDNManagementPort() error {
 			udng.GetNetworkName(), stdout, stderr, err)
 	}
 	klog.V(3).Infof("Removed OVS management port interface %s for network %s", interfaceName, udng.GetNetworkName())
-	// sending nil mac address will delete the network's annotation value
-	if err := util.UpdateNodeManagementPortMACAddressesWithRetry(udng.node, udng.nodeLister, udng.kubeInterface, nil, udng.GetNetworkName()); err != nil {
-		return fmt.Errorf("unable to remove mac address annotation for node %s, for network %s, err: %v", udng.node.Name, udng.GetNetworkName(), err)
-	}
-	klog.V(3).Infof("Removed management port mac address information of %s for network %s", interfaceName, udng.GetNetworkName())
 	return nil
 }
 

@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 	"math"
 	"net"
 	"net/netip"
@@ -871,18 +872,28 @@ func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 }
 
 func ParseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
-	var val primaryIfAddrAnnotation
-	joinSubnetMap, err := parseJoinSubnetAnnotation(node.Annotations, OVNNodeGRLRPAddrs)
-	if err != nil {
-		return val, fmt.Errorf("unable to parse annotation %s on node %s: err %w",
-			OVNNodeGRLRPAddrs, node.Name, err)
+	var joinSubnetMap map[string]json.RawMessage
+	var ret primaryIfAddrAnnotation
+
+	annotation, ok := node.Annotations[OVNNodeGRLRPAddrs]
+	if !ok {
+		return primaryIfAddrAnnotation{}, newAnnotationNotSetError("could not find %q annotation", OVNNodeGRLRPAddrs)
+	}
+
+	if err := json.Unmarshal([]byte(annotation), &joinSubnetMap); err != nil {
+		return primaryIfAddrAnnotation{}, fmt.Errorf("failed to unmarshal %q annotation on node %s: %v", OVNNodeGRLRPAddrs, node.Name, err)
 	}
 	val, ok := joinSubnetMap[netName]
 	if !ok {
-		return val, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
+		return primaryIfAddrAnnotation{}, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
 			node.Name, netName)
 	}
-	return val, nil
+
+	if err := json.Unmarshal(val, &ret); err != nil {
+		return primaryIfAddrAnnotation{}, fmt.Errorf("failed to unmarshal the %q annotation on node %s for %s network err: %w", OVNNodeGRLRPAddrs, node.Name, netName, err)
+	}
+
+	return ret, nil
 }
 
 // ParseNodeGatewayRouterJoinIPv4 returns the IPv4 address for the node's gateway router port
@@ -904,6 +915,21 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 	return ip, nil
 }
 
+func ParseNodeUDNGatewayRouterJoinAddrs(udnNode *userdefinednodeapi.UDNNode) ([]*net.IPNet, error) {
+	var ipAddrs []*net.IPNet
+	if len(udnNode.Spec.JoinSubnets) == 0 {
+		return nil, types.NewSuppressedError(fmt.Errorf("join subnet missing in spec"))
+	}
+	for _, subnet := range udnNode.Spec.JoinSubnets {
+		ip, ipNet, err := net.ParseCIDR(string(subnet))
+		if err != nil {
+			return nil, err
+		}
+		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
+	}
+	return ipAddrs, nil
+}
+
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
@@ -918,6 +944,10 @@ func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IP
 // stored in the 'ovnTransitSwitchPortAddr' annotation
 func ParseNodeTransitSwitchPortAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnTransitSwitchPortAddr)
+}
+
+func TransitSwitchAddrsEqual(old, new *kapi.Node) bool {
+	return old.Annotations[ovnTransitSwitchPortAddr] == new.Annotations[ovnTransitSwitchPortAddr]
 }
 
 // ParseNodeMasqueradeSubnet returns the IPv4 and/or IPv6 networks for the node's gateway router port
@@ -1494,4 +1524,17 @@ func GetNetworkID(nodes []*corev1.Node, nInfo BasicNetInfo) (int, error) {
 		}
 	}
 	return InvalidID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
+}
+
+func GetUDNNetworkID(udnNodes []*userdefinednodeapi.UDNNode, networkName string) (int, error) {
+	for _, udnNode := range udnNodes {
+		if udnNode.Spec.NetworkID != nil && *udnNode.Spec.NetworkID > 0 {
+			return *udnNode.Spec.NetworkID, nil
+		}
+	}
+	return InvalidID, fmt.Errorf("missing network id for network '%s'", networkName)
+}
+
+func GetUDNNodeFormat(nodeName, networkName string) string {
+	return fmt.Sprintf("%s-%s", networkName, nodeName)
 }

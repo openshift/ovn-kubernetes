@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
+	kapi "k8s.io/api/core/v1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -54,7 +57,7 @@ func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology, ovntypes.LocalnetTopology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(false),
 			nInfo, ncm.vrfManager, ncm.ruleManager, ncm.defaultNodeNetworkController.Gateway)
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
@@ -81,20 +84,40 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ..
 }
 
 func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
-	nodes, err := ncm.watchFactory.GetNodes()
-	if err != nil {
-		return util.InvalidID, err
-	}
-	networkID, err := util.GetNetworkID(nodes, network)
-	if err != nil {
-		return util.InvalidID, err
+	var err error
+	var networkID int
+	if network.IsDefault() {
+		var nodes []*kapi.Node
+		nodes, err = ncm.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidID, err
+		}
+		networkID, err = util.GetNetworkID(nodes, network)
+		if err != nil {
+			return util.InvalidID, err
+		}
+	} else {
+		var udnNodes []*userdefinednodeapi.UDNNode
+		udnNodes, err = ncm.watchFactory.GetUDNNodes(network.GetNetworkName())
+		if err != nil {
+			return util.InvalidID, err
+		}
+		networkID, err = util.GetUDNNetworkID(udnNodes, network.GetNetworkName())
+		if err != nil || networkID <= util.NoID {
+			return util.InvalidID, err
+		}
 	}
 	return networkID, nil
 }
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
-func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.routeManager)
+func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo(defaultNet bool) *node.CommonNodeNetworkControllerInfo {
+	wf := ncm.watchFactory
+	if !defaultNet {
+		wf = wf.ShallowClone()
+	}
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient,
+		ncm.ovnNodeClient.UserDefinedNodeClient, wf, ncm.recorder, ncm.name, ncm.routeManager)
 }
 
 // NAD controller should be started on the node side under the following conditions:
@@ -109,21 +132,25 @@ func isNodeNADControllerRequired() bool {
 func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
 	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
-		name:          name,
-		ovnNodeClient: &util.OVNNodeClientset{KubeClient: ovnClient.KubeClient, AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient},
-		Kube:          &kube.Kube{KClient: ovnClient.KubeClient},
-		watchFactory:  wf,
-		stopChan:      make(chan struct{}),
-		wg:            wg,
-		recorder:      eventRecorder,
-		routeManager:  routeManager,
+		name: name,
+		ovnNodeClient: &util.OVNNodeClientset{
+			KubeClient:             ovnClient.KubeClient,
+			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
+			UserDefinedNodeClient:  ovnClient.UserDefinedNodeClient,
+		},
+		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
+		watchFactory: wf,
+		stopChan:     make(chan struct{}),
+		wg:           wg,
+		recorder:     eventRecorder,
+		routeManager: routeManager,
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to start NAD controller on node side for programming gateway pieces for UDNs
 	var err error
 	if isNodeNADControllerRequired() {
-		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf, nil)
+		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf, nil, 15)
 		if err != nil {
 			return nil, err
 		}
@@ -137,7 +164,7 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 
 // initDefaultNodeNetworkController creates the controller for default network
 func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
-	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(true),
 		ncm.nadController)
 	if err != nil {
 		return err

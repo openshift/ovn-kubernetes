@@ -2,12 +2,15 @@ package ovn
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"sync"
 	"time"
+
+	userdefinednodeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/udnnode/v1"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -371,7 +374,7 @@ func (oc *DefaultNetworkController) WatchEgressIPPods() error {
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
-func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets, gwLRPIPs []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
@@ -396,7 +399,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
 			}
 		}
-		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
+		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs, gwLRPIPs); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -405,35 +408,49 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
-	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
+	return oldNode.Annotations[util.OvnNodeL3GatewayConfig] != newNode.Annotations[util.OvnNodeL3GatewayConfig] ||
+		oldNode.Annotations[util.OvnNodeChassisID] != newNode.Annotations[util.OvnNodeChassisID]
 }
 
 // hostCIDRsChanged compares old annotations to new and returns true if the something has changed.
 func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
-	oldAddrs, _ := util.ParseNodeHostCIDRs(oldNode)
-	Addrs, _ := util.ParseNodeHostCIDRs(newNode)
-	return !oldAddrs.Equal(Addrs)
+	return util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 }
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
 func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
-	oldMacAddress, _ := util.ParseNodeManagementPortMACAddresses(oldNode, netName)
-	macAddress, _ := util.ParseNodeManagementPortMACAddresses(node, netName)
-	return !bytes.Equal(oldMacAddress, macAddress)
+	var oldMacAddress, newMacAddress map[string]json.RawMessage
+
+	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OvnNodeManagementPortMacAddresses]), &oldMacAddress); err != nil {
+		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
+		return true
+	}
+	if err := json.Unmarshal([]byte(node.Annotations[util.OvnNodeManagementPortMacAddresses]), &newMacAddress); err != nil {
+		klog.Errorf("Failed to unmarshal new node %s annotation: %v", node.Name, err)
+		return true
+	}
+	return !bytes.Equal(oldMacAddress[netName], newMacAddress[netName])
+}
+
+func udnNodeMACAddressChanged(oldNode, node *userdefinednodeapi.UDNNode) bool {
+	return oldNode.Spec.ManagementPortMACAddress != node.Spec.ManagementPortMACAddress
 }
 
 func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
-	return !reflect.DeepEqual(oldSubnets, newSubnets)
+	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, node, netName)
+}
+
+func udnNodeSubnetChanged(oldNode, node *userdefinednodeapi.UDNNode) bool {
+	if !reflect.DeepEqual(oldNode.Spec.NodeSubnets, node.Spec.NodeSubnets) {
+		return true
+	}
+	return false
 }
 
 func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {
-	oldSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(oldNode, netName)
-	newSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(node, netName)
-	return !reflect.DeepEqual(oldSubnets, newSubnets)
+	oldCIDRs, _ := util.ExtractJSONStringValue(oldNode.Annotations[util.OVNNodeGRLRPAddrs], netName)
+	newCIDRs, _ := util.ExtractJSONStringValue(node.Annotations[util.OVNNodeGRLRPAddrs], netName)
+	return newCIDRs != oldCIDRs
 }
 
 func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {
@@ -443,14 +460,12 @@ func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {
 }
 
 func nodeChassisChanged(oldNode, node *kapi.Node) bool {
-	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
-	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
-	return oldChassis != newChassis
+	return util.NodeChassisIDAnnotationChanged(oldNode, node)
 }
 
 // nodeGatewayMTUSupportChanged returns true if annotation "k8s.ovn.org/gateway-mtu-support" on the node was updated.
 func nodeGatewayMTUSupportChanged(oldNode, node *kapi.Node) bool {
-	return util.ParseNodeGatewayMTUSupport(oldNode) != util.ParseNodeGatewayMTUSupport(node)
+	return oldNode.Annotations[util.OvnNodeGatewayMtuSupport] != node.Annotations[util.OvnNodeGatewayMtuSupport]
 }
 
 // shouldUpdateNode() determines if the ovn-kubernetes plugin should update the state of the node.

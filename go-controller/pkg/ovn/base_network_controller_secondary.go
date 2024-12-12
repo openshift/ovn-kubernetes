@@ -257,8 +257,6 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 
 	if !on {
 		// the pod is not attached to this specific network
-		klog.V(5).Infof("Pod %s/%s is not attached on this network controller %s",
-			pod.Namespace, pod.Name, bsnc.GetNetworkName())
 		return nil
 	}
 
@@ -791,11 +789,11 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 	if oc.networkID == nil || *oc.networkID == util.InvalidID {
 		oc.networkID = ptr.To(util.InvalidID)
-		nodes, err := oc.watchFactory.GetNodes()
+		udnNodes, err := oc.watchFactory.GetUDNNodes(oc.GetNetworkName())
 		if err != nil {
 			return util.InvalidID, err
 		}
-		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
+		*oc.networkID, err = util.GetUDNNetworkID(udnNodes, oc.GetNetworkName())
 		if err != nil {
 			return util.InvalidID, err
 		}
@@ -805,8 +803,7 @@ func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
-func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string,
-	node *kapi.Node) ([]*nbdb.NAT, error) {
+func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort, nodeName string) ([]*nbdb.NAT, error) {
 	if len(localPodSubnets) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -817,11 +814,11 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 	if err != nil {
 		return nil, fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
 	}
-	dstMac, err := util.ParseNodeManagementPortMACAddresses(node, bsnc.GetNetworkName())
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse mac address annotation for network %q on node %q, err: %w",
-			bsnc.GetNetworkName(), node.Name, err)
+	if len(localPodSubnets) == 0 {
+		return nil, fmt.Errorf("failed to compute mac address for network %q on node %q, err: %w",
+			bsnc.GetNetworkName(), nodeName, err)
 	}
+	dstMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(localPodSubnets[0]).IP)
 	extIDs := map[string]string{
 		types.NetworkExternalID:  bsnc.GetNetworkName(),
 		types.TopologyExternalID: bsnc.TopologyType(),
