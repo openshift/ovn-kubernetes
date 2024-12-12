@@ -367,7 +367,10 @@ func (m *UDNHostIsolationManager) podInitialSync() error {
 		// ignore openPorts parse error in initial sync
 		pi, _, err := m.getPodInfo(podKey, pod)
 		if err != nil {
-			return err
+			// don't fail because of one pod error on initial sync as it may cause crashloop.
+			// expect pod event to come later with correct/updated annotations.
+			klog.Warningf("UDNHostIsolationManager failed to get pod info for pod %s/%s on initial sync: %v", pod.Name, pod.Namespace, err)
+			continue
 		}
 		if pi == nil {
 			// this pod doesn't need to be updated
@@ -455,6 +458,10 @@ func (m *UDNHostIsolationManager) getPodInfo(podKey string, pod *v1.Pod) (*podIn
 	pi := &podInfo{}
 	if pod == nil {
 		return pi, nil, nil
+	}
+	if util.PodWantsHostNetwork(pod) {
+		// host network pods can't be isolated by IP
+		return nil, nil, nil
 	}
 	// only add pods with primary UDN
 	primaryUDN, err := m.isPodPrimaryUDN(pod)
