@@ -309,30 +309,45 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			return nil
 		}
 
+		checkIperfTraffic = func(iperfLogFile string, execFn func(cmd string) (string, error), stage string) {
+			GinkgoHelper()
+			// Check the last line eventually show traffic flowing
+			Eventually(func() (string, error) {
+				iperfLog, err := execFn("cat " + iperfLogFile)
+				if err != nil {
+					return "", err
+				}
+				// Fail fast
+				Expect(iperfLog).NotTo(ContainSubstring("iperf3: error"), stage+": "+iperfLogFile)
+				//Remove last carriage return to propertly split by new line.
+				iperfLog = strings.TrimSuffix(iperfLog, "\n")
+				iperfLogLines := strings.Split(iperfLog, "\n")
+				if len(iperfLogLines) == 0 {
+					return "", nil
+				}
+				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
+				return lastIperfLogLine, nil
+			}).
+				WithPolling(50*time.Millisecond).
+				WithTimeout(2*time.Second).
+				Should(
+					SatisfyAll(
+						ContainSubstring(" sec "),
+						Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
+					),
+					stage+": failed checking iperf3 traffic at file "+iperfLogFile,
+				)
+		}
+
 		checkEastWestIperfTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, podIPsByName map[string][]string, stage string) {
 			GinkgoHelper()
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
-					// Check the last line eventually show traffic flowing
-					Eventually(func() (string, error) {
-						iperfLog, err := kubevirt.RunCommand(vmi, fmt.Sprintf("cat /tmp/%s_%s_iperf3.log", podName, podIP), 2*time.Second)
-						if err != nil {
-							return "", err
-						}
-						iperfLogLines := strings.Split(iperfLog, "\n")
-						if len(iperfLogLines) == 0 {
-							return "", nil
-						}
-						return iperfLogLines[len(iperfLogLines)-1], nil
-					}).
-						WithPolling(time.Second).
-						WithTimeout(3 * time.Minute).
-						Should(
-							SatisfyAll(
-								ContainSubstring(" sec "),
-								Not(ContainSubstring("0.00 Bytes  0.00 bits/sec")),
-							),
-						)
+					iperfLogFile := fmt.Sprintf("/tmp/%s_%s_iperf3.log", podName, podIP)
+					execFn := func(cmd string) (string, error) {
+						return kubevirt.RunCommand(vmi, cmd, 2*time.Second)
+					}
+					checkIperfTraffic(iperfLogFile, execFn, stage)
 				}
 			}
 		}
