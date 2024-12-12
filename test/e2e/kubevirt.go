@@ -326,8 +326,8 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
 				return lastIperfLogLine, nil
 			}).
-				WithPolling(time.Second).
-				WithTimeout(30*time.Second).
+				WithPolling(50*time.Millisecond).
+				WithTimeout(2*time.Second).
 				Should(
 					SatisfyAll(
 						ContainSubstring(" sec "),
