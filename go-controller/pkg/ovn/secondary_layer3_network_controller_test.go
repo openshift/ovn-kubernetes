@@ -29,10 +29,12 @@ import (
 )
 
 type secondaryNetInfo struct {
-	netName  string
-	nadName  string
-	subnets  string
-	topology string
+	netName            string
+	nadName            string
+	subnets            string
+	topology           string
+	allowPersistentIPs bool
+	ipamClaimReference string
 }
 
 const (
@@ -208,9 +210,10 @@ func (sni *secondaryNetInfo) netconf() *ovncnitypes.NetConf {
 			Name: sni.netName,
 			Type: plugin,
 		},
-		Topology: sni.topology,
-		NADName:  sni.nadName,
-		Subnets:  sni.subnets,
+		Topology:           sni.topology,
+		NADName:            sni.nadName,
+		Subnets:            sni.subnets,
+		AllowPersistentIPs: sni.allowPersistentIPs,
 	}
 }
 

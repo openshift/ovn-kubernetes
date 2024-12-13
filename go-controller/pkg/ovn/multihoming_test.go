@@ -138,6 +138,9 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 				lsp := newExpectedSwitchPort(lspUUID, portName, podAddr, pod, ocInfo.bnc, nad)
 				if expectedPodLspEnabled != nil {
 					lsp.Enabled = expectedPodLspEnabled[pod.podName]
+					if lsp.Enabled != nil && !*lsp.Enabled {
+						lsp.Addresses = nil
+					}
 				}
 
 				if pod.noIfaceIdVer {
@@ -266,15 +269,34 @@ func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
 	return featConfig
 }
 
-func icClusterTestConfiguration() testConfiguration {
-	return testConfiguration{
+func enableNonICFeatureConfig() *config.OVNKubernetesFeatureConfig {
+	featConfig := minimalFeatureConfig()
+	featConfig.EnableInterconnect = false
+	featConfig.EnablePersistentIPs = true
+	return featConfig
+}
+
+type testConfigOpt = func(*testConfiguration)
+
+func icClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{
 		configToOverride:   enableICFeatureConfig(),
 		expectationOptions: []option{withInterconnectCluster()},
 	}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
 }
 
-func nonICClusterTestConfiguration() testConfiguration {
-	return testConfiguration{}
+func nonICClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{
+		configToOverride: enableNonICFeatureConfig(),
+	}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
 }
 
 func newMultiHomedKubevirtPod(vmName string, liveMigrationInfo liveMigrationPodInfo, testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
@@ -291,6 +313,9 @@ func newMultiHomedKubevirtPod(vmName string, liveMigrationInfo liveMigrationPodI
 func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
 	pod := newPod(testPod.namespace, testPod.podName, testPod.nodeName, testPod.podIP)
 	var secondaryNetworks []nadapi.NetworkSelectionElement
+	if len(pod.Annotations) == 0 {
+		pod.Annotations = map[string]string{}
+	}
 	for _, multiHomingConf := range multiHomingConfigs {
 		nadNamePair := strings.Split(multiHomingConf.nadName, "/")
 		ns := pod.Namespace
@@ -300,13 +325,14 @@ func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *
 			attachmentName = nadNamePair[1]
 		}
 		nse := nadapi.NetworkSelectionElement{
-			Name:      attachmentName,
-			Namespace: ns,
+			Name:               attachmentName,
+			Namespace:          ns,
+			IPAMClaimReference: multiHomingConf.ipamClaimReference,
 		}
 		secondaryNetworks = append(secondaryNetworks, nse)
 	}
 	serializedNetworkSelectionElements, _ := json.Marshal(secondaryNetworks)
-	pod.Annotations = map[string]string{nadapi.NetworkAttachmentAnnot: string(serializedNetworkSelectionElements)}
+	pod.Annotations[nadapi.NetworkAttachmentAnnot] = string(serializedNetworkSelectionElements)
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(testPod.secondaryPodInfos, multiHomingConfigs)
 		if dummyOVNNetAnnotations != "{}" {
