@@ -886,6 +886,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				}
 				for _, node := range nodes {
 					node := *node
+					if !nodeIsReady(node) {
+						klog.Infof("Skipping node %q, not in ready state", node.Name)
+						continue
+					}
 					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone && !util.NoHostSubnet(&node) {
 						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 						if err != nil {
@@ -1320,4 +1324,14 @@ func DummyNextHopIPs() []net.IP {
 		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP)
 	}
 	return nextHops
+}
+
+// Returns if the given node is in "Ready" state.
+func nodeIsReady(n kapi.Node) bool {
+	for _, condition := range n.Status.Conditions {
+		if condition.Type == kapi.NodeReady {
+			return condition.Status == kapi.ConditionTrue
+		}
+	}
+	return false
 }
