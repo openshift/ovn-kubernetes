@@ -11,10 +11,12 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -77,7 +79,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 		"reconciles a new",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
 			const podIdx = 0
-			podInfo := dummyL2TestPod(ns, netInfo, podIdx)
+			podInfo := dummyL2TestPod(ns, netInfo, podIdx, podIdx)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
 			}
@@ -133,11 +135,25 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 	table.DescribeTable(
 		"reconciles a new kubevirt-related pod during its live-migration phases",
 		func(netInfo secondaryNetInfo, testConfig testConfiguration, migrationInfo *liveMigrationInfo) {
+			ipamClaim := ipamclaimsapi.IPAMClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: ns,
+					Name:      netInfo.netName + "-" + migrationInfo.vmName,
+				},
+				Spec: ipamclaimsapi.IPAMClaimSpec{
+					Network:   netInfo.netName,
+					Interface: "net1",
+				},
+			}
+			netInfo.allowPersistentIPs = true
+			netInfo.ipamClaimReference = ipamClaim.Name
+
 			const (
-				sourcePodInfoIdx = 0
-				targetPodInfoIdx = 1
+				sourcePodInfoIdx    = 0
+				targetPodInfoIdx    = 1
+				secondaryNetworkIdx = 0
 			)
-			sourcePodInfo := dummyL2TestPod(ns, netInfo, sourcePodInfoIdx)
+			sourcePodInfo := dummyL2TestPod(ns, netInfo, sourcePodInfoIdx, secondaryNetworkIdx)
 			if testConfig.configToOverride != nil {
 				config.OVNKubernetesFeature = *testConfig.configToOverride
 			}
@@ -153,7 +169,9 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, sourcePodInfo, sourcePod)).To(Succeed())
+				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, sourcePodInfo, sourcePod,
+					&ipamclaimsapi.IPAMClaimList{Items: []ipamclaimsapi.IPAMClaim{ipamClaim}}),
+				).To(Succeed())
 
 				// for layer2 on interconnect, it is the cluster manager that
 				// allocates the OVN annotation; on unit tests, this just
@@ -179,7 +197,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 							expectationOptions...,
 						).expectedLogicalSwitchesAndPorts()...))
 
-				targetPodInfo := dummyL2TestPod(ns, netInfo, targetPodInfoIdx)
+				targetPodInfo := dummyL2TestPod(ns, netInfo, targetPodInfoIdx, secondaryNetworkIdx)
 				targetKvPod := newMultiHomedKubevirtPod(
 					migrationInfo.vmName,
 					migrationInfo.targetPodInfo,
@@ -291,7 +309,7 @@ func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	}
 }
 
-func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx int) testPod {
+func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx, secondaryNetIdx int) testPod {
 	const nodeSubnet = "10.128.1.0/24"
 	pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "10.128.1.1", fmt.Sprintf("%s-%d", podName, podIdx), fmt.Sprintf("10.128.1.%d", podIdx+3), fmt.Sprintf("0a:58:0a:80:01:%0.2d", podIdx+3), nsName)
 	pod.addNetwork(
@@ -300,8 +318,8 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx int) testPod {
 		info.subnets,
 		"",
 		"",
-		fmt.Sprintf("100.200.0.%d/16", podIdx+1),
-		fmt.Sprintf("0a:58:64:c8:00:%0.2d", podIdx+1),
+		fmt.Sprintf("100.200.0.%d/16", secondaryNetIdx+1),
+		fmt.Sprintf("0a:58:64:c8:00:%0.2d", secondaryNetIdx+1),
 		"secondary",
 		0,
 		[]util.PodRoute{},
@@ -309,7 +327,7 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx int) testPod {
 	return pod
 }
 
-func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.TestSetup, netInfo secondaryNetInfo, testNode *v1.Node, podInfo testPod, pod *v1.Pod) error {
+func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.TestSetup, netInfo secondaryNetInfo, testNode *v1.Node, podInfo testPod, pod *corev1.Pod, extraObjects ...runtime.Object) error {
 	By(fmt.Sprintf("creating a network attachment definition for network: %s", netInfo.netName))
 	nad, err := newNetworkAttachmentDefinition(
 		ns,
@@ -323,8 +341,7 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 	if err = netInfo.setupOVNDependencies(&initialDB); err != nil {
 		return err
 	}
-	fakeOvn.startWithDBSetup(
-		initialDB,
+	objects := []runtime.Object{
 		&v1.NamespaceList{
 			Items: []v1.Namespace{
 				*newNamespace(ns),
@@ -339,7 +356,11 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 		&nadapi.NetworkAttachmentDefinitionList{
 			Items: []nadapi.NetworkAttachmentDefinition{*nad},
 		},
-	)
+	}
+
+	objects = append(objects, extraObjects...)
+
+	fakeOvn.startWithDBSetup(initialDB, objects...)
 	podInfo.populateLogicalSwitchCache(fakeOvn)
 
 	// on IC, the test itself spits out the pod with the
