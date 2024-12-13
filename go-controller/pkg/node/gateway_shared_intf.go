@@ -19,6 +19,7 @@ import (
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -1083,7 +1084,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	}
 
 	svcNamespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
-	if err != nil {
+	if err != nil || svcNamespacedName == nil {
 		return err
 	}
 
@@ -1117,7 +1118,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice event is
 	// received, only alter flows if we need to, i.e if cache wasn't set or if it was and
 	// hasLocalHostNetworkEp or localEndpoints state (for LB svc where NPs=0) changed, to prevent flow churn
-	out, exists := npw.getAndSetServiceInfo(svcNamespacedName, svc, hasLocalHostNetworkEp, localEndpoints)
+	out, exists := npw.getAndSetServiceInfo(*svcNamespacedName, svc, hasLocalHostNetworkEp, localEndpoints)
 	if !exists {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is creating rules", epSlice.Name, epSlice.Namespace)
 		return addServiceRules(svc, netInfo, sets.List(localEndpoints), hasLocalHostNetworkEp, npw)
@@ -1154,7 +1155,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
 	namespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
-	if err != nil {
+	if err != nil || namespacedName == nil {
 		return err
 	}
 	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, netInfo.GetNetworkName())
@@ -1175,7 +1176,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 			namespacedName.Namespace, namespacedName.Name, epSlice.Name, err)
 	}
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
-	if svcConfig, exists := npw.updateServiceInfo(namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
+	if svcConfig, exists := npw.updateServiceInfo(*namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
 		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(namespacedName.Namespace)
 		if err != nil {
 			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", svc.Name, svc.Namespace, err)
@@ -1219,8 +1220,8 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	}
 
 	namespacedName, err := util.ServiceFromEndpointSlice(newEpSlice, netInfo)
-	if err != nil {
-		return fmt.Errorf("cannot update %s/%s in nodePortWatcher: %v", newEpSlice.Namespace, newEpSlice.Name, err)
+	if err != nil || namespacedName == nil {
+		return err
 	}
 	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
 	if err != nil && !kerrors.IsNotFound(err) {
@@ -1238,7 +1239,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	var serviceInfo *serviceConfig
 	var exists bool
-	if serviceInfo, exists = npw.getServiceInfo(namespacedName); !exists {
+	if serviceInfo, exists = npw.getServiceInfo(*namespacedName); !exists {
 		// When a service is updated from externalName to nodeport type, it won't be
 		// in nodePortWatcher cache (npw): in this case, have the new nodeport IPtable rules
 		// installed.
@@ -1787,6 +1788,21 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
 						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 
+				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
+				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
+				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.eipMarkIPs != nil {
+					if netConfig.masqCTMark != ctMarkOVN {
+						for mark, eip := range bridge.eipMarkIPs.GetIPv4() {
+							dftFlows = append(dftFlows,
+								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ip, pkt_mark=%d, "+
+									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+									defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, mark,
+									config.Default.ConntrackZone, eip, netConfig.masqCTMark, ofPortPhys))
+						}
+					}
+				}
+
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
 				if netConfig.isDefaultNetwork() {
@@ -1845,6 +1861,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 		}
 	}
+
 	if config.IPv6Mode {
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
@@ -1862,6 +1879,21 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
 						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
+
+				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
+				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
+				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.eipMarkIPs != nil {
+					if netConfig.masqCTMark != ctMarkOVN {
+						for mark, eip := range bridge.eipMarkIPs.GetIPv6() {
+							dftFlows = append(dftFlows,
+								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ipv6, pkt_mark=%d, "+
+									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+									defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, mark,
+									config.Default.ConntrackZone, eip, netConfig.masqCTMark, ofPortPhys))
+						}
+					}
+				}
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
@@ -2122,7 +2154,8 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, linkManager *linkmanager.Controller,
+	nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
 	klog.Info("Creating new gateway")
 	gw := &gateway{}
 
@@ -2194,6 +2227,10 @@ func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIn
 			if err != nil {
 				return err
 			}
+		}
+		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
+			gw.bridgeEIPAddrManager = newBridgeEIPAddrManager(nodeName, gwBridge.bridgeName, linkManager, kube, watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+			gwBridge.eipMarkIPs = gw.bridgeEIPAddrManager.GetCache()
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
