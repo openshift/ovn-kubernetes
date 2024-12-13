@@ -2106,8 +2106,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/egress-assignable": "",
 					}
 					node2 := nodes[1]
-					egressNamespace := newNamespace(eipNamespace)
-					egressNamespace2 := newNamespace(eipNamespace2)
+					egressNamespace := newUDNNamespace(eipNamespace)
+					egressNamespace2 := newUDNNamespace(eipNamespace2)
 					egressPod1Node1 := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 					egressPod2Node1 := *newPodWithLabels(eipNamespace2, podName, node1Name, podV4IP2, egressPodLabel)
 					egressPod3Node2 := *newPodWithLabels(eipNamespace, podName2, node2Name, podV4IP3, egressPodLabel)
