@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
@@ -448,7 +449,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
 	}
 
-	for nadName := range podNetworks {
+	for nadName, podAnnotation := range podNetworks {
 		if !bsnc.HasNAD(nadName) {
 			continue
 		}
@@ -460,7 +461,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		}
 
 		if kubevirt.IsPodAllowedForMigration(pod, bsnc.NetInfo) {
-			if err = bsnc.enableSourceLSPFailedLiveMigration(pod, nadName); err != nil {
+			if err = bsnc.enableSourceLSPFailedLiveMigration(pod, nadName, podAnnotation.MAC, podAnnotation.IPs); err != nil {
 				return err
 			}
 		}
@@ -748,15 +749,34 @@ func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 	return *oc.networkID, nil
 }
 
-func (bsnc *BaseSecondaryNetworkController) setPodLogicalSwitchPortEnabledField(
-	pod *kapi.Pod, nadName string, ops []ovsdb.Operation, enabled bool) ([]ovsdb.Operation, *nbdb.LogicalSwitchPort, error) {
+func (bsnc *BaseSecondaryNetworkController) setPodLogicalSwitchPortAddressesAndEnabledField(
+	pod *kapi.Pod, nadName string, mac string, ips []string, enabled bool, ops []ovsdb.Operation) ([]ovsdb.Operation, *nbdb.LogicalSwitchPort, error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: bsnc.GetLogicalPortName(pod, nadName)}
 	lsp.Enabled = ptr.To(enabled)
+	customFields := []libovsdbops.ModelUpdateField{
+		libovsdbops.LogicalSwitchPortEnabled,
+		libovsdbops.LogicalSwitchPortAddresses,
+	}
+	if !enabled {
+		lsp.Addresses = nil
+	} else {
+		if len(mac) == 0 || len(ips) == 0 {
+			return nil, nil, fmt.Errorf("failed to configure addresses for lsp, missing mac and ips for pod %s", pod.Name)
+		}
+
+		// Remove length
+		for i, ip := range ips {
+			ips[i] = strings.Split(ip, "/")[0]
+		}
+
+		lsp.Addresses = []string{
+			strings.Join(append([]string{mac}, ips...), " "),
+		}
+	}
 	switchName, err := bsnc.getExpectedSwitchName(pod)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to fetch switch name for pod %s: %w", pod.Name, err)
 	}
-	customFields := []libovsdbops.ModelUpdateField{libovsdbops.LogicalSwitchPortEnabled}
 	ops, err = libovsdbops.UpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps(bsnc.nbClient, ops, &nbdb.LogicalSwitch{Name: switchName}, customFields, lsp)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed updating logical switch port %+v on switch %s: %w", *lsp, switchName, err)
@@ -768,11 +788,11 @@ func (bsnc *BaseSecondaryNetworkController) disableLiveMigrationSourceLSPOps(
 	kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
 	nadName string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
 	// closing the sourcePod lsp to ensure traffic goes to the now ready targetPod.
-	ops, _, err := bsnc.setPodLogicalSwitchPortEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, ops, false)
+	ops, _, err := bsnc.setPodLogicalSwitchPortAddressesAndEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, "", nil, false, ops)
 	return ops, err
 }
 
-func (bsnc *BaseSecondaryNetworkController) enableSourceLSPFailedLiveMigration(pod *kapi.Pod, nadName string) error {
+func (bsnc *BaseSecondaryNetworkController) enableSourceLSPFailedLiveMigration(pod *kapi.Pod, nadName string, mac string, ips []string) error {
 	kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory, pod)
 	if err != nil {
 		return fmt.Errorf("failed to discover Live-migration status after pod termination: %w", err)
@@ -783,7 +803,7 @@ func (bsnc *BaseSecondaryNetworkController) enableSourceLSPFailedLiveMigration(p
 		return nil
 	}
 	// make sure sourcePod lsp is enabled if migration failed after DomainReady was set.
-	ops, sourcePodLsp, err := bsnc.setPodLogicalSwitchPortEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, nil, true)
+	ops, sourcePodLsp, err := bsnc.setPodLogicalSwitchPortAddressesAndEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, mac, ips, true, nil)
 	if err != nil {
 		return fmt.Errorf("failed to set source Pod lsp to enabled after migration failed: %w", err)
 	}
