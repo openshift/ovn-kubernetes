@@ -40,10 +40,10 @@ func (c *openflowManager) getExGwBridgePortConfigurations() ([]bridgeUDNConfigur
 	return c.externalGatewayBridge.getBridgePortConfigurations()
 }
 
-func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) {
-	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIPs, v6MasqIPs)
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) {
+	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs)
 	if c.externalGatewayBridge != nil {
-		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIPs, v6MasqIPs)
+		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs)
 	}
 }
 
@@ -55,7 +55,7 @@ func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
 }
 
 func (c *openflowManager) getActiveNetwork(nInfo util.NetInfo) *bridgeUDNConfiguration {
-	return c.defaultBridge.getActiveNetworkBridgeConfig(nInfo)
+	return c.defaultBridge.getActiveNetworkBridgeConfig(nInfo.GetNetworkName())
 }
 
 // END UDN UTILs

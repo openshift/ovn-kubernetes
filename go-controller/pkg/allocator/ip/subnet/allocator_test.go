@@ -5,12 +5,14 @@ import (
 
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 )
 
 var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
+	const subnetName = "subnet1"
 	var (
 		allocator Allocator
 	)
@@ -21,7 +23,6 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 
 	ginkgo.Context("when adding subnets", func() {
 		ginkgo.It("creates each IPAM and reserves IPs correctly", func() {
-			subnetName := "subnet1"
 			subnets := []string{
 				"10.1.1.0/24",
 				"2000::/64",
@@ -40,7 +41,6 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 		})
 
 		ginkgo.It("handles updates to the subnets correctly", func() {
-			subnetName := "subnet1"
 			subnets := []string{
 				"10.1.1.0/24",
 				"2000::/64",
@@ -69,7 +69,6 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 		})
 
 		ginkgo.It("excludes subnets correctly", func() {
-			subnetName := "subnet1"
 			subnets := []string{
 				"10.1.1.0/24",
 			}
@@ -93,7 +92,6 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 
 	ginkgo.Context("when allocating IP addresses", func() {
 		ginkgo.It("IPAM for each subnet allocates IPs contiguously", func() {
-			subnetName := "subnet1"
 			subnets := []string{
 				"10.1.1.0/24",
 				"2000::/64",
@@ -116,7 +114,6 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 		})
 
 		ginkgo.It("IPAM allocates, releases, and reallocates IPs correctly", func() {
-			subnetName := "subnet1"
 			subnets := []string{
 				"10.1.1.0/24",
 			}
@@ -136,13 +133,24 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 				}
 				err = allocator.ReleaseIPs(subnetName, ips)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = allocator.AllocateIPs(subnetName, ips)
+				err = allocator.AllocateIPPerSubnet(subnetName, ips)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 		})
 
+		ginkgo.It("fails to allocate multiple IPs from the same subnet", func() {
+			subnets := []string{"10.1.1.0/24", "2000::/64"}
+
+			gomega.Expect(allocator.AddOrUpdateSubnet(subnetName, ovntest.MustParseIPNets(subnets...))).To(gomega.Succeed())
+
+			ips, err := util.ParseIPNets([]string{"10.1.1.1/24", "10.1.1.2/24"})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(allocator.AllocateIPPerSubnet(subnetName, ips)).To(gomega.MatchError(
+				"failed to allocate IP 10.1.1.2 for subnet1: attempted to reserve multiple IPs in the same IPAM instance",
+			))
+		})
+
 		ginkgo.It("releases IPs for other subnets when any other subnet allocation fails", func() {
-			subnetName := "subnet1"
 			subnets := []string{
 				"10.1.1.0/24",
 				"10.1.2.0/29",
@@ -184,7 +192,6 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 		})
 
 		ginkgo.It("fails correctly when trying to block a previously allocated IP", func() {
-			subnetName := "subnet1"
 			subnets := []string{
 				"10.1.1.0/24",
 				"2000::/64",
@@ -203,7 +210,7 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 				gomega.Expect(ip.String()).To(gomega.Equal(expectedIPs[i]))
 			}
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = allocator.AllocateIPs(subnetName, ovntest.MustParseIPNets(expectedIPs...))
+			err = allocator.AllocateIPPerSubnet(subnetName, ovntest.MustParseIPNets(expectedIPs...))
 			gomega.Expect(err).To(gomega.MatchError(ipam.ErrAllocated))
 		})
 

@@ -295,6 +295,10 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        - mountPath: /run/systemd/private
+          name: run-systemd
+          subPath: private
+          readOnly: true
 
         resources:
           requests:
@@ -429,6 +433,8 @@ spec:
           value: "{{ ovn_multi_network_enable }}"
         - name: OVN_NETWORK_SEGMENTATION_ENABLE
           value: "{{ ovn_network_segmentation_enable }}"
+        - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE
+          value: "{{ ovn_route_advertisements_enable }}"
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
           value: "{{ ovnkube_node_mgmt_port_netdev }}"
         - name: OVN_EMPTY_LB_EVENTS
@@ -622,6 +628,9 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
+      - name: run-systemd
+        hostPath:
+          path: /run/systemd
 
       tolerations:
       - operator: "Exists"

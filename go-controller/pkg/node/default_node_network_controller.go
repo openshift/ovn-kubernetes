@@ -25,6 +25,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ip"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -106,6 +107,7 @@ type DefaultNodeNetworkController struct {
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
 	routeManager  *routemanager.Controller
+	linkManager   *linkmanager.Controller
 
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
@@ -119,6 +121,8 @@ type DefaultNodeNetworkController struct {
 	cniServer *cni.Server
 
 	gatewaySetup *preStartSetup
+
+	udnHostIsolationManager *UDNHostIsolationManager
 }
 
 type preStartSetup struct {
@@ -129,9 +133,9 @@ type preStartSetup struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) *DefaultNodeNetworkController {
 
-	return &DefaultNodeNetworkController{
+	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         &util.DefaultNetInfo{},
@@ -140,6 +144,12 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		},
 		routeManager: routeManager,
 	}
+	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
+		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
+			cnnci.watchFactory.PodCoreInformer(), nadController)
+	}
+	c.linkManager = linkmanager.NewController(cnnci.name, config.IPv4Mode, config.IPv6Mode, c.updateGatewayMAC)
+	return c
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
@@ -147,7 +157,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, nad
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, nadController)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -794,6 +804,15 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if nc.udnHostIsolationManager != nil {
+			if err = nc.udnHostIsolationManager.Start(ctx); err != nil {
+				return err
+			}
+		} else {
+			if err = CleanupUDNHostIsolation(); err != nil {
+				return fmt.Errorf("failed cleaning up UDN host isolation: %w", err)
+			}
+		}
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
@@ -1193,13 +1212,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	// create link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
-	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
-
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
 		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
-			config.IPv6Mode, nc.name, linkManager)
+			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.nadController.GetActiveNetworkForNamespace,
+			nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name, nc.linkManager)
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}
@@ -1210,7 +1226,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
-	linkManager.Run(nc.stopChan, nc.wg)
+	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
 	go func() {
@@ -1426,6 +1442,19 @@ func DummyNextHopIPs() []net.IP {
 	}
 	if config.IPv6Mode {
 		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP)
+	}
+	return nextHops
+}
+
+// DummyMasqueradeIPs returns the fake host masquerade IPs used for service traffic routing.
+// It is used in: br-ex, where we SNAT the traffic destined towards a service IP
+func DummyMasqueradeIPs() []net.IP {
+	var nextHops []net.IP
+	if config.IPv4Mode {
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP)
+	}
+	if config.IPv6Mode {
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6HostMasqueradeIP)
 	}
 	return nextHops
 }

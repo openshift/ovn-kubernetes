@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -18,6 +19,8 @@ import (
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -30,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/knftables"
 )
 
 const (
@@ -56,7 +60,122 @@ const (
 	// ovnKubeNodeSNATMark is used to mark packets that need to be SNAT-ed to nodeIP for
 	// traffic originating from egressIP and egressService controlled pods towards other nodes in the cluster.
 	ovnKubeNodeSNATMark = "0x3f0"
+
+	// nftablesUDNServicePreroutingChain is a base chain registered into the prerouting hook,
+	// and it contains one rule that jumps to nftablesUDNServiceMarkChain.
+	// Traffic from the default network's management interface is bypassed
+	// to prevent enabling the default network access to the local node's UDN NodePort.
+	nftablesUDNServicePreroutingChain = "udn-service-prerouting"
+
+	// nftablesUDNServiceOutputChain is a base chain registered into the output hook
+	// it contains one rule that jumps to nftablesUDNServiceMarkChain
+	nftablesUDNServiceOutputChain = "udn-service-output"
+
+	// nftablesUDNServiceMarkChain is a regular chain trying to match the incoming traffic
+	// against the following UDN service verdict maps: nftablesUDNMarkNodePortsMap,
+	// nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map
+	nftablesUDNServiceMarkChain = "udn-service-mark"
+
+	// nftablesUDNMarkNodePortsMap is a verdict maps containing
+	// localNodeIP / protocol / port keys indicating traffic that
+	// should be marked with a UDN specific value, which is used to direct the traffic
+	// to the appropriate network.
+	nftablesUDNMarkNodePortsMap = "udn-mark-nodeports"
+
+	// nftablesUDNMarkExternalIPsV4Map and nftablesUDNMarkExternalIPsV6Map are verdict
+	// maps containing loadBalancerIP / protocol / port keys indicating traffic that
+	// should be marked with a UDN specific value, which is used to direct the traffic
+	// to the appropriate network.
+	nftablesUDNMarkExternalIPsV4Map = "udn-mark-external-ips-v4"
+	nftablesUDNMarkExternalIPsV6Map = "udn-mark-external-ips-v6"
 )
+
+// configureUDNServicesNFTables configures the nftables chains, rules, and verdict maps
+// that are used to set packet marks on externally exposed UDN services
+func configureUDNServicesNFTables() error {
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return err
+	}
+	tx := nft.NewTransaction()
+
+	tx.Add(&knftables.Chain{
+		Name:    nftablesUDNServiceMarkChain,
+		Comment: knftables.PtrTo("UDN services packet mark"),
+	})
+	tx.Flush(&knftables.Chain{Name: nftablesUDNServiceMarkChain})
+
+	tx.Add(&knftables.Chain{
+		Name:    nftablesUDNServicePreroutingChain,
+		Comment: knftables.PtrTo("UDN services packet mark - Prerouting"),
+
+		Type:     knftables.PtrTo(knftables.FilterType),
+		Hook:     knftables.PtrTo(knftables.PreroutingHook),
+		Priority: knftables.PtrTo(knftables.ManglePriority),
+	})
+	tx.Flush(&knftables.Chain{Name: nftablesUDNServicePreroutingChain})
+
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServicePreroutingChain,
+		Rule: knftables.Concat(
+			"iifname", "!=", fmt.Sprintf("%q", types.K8sMgmtIntfName),
+			"jump", nftablesUDNServiceMarkChain,
+		),
+	})
+
+	tx.Add(&knftables.Chain{
+		Name:    nftablesUDNServiceOutputChain,
+		Comment: knftables.PtrTo("UDN services packet mark - Output"),
+
+		Type:     knftables.PtrTo(knftables.FilterType),
+		Hook:     knftables.PtrTo(knftables.OutputHook),
+		Priority: knftables.PtrTo(knftables.ManglePriority),
+	})
+	tx.Flush(&knftables.Chain{Name: nftablesUDNServiceOutputChain})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceOutputChain,
+		Rule: knftables.Concat(
+			"jump", nftablesUDNServiceMarkChain,
+		),
+	})
+
+	tx.Add(&knftables.Map{
+		Name:    nftablesUDNMarkNodePortsMap,
+		Comment: knftables.PtrTo("UDN services NodePorts mark"),
+		Type:    "inet_proto . inet_service : verdict",
+	})
+	tx.Add(&knftables.Map{
+		Name:    nftablesUDNMarkExternalIPsV4Map,
+		Comment: knftables.PtrTo("UDN services External IPs mark (IPv4)"),
+		Type:    "ipv4_addr . inet_proto . inet_service : verdict",
+	})
+	tx.Add(&knftables.Map{
+		Name:    nftablesUDNMarkExternalIPsV6Map,
+		Comment: knftables.PtrTo("UDN services External IPs mark (IPv6)"),
+		Type:    "ipv6_addr . inet_proto . inet_service : verdict",
+	})
+
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceMarkChain,
+		Rule: knftables.Concat(
+			"fib daddr type local meta l4proto . th dport vmap", "@", nftablesUDNMarkNodePortsMap,
+		),
+	})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceMarkChain,
+		Rule: knftables.Concat(
+			"ip daddr . meta l4proto . th dport vmap", "@", nftablesUDNMarkExternalIPsV4Map,
+		),
+	})
+	tx.Add(&knftables.Rule{
+		Chain: nftablesUDNServiceMarkChain,
+		Rule: knftables.Concat(
+			"ip6 daddr . meta l4proto . th dport vmap", "@", nftablesUDNMarkExternalIPsV6Map,
+		),
+	})
+
+	return nft.Run(context.TODO(), tx)
+}
 
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
@@ -287,6 +406,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 			key = strings.Join([]string{"UDNAllowedSVC", service.Namespace, service.Name}, "_")
 			if !add {
 				npw.ofm.deleteFlowsByKey(key)
+				return utilerrors.Join(errors...)
 			}
 
 			ipPrefix := "ip"
@@ -296,7 +416,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 				masqueradeSubnet = config.Gateway.V6MasqueradeSubnet
 			}
 			// table 2, user-defined network host -> OVN towards default cluster network services
-			defaultNetConfig := npw.ofm.defaultBridge.netConfig[types.DefaultNetworkName]
+			defaultNetConfig := npw.ofm.defaultBridge.getActiveNetworkBridgeConfig(types.DefaultNetworkName)
 
 			npw.ofm.updateFlowCacheEntry(key, []string{fmt.Sprintf("cookie=%s, priority=300, table=2, %s, %s_src=%s, %s_dst=%s, "+
 				"actions=set_field:%s->eth_dst,output:%s",
@@ -546,24 +666,41 @@ func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints
 	// For dpu or Full mode
 	var err error
 	var errors []error
+	var activeNetwork *bridgeUDNConfiguration
 	if npw != nil {
 		if err = npw.updateServiceFlowCache(service, netInfo, true, svcHasLocalHostNetEndPnt); err != nil {
 			errors = append(errors, err)
 		}
 		npw.ofm.requestFlowSync()
-		if !npw.dpuMode {
-			// add iptable rules only in full mode
-			if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
-				errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
+		activeNetwork = npw.ofm.getActiveNetwork(netInfo)
+		if activeNetwork == nil {
+			return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+		}
+	}
+
+	if npw == nil || !npw.dpuMode {
+		// add iptables/nftables rules only in full mode
+		iptRules := getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+		if len(iptRules) > 0 {
+			if err := insertIptRules(iptRules); err != nil {
+				err = fmt.Errorf("failed to add iptables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
 			}
 		}
-	} else {
-		// For Host Only Mode
-		if err = insertIptRules(getGatewayIPTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)); err != nil {
-			errors = append(errors, fmt.Errorf("failed to add iptables rules for service: %v", err))
+		nftElems := getGatewayNFTRules(service, localEndpoints, svcHasLocalHostNetEndPnt)
+		if netInfo.IsPrimaryNetwork() && activeNetwork != nil {
+			nftElems = append(nftElems, getUDNNFTRules(service, activeNetwork)...)
 		}
-
+		if len(nftElems) > 0 {
+			if err := nodenft.UpdateNFTElements(nftElems); err != nil {
+				err = fmt.Errorf("failed to update nftables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
+			}
+		}
 	}
+
 	return utilerrors.Join(errors...)
 }
 
@@ -578,49 +715,82 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 		npw.ofm.requestFlowSync()
-		if !npw.dpuMode {
-			// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
-			// +--------------------------+-----------------------+-----------------------+--------------------------------+
-			// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | InternalTrafficPolicy |     Scenario for deletion      |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes the MARK          |
-			// |         false            |         cluster       |          local        |      rules for itp=local       |
-			// |                          |                       |                       |       called from mangle       |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes the REDIRECT      |
-			// |         true             |         cluster       |          local        |      rules towards target      |
-			// |                          |                       |                       |       port for itp=local       |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       | deletes the DNAT rules for     |
-			// |         false            |          local        |          cluster      |    non-local-host-net          |
-			// |                          |                       |                       | eps towards masqueradeIP +     |
-			// |                          |                       |                       | DNAT rules towards clusterIP   |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |    deletes the DNAT rules      |
-			// |       false||true        |          cluster      |          cluster      |   	towards clusterIP          |
-			// |                          |                       |                       |       for the default case     |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes all the rules     |
-			// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
-			// |                          |                       |                       |   + default dnat towards CIP   |
-			// +--------------------------+-----------------------+-----------------------+--------------------------------+
+	}
 
-			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
-				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
-			}
-			if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
-				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
+	if npw == nil || !npw.dpuMode {
+		// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
+		// +--------------------------+-----------------------+-----------------------+--------------------------------+
+		// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | InternalTrafficPolicy |     Scenario for deletion      |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes the MARK          |
+		// |         false            |         cluster       |          local        |      rules for itp=local       |
+		// |                          |                       |                       |       called from mangle       |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes the REDIRECT      |
+		// |         true             |         cluster       |          local        |      rules towards target      |
+		// |                          |                       |                       |       port for itp=local       |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       | deletes the DNAT rules for     |
+		// |         false            |          local        |          cluster      |    non-local-host-net          |
+		// |                          |                       |                       | eps towards masqueradeIP +     |
+		// |                          |                       |                       | DNAT rules towards clusterIP   |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |    deletes the DNAT rules      |
+		// |       false||true        |          cluster      |          cluster      |     towards clusterIP          |
+		// |                          |                       |                       |       for the default case     |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes all the rules     |
+		// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
+		// |                          |                       |                       |   + default dnat towards CIP   |
+		// +--------------------------+-----------------------+-----------------------+--------------------------------+
+
+		iptRules := getGatewayIPTRules(service, localEndpoints, true)
+		iptRules = append(iptRules, getGatewayIPTRules(service, localEndpoints, false)...)
+		if len(iptRules) > 0 {
+			if err := nodeipt.DelRules(iptRules); err != nil {
+				err := fmt.Errorf("failed to delete iptables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
 			}
 		}
-	} else {
-
-		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, true)); err != nil {
-			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
+		nftElems := getGatewayNFTRules(service, localEndpoints, true)
+		nftElems = append(nftElems, getGatewayNFTRules(service, localEndpoints, false)...)
+		if len(nftElems) > 0 {
+			if err := nodenft.DeleteNFTElements(nftElems); err != nil {
+				err = fmt.Errorf("failed to delete nftables rules for service %s/%s: %v",
+					service.Namespace, service.Name, err)
+				errors = append(errors, err)
+			}
 		}
-		if err = nodeipt.DelRules(getGatewayIPTRules(service, localEndpoints, false)); err != nil {
-			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
+
+		if util.IsNetworkSegmentationSupportEnabled() {
+			// NOTE: The code below is not using nodenft.DeleteNFTElements because it first adds elements
+			// before removing them, which fails for UDN NFT rules. These rules only have map keys,
+			// not key-value pairs, making it impossible to add.
+			// Attempt to delete the elements directly and handle the IsNotFound error.
+			//
+			// TODO: Switch to `nft destroy` when supported.
+			nftElems = getUDNNFTRules(service, nil)
+			if len(nftElems) > 0 {
+				nft, err := nodenft.GetNFTablesHelper()
+				if err != nil {
+					return utilerrors.Join(append(errors, err)...)
+				}
+
+				tx := nft.NewTransaction()
+				for _, elem := range nftElems {
+					tx.Delete(elem)
+				}
+
+				if err := nft.Run(context.TODO(), tx); err != nil && !knftables.IsNotFound(err) {
+					err = fmt.Errorf("failed to delete nftables rules for UDN service %s/%s: %v",
+						service.Namespace, service.Name, err)
+					errors = append(errors, err)
+				}
+			}
 		}
 	}
+
 	return utilerrors.Join(errors...)
 }
 
@@ -654,7 +824,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	}
 
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, types.DefaultNetworkName)
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during service add: %w",
@@ -674,7 +844,8 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 		klog.V(5).Infof("Service Add %s event in namespace %s came before endpoint event setting svcConfig",
 			service.Name, service.Namespace)
 		if err := addServiceRules(service, netInfo, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
-			return fmt.Errorf("AddService failed for nodePortWatcher: %v", err)
+			npw.getAndDeleteServiceInfo(name)
+			return fmt.Errorf("AddService failed for nodePortWatcher: %w, trying delete: %w", err, delServiceRules(service, sets.List(localEndpoints), npw))
 		}
 	} else {
 		// Need to update flows here in case an attribute of the gateway has changed, such as MAC address
@@ -810,7 +981,8 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []nodeipt.Rule{}
+	var keepIPTRules []nodeipt.Rule
+	var keepNFTSetElems, keepNFTMapElems []*knftables.Element
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
 
@@ -825,7 +997,13 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			continue
 		}
 
-		epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, types.DefaultNetworkName)
+		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(service.Namespace)
+		if err != nil {
+			errors = append(errors, err)
+			continue
+		}
+
+		epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
 				return fmt.Errorf("error retrieving all endpointslices for service %s/%s during SyncServices: %w",
@@ -839,12 +1017,6 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints)
 
-		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(service.Namespace)
-		if err != nil {
-			errors = append(errors, err)
-			continue
-		}
-
 		// Delete OF rules for service if they exist
 		if err = npw.updateServiceFlowCache(service, netInfo, false, hasLocalHostNetworkEp); err != nil {
 			errors = append(errors, err)
@@ -852,24 +1024,46 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		if err = npw.updateServiceFlowCache(service, netInfo, true, hasLocalHostNetworkEp); err != nil {
 			errors = append(errors, err)
 		}
-		// Add correct iptables rules only for Full mode
+		// Add correct netfilter rules only for Full mode
 		if !npw.dpuMode {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp)...)
+			localEndpointsArray := sets.List(localEndpoints)
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
+			keepNFTSetElems = append(keepNFTSetElems, getGatewayNFTRules(service, localEndpointsArray, hasLocalHostNetworkEp)...)
+			if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
+				netConfig := npw.ofm.getActiveNetwork(netInfo)
+				if netConfig == nil {
+					return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+				}
+				keepNFTMapElems = append(keepNFTMapElems, getUDNNFTRules(service, netConfig)...)
+			}
 		}
 	}
 
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
-	// sync IPtables rules once only for Full mode
+	// sync netfilter rules once only for Full mode
 	if !npw.dpuMode {
 		// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
+		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 			if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
 				errors = append(errors, err)
 			}
 		}
 		if err = recreateIPTRules("mangle", iptableITPChain, keepIPTRules); err != nil {
 			errors = append(errors, err)
+		}
+
+		for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+			if err = recreateNFTSet(set, keepNFTSetElems); err != nil {
+				errors = append(errors, err)
+			}
+		}
+		if util.IsNetworkSegmentationSupportEnabled() {
+			for _, nftMap := range []string{nftablesUDNMarkNodePortsMap, nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map} {
+				if err = recreateNFTMap(nftMap, keepNFTMapElems); err != nil {
+					errors = append(errors, err)
+				}
+			}
 		}
 	}
 	return utilerrors.Join(errors...)
@@ -880,12 +1074,25 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	var errors []error
 	var svc *kapi.Service
 
-	svcName := epSlice.Labels[discovery.LabelServiceName]
-	svc, err = npw.watchFactory.GetService(epSlice.Namespace, svcName)
+	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(epSlice.Namespace)
+	if err != nil {
+		return fmt.Errorf("error getting active network for endpointslice %s in namespace %s: %w", epSlice.Name, epSlice.Namespace, err)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && !util.IsEndpointSliceForNetwork(epSlice, netInfo) {
+		return nil
+	}
+
+	svcNamespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
+	if err != nil || svcNamespacedName == nil {
+		return err
+	}
+
+	svc, err = npw.watchFactory.GetService(svcNamespacedName.Namespace, svcNamespacedName.Name)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving service %s/%s during endpointslice add: %w",
-				epSlice.Namespace, svcName, err)
+				svcNamespacedName.Namespace, svcNamespacedName.Name, err)
 		}
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
@@ -900,7 +1107,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 
 	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name, types.DefaultNetworkName)
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name, netInfo.GetNetworkName())
 	if err != nil {
 		// No need to continue adding the new endpoint slice, if we can't retrieve all slices for this service
 		return fmt.Errorf("error retrieving endpointslices for service %s/%s during endpointslice add: %w", svc.Namespace, svc.Name, err)
@@ -908,19 +1115,10 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 
-	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(svc.Namespace)
-	if err != nil {
-		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", svc.Name, svc.Namespace, err)
-	}
-
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice event is
 	// received, only alter flows if we need to, i.e if cache wasn't set or if it was and
 	// hasLocalHostNetworkEp or localEndpoints state (for LB svc where NPs=0) changed, to prevent flow churn
-	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
-	if err != nil {
-		return fmt.Errorf("cannot add %s/%s to nodePortWatcher: %v", epSlice.Namespace, epSlice.Name, err)
-	}
-	out, exists := npw.getAndSetServiceInfo(namespacedName, svc, hasLocalHostNetworkEp, localEndpoints)
+	out, exists := npw.getAndSetServiceInfo(*svcNamespacedName, svc, hasLocalHostNetworkEp, localEndpoints)
 	if !exists {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is creating rules", epSlice.Name, epSlice.Namespace)
 		return addServiceRules(svc, netInfo, sets.List(localEndpoints), hasLocalHostNetworkEp, npw)
@@ -946,13 +1144,21 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	var errors []error
 	var hasLocalHostNetworkEp = false
 
+	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(epSlice.Namespace)
+	if err != nil {
+		return fmt.Errorf("error getting active network for endpointslice %s in namespace %s: %w", epSlice.Name, epSlice.Namespace, err)
+	}
+	if util.IsNetworkSegmentationSupportEnabled() && !util.IsEndpointSliceForNetwork(epSlice, netInfo) {
+		return nil
+	}
+
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
-	if err != nil {
-		return fmt.Errorf("cannot delete %s/%s from nodePortWatcher: %v", epSlice.Namespace, epSlice.Name, err)
+	namespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
+	if err != nil || namespacedName == nil {
+		return err
 	}
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName], types.DefaultNetworkName)
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, netInfo.GetNetworkName())
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during endpointslice delete on %s: %w",
@@ -970,7 +1176,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 			namespacedName.Namespace, namespacedName.Name, epSlice.Name, err)
 	}
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
-	if svcConfig, exists := npw.updateServiceInfo(namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
+	if svcConfig, exists := npw.updateServiceInfo(*namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
 		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(namespacedName.Namespace)
 		if err != nil {
 			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", svc.Name, svc.Namespace, err)
@@ -1004,9 +1210,18 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	var err error
 	var errors []error
 
-	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(newEpSlice)
+	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(newEpSlice.Namespace)
 	if err != nil {
-		return fmt.Errorf("cannot update %s/%s in nodePortWatcher: %v", newEpSlice.Namespace, newEpSlice.Name, err)
+		return fmt.Errorf("error getting active network for endpointslice %s in namespace %s: %w", newEpSlice.Name, newEpSlice.Namespace, err)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && !util.IsEndpointSliceForNetwork(newEpSlice, netInfo) {
+		return nil
+	}
+
+	namespacedName, err := util.ServiceFromEndpointSlice(newEpSlice, netInfo)
+	if err != nil || namespacedName == nil {
+		return err
 	}
 	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
 	if err != nil && !kerrors.IsNotFound(err) {
@@ -1024,7 +1239,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	var serviceInfo *serviceConfig
 	var exists bool
-	if serviceInfo, exists = npw.getServiceInfo(namespacedName); !exists {
+	if serviceInfo, exists = npw.getServiceInfo(*namespacedName); !exists {
 		// When a service is updated from externalName to nodeport type, it won't be
 		// in nodePortWatcher cache (npw): in this case, have the new nodeport IPtable rules
 		// installed.
@@ -1041,7 +1256,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 
 	// Update rules and service cache if hasHostNetworkEndpoints status changed or localEndpoints changed
 	nodeIPs := npw.nodeIPManager.ListAddresses()
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(newEpSlice.Namespace, newEpSlice.Labels[discovery.LabelServiceName], types.DefaultNetworkName)
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(newEpSlice.Namespace, namespacedName.Name, netInfo.GetNetworkName())
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during endpointslice update on %s: %w",
@@ -1143,6 +1358,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 	var err error
 	var errors []error
 	keepIPTRules := []nodeipt.Rule{}
+	keepNFTElems := []*knftables.Element{}
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -1157,14 +1373,22 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		// Add correct iptables rules.
 		// TODO: ETP and ITP is not implemented for smart NIC mode.
 		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
+		keepNFTElems = append(keepNFTElems, getGatewayNFTRules(service, nil, false)...)
 	}
 
-	// sync IPtables rules once
+	// sync rules once
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
 			errors = append(errors, err)
 		}
 	}
+
+	for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+		if err = recreateNFTSet(set, keepNFTElems); err != nil {
+			errors = append(errors, err)
+		}
+	}
+
 	return utilerrors.Join(errors...)
 }
 
@@ -1440,7 +1664,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			bridgeMacAddress, defaultNetConfig.ofPortPatch))
 
 	// table 2, priority 200, dispatch from UDN -> Host -> OVN. These packets have
-	// already been SNATed to the UDN's masq IP.
+	// already been SNATed to the UDN's masq IP or have been marked with the UDN's packet mark.
 	if config.IPv4Mode {
 		for _, netConfig := range bridge.patchedNetConfigs() {
 			if netConfig.isDefaultNetwork() {
@@ -1450,6 +1674,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, ip_src=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.v4MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, pkt_mark=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
 		}
 	}
@@ -1464,6 +1693,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, ipv6_src=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.v6MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, pkt_mark=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
 		}
 	}
@@ -1554,6 +1788,21 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
 						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 
+				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
+				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
+				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.eipMarkIPs != nil {
+					if netConfig.masqCTMark != ctMarkOVN {
+						for mark, eip := range bridge.eipMarkIPs.GetIPv4() {
+							dftFlows = append(dftFlows,
+								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ip, pkt_mark=%d, "+
+									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+									defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, mark,
+									config.Default.ConntrackZone, eip, netConfig.masqCTMark, ofPortPhys))
+						}
+					}
+				}
+
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
 				if netConfig.isDefaultNetwork() {
@@ -1612,6 +1861,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 		}
 	}
+
 	if config.IPv6Mode {
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
@@ -1629,6 +1879,21 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
 						defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, ovnKubeNodeSNATMark,
 						config.Default.ConntrackZone, physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
+
+				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
+				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
+				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.eipMarkIPs != nil {
+					if netConfig.masqCTMark != ctMarkOVN {
+						for mark, eip := range bridge.eipMarkIPs.GetIPv6() {
+							dftFlows = append(dftFlows,
+								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ipv6, pkt_mark=%d, "+
+									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+									defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, mark,
+									config.Default.ConntrackZone, eip, netConfig.masqCTMark, ofPortPhys))
+						}
+					}
+				}
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
@@ -1889,7 +2154,8 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 
 func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, linkManager *linkmanager.Controller,
+	nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
 	klog.Info("Creating new gateway")
 	gw := &gateway{}
 
@@ -1961,6 +2227,10 @@ func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIn
 			if err != nil {
 				return err
 			}
+		}
+		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
+			gw.bridgeEIPAddrManager = newBridgeEIPAddrManager(nodeName, gwBridge.bridgeName, linkManager, kube, watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+			gwBridge.eipMarkIPs = gw.bridgeEIPAddrManager.GetCache()
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
@@ -2065,6 +2335,11 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 		} else if config.Gateway.Mode == config.GatewayModeShared {
 			if err := initSharedGatewayIPTables(); err != nil {
 				return nil, err
+			}
+		}
+		if util.IsNetworkSegmentationSupportEnabled() {
+			if err := configureUDNServicesNFTables(); err != nil {
+				return nil, fmt.Errorf("unable to configure UDN nftables: %w", err)
 			}
 		}
 	}

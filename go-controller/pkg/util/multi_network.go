@@ -828,7 +828,7 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 
 	if netconf.Topology != types.LocalnetTopology && netconf.Name != types.DefaultNetworkName {
 		if err := subnetOverlapCheck(netconf); err != nil {
-			return fmt.Errorf("invalid subnet cnfiguration: %w", err)
+			return fmt.Errorf("invalid subnet configuration: %w", err)
 		}
 	}
 
@@ -1002,6 +1002,12 @@ func IsMultiNetworkPoliciesSupportEnabled() bool {
 
 func IsNetworkSegmentationSupportEnabled() bool {
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableNetworkSegmentation
+}
+
+func IsRouteAdvertisementsEnabled() bool {
+	// for now, we require multi-network to be enabled because we rely on NADs,
+	// even for the default network
+	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
 }
 
 func DoesNetworkRequireIPAM(netInfo NetInfo) bool {

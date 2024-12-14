@@ -6,7 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/safchain/ethtool"
+	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -14,13 +20,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
-
-	"github.com/safchain/ethtool"
-	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
-	"k8s.io/klog/v2"
 )
 
 // Gateway responds to Service and Endpoint K8s events
@@ -44,11 +43,12 @@ type gateway struct {
 	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
 	nodePortWatcherIptables informer.ServiceEventHandler
 	// nodePortWatcher is used in Local+Shared GW modes to handle nodePort flows in shared OVS bridge
-	nodePortWatcher informer.ServiceAndEndpointsEventHandler
-	openflowManager *openflowManager
-	nodeIPManager   *addressManager
-	initFunc        func() error
-	readyFunc       func() (bool, error)
+	nodePortWatcher      informer.ServiceAndEndpointsEventHandler
+	openflowManager      *openflowManager
+	nodeIPManager        *addressManager
+	bridgeEIPAddrManager *bridgeEIPAddrManager
+	initFunc             func() error
+	readyFunc            func() (bool, error)
 
 	servicesRetryFramework *retry.RetryFramework
 
@@ -166,8 +166,12 @@ func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || epSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -184,8 +188,12 @@ func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.Endpoint
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || newEpSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -202,8 +210,12 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var errors []error
 
 	if g.loadBalancerHealthChecker != nil {
-		if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
-			errors = append(errors, err)
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		if !util.IsNetworkSegmentationSupportEnabled() || epSlice.Labels[discovery.LabelServiceName] != "" {
+			if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 	if g.nodePortWatcher != nil {
@@ -212,7 +224,71 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 		}
 	}
 	return utilerrors.Join(errors...)
+}
 
+func (g *gateway) AddEgressIP(eip *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.addEgressIP(eip)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.updateEgressIP(oldEIP, newEIP)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) DeleteEgressIP(eip *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.deleteEgressIP(eip)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) SyncEgressIP(eips []interface{}) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	if err := g.bridgeEIPAddrManager.syncEgressIP(eips); err != nil {
+		return err
+	}
+	if err := g.Reconcile(); err != nil {
+		return fmt.Errorf("failed to sync gateway: %v", err)
+	}
+	g.openflowManager.requestFlowSync()
+	return nil
 }
 
 func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
@@ -227,22 +303,17 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	}
 
 	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
-
-	if util.IsNetworkSegmentationSupportEnabled() {
-		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
-		// Only default EndpointSlices contain the discovery.LabelServiceName label
-		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
-		if err != nil {
-			return err
-		}
-		if _, err = endpointSlicesRetryFramework.WatchResourceFiltered("", labels.NewSelector().Add(*req)); err != nil {
-			return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
-		}
-		return nil
-	}
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
+
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		eipRetryFramework := g.newRetryFrameworkNode(factory.EgressIPType)
+		if _, err = eipRetryFramework.WatchResource(); err != nil {
+			return fmt.Errorf("gateway init failed to start watching EgressIPs: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -448,6 +519,7 @@ type bridgeConfiguration struct {
 	ofPortPhys  string
 	ofPortHost  string
 	netConfig   map[string]*bridgeUDNConfiguration
+	eipMarkIPs  *markIPsCache
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -489,6 +561,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		netConfig: map[string]*bridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
+		eipMarkIPs: newMarkIPsCache(),
 	}
 	gwIntf := intfName
 

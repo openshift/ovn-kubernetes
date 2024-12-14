@@ -210,6 +210,88 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 			})
 		})
 
+		ginkgo.When("Attaching to a localnet network", func() {
+			const subnets = "192.168.200.0/24,fd12:1234::0/64"
+
+			var (
+				fakeClient *util.OVNClusterManagerClientset
+				netInfo    util.NetInfo
+			)
+
+			ginkgo.BeforeEach(func() {
+				fakeClient = &util.OVNClusterManagerClientset{
+					KubeClient:            fake.NewSimpleClientset(&v1.NodeList{Items: nodes()}),
+					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
+				}
+
+				gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			})
+
+			ginkgo.DescribeTable(
+				"the secondary network controller",
+				func(netConf *ovncnitypes.NetConf, featureConfig config.OVNKubernetesFeatureConfig, expectedError error) {
+					var err error
+					netInfo, err = util.NewNetInfo(netConf)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					app.Action = func(ctx *cli.Context) error {
+						gomega.Expect(initConfig(ctx, featureConfig)).To(gomega.Succeed())
+
+						f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						err = f.Start()
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						sncm, err := newSecondaryNetworkClusterManager(fakeClient, f, recorder)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+						_, err = sncm.NewNetworkController(netInfo)
+						if expectedError == nil {
+							gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						} else {
+							gomega.Expect(err).To(gomega.MatchError(expectedError))
+						}
+
+						return nil
+					}
+
+					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+				},
+				ginkgo.Entry(
+					"does not manage localnet topologies on IC deployments for networks without subnets",
+					&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.LocalnetTopology},
+					config.OVNKubernetesFeatureConfig{EnableInterconnect: true, EnableMultiNetwork: true},
+					nad.ErrNetworkControllerTopologyNotManaged,
+				),
+				ginkgo.Entry(
+					"manages localnet topologies on IC deployments for networks with subnets",
+					&ovncnitypes.NetConf{
+						NetConf:  types.NetConf{Name: "blue"},
+						Topology: ovntypes.LocalnetTopology,
+						Subnets:  subnets,
+					},
+					config.OVNKubernetesFeatureConfig{EnableInterconnect: true, EnableMultiNetwork: true},
+					nil,
+				),
+				ginkgo.Entry(
+					"does not manage localnet topologies on non-IC deployments without subnets",
+					&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.LocalnetTopology},
+					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
+					nad.ErrNetworkControllerTopologyNotManaged,
+				),
+				ginkgo.Entry(
+					"does not manage localnet topologies on non-IC deployments with subnets",
+					&ovncnitypes.NetConf{
+						NetConf:  types.NetConf{Name: "blue"},
+						Topology: ovntypes.LocalnetTopology,
+						Subnets:  subnets,
+					},
+					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
+					nad.ErrNetworkControllerTopologyNotManaged,
+				),
+			)
+		})
+
 		ginkgo.It("Cleanup", func() {
 			app.Action = func(ctx *cli.Context) error {
 				nodes := []v1.Node{
@@ -359,10 +441,12 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 		ginkgo.Context("persistent IP allocations", func() {
 			const (
 				claimName   = "claim1"
+				claimName2  = "claim2"
 				namespace   = "ns"
 				networkName = "blue"
 				subnetCIDR  = "192.168.200.0/24"
 				subnetIP    = "192.168.200.2/24"
+				subnetIP2   = "192.168.200.3/24"
 			)
 
 			var netInfo util.NetInfo
@@ -387,6 +471,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 							KubeClient: fake.NewSimpleClientset(),
 							IPAMClaimsClient: fakeipamclaimclient.NewSimpleClientset(
 								ipamClaimWithIPAddr(claimName, namespace, networkName, subnetIP),
+								ipamClaimWithIPAddr(claimName2, namespace, networkName, subnetIP2),
 							),
 							NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
 						}
@@ -420,8 +505,13 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(nc.subnetAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), ips)).To(
+							gomega.Equal(ip.ErrAllocated))
 
-						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), ips)).To(gomega.Equal(ip.ErrAllocated))
+						ips2, err := util.ParseIPNets([]string{subnetIP2})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						gomega.Expect(nc.subnetAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), ips2)).To(
+							gomega.Equal(ip.ErrAllocated))
 
 						return nil
 					}
@@ -471,7 +561,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						ips, err := util.ParseIPNets([]string{subnetIP})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-						gomega.Expect(nc.subnetAllocator.AllocateIPs(netInfo.GetNetworkName(), ips)).To(gomega.Succeed())
+						gomega.Expect(nc.subnetAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), ips)).To(gomega.Succeed())
 
 						return nil
 					}
