@@ -606,6 +606,16 @@ func (oc *SecondaryLayer3NetworkController) run() error {
 	return nil
 }
 
+func (oc *SecondaryLayer3NetworkController) Reconcile(netInfo util.NetInfo) error {
+	return oc.BaseNetworkController.reconcile(
+		netInfo,
+		func(node string) {
+			oc.addNodeFailed.Store(node, true)
+			oc.gatewaysFailed.Store(node, true)
+		},
+	)
+}
+
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
@@ -857,6 +867,28 @@ func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodS
 	return nil
 }
 
+// deleteUDNNodeSubnetEgressSNAT deletes SNAT rule from network specific
+// ovn_cluster_router depending on whether the network is advertised or not
+func (oc *SecondaryLayer3NetworkController) deleteUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node) error {
+	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
+	if err != nil {
+		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
+			oc.GetNetworkName(), node.Name, err)
+	}
+	if len(nats) == 0 {
+		return nil // nothing to do
+	}
+	router := &nbdb.LogicalRouter{
+		Name: oc.GetNetworkScopedClusterRouterName(),
+	}
+	if err := libovsdbops.DeleteNATs(oc.nbClient, router, nats...); err != nil {
+		return fmt.Errorf("failed to delete SNAT for node subnet on router: %q for network %q, error: %w",
+			oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkName(), err)
+	}
+	return nil
+}
+
 func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.IPNet, error) {
 	// Node subnet for the secondary layer3 network is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
@@ -871,8 +903,14 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 		return nil, err
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
-			return nil, err
+		if !util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
+			if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := oc.deleteUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return hostSubnets, nil

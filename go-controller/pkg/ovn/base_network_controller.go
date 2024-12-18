@@ -183,6 +183,65 @@ type BaseNetworkController struct {
 	routeImportManager routeimport.Manager
 }
 
+func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed func(string)) error {
+	// gather some information first
+	var err error
+	var retryNodes []*corev1.Node
+	oc.localZoneNodes.Range(func(key, _ any) bool {
+		nodeName := key.(string)
+		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
+		isAdvertised := util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)
+		if wasAdvertised == isAdvertised {
+			// noop
+			return true
+		}
+		var node *corev1.Node
+		node, err = oc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return false
+		}
+		retryNodes = append(retryNodes, node)
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
+	}
+	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
+	reconcilePendingPods := !oc.IsDefault() && !oc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
+
+	// set the new NetInfo, point of no return
+	err = util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	if reconcileRoutes {
+		err = oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
+		if err != nil {
+			klog.Errorf("Failed to reconcile network %s on route import controller: %v", oc.GetNetworkName(), err)
+		}
+	}
+
+	for _, node := range retryNodes {
+		setNodeFailed(node.Name)
+		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
+		if err != nil {
+			klog.Errorf("Failed to retry node %s for network %s: %v", node.Name, oc.GetNetworkName(), err)
+		}
+	}
+	if len(retryNodes) > 0 {
+		oc.retryNodes.RequestRetryObjs()
+	}
+
+	if reconcilePendingPods {
+		if err := ovnretry.RequeuePendingPods(oc.kube, oc.GetNetInfo(), oc.retryPods); err != nil {
+			klog.Errorf("Failed to requeue pending pods for network %s: %v", oc.GetNetworkName(), err)
+		}
+	}
+
+	return nil
+}
+
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
 // configuration for secondary network controller
 type BaseSecondaryNetworkController struct {
@@ -194,20 +253,6 @@ type BaseSecondaryNetworkController struct {
 	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
 	multiNetPolicyHandler *factory.Handler
-}
-
-func (oc *BaseSecondaryNetworkController) Reconcile(netInfo util.NetInfo) error {
-	reconcilePendingPods := !oc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
-	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
-	if err != nil {
-		return err
-	}
-	if reconcilePendingPods {
-		if err := ovnretry.RequeuePendingPods(oc.kube, oc.GetNetInfo(), oc.retryPods); err != nil {
-			klog.Errorf("Failed to requeue pending pods for network %s: %v", oc.GetNetworkName(), err)
-		}
-	}
-	return nil
 }
 
 func (oc *BaseSecondaryNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {

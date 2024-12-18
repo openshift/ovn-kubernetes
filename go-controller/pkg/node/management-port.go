@@ -220,6 +220,6 @@ func (p *managementPortEntry) doReconcile() error {
 	return p.port.CheckManagementPortHealth(p.routeManager, p.config)
 }
 
-func (p *managementPortEntry) SetPodNetworkAdvertised(isPodNetworkAdvertised bool) {
+func (p *managementPortEntry) SetDefaultPodNetworkAdvertised(isPodNetworkAdvertised bool) {
 	p.config.isPodNetworkAdvertised.Store(isPodNetworkAdvertised)
 }

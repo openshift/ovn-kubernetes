@@ -506,6 +506,13 @@ func (oc *SecondaryLayer2NetworkController) Stop() {
 	oc.BaseSecondaryLayer2NetworkController.stop()
 }
 
+func (oc *SecondaryLayer2NetworkController) Reconcile(netInfo util.NetInfo) error {
+	return oc.BaseNetworkController.reconcile(
+		netInfo,
+		func(node string) { oc.gatewaysFailed.Store(node, true) },
+	)
+}
+
 func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)

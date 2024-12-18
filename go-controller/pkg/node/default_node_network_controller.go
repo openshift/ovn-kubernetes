@@ -201,14 +201,14 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	if reconcilePodNetwork {
 		isPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(netInfo, oc.name)
 		if oc.Gateway != nil {
-			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+			oc.Gateway.SetDefaultPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
 			err := oc.Gateway.Reconcile()
 			if err != nil {
 				return fmt.Errorf("failed to reconcile gateway: %v", err)
 			}
 		}
 		for _, mgmtPort := range oc.gatewaySetup.mgmtPorts {
-			mgmtPort.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+			mgmtPort.SetDefaultPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
 			mgmtPort.Reconcile()
 		}
 	}

@@ -1268,9 +1268,6 @@ func (gw *GatewayManager) containsJoinIP(ip net.IP) bool {
 }
 
 func (gw *GatewayManager) isRoutingAdvertised(node string) bool {
-	if gw.netInfo.IsSecondary() {
-		return false
-	}
 	return util.IsPodNetworkAdvertisedAtNode(gw.netInfo, node)
 }
 

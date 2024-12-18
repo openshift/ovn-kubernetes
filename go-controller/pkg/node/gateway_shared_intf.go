@@ -1762,7 +1762,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetworkAdvertised bool) ([]string, error) {
+func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 	ofPortPhys := bridge.ofPortPhys
@@ -2000,7 +2000,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 				fmt.Sprintf("cookie=%s, priority=104, in_port=%s, %s, %s_src=%s, actions=drop",
 					defaultOpenFlowCookie, defaultNetConfig.ofPortPatch, ipv, ipv, cidr))
 		}
-		for _, subnet := range subnets {
+		for _, subnet := range defaultNetConfig.nodeSubnets {
 			ipv := getIPv(subnet)
 			if ofPortPhys != "" {
 				// table 0, commit connections from local pods.
@@ -2015,10 +2015,15 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 	}
 
 	if ofPortPhys != "" {
-		if config.Gateway.DisableSNATMultipleGWs || isPodNetworkAdvertised {
-			// table 1, traffic to pod subnet go directly to OVN
-			output := defaultNetConfig.ofPortPatch
-			if isPodNetworkAdvertised && config.Gateway.Mode == config.GatewayModeLocal {
+		for _, netConfig := range bridge.patchedNetConfigs() {
+			isNetworkAdvertised := netConfig.advertised.Load()
+			// disableSNATMultipleGWs only applies to default network
+			disableSNATMultipleGWs := netConfig.isDefaultNetwork() && config.Gateway.DisableSNATMultipleGWs
+			if !disableSNATMultipleGWs && !isNetworkAdvertised {
+				continue
+			}
+			output := netConfig.ofPortPatch
+			if isNetworkAdvertised && config.Gateway.Mode == config.GatewayModeLocal {
 				// except if advertised through BGP, go to kernel
 				// TODO: MEG enabled pods should still go through the patch port
 				// but holding this until
@@ -2026,7 +2031,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 				// are assuming MEG & BGP are not used together
 				output = ovsLocalPort
 			}
-			for _, clusterEntry := range config.Default.ClusterSubnets {
+			for _, clusterEntry := range netConfig.subnets {
 				cidr := clusterEntry.CIDR
 				ipv := getIPv(cidr)
 				dftFlows = append(dftFlows,
@@ -2034,9 +2039,9 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 						"actions=output:%s",
 						defaultOpenFlowCookie, ipv, ipv, cidr, output))
 			}
-			if output == defaultNetConfig.ofPortPatch {
+			if output == netConfig.ofPortPatch {
 				// except node management traffic
-				for _, subnet := range subnets {
+				for _, subnet := range netConfig.nodeSubnets {
 					mgmtIP := util.GetNodeManagementIfAddr(subnet)
 					ipv := getIPv(mgmtIP)
 					dftFlows = append(dftFlows,
@@ -2229,8 +2234,9 @@ func newGateway(
 		}
 	}
 
+	advertised := util.IsPodNetworkAdvertisedAtNode(networkManager.GetNetwork(types.DefaultNetworkName), nodeName)
 	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
+		nodeName, gwIntf, egressGWIntf, gwNextHops, subnets, gwIPs, advertised, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
@@ -2315,7 +2321,7 @@ func newGateway(
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
 		if err != nil {
 			return err
 		}
@@ -2323,7 +2329,7 @@ func newGateway(
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses(), gw.isPodNetworkAdvertised); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
