@@ -76,11 +76,12 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 		return nil, fmt.Errorf("foreign NetworkAttachmentDefinition with the desired name already exist [%s/%s]", nadCopy.Namespace, nadCopy.Name)
 	}
 
-	if reflect.DeepEqual(nadCopy.Spec.Config, desiredNAD.Spec.Config) {
+	if reflect.DeepEqual(nadCopy.Spec.Config, desiredNAD.Spec.Config) && reflect.DeepEqual(nadCopy.ObjectMeta.Labels, desiredNAD.ObjectMeta.Labels) {
 		return nadCopy, nil
 	}
 
 	nadCopy.Spec.Config = desiredNAD.Spec.Config
+	nadCopy.ObjectMeta.Labels = desiredNAD.ObjectMeta.Labels
 	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadCopy.Namespace).Update(context.Background(), nadCopy, metav1.UpdateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update NetworkAttachmentDefinition: %w", err)
