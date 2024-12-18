@@ -14,6 +14,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -185,7 +186,6 @@ func unmarshalPodAnnotation(annotations map[string]string, networkName string) (
 
 	podAnnotation := &PodAnnotation{Primary: a.Primary}
 	var err error
-
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse pod MAC %q: %v", a.MAC, err)
@@ -604,7 +604,7 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 			return false, nil
 		}
 
-		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
+		podClient := f.ClientSet.CoreV1().Pods(ovnNamespace)
 		// Ensure all nodes are running and healthy
 		podList, err := podClient.List(context.Background(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
@@ -1038,6 +1038,7 @@ func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, c
 // allowOrDropNodeInputTrafficOnPort ensures or deletes a drop iptables
 // input rule for the specified node, protocol and port
 func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
+	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
 	switch op {
 	case "Allow":
 		op = "delete"
@@ -1046,33 +1047,36 @@ func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
 	default:
 		framework.Failf("unsupported op %s", op)
 	}
+	updateIPTablesRulesForNode(op, nodeName, ipTablesArgs, false)
+	updateIPTablesRulesForNode(op, nodeName, ipTablesArgs, true)
+}
 
+func updateIPTablesRulesForNode(op, nodeName string, ipTablesArgs []string, ipv6 bool) {
 	args := []string{"get", "pods", "--selector=app=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
 	ovnKubePodName := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
+	iptables := "iptables"
+	if ipv6 {
+		iptables = "ip6tables"
+	}
 
-	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
-
-	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--check"}
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", iptables, "--check"}
 	_, err := e2ekubectl.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
-
 	// errors known to be equivalent to not found
 	notFound1 := "No chain/target/match by that name"
 	notFound2 := "does a matching rule exist in that chain?"
 	notFound := err != nil && (strings.Contains(err.Error(), notFound1) || strings.Contains(err.Error(), notFound2))
 	if err != nil && !notFound {
-		framework.Failf("failed to check existance of iptables rule on node %s: %v", nodeName, err)
+		framework.Failf("failed to check existance of %s rule on node %s: %v", iptables, nodeName, err)
 	}
-
 	if op == "delete" && notFound {
 		// rule is not there
 		return
-	} else if op == "append" && err == nil {
+	} else if op == "insert" && err == nil {
 		// rule is already there
 		return
 	}
-
-	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--" + op}
-	framework.Logf("%s iptables input rule for protocol %s port %s action DROP on node %s", op, protocol, port, nodeName)
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", iptables, "--" + op}
+	framework.Logf("%s %s rule: %q on node %s", op, iptables, strings.Join(ipTablesArgs, ","), nodeName)
 	e2ekubectl.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
 }
 
@@ -1243,4 +1247,12 @@ func isKernelModuleLoaded(nodeName, kernelModuleName string) bool {
 		}
 	}
 	return false
+}
+
+func matchIPv4StringFamily(ipStrings []string) (string, error) {
+	return util.MatchIPStringFamily(false /*ipv4*/, ipStrings)
+}
+
+func matchIPv6StringFamily(ipStrings []string) (string, error) {
+	return util.MatchIPStringFamily(true /*ipv6*/, ipStrings)
 }

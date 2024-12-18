@@ -17,7 +17,7 @@ concurrency:
 
 env:
   GO_VERSION: 1.22.0
-  K8S_VERSION: v1.30.2
+  K8S_VERSION: v1.31.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -83,8 +83,8 @@ jobs:
             exit 0
         fi
 
-        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master; then
-            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-fedora:master ovn-daemonset-fedora:dev
+        if docker pull ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:master; then
+            docker tag ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:master ovn-daemonset-fedora:dev
 
             echo "MASTER_IMAGE_RESTORED=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -226,8 +226,8 @@ jobs:
         go get github.com/modocache/gover
         PATH=$PATH:$(go env GOPATH)/bin
 
-        mkdir -p $(go env GOPATH)/src/github.com/ovn-org
-        ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
+        mkdir -p $(go env GOPATH)/src/github.com/ovn-kubernetes
+        ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-kubernetes/ovn-kubernetes
 
         gover
         goveralls -coverprofile=gover.coverprofile -service=github
@@ -433,14 +433,15 @@ jobs:
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled", "num-workers": "3"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3"}
           - {"target": "control-plane", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
-          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
+      OVN_HYBRID_OVERLAY_ENABLE: ${{ (matrix.target == 'control-plane' || matrix.target == 'control-plane-helm') && (matrix.ipfamily == 'ipv4' || matrix.ipfamily == 'dualstack' ) }}
       OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
@@ -451,7 +452,7 @@ jobs:
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' }}"
-      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools'}}"
+      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'kv-live-migration'}}"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
       OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'compact-mode' }}"
@@ -531,7 +532,7 @@ jobs:
       run: |
         # used by e2e diagnostics package
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
-        
+
         if [ "${{ matrix.target }}" == "multi-homing" ] || [ "${{ matrix.target }}" == "multi-homing-helm" ]; then
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
@@ -616,6 +617,17 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
+
+    - name: Free up disk space
+      run: |
+        sudo rm -rf /usr/local/lib/android/sdk
+        sudo apt-get update
+        sudo eatmydata apt-get purge --auto-remove -y \
+          azure-cli aspnetcore-* dotnet-* ghc-* firefox \
+          google-chrome-stable \
+          llvm-* microsoft-edge-stable mono-* \
+          msbuild mysql-server-core-* php-* php7* \
+          powershell temurin-* zulu-*
 
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
@@ -15,7 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // bridgedGatewayNodeSetup enables forwarding on bridge interface, sets up the physical network name mappings for the bridge,
@@ -311,26 +312,23 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 	return nil
 }
 
-func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
-	waiter *startupWaiter, managementPortConfig *managementPortConfig, kubeNodeIP net.IP) error {
-	klog.Info("Initializing Gateway Functionality")
+// initGatewayPreStart executes the first part of the gateway initialization for the node.
+// It creates the gateway object, the node IP manager, openflow manager and node port watcher
+// once OVN controller is ready and the patch port exists for this node.
+// It is split from initGatewayMainStart to allow for the gateway object and openflow manager to be created
+// before the rest of the gateway functionality is started.
+func (nc *DefaultNodeNetworkController) initGatewayPreStart(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
+	managementPortConfig *managementPortConfig, kubeNodeIP net.IP) (*gateway, error) {
+
+	klog.Info("Initializing Gateway Functionality for Gateway PreStart")
 	var err error
 	var ifAddrs []*net.IPNet
 
-	var loadBalancerHealthChecker *loadBalancerHealthChecker
-	var portClaimWatcher *portClaimWatcher
-
-	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
-		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
-		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
-		if err != nil {
-			return err
-		}
-	}
+	waiter := newStartupWaiter()
 
 	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	egressGWInterface := ""
@@ -340,7 +338,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 
 	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
@@ -348,7 +346,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -358,14 +356,10 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 
 	var gw *gateway
 	switch config.Gateway.Mode {
-	case config.GatewayModeLocal:
-		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager)
-	case config.GatewayModeShared:
-		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
-			managementPortConfig, nc.watchFactory, nc.routeManager)
+	case config.GatewayModeLocal, config.GatewayModeShared:
+		klog.Info("Preparing Gateway")
+		gw, err = newGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
+			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.nadController, config.Gateway.Mode)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
@@ -376,7 +370,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		}
 		chassisID, err = util.GetNodeChassisID()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 			Mode:      config.GatewayModeDisabled,
@@ -384,12 +378,56 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		})
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// a golang interface has two values <type, value>. an interface is nil if both type and
-	// value is nil. so, you cannot directly set the value to an interface and later check if
-	// value was nil by comparing the interface to nil. this is because if the value is `nil`,
-	// then the interface will still hold the type of the value being set.
+
+	initGwFunc := func() error {
+		return gw.initFunc()
+	}
+
+	readyGwFunc := func() (bool, error) {
+		controllerReady, err := isOVNControllerReady()
+		if err != nil || !controllerReady {
+			return false, err
+		}
+		return gw.readyFunc()
+	}
+
+	if err := nodeAnnotator.Run(); err != nil {
+		return nil, fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
+
+	waiter.AddWait(readyGwFunc, initGwFunc)
+	nc.Gateway = gw
+
+	// Wait for management port and gateway resources to be created by the master
+	start := time.Now()
+	if err := waiter.Wait(); err != nil {
+		return nil, err
+	}
+	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
+
+	return gw, nil
+}
+
+// initGatewayMainStart finishes the gateway initialization for the node: it initializes the
+// LB health checker and port claim watcher; it starts watching for events on services and endpoint slices,
+// so that LB health checker, port claim watcher, node port watcher and node port watcher ip tables can
+// react to those events.
+func (nc *DefaultNodeNetworkController) initGatewayMainStart(gw *gateway, waiter *startupWaiter) error {
+	klog.Info("Initializing Gateway Functionality for gateway Start")
+
+	var loadBalancerHealthChecker *loadBalancerHealthChecker
+	var portClaimWatcher *portClaimWatcher
+
+	var err error
+	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
+		if err != nil {
+			return err
+		}
+	}
 
 	if loadBalancerHealthChecker != nil {
 		gw.loadBalancerHealthChecker = loadBalancerHealthChecker
@@ -403,14 +441,8 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	}
 
 	readyGwFunc := func() (bool, error) {
-		controllerReady, err := isOVNControllerReady()
-		if err != nil || !controllerReady {
-			return false, err
-		}
-
-		return gw.readyFunc()
+		return true, nil
 	}
-
 	waiter.AddWait(readyGwFunc, initGwFunc)
 	nc.Gateway = gw
 
@@ -450,7 +482,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 	config.Gateway.Interface = gwIntf
 
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+	_, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
 		return err
 	}
@@ -480,7 +512,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nc.name, err)
 	}
 
-	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops)
+	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, DummyNextHopIPs())
 	if err != nil {
 		return err
 	}
@@ -497,7 +529,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		if err := initSharedGatewayIPTables(); err != nil {
 			return err
 		}
-		gw.nodePortWatcherIptables = newNodePortWatcherIptables()
+		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.nadController)
 		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
 		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
@@ -545,6 +577,13 @@ func CleanupClusterNode(name string) error {
 }
 
 func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) error {
+	// TBD-merge for dpu-host mode: if interface mac of the dpu-host interface that connects to the
+	// gateway bridge on the dpu changes, we need to update dpu's gatewayBridge.macAddress L3 gateway
+	// annotation (see bridgeForInterface)
+	if config.OvnKubeNode.Mode != types.NodeModeFull {
+		return nil
+	}
+
 	if nc.Gateway.GetGatewayBridgeIface() != link.Attrs().Name {
 		return nil
 	}

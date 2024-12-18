@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/validation"
@@ -23,19 +22,12 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-const (
-	maxRetries = 10
-	// LabelSourceEndpointSlice label key used in mirrored EndpointSlice
-	// that has the value of the default EndpointSlice name
-	LabelSourceEndpointSlice = "k8s.ovn.org/source-endpointslice"
-	// LabelSourceEndpointSliceVersion label key used in mirrored EndpointSlice
-	// that has the value of the last known default EndpointSlice ResourceVersion
-	LabelSourceEndpointSliceVersion = "k8s.ovn.org/source-endpointslice-version"
-)
+const maxRetries = 10
 
 // Controller represents the EndpointSlice mirror controller.
 // For namespaces that use a user-defined primary network, this controller mirrors the default EndpointSlices
@@ -44,15 +36,14 @@ const (
 type Controller struct {
 	kubeClient kubernetes.Interface
 	wg         *sync.WaitGroup
-	queue      workqueue.RateLimitingInterface
+	queue      workqueue.TypedRateLimitingInterface[string]
 	name       string
 
 	endpointSliceLister  discoverylisters.EndpointSliceLister
 	endpointSlicesSynced cache.InformerSynced
 	podLister            corelisters.PodLister
 	podsSynced           cache.InformerSynced
-	nadLister            nadlister.NetworkAttachmentDefinitionLister
-	nadsSynced           cache.InformerSynced
+	nadController        *networkAttachDefController.NetAttachDefinitionController
 	cancel               context.CancelFunc
 }
 
@@ -62,7 +53,7 @@ type Controller struct {
 // For other EndpointSlices it returns an empty value.
 func (c *Controller) getDefaultEndpointSliceKey(endpointSlice *v1.EndpointSlice) string {
 	if c.isManagedByController(endpointSlice) {
-		defaultEndpointSliceName, found := endpointSlice.Labels[LabelSourceEndpointSlice]
+		defaultEndpointSliceName, found := endpointSlice.Labels[types.LabelSourceEndpointSlice]
 		if !found {
 			utilruntime.HandleError(fmt.Errorf("couldn't determine the source EndpointSlice for %s", cache.MetaObjectToName(endpointSlice)))
 			return ""
@@ -120,25 +111,23 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 
 func NewController(
 	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory) (*Controller, error) {
+	wf *factory.WatchFactory, nadController *networkAttachDefController.NetAttachDefinitionController) (*Controller, error) {
 
 	wg := &sync.WaitGroup{}
 	c := &Controller{
-		kubeClient: ovnClient.KubeClient,
-		wg:         wg,
-		name:       types.EndpointSliceMirrorControllerName,
+		kubeClient:    ovnClient.KubeClient,
+		wg:            wg,
+		name:          types.EndpointSliceMirrorControllerName,
+		nadController: nadController,
 	}
 
-	c.queue = workqueue.NewRateLimitingQueueWithConfig(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		workqueue.RateLimitingQueueConfig{Name: c.name},
+	c.queue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: c.name},
 	)
 
 	c.podLister = wf.PodCoreInformer().Lister()
 	c.podsSynced = wf.PodCoreInformer().Informer().HasSynced
-
-	c.nadLister = wf.NADInformer().Lister()
-	c.nadsSynced = wf.NADInformer().Informer().HasSynced
 
 	endpointSlicesInformer := wf.EndpointSliceCoreInformer()
 	c.endpointSliceLister = endpointSlicesInformer.Lister()
@@ -161,11 +150,6 @@ func (c *Controller) Start(ctx context.Context, threadiness int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	klog.Infof("Starting the EndpointSlice mirror controller")
-	if !util.WaitForInformerCacheSyncWithTimeout(c.name, ctx.Done(), c.endpointSlicesSynced, c.podsSynced,
-		c.nadsSynced) {
-		return fmt.Errorf("timed out waiting for caches to sync")
-	}
-
 	klog.Infof("Repairing EndpointSlice mirrors")
 	err := c.repair(ctx)
 	if err != nil {
@@ -225,7 +209,7 @@ func (c *Controller) processNextEgressServiceWorkItem(ctx context.Context, wg *s
 
 	defer c.queue.Done(key)
 
-	err := c.syncDefaultEndpointSlice(ctx, key.(string))
+	err := c.syncDefaultEndpointSlice(ctx, key)
 	if err == nil {
 		c.queue.Forget(key)
 		return true
@@ -260,7 +244,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return err
 	}
 
-	namespacePrimaryNetwork, err := util.GetActiveNetworkForNamespace(namespace, c.nadLister)
+	namespacePrimaryNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}
@@ -270,8 +254,8 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 	}
 
 	mirrorEndpointSliceSelector := labels.Set(map[string]string{
-		LabelSourceEndpointSlice: name,
-		v1.LabelManagedBy:        c.name,
+		types.LabelSourceEndpointSlice: name,
+		v1.LabelManagedBy:              c.name,
 	}).AsSelectorPreValidated()
 
 	klog.Infof("Processing %s/%s EndpointSlice in %q primary network", namespace, name, namespacePrimaryNetwork.GetNetworkName())
@@ -302,7 +286,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 
 	if defaultEndpointSlice == nil {
 		if mirroredEndpointSlice != nil {
-			klog.Infof("The default EndpointSlice %s/%s no longer exists, removing the mirrored one: %s", namespace, mirroredEndpointSlice.Labels[LabelSourceEndpointSlice], cache.MetaObjectToName(mirroredEndpointSlice))
+			klog.Infof("The default EndpointSlice %s/%s no longer exists, removing the mirrored one: %s", namespace, mirroredEndpointSlice.Labels[types.LabelSourceEndpointSlice], cache.MetaObjectToName(mirroredEndpointSlice))
 			return c.kubeClient.DiscoveryV1().EndpointSlices(namespace).Delete(ctx, mirroredEndpointSlice.Name, metav1.DeleteOptions{})
 		}
 		klog.Infof("The default EndpointSlice %s/%s no longer exists", namespace, name)
@@ -320,7 +304,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 
 	if mirroredEndpointSlice != nil {
 		// nothing to do if we already reconciled this exact EndpointSlice
-		if mirroredResourceVersion, ok := mirroredEndpointSlice.Labels[LabelSourceEndpointSliceVersion]; ok {
+		if mirroredResourceVersion, ok := mirroredEndpointSlice.Labels[types.LabelSourceEndpointSliceVersion]; ok {
 			if mirroredResourceVersion == defaultEndpointSlice.ResourceVersion {
 				return nil
 			}
@@ -420,8 +404,8 @@ func (c *Controller) mirrorEndpointSlice(mirroredEndpointSlice, defaultEndpointS
 
 	// set the custom labels, generateName and reset the endpoints
 	currentMirror.Labels[v1.LabelManagedBy] = c.name
-	currentMirror.Labels[LabelSourceEndpointSlice] = defaultEndpointSlice.Name
-	currentMirror.Labels[LabelSourceEndpointSliceVersion] = defaultEndpointSlice.ResourceVersion
+	currentMirror.Labels[types.LabelSourceEndpointSlice] = defaultEndpointSlice.Name
+	currentMirror.Labels[types.LabelSourceEndpointSliceVersion] = defaultEndpointSlice.ResourceVersion
 	currentMirror.Labels[types.LabelUserDefinedEndpointSliceNetwork] = network.GetNetworkName()
 	currentMirror.Labels[types.LabelUserDefinedServiceName] = defaultEndpointSlice.Labels[v1.LabelServiceName]
 

@@ -61,7 +61,7 @@ function testrun {
     fi
     if grep -q "ginkgo" ."${path}"/*_test.go; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
-        ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+        ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.junit-report ${TEST_REPORT_DIR}/junit-${prefix}.xml"
     fi
     args="${args}${otherargs}"
     if [ "$go_test" == "gocmd test -mod=vendor" ]; then
@@ -72,7 +72,7 @@ function testrun {
 }
 
 # These packages requires root for network namespace manipulation in unit tests
-root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/rulemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip")
+root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/rulemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip")
 
 # These packages are big and require more than the 10m default to run the unit tests
 big_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn")
