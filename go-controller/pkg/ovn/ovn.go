@@ -176,6 +176,24 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 		}
 	}
 
+	// update open ports for UDN pods on pod update.
+	if util.IsNetworkSegmentationSupportEnabled() && !util.PodWantsHostNetwork(pod) && !addPort &&
+		pod != nil && oldPod != nil &&
+		pod.Annotations[util.UDNOpenPortsAnnotationName] != oldPod.Annotations[util.UDNOpenPortsAnnotationName] {
+		networkRole, err := oc.GetNetworkRole(pod)
+		if err != nil {
+			return err
+		}
+		if networkRole != ovntypes.NetworkRolePrimary {
+			// only update for non-default network pods
+			portName := oc.GetLogicalPortName(pod, oc.GetNetworkName())
+			err := oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, portName)
+			if err != nil {
+				return fmt.Errorf("failed to update UDN pod  %s/%s open ports: %w", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+
 	if kubevirt.IsPodLiveMigratable(pod) {
 		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName)
 	}
@@ -406,9 +424,15 @@ func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
-func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
+	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(oldNode, netName)
+	newSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(node, netName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
@@ -444,7 +468,6 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 }
 
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -500,6 +523,7 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.isPodScheduledinLocalZone,
 		oc.zone,
 		oc.recorder,
+		oc.observManager,
 	)
 	return err
 }

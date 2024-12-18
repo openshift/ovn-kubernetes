@@ -8,6 +8,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
@@ -33,8 +34,11 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	if oc.ipamClaimsHandler != nil {
 		oc.watchFactory.RemoveIPAMClaimsHandler(oc.ipamClaimsHandler)
 	}
-	if oc.policyHandler != nil {
-		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
+	if oc.netPolicyHandler != nil {
+		oc.watchFactory.RemovePolicyHandler(oc.netPolicyHandler)
+	}
+	if oc.multiNetPolicyHandler != nil {
+		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
 	}
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
@@ -100,22 +104,29 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		return err
 	}
 
-	// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
-	if err := oc.WatchMultiNetworkPolicy(); err != nil {
-		return err
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
+		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchMultiNetworkPolicy(); err != nil {
+			return err
+		}
+	}
+
+	if oc.IsPrimaryNetwork() {
+		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchNetworkPolicy(); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchName string, clusterSubnets []config.CIDRNetworkEntry,
-	excludeSubnets []*net.IPNet) (*nbdb.LogicalSwitch, error) {
+	excludeSubnets []*net.IPNet, clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
-		ExternalIDs: map[string]string{},
+		ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(oc.NetInfo),
 	}
-	logicalSwitch.ExternalIDs[types.NetworkExternalID] = oc.GetNetworkName()
-	logicalSwitch.ExternalIDs[types.TopologyExternalID] = oc.TopologyType()
 
 	hostSubnets := make([]*net.IPNet, 0, len(clusterSubnets))
 	for _, clusterSubnet := range clusterSubnets {
@@ -133,6 +144,10 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if clusterLoadBalancerGroupUUID != "" && switchLoadBalancerGroupUUID != "" {
+		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)

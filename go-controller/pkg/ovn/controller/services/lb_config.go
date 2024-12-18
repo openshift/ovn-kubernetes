@@ -160,7 +160,9 @@ var protos = []v1.Protocol{
 // Template LBs will be created for
 //   - services with NodePort set but *without* ExternalTrafficPolicy=Local or
 //     affinity timeout set.
-func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice, nodeInfos []nodeInfo, useLBGroup, useTemplates bool) (perNodeConfigs, templateConfigs, clusterConfigs []lbConfig) {
+func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice, nodeInfos []nodeInfo,
+	useLBGroup, useTemplates bool, networkName string) (perNodeConfigs, templateConfigs, clusterConfigs []lbConfig) {
+
 	needsAffinityTimeout := hasSessionAffinityTimeOut(service)
 
 	nodes := sets.New[string]()
@@ -168,7 +170,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		nodes.Insert(n.name)
 	}
 	// get all the endpoints classified by port and by port,node
-	portToClusterEndpoints, portToNodeToEndpoints := getEndpointsForService(endpointSlices, service, nodes)
+	portToClusterEndpoints, portToNodeToEndpoints := getEndpointsForService(endpointSlices, service, nodes, networkName)
 	for _, svcPort := range service.Spec.Ports {
 		svcPortKey := getServicePortKey(svcPort.Protocol, svcPort.Name)
 		clusterEndpoints := portToClusterEndpoints[svcPortKey]
@@ -259,12 +261,15 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 	return
 }
 
+func makeLBNameForNetwork(service *v1.Service, proto v1.Protocol, scope string, netInfo util.NetInfo) string {
+	return netInfo.GetNetworkScopedLoadBalancerName(makeLBName(service, proto, scope))
+}
+
 // makeLBName creates the load balancer name - used to minimize churn
 func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 	return fmt.Sprintf("Service_%s/%s_%s_%s",
 		service.Namespace, service.Name,
-		proto, scope,
-	)
+		proto, scope)
 }
 
 // buildClusterLBs takes a list of lbConfigs and aggregates them
@@ -273,14 +278,15 @@ func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 // It takes a list of (proto:[vips]:port -> [endpoints]) configs and re-aggregates
 // them to a list of (proto:[vip:port -> [endpoint:port]])
 // This load balancer is attached to all node switches. In shared-GW mode, it is also on all routers
-func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, useLBGroup bool) []LB {
+// The input netInfo is needed to get the right LB groups and network IDs for the specified network.
+func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, useLBGroup bool, netInfo util.NetInfo) []LB {
 	var nodeSwitches []string
 	var nodeRouters []string
 	var groups []string
 	if useLBGroup {
 		nodeSwitches = make([]string, 0)
 		nodeRouters = make([]string, 0)
-		groups = []string{types.ClusterLBGroupName}
+		groups = []string{netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)}
 	} else {
 		nodeSwitches = make([]string, 0, len(nodeInfos))
 		nodeRouters = make([]string, 0, len(nodeInfos))
@@ -306,9 +312,9 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 			continue
 		}
 		lb := LB{
-			Name:        makeLBName(service, proto, "cluster"),
+			Name:        makeLBNameForNetwork(service, proto, "cluster", netInfo),
 			Protocol:    string(proto),
-			ExternalIDs: util.ExternalIDsForObject(service),
+			ExternalIDs: getExternalIDsForLoadBalancer(service, netInfo),
 			Opts:        lbOpts(service),
 
 			Switches: nodeSwitches,
@@ -377,11 +383,13 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 // Note:
 // NodePort services with ETP=local or affinity timeout set still need
 // non-template per-node LBs.
+//
+// The input netInfo is needed to get the right LB groups and network IDs for the specified network.
 func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
-	nodeIPv4Templates, nodeIPv6Templates *NodeIPsTemplates) []LB {
+	nodeIPv4Templates, nodeIPv6Templates *NodeIPsTemplates, netInfo util.NetInfo) []LB {
 
 	cbp := configsByProto(configs)
-	eids := util.ExternalIDsForObject(service)
+	eids := getExternalIDsForLoadBalancer(service, netInfo)
 	out := make([]LB, 0, len(configs))
 
 	for _, proto := range protos {
@@ -403,29 +411,30 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 				makeTemplate(
 					makeLBTargetTemplateName(
 						service, proto, config.inport,
-						optsV4.AddressFamily, "node_switch_template"))
+						optsV4.AddressFamily, "node_switch_template", netInfo))
 			switchV6TemplateTarget :=
 				makeTemplate(
 					makeLBTargetTemplateName(
 						service, proto, config.inport,
-						optsV6.AddressFamily, "node_switch_template"))
+						optsV6.AddressFamily, "node_switch_template", netInfo))
 
 			routerV4TemplateTarget :=
 				makeTemplate(
 					makeLBTargetTemplateName(
 						service, proto, config.inport,
-						optsV4.AddressFamily, "node_router_template"))
+						optsV4.AddressFamily, "node_router_template", netInfo))
 			routerV6TemplateTarget :=
 				makeTemplate(
 					makeLBTargetTemplateName(
 						service, proto, config.inport,
-						optsV6.AddressFamily, "node_router_template"))
+						optsV6.AddressFamily, "node_router_template", netInfo))
 
 			allV4TargetIPs := config.clusterEndpoints.V4IPs
 			allV6TargetIPs := config.clusterEndpoints.V6IPs
 
 			for range config.vips {
-				klog.V(5).Infof("buildTemplateLBs() service %s/%s adding rules", service.Namespace, service.Name)
+				klog.V(5).Infof("buildTemplateLBs() service %s/%s adding rules for network=%s",
+					service.Namespace, service.Name, netInfo.GetNetworkName())
 
 				// If all targets have exactly the same IPs on all nodes there's
 				// no need to use a template, just use the same list of explicit
@@ -538,22 +547,22 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 		if nodeIPv4Templates.Len() > 0 {
 			if len(switchV4Rules) > 0 {
 				out = append(out, LB{
-					Name:        makeLBName(service, proto, "node_switch_template_IPv4"),
+					Name:        makeLBNameForNetwork(service, proto, "node_switch_template_IPv4", netInfo),
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV4,
-					Groups:      []string{types.ClusterSwitchLBGroupName},
+					Groups:      []string{netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterSwitchLBGroupName)},
 					Rules:       switchV4Rules,
 					Templates:   getTemplatesFromRulesTargets(switchV4Rules),
 				})
 			}
 			if len(routerV4Rules) > 0 {
 				out = append(out, LB{
-					Name:        makeLBName(service, proto, "node_router_template_IPv4"),
+					Name:        makeLBNameForNetwork(service, proto, "node_router_template_IPv4", netInfo),
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV4,
-					Groups:      []string{types.ClusterRouterLBGroupName},
+					Groups:      []string{netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterRouterLBGroupName)},
 					Rules:       routerV4Rules,
 					Templates:   getTemplatesFromRulesTargets(routerV4Rules),
 				})
@@ -563,22 +572,22 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 		if nodeIPv6Templates.Len() > 0 {
 			if len(switchV6Rules) > 0 {
 				out = append(out, LB{
-					Name:        makeLBName(service, proto, "node_switch_template_IPv6"),
+					Name:        makeLBNameForNetwork(service, proto, "node_switch_template_IPv6", netInfo),
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV6,
-					Groups:      []string{types.ClusterSwitchLBGroupName},
+					Groups:      []string{netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterSwitchLBGroupName)},
 					Rules:       switchV6Rules,
 					Templates:   getTemplatesFromRulesTargets(switchV6Rules),
 				})
 			}
 			if len(routerV6Rules) > 0 {
 				out = append(out, LB{
-					Name:        makeLBName(service, proto, "node_router_template_IPv6"),
+					Name:        makeLBNameForNetwork(service, proto, "node_router_template_IPv6", netInfo),
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV6,
-					Groups:      []string{types.ClusterRouterLBGroupName},
+					Groups:      []string{netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterRouterLBGroupName)},
 					Rules:       routerV6Rules,
 					Templates:   getTemplatesFromRulesTargets(routerV6Rules),
 				})
@@ -588,9 +597,9 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 
 	merged := mergeLBs(out)
 	if len(merged) != len(out) {
-		klog.V(5).Infof("Service %s/%s merged %d LBs to %d",
+		klog.V(5).Infof("Service %s/%s merged %d LBs to %d for network=%s",
 			service.Namespace, service.Name,
-			len(out), len(merged))
+			len(out), len(merged), netInfo.GetNetworkName())
 	}
 
 	return merged
@@ -613,9 +622,11 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 // - SkipSNAT enabled
 // - NodePort LB on the switch will have masqueradeIP as the vip to handle etp=local for LGW case.
 // This results in the creation of an additional load balancer on the GatewayRouters and NodeSwitches.
-func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) []LB {
+//
+// The input netInfo is needed to get the right network IDs for the specified network.
+func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo, netInfo util.NetInfo) []LB {
 	cbp := configsByProto(configs)
-	eids := util.ExternalIDsForObject(service)
+	eids := getExternalIDsForLoadBalancer(service, netInfo)
 
 	out := make([]LB, 0, len(nodes)*len(configs))
 
@@ -746,7 +757,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 			// If switch and router rules are identical, coalesce
 			if reflect.DeepEqual(switchRules, routerRules) && len(switchRules) > 0 && node.gatewayRouterName != "" {
 				out = append(out, LB{
-					Name:        makeLBName(service, proto, "node_router+switch_"+node.name),
+					Name:        makeLBNameForNetwork(service, proto, "node_router+switch_"+node.name, netInfo),
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        lbOpts(service),
@@ -757,7 +768,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 			} else {
 				if len(routerRules) > 0 && node.gatewayRouterName != "" {
 					out = append(out, LB{
-						Name:        makeLBName(service, proto, "node_router_"+node.name),
+						Name:        makeLBNameForNetwork(service, proto, "node_router_"+node.name, netInfo),
 						Protocol:    string(proto),
 						ExternalIDs: eids,
 						Opts:        lbOpts(service),
@@ -767,7 +778,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				}
 				if len(noSNATRouterRules) > 0 && node.gatewayRouterName != "" {
 					lb := LB{
-						Name:        makeLBName(service, proto, "node_local_router_"+node.name),
+						Name:        makeLBNameForNetwork(service, proto, "node_local_router_"+node.name, netInfo),
 						Protocol:    string(proto),
 						ExternalIDs: eids,
 						Opts:        lbOpts(service),
@@ -780,7 +791,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 				if len(switchRules) > 0 {
 					out = append(out, LB{
-						Name:        makeLBName(service, proto, "node_switch_"+node.name),
+						Name:        makeLBNameForNetwork(service, proto, "node_switch_"+node.name, netInfo),
 						Protocol:    string(proto),
 						ExternalIDs: eids,
 						Opts:        lbOpts(service),
@@ -794,9 +805,9 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 	merged := mergeLBs(out)
 	if len(merged) != len(out) {
-		klog.V(5).Infof("Service %s/%s merged %d LBs to %d",
+		klog.V(5).Infof("Service %s/%s merged %d LBs to %d for network=%s",
 			service.Namespace, service.Name,
-			len(out), len(merged))
+			len(out), len(merged), netInfo.GetNetworkName())
 	}
 
 	return merged
@@ -938,7 +949,9 @@ func getServicePortKey(protocol v1.Protocol, name string) string {
 // one classified by port, one classified by port,node. This second map is only filled in
 // when the service needs local (per-node) endpoints, that is when ETP=local or ITP=local.
 // The node list helps to keep the resulting map small, since we're only interested in local endpoints.
-func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Service, nodes sets.Set[string]) (map[string]lbEndpoints, map[string]map[string]lbEndpoints) {
+func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Service, nodes sets.Set[string],
+	networkName string) (map[string]lbEndpoints, map[string]map[string]lbEndpoints) {
+
 	// classify endpoints
 	ports := map[string]int32{}
 	portToEndpoints := map[string][]discovery.Endpoint{}
@@ -1015,7 +1028,8 @@ func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Servi
 			}
 		}
 	}
-	klog.V(5).Infof("Cluster endpoints for %s/%s are: %v", service.Namespace, service.Name, portToLBEndpoints)
+	klog.V(5).Infof("Cluster endpoints for %s/%s for network=%s are: %v",
+		service.Namespace, service.Name, networkName, portToLBEndpoints)
 
 	for port, nodeToEndpoints := range portToNodeToEndpoints {
 		for node, endpoints := range nodeToEndpoints {
@@ -1037,7 +1051,8 @@ func getEndpointsForService(slices []*discovery.EndpointSlice, service *v1.Servi
 	}
 
 	if requiresLocalEndpoints {
-		klog.V(5).Infof("Local endpoints for %s/%s are: %v", service.Namespace, service.Name, portToNodeToLBEndpoints)
+		klog.V(5).Infof("Local endpoints for %s/%s for network=%s are: %v",
+			service.Namespace, service.Name, networkName, portToNodeToLBEndpoints)
 	}
 
 	return portToLBEndpoints, portToNodeToLBEndpoints

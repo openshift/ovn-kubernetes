@@ -9,17 +9,19 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -59,10 +61,13 @@ const (
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
 type nodePortWatcherIptables struct {
+	nadController *nad.NetAttachDefinitionController
 }
 
-func newNodePortWatcherIptables() *nodePortWatcherIptables {
-	return &nodePortWatcherIptables{}
+func newNodePortWatcherIptables(nadController *nad.NetAttachDefinitionController) *nodePortWatcherIptables {
+	return &nodePortWatcherIptables{
+		nadController: nadController,
+	}
 }
 
 // nodePortWatcher manages OpenFlow and iptables rules
@@ -73,13 +78,13 @@ type nodePortWatcher struct {
 	gatewayIPv6   string
 	gatewayIPLock sync.Mutex
 	ofportPhys    string
-	ofportPatch   string
 	gwBridge      string
 	// Map of service name to programmed iptables/OF rules
 	serviceInfo     map[ktypes.NamespacedName]*serviceConfig
 	serviceInfoLock sync.Mutex
 	ofm             *openflowManager
 	nodeIPManager   *addressManager
+	nadController   *nad.NetAttachDefinitionController
 	watchFactory    factory.NodeWatchFactory
 }
 
@@ -126,10 +131,21 @@ func (npw *nodePortWatcher) updateGatewayIPs(addressManager *addressManager) {
 //
 // `add` parameter indicates if the flows should exist or be removed from the cache
 // `hasLocalHostNetworkEp` indicates if at least one host networked endpoint exists for this service which is local to this node.
-func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, hasLocalHostNetworkEp bool) error {
+func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInfo util.NetInfo, add, hasLocalHostNetworkEp bool) error {
 	if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink && npw.ofportPhys == "" {
 		// if LGW mode and no uplink gateway bridge, ingress traffic enters host from node physical interface instead of the breth0. Skip adding these service flows to br-ex.
 		return nil
+	}
+
+	var netConfig *bridgeUDNConfiguration
+	var actions string
+
+	if add {
+		netConfig = npw.ofm.getActiveNetwork(netInfo)
+		if netConfig == nil {
+			return fmt.Errorf("failed to get active network config for network %s", netInfo.GetNetworkName())
+		}
+		actions = fmt.Sprintf("output:%s", netConfig.ofPortPatch)
 	}
 
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
@@ -143,8 +159,6 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 
 	isServiceTypeETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
 
-	actions := fmt.Sprintf("output:%s", npw.ofportPatch)
-
 	// cookie is only used for debugging purpose. so it is not fatal error if cookie is failed to be generated.
 	for _, svcPort := range service.Spec.Ports {
 		protocol := strings.ToLower(string(svcPort.Protocol))
@@ -157,17 +171,17 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 				flowProtocols = append(flowProtocols, protocol+"6")
 			}
 			for _, flowProtocol := range flowProtocols {
-				cookie, err = svcToCookie(service.Namespace, service.Name, flowProtocol, svcPort.NodePort)
-				if err != nil {
-					klog.Warningf("Unable to generate cookie for nodePort svc: %s, %s, %s, %d, error: %v",
-						service.Namespace, service.Name, flowProtocol, svcPort.Port, err)
-					cookie = "0"
-				}
 				key = strings.Join([]string{"NodePort", service.Namespace, service.Name, flowProtocol, fmt.Sprintf("%d", svcPort.NodePort)}, "_")
 				// Delete if needed and skip to next protocol
 				if !add {
 					npw.ofm.deleteFlowsByKey(key)
 					continue
+				}
+				cookie, err = svcToCookie(service.Namespace, service.Name, flowProtocol, svcPort.NodePort)
+				if err != nil {
+					klog.Warningf("Unable to generate cookie for nodePort svc: %s, %s, %s, %d, error: %v",
+						service.Namespace, service.Name, flowProtocol, svcPort.Port, err)
+					cookie = "0"
 				}
 				// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
 				// set to Local, and the backend pod is HostNetworked. We need to add
@@ -211,7 +225,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 						// table=0, matches on return traffic from service nodePort and sends it out to primary node interface (br-ex)
 						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, tp_src=%d, "+
 							"actions=output:%s",
-							cookie, npw.ofportPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, svcPort.NodePort, npw.ofportPhys)})
+							cookie, netConfig.ofPortPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, svcPort.NodePort, npw.ofportPhys)})
 				}
 			}
 		}
@@ -252,14 +266,42 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 					err)
 			}
 		}
-		if err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions,
+		if err = npw.createLbAndExternalSvcFlows(service, netConfig, &svcPort, add, hasLocalHostNetworkEp, protocol, actions,
 			ingParsedIPs, "Ingress", ofPorts); err != nil {
 			errors = append(errors, err)
 		}
 
-		if err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions,
+		if err = npw.createLbAndExternalSvcFlows(service, netConfig, &svcPort, add, hasLocalHostNetworkEp, protocol, actions,
 			extParsedIPs, "External", ofPorts); err != nil {
 			errors = append(errors, err)
+		}
+	}
+
+	// Add flows for default network services that are accessible from UDN networks
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// The flow added below has a higher priority than the per UDN service flow:
+		//   priority=200, table=2, ip, ip_src=169.254.0.<UDN>, actions=set_field:<bridge-mac>->eth_dst,output:<UDN-patch-port>
+		// This ordering ensures that traffic to UDN allowed default services goes to the the default patch port.
+
+		if util.IsUDNEnabledService(ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String()) {
+			key = strings.Join([]string{"UDNAllowedSVC", service.Namespace, service.Name}, "_")
+			if !add {
+				npw.ofm.deleteFlowsByKey(key)
+			}
+
+			ipPrefix := "ip"
+			masqueradeSubnet := config.Gateway.V4MasqueradeSubnet
+			if !utilnet.IsIPv4String(service.Spec.ClusterIP) {
+				ipPrefix = "ipv6"
+				masqueradeSubnet = config.Gateway.V6MasqueradeSubnet
+			}
+			// table 2, user-defined network host -> OVN towards default cluster network services
+			defaultNetConfig := npw.ofm.defaultBridge.netConfig[types.DefaultNetworkName]
+
+			npw.ofm.updateFlowCacheEntry(key, []string{fmt.Sprintf("cookie=%s, priority=300, table=2, %s, %s_src=%s, %s_dst=%s, "+
+				"actions=set_field:%s->eth_dst,output:%s",
+				defaultOpenFlowCookie, ipPrefix, ipPrefix, masqueradeSubnet, ipPrefix, service.Spec.ClusterIP,
+				npw.ofm.getDefaultBridgeMAC().String(), defaultNetConfig.ofPortPatch)})
 		}
 	}
 	return utilerrors.Join(errors...)
@@ -284,7 +326,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 // `actions`: "send to patchport"
 // `externalIPOrLBIngressIP` is either externalIP.IP or LB.status.ingress.IP
 // `ipType` is either "External" or "Ingress"
-func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, svcPort *kapi.ServicePort, add bool,
+func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, netConfig *bridgeUDNConfiguration, svcPort *kapi.ServicePort, add bool,
 	hasLocalHostNetworkEp bool, protocol string, actions string, externalIPOrLBIngressIPs []string, ipType string, ofPorts []string) error {
 
 	for _, externalIPOrLBIngressIP := range externalIPOrLBIngressIPs {
@@ -315,7 +357,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 			continue
 		}
 		// add the ARP bypass flow regardless of service type or gateway modes since its applicable in all scenarios.
-		arpFlow := npw.generateARPBypassFlow(ofPorts, externalIPOrLBIngressIP, cookie)
+		arpFlow := npw.generateARPBypassFlow(ofPorts, netConfig.ofPortPatch, externalIPOrLBIngressIP, cookie)
 		externalIPFlows = append(externalIPFlows, arpFlow)
 		// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
 		// set to Local, and the backend pod is HostNetworked. We need to add
@@ -352,7 +394,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 					etpSvcOpenFlowCookie, npw.ofportPhys))
 		} else if config.Gateway.Mode == config.GatewayModeShared {
 			// add the ICMP Fragmentation flow for shared gateway mode.
-			icmpFlow := npw.generateICMPFragmentationFlow(nwDst, externalIPOrLBIngressIP, cookie)
+			icmpFlow := npw.generateICMPFragmentationFlow(nwDst, externalIPOrLBIngressIP, netConfig.ofPortPatch, cookie)
 			externalIPFlows = append(externalIPFlows, icmpFlow)
 			// case2 (see function description for details)
 			externalIPFlows = append(externalIPFlows,
@@ -363,7 +405,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 				// table=0, matches on return traffic from service externalIP or LB ingress and sends it out to primary node interface (br-ex)
 				fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, %s=%s, tp_src=%d, "+
 					"actions=output:%s",
-					cookie, npw.ofportPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
+					cookie, netConfig.ofPortPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
 		}
 		npw.ofm.updateFlowCacheEntry(key, externalIPFlows)
 	}
@@ -373,7 +415,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 
 // generate ARP/NS bypass flow which will send the ARP/NS request everywhere *but* to OVN
 // OpenFlow will not do hairpin switching, so we can safely add the origin port to the list of ports, too
-func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ipAddr string, cookie string) string {
+func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ofPortPatch, ipAddr string, cookie string) string {
 	addrResDst := "arp_tpa"
 	addrResProto := "arp, arp_op=1"
 	if utilnet.IsIPv6String(ipAddr) {
@@ -396,7 +438,7 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ipAddr strin
 		// Filtering ofPortPhys is for consistency / readability only, OpenFlow will not send
 		// out the in_port normally (see man 7 ovs-actions)
 		for _, port := range ofPorts {
-			if port == npw.ofportPatch || port == npw.ofportPhys {
+			if port == ofPortPatch || port == npw.ofportPhys {
 				continue
 			}
 			arpPortsFiltered = append(arpPortsFiltered, port)
@@ -409,7 +451,7 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ipAddr strin
 	return arpFlow
 }
 
-func (npw *nodePortWatcher) generateICMPFragmentationFlow(nwDst, ipAddr string, cookie string) string {
+func (npw *nodePortWatcher) generateICMPFragmentationFlow(nwDst, ipAddr string, ofPortPatch, cookie string) string {
 	// we send any ICMP destination unreachable, fragmentation needed to the OVN pipeline too so that
 	// path MTU discovery continues to work.
 	icmpMatch := "icmp"
@@ -422,7 +464,7 @@ func (npw *nodePortWatcher) generateICMPFragmentationFlow(nwDst, ipAddr string, 
 	}
 	icmpFragmentationFlow := fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, icmp_type=%d, "+
 		"icmp_code=%d, actions=output:%s",
-		cookie, npw.ofportPhys, icmpMatch, nwDst, ipAddr, icmpType, icmpCode, npw.ofportPatch)
+		cookie, npw.ofportPhys, icmpMatch, nwDst, ipAddr, icmpType, icmpCode, ofPortPatch)
 	return icmpFragmentationFlow
 }
 
@@ -500,12 +542,12 @@ func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, servi
 
 // addServiceRules ensures the correct iptables rules and OpenFlow physical
 // flows are programmed for a given service and endpoint configuration
-func addServiceRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool, npw *nodePortWatcher) error {
+func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints []string, svcHasLocalHostNetEndPnt bool, npw *nodePortWatcher) error {
 	// For dpu or Full mode
 	var err error
 	var errors []error
 	if npw != nil {
-		if err = npw.updateServiceFlowCache(service, true, svcHasLocalHostNetEndPnt); err != nil {
+		if err = npw.updateServiceFlowCache(service, netInfo, true, svcHasLocalHostNetEndPnt); err != nil {
 			errors = append(errors, err)
 		}
 		npw.ofm.requestFlowSync()
@@ -532,7 +574,7 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 	var errors []error
 	// full mode || dpu mode
 	if npw != nil {
-		if err = npw.updateServiceFlowCache(service, false, false); err != nil {
+		if err = npw.updateServiceFlowCache(service, nil, false, false); err != nil {
 			errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 		}
 		npw.ofm.requestFlowSync()
@@ -605,6 +647,12 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	}
 
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
+
+	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(service.Namespace)
+	if err != nil {
+		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
+	}
+
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, types.DefaultNetworkName)
 	if err != nil {
@@ -625,13 +673,13 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	if exists := npw.addOrSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints); !exists {
 		klog.V(5).Infof("Service Add %s event in namespace %s came before endpoint event setting svcConfig",
 			service.Name, service.Namespace)
-		if err := addServiceRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
+		if err := addServiceRules(service, netInfo, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
 			return fmt.Errorf("AddService failed for nodePortWatcher: %v", err)
 		}
 	} else {
 		// Need to update flows here in case an attribute of the gateway has changed, such as MAC address
 		klog.V(5).Infof("Updating already programmed rules for %s in namespace %s", service.Name, service.Namespace)
-		if err = npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp); err != nil {
+		if err = npw.updateServiceFlowCache(service, netInfo, true, hasLocalHostNetworkEp); err != nil {
 			return fmt.Errorf("failed to update flows for service %s/%s: %w", service.Namespace, service.Name, err)
 		}
 		npw.ofm.requestFlowSync()
@@ -662,6 +710,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 		// Delete old rules if needed, but don't delete svcConfig
 		// so that we don't miss any endpoint update events here
 		klog.V(5).Infof("Deleting old service rules for: %v", old)
+
 		if err = delServiceRules(old, sets.List(svcConfig.localEndpoints), npw); err != nil {
 			errors = append(errors, err)
 		}
@@ -669,7 +718,13 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
 		klog.V(5).Infof("Adding new service rules for: %v", new)
-		if err = addServiceRules(new, sets.List(svcConfig.localEndpoints), svcConfig.hasLocalHostNetworkEp, npw); err != nil {
+
+		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(new.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", new.Name, new.Namespace, err)
+		}
+
+		if err = addServiceRules(new, netInfo, sets.List(svcConfig.localEndpoints), svcConfig.hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
 	}
@@ -784,11 +839,17 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints)
 
+		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(service.Namespace)
+		if err != nil {
+			errors = append(errors, err)
+			continue
+		}
+
 		// Delete OF rules for service if they exist
-		if err = npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp); err != nil {
+		if err = npw.updateServiceFlowCache(service, netInfo, false, hasLocalHostNetworkEp); err != nil {
 			errors = append(errors, err)
 		}
-		if err = npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp); err != nil {
+		if err = npw.updateServiceFlowCache(service, netInfo, true, hasLocalHostNetworkEp); err != nil {
 			errors = append(errors, err)
 		}
 		// Add correct iptables rules only for Full mode
@@ -847,6 +908,11 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 
+	netInfo, err := npw.nadController.GetActiveNetworkForNamespace(svc.Namespace)
+	if err != nil {
+		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", svc.Name, svc.Namespace, err)
+	}
+
 	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice event is
 	// received, only alter flows if we need to, i.e if cache wasn't set or if it was and
 	// hasLocalHostNetworkEp or localEndpoints state (for LB svc where NPs=0) changed, to prevent flow churn
@@ -857,7 +923,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	out, exists := npw.getAndSetServiceInfo(namespacedName, svc, hasLocalHostNetworkEp, localEndpoints)
 	if !exists {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is creating rules", epSlice.Name, epSlice.Namespace)
-		return addServiceRules(svc, sets.List(localEndpoints), hasLocalHostNetworkEp, npw)
+		return addServiceRules(svc, netInfo, sets.List(localEndpoints), hasLocalHostNetworkEp, npw)
 	}
 
 	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp ||
@@ -866,7 +932,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 		if err = delServiceRules(svc, sets.List(out.localEndpoints), npw); err != nil {
 			errors = append(errors, err)
 		}
-		if err = addServiceRules(svc, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
+		if err = addServiceRules(svc, netInfo, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
 		return utilerrors.Join(errors...)
@@ -905,6 +971,11 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	}
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	if svcConfig, exists := npw.updateServiceInfo(namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
+		netInfo, err := npw.nadController.GetActiveNetworkForNamespace(namespacedName.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", svc.Name, svc.Namespace, err)
+		}
+
 		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
 		// we have to do this because deleting and adding iptables rules is slow.
 		npw.serviceInfoLock.Lock()
@@ -913,7 +984,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 		if err = delServiceRules(svcConfig.service, sets.List(svcConfig.localEndpoints), npw); err != nil {
 			errors = append(errors, err)
 		}
-		if err = addServiceRules(svcConfig.service, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
+		if err = addServiceRules(svcConfig.service, netInfo, sets.List(localEndpoints), hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
 		return utilerrors.Join(errors...)
@@ -1011,7 +1082,13 @@ func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) error {
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return nil
 	}
-	if err := addServiceRules(service, nil, false, nil); err != nil {
+
+	netInfo, err := npwipt.nadController.GetActiveNetworkForNamespace(service.Namespace)
+	if err != nil {
+		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
+	}
+
+	if err := addServiceRules(service, netInfo, nil, false, nil); err != nil {
 		return fmt.Errorf("AddService failed for nodePortWatcherIptables: %v", err)
 	}
 	return nil
@@ -1034,7 +1111,12 @@ func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) err
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
-		if err = addServiceRules(new, nil, false, nil); err != nil {
+		netInfo, err := npwipt.nadController.GetActiveNetworkForNamespace(new.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", new.Name, new.Namespace, err)
+		}
+
+		if err = addServiceRules(new, netInfo, nil, false, nil); err != nil {
 			errors = append(errors, err)
 		}
 	}
@@ -1050,6 +1132,7 @@ func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) erro
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return nil
 	}
+
 	if err := delServiceRules(service, nil, nil); err != nil {
 		return fmt.Errorf("DeleteService failed for nodePortWatcherIptables: %v", err)
 	}
@@ -1222,32 +1305,50 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				defaultOpenFlowCookie, ofPortHost, config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String(), config.Default.OVNMasqConntrackZone))
 	}
 
-	var protoPrefix string
-	var masqIP string
+	var protoPrefix, masqIP, masqSubnet string
 
 	// table 0, packets coming from Host -> Service
 	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 		if utilnet.IsIPv4CIDR(svcCIDR) {
 			protoPrefix = "ip"
 			masqIP = config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V4MasqueradeSubnet
 		} else {
 			protoPrefix = "ipv6"
 			masqIP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V6MasqueradeSubnet
 		}
 
-		// table 0, Host -> OVN towards SVC, SNAT to special IP
+		// table 0, Host (default network) -> OVN towards SVC, SNAT to special IP.
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s,"+
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s, "+
 				"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
-				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone, masqIP))
+				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
+				svcCIDR, config.Default.HostMasqConntrackZone, masqIP))
 
+		if util.IsNetworkSegmentationSupportEnabled() {
+			// table 0, Host (UDNs) -> OVN towards SVC, SNAT to special IP.
+			// For packets originating from UDN, commit without NATing, those
+			// have already been SNATed to the masq IP of the UDN.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=550, in_port=%s, %s, %s_src=%s, %s_dst=%s, "+
+					"actions=ct(commit,zone=%d,table=2)",
+					defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
+					masqSubnet, protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone))
+		}
+
+		masqDst := masqIP
+		if util.IsNetworkSegmentationSupportEnabled() {
+			// In UDN match on the whole masquerade subnet to handle replies from UDN enabled services
+			masqDst = masqSubnet
+		}
 		for _, netConfig := range bridge.patchedNetConfigs() {
 			// table 0, Reply hairpin traffic to host, coming from OVN, unSNAT
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
 					"actions=ct(zone=%d,nat,table=3)",
 					defaultOpenFlowCookie, netConfig.ofPortPatch, protoPrefix, protoPrefix, svcCIDR,
-					protoPrefix, masqIP, config.Default.HostMasqConntrackZone))
+					protoPrefix, masqDst, config.Default.HostMasqConntrackZone))
 			// table 0, Reply traffic coming from OVN to outside, drop it if the DNAT wasn't done either
 			// at the GR load balancer or switch load balancer. It means the correct port wasn't provided.
 			// nodeCIDR->serviceCIDR traffic flow is internal and it shouldn't be carried to outside the cluster
@@ -1329,11 +1430,43 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
 				defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
 	}
+
 	defaultNetConfig := bridge.netConfig[types.DefaultNetworkName]
+
 	// table 2, dispatch from Host -> OVN
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, table=2, "+
-			"actions=set_field:%s->eth_dst,output:%s", defaultOpenFlowCookie, bridgeMacAddress, defaultNetConfig.ofPortPatch))
+		fmt.Sprintf("cookie=%s, priority=100, table=2, "+
+			"actions=set_field:%s->eth_dst,output:%s", defaultOpenFlowCookie,
+			bridgeMacAddress, defaultNetConfig.ofPortPatch))
+
+	// table 2, priority 200, dispatch from UDN -> Host -> OVN. These packets have
+	// already been SNATed to the UDN's masq IP.
+	if config.IPv4Mode {
+		for _, netConfig := range bridge.patchedNetConfigs() {
+			if netConfig.isDefaultNetwork() {
+				continue
+			}
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, ip_src=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.v4MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+		}
+	}
+
+	if config.IPv6Mode {
+		for _, netConfig := range bridge.patchedNetConfigs() {
+			if netConfig.isDefaultNetwork() {
+				continue
+			}
+
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, ipv6_src=%s, "+
+					"actions=set_field:%s->eth_dst,output:%s",
+					defaultOpenFlowCookie, netConfig.v6MasqIPs.ManagementPort.IP,
+					bridgeMacAddress, netConfig.ofPortPatch))
+		}
+	}
 
 	// table 3, dispatch from OVN -> Host
 	dftFlows = append(dftFlows,
@@ -1423,7 +1556,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
-				if netConfig.masqCTMark == ctMarkOVN {
+				if netConfig.isDefaultNetwork() {
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ip, "+
 							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
@@ -1434,7 +1567,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ip, ip_src=%s, "+
 							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
-							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v4MasqIP.IP, config.Default.ConntrackZone,
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v4MasqIPs.GatewayRouter.IP, config.Default.ConntrackZone,
 							physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 				}
 			}
@@ -1499,7 +1632,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 				// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 				// so that reverse direction goes back to the pods.
-				if netConfig.masqCTMark == ctMarkOVN {
+				if netConfig.isDefaultNetwork() {
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, "+
 							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
@@ -1509,7 +1642,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, ipv6_src=%s, "+
 							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
-							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v6MasqIP.IP, config.Default.ConntrackZone,
+							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, netConfig.v6MasqIPs.GatewayRouter.IP, config.Default.ConntrackZone,
 							physicalIP.IP, netConfig.masqCTMark, ofPortPhys))
 				}
 			}
@@ -1678,7 +1811,7 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 		bridge.ofPortPhys = ofportPhys
 	}
 
-	// Get ofport represeting the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
+	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		var stderr string
 		hostRep, err := util.GetDPUHostInterface(bridge.bridgeName)
@@ -1754,11 +1887,17 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
-	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig,
-	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller) (*gateway, error) {
-	klog.Info("Creating new shared gateway")
+func newGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface,
+	watchFactory factory.NodeWatchFactory, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController, gatewayMode config.GatewayMode) (*gateway, error) {
+	klog.Info("Creating new gateway")
 	gw := &gateway{}
+
+	if gatewayMode == config.GatewayModeLocal {
+		if err := initLocalGateway(subnets, cfg); err != nil {
+			return nil, fmt.Errorf("failed to initialize new local gateway, err: %w", err)
+		}
+	}
 
 	gwBridge, exGwBridge, err := gatewayInitInternal(
 		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
@@ -1812,7 +1951,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	gw.initFunc = func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
-		klog.Info("Creating Shared Gateway Openflow Manager")
+		klog.Info("Creating Gateway Openflow Manager")
 		err := setBridgeOfPorts(gwBridge)
 		if err != nil {
 			return err
@@ -1879,8 +2018,8 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 					return err
 				}
 			}
-			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory)
+			klog.Info("Creating Gateway Node Port Watcher")
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, nadController)
 			if err != nil {
 				return err
 			}
@@ -1896,21 +2035,13 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		return nil
 	}
 	gw.watchFactory = watchFactory.(*factory.WatchFactory)
-	klog.Info("Shared Gateway Creation Complete")
+	klog.Info("Gateway Creation Complete")
 	return gw, nil
 }
 
 func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
-	nodeIPManager *addressManager, watchFactory factory.NodeWatchFactory) (*nodePortWatcher, error) {
-	// TODO(dceara): support services for UDNs
-	defaultNetConfig := gwBridge.netConfig[types.DefaultNetworkName]
-	// Get ofport of patchPort
-	ofportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get",
-		"interface", defaultNetConfig.patchPort, "ofport")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-			defaultNetConfig.patchPort, stderr, err)
-	}
+	nodeIPManager *addressManager, watchFactory factory.NodeWatchFactory,
+	nadController *nad.NetAttachDefinitionController) (*nodePortWatcher, error) {
 
 	// Get ofport of physical interface
 	ofportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get",
@@ -1967,12 +2098,12 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 		gatewayIPv4:   gatewayIPv4,
 		gatewayIPv6:   gatewayIPv6,
 		ofportPhys:    ofportPhys,
-		ofportPatch:   ofportPatch,
 		gwBridge:      gwBridge.bridgeName,
 		serviceInfo:   make(map[ktypes.NamespacedName]*serviceConfig),
 		nodeIPManager: nodeIPManager,
 		ofm:           ofm,
 		watchFactory:  watchFactory,
+		nadController: nadController,
 	}
 	return npw, nil
 }

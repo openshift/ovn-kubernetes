@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
@@ -27,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 )
@@ -272,13 +272,14 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		ComposeDHCPv4Options = func(uuid, namespace string, t *testDHCPOptions) *nbdb.DHCPOptions {
 			dhcpOptions := kubevirt.ComposeDHCPv4Options(
 				t.cidr,
-				t.dns,
 				DefaultNetworkControllerName,
 				ktypes.NamespacedName{
 					Namespace: namespace,
 					Name:      t.hostname,
 				},
 			)
+			dhcpOptions.Options["dns_server"] = t.dns
+			dhcpOptions.Options["router"] = kubevirt.ARPProxyIPv4
 			dhcpOptions.UUID = uuid
 
 			return dhcpOptions
@@ -286,7 +287,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		ComposeDHCPv6Options = func(uuid, namespace string, t *testDHCPOptions) *nbdb.DHCPOptions {
 			dhcpOptions := kubevirt.ComposeDHCPv6Options(
 				t.cidr,
-				t.dns,
 				DefaultNetworkControllerName,
 				ktypes.NamespacedName{
 					Namespace: namespace,
@@ -294,6 +294,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				},
 			)
 			dhcpOptions.UUID = uuid
+			dhcpOptions.Options["dns_server"] = t.dns
 			return dhcpOptions
 		}
 		composePolicy = func(uuid string, p testPolicy, t testData) *nbdb.LogicalRouterPolicy {
@@ -712,8 +713,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						podToCreate.Labels = t.migrationTarget.labels
 						podToCreate.Annotations = t.migrationTarget.annotations
 					}
-					pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), podToCreate.Name, metav1.GetOptions{})
-					Expect(pod).To(BeNil())
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), podToCreate.Name, metav1.GetOptions{})
+					Expect(err).To(MatchError(kapierrors.IsNotFound, "IsNotFound"))
 
 					podToCreate.CreationTimestamp = metav1.NewTime(time.Now())
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), podToCreate, metav1.CreateOptions{})
