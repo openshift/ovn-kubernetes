@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -337,8 +338,64 @@ var _ = Describe("Network Segmentation", func() {
 
 						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
 
-						// TODO
-						//By("checking non-kubelet default network host process can't reach the UDN pod")
+						By("restarting kubelet, pod should stay ready")
+						_, err = runCommand(containerRuntime, "exec", workerOneNodeName,
+							"systemctl", "restart", "kubelet")
+						Expect(err).NotTo(HaveOccurred())
+
+						By("asserting healthcheck still works (kubelet can access the UDN pod)")
+						// The pod should stay ready
+						Consistently(func() bool {
+							return podutils.IsPodReady(udnPod)
+						}, 10*time.Second, 1*time.Second).Should(BeTrue())
+						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
+
+
+						if !isUDNHostIsolationDisabled() {
+							By("checking default network hostNetwork pod and non-kubelet host process can't reach the UDN pod")
+							hostNetPod, err := createPod(f, "host-net-pod", udnPodConfig.nodeSelector[nodeHostnameKey],
+								defaultNetNamespace, []string{}, nil, func(pod *v1.Pod) {
+									pod.Spec.HostNetwork = true
+								})
+							Expect(err).NotTo(HaveOccurred())
+
+							// positive check for reachable default network pod
+							for _, destIP := range []string{defaultIPv4, defaultIPv6} {
+								if destIP == "" {
+									continue
+								}
+								By("checking the default network hostNetwork can reach default pod on IP " + destIP)
+								Eventually(func() bool {
+									return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, defaultPort) == nil
+								}).Should(BeTrue())
+								By("checking the non-kubelet host process can reach default pod on IP " + destIP)
+								Eventually(func() bool {
+									_, err = runCommand(containerRuntime, "exec", workerOneNodeName,
+										"curl", "--connect-timeout", "2",
+										net.JoinHostPort(destIP, fmt.Sprintf("%d", defaultPort)))
+									return err == nil
+								}).Should(BeTrue())
+							}
+							// negative check for UDN pod
+							for _, destIP := range []string{udnIPv4, udnIPv6} {
+								if destIP == "" {
+									continue
+								}
+
+								By("checking the default network hostNetwork pod can't reach UDN pod on IP " + destIP)
+								Consistently(func() bool {
+									return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) != nil
+								}, 5*time.Second).Should(BeTrue())
+
+								By("checking the non-kubelet host process can't reach UDN pod on IP " + destIP)
+								Consistently(func() bool {
+									_, err = runCommand(containerRuntime, "exec", workerOneNodeName,
+										"curl", "--connect-timeout", "2",
+										net.JoinHostPort(destIP, fmt.Sprintf("%d", port)))
+									return err != nil
+								}, 5*time.Second).Should(BeTrue())
+							}
+						}
 
 						By("asserting UDN pod can reach the kapi service in the default network")
 						// Use the service name to get test the DNS access
@@ -619,6 +676,85 @@ var _ = Describe("Network Segmentation", func() {
 				return err
 			}),
 		)
+		Context("with multicast feature enabled for namespace", func() {
+			var (
+				clientNodeInfo, serverNodeInfo nodeInfo
+			)
+			BeforeEach(func() {
+
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
+				framework.ExpectNoError(err)
+				if len(nodes.Items) < 2 {
+					e2eskipper.Skipf(
+						"Test requires >= 2 Ready nodes, but there are only %v nodes",
+						len(nodes.Items))
+				}
+
+				ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+
+				clientNodeInfo = nodeInfo{
+					name:   nodes.Items[0].Name,
+					nodeIP: ips[0],
+				}
+
+				serverNodeInfo = nodeInfo{
+					name:   nodes.Items[1].Name,
+					nodeIP: ips[1],
+				}
+
+				enableMulticastForNamespace(f)
+			})
+			DescribeTable("should be able to send multicast UDP traffic between nodes", func(netConfigParams networkAttachmentConfigParams) {
+				ginkgo.By("creating the attachment configuration")
+				netConfigParams.namespace = f.Namespace.Name
+				netConfig := newNetworkAttachmentConfig(netConfigParams)
+				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+					context.Background(),
+					generateNAD(netConfig),
+					metav1.CreateOptions{},
+				)
+				framework.ExpectNoError(err)
+				testMulticastUDPTraffic(f, clientNodeInfo, serverNodeInfo)
+			},
+				ginkgo.Entry("with primary layer3 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer3",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+				ginkgo.Entry("with primary layer2 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer2",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+			)
+			DescribeTable("should be able to receive multicast IGMP query", func(netConfigParams networkAttachmentConfigParams) {
+				ginkgo.By("creating the attachment configuration")
+				netConfigParams.namespace = f.Namespace.Name
+				netConfig := newNetworkAttachmentConfig(netConfigParams)
+				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+					context.Background(),
+					generateNAD(netConfig),
+					metav1.CreateOptions{},
+				)
+				framework.ExpectNoError(err)
+				testMulticastIGMPQuery(f, clientNodeInfo, serverNodeInfo)
+			},
+				ginkgo.Entry("with primary layer3 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer3",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+				ginkgo.Entry("with primary layer2 UDN", networkAttachmentConfigParams{
+					name:     nadName,
+					topology: "layer2",
+					cidr:     fmt.Sprintf("%s,%s", userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:     "primary",
+				}),
+			)
+		})
 	})
 
 	Context("UserDefinedNetwork CRD Controller", func() {
@@ -1233,6 +1369,13 @@ spec:
 				defaultNetNamespace, []string{}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("creating default network hostNetwork client pod")
+			hostNetPod, err := createPod(f, "host-net-client-pod", workerOneNodeName,
+				defaultNetNamespace, []string{}, nil, func(pod *v1.Pod) {
+					pod.Spec.HostNetwork = true
+				})
+			Expect(err).NotTo(HaveOccurred())
+
 			udnIPv4, udnIPv6, err := podIPsForDefaultNetwork(
 				cs,
 				f.Namespace.Name,
@@ -1249,6 +1392,13 @@ spec:
 				Consistently(func() bool {
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) != nil
 				}, 5*time.Second).Should(BeTrue())
+
+				if !isUDNHostIsolationDisabled() {
+					By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
+					Consistently(func() bool {
+						return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) != nil
+					}, 5*time.Second).Should(BeTrue())
+				}
 			}
 
 			By("Open UDN pod port")
@@ -1264,9 +1414,14 @@ spec:
 				if destIP == "" {
 					continue
 				}
-				By("checking the default network pod can't reach UDN pod on IP " + destIP)
+				By("checking the default network pod can reach UDN pod on IP " + destIP)
 				Eventually(func() bool {
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) == nil
+				}, 5*time.Second).Should(BeTrue())
+
+				By("checking the default hostNetwork pod can reach UDN pod on IP " + destIP)
+				Eventually(func() bool {
+					return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) == nil
 				}, 5*time.Second).Should(BeTrue())
 			}
 
@@ -1287,6 +1442,13 @@ spec:
 				Eventually(func() bool {
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, port) != nil
 				}, 5*time.Second).Should(BeTrue())
+
+				if !isUDNHostIsolationDisabled() {
+					By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
+					Eventually(func() bool {
+						return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, port) != nil
+					}, 5*time.Second).Should(BeTrue())
+				}
 			}
 			By("Verify syntax error is reported via event")
 			events, err := cs.CoreV1().Events(udnPod.Namespace).List(context.Background(), metav1.ListOptions{})
