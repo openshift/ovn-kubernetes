@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"os"
 	"os/exec"
 	"reflect"
 	"runtime"
@@ -22,8 +21,15 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,13 +41,6 @@ import (
 	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
-
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/onsi/ginkgo/v2"
-
-	"github.com/onsi/gomega"
-	"github.com/vishvananda/netlink"
 )
 
 // testPodConfig holds all the information needed to validate a config is applied for a pod
@@ -257,8 +256,10 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	kubeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: []corev1.Node{getNodeObj(node, createEIPAnnot)}},
 		&corev1.NamespaceList{Items: namespaces}, &corev1.PodList{Items: pods})
 	egressIPClient := egressipfake.NewSimpleClientset(&egressipv1.EgressIPList{Items: egressIPs})
-	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient}
+	nadClient := nadfake.NewSimpleClientset()
+	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient, NetworkAttchDefClient: nadClient}
 	rm := routemanager.NewController()
+	ovnconfig.OVNKubernetesFeature.EnableMultiNetwork = true // force addition of NAD informer for node watch factory
 	ovnconfig.OVNKubernetesFeature.EnableEgressIP = true
 	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, node1Name)
 	if err != nil {
@@ -268,8 +269,12 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 		return nil, nil, err
 	}
 	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
+	// only CDN network is supported
+	getActiveNetForNsFn := func(namespace string) (util.NetInfo, error) {
+		return &util.DefaultNetInfo{}, nil
+	}
 	c, err := NewController(&ovnkube.Kube{KClient: kubeClient}, watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
+		watchFactory.PodCoreInformer(), getActiveNetForNsFn, rm, v4, v6, node1Name, linkManager)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -416,7 +421,7 @@ func runSubControllers(testNS ns.NetNS, c *Controller, wg *sync.WaitGroup, stopC
 var _ = ginkgo.DescribeTable("EgressIP selectors",
 	func(expectedEIPConfigs []eipConfig, pods []corev1.Pod, namespaces []corev1.Namespace, nodeConfig nodeConfig) {
 		defer ginkgo.GinkgoRecover()
-		if os.Getenv("NOROOT") == "TRUE" {
+		if ovntest.NoRoot() {
 			ginkgo.Skip("Test requires root privileges")
 		}
 		if !commandExists("iptables") {
@@ -1036,7 +1041,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 	// Test using root and a test netns because we want to test between netlink lib
 	// and the egress IP components (link manager, route manager)
 	defer ginkgo.GinkgoRecover()
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		ginkgo.Skip("Test requires root privileges")
 	}
 	if !commandExists("iptables") {
@@ -1096,7 +1101,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 var _ = ginkgo.Describe("VRF", func() {
 	ginkgo.It("copies routes from the VRF routing table for a link enslaved by VRF device", func() {
 		defer ginkgo.GinkgoRecover()
-		if os.Getenv("NOROOT") == "TRUE" {
+		if ovntest.NoRoot() {
 			ginkgo.Skip("Test requires root privileges")
 		}
 		if !commandExists("iptables") {
@@ -1147,7 +1152,7 @@ var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []e
 	// Test using root and a test netns because we want to test between netlink lib
 	// and the egress IP components (link manager, route manager)
 	defer ginkgo.GinkgoRecover()
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		ginkgo.Skip("Test requires root privileges")
 	}
 	if !commandExists("iptables") {
