@@ -36,7 +36,7 @@ jobs:
   # separate job for parallelism
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - name: Check out code
       uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
 
   build-master:
     name: Build-master
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     # Create a cache for the built master image
     - name: Restore master image cache
@@ -147,7 +147,7 @@ jobs:
 
   build-pr:
     name: Build-PR
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     # Create a cache for the build PR image
     - name: Restore PR image cache
@@ -195,8 +195,9 @@ jobs:
       run: |
         set -x
         pushd go-controller
-           # exit early if there are gofmt issues
+           # exit early if there are gofmt or go mod / vendor issues
            make gofmt
+           make verify-go-mod-vendor
            make
            make windows
            COVERALLS=1 CONTAINER_RUNNABLE=1 make check
@@ -256,7 +257,7 @@ jobs:
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 120
     needs:
       - build-master
@@ -327,7 +328,7 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
         set -x
         docker ps -a
         docker exec ovn-control-plane crictl images
@@ -375,7 +376,7 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs-kind-pr-branch
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs-kind-pr-branch
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs-kind-pr-branch
 
     - name: Upload kind logs
       if: always()
@@ -386,7 +387,7 @@ jobs:
 
   e2e:
     name: e2e
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
     strategy:
@@ -406,13 +407,14 @@ jobs:
         # num-nodes-per-zone : "<integer value>"
         # forwarding : ["", "disable-forwarding"]
         # dns-name-resolver : ["", "enable-dns-name-resolver"]
+        # traffic-flow-tests : "<tests range. i.e. 1-24>"
         include:
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-disabled",          "dns-name-resolver": "enable-dns-name-resolver"}
-          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
+          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled", "traffic-flow-tests": "1,2,3"}
           - {"target": "control-plane-helm","ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "control-plane-helm","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "dns-name-resolver": "enable-dns-name-resolver"}
@@ -437,6 +439,7 @@ jobs:
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "traffic-flow-test-only","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24"}
           - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
     needs: [ build-pr ]
     env:
@@ -446,13 +449,13 @@ jobs:
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
       OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws == 'noSnatGW' }}"
-      KIND_INSTALL_METALLB: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
+      KIND_INSTALL_METALLB: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' || matrix.target == 'network-segmentation' }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' }}"
-      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'kv-live-migration'}}"
+      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' || matrix.target == 'traffic-flow-test-only' }}"
+      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'kv-live-migration' || matrix.target == 'traffic-flow-test-only' }}"
       DISABLE_UDN_HOST_ISOLATION: "true"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
@@ -463,6 +466,7 @@ jobs:
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
       USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
+      TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
     steps:
 
     - name: Install VRF kernel module
@@ -481,6 +485,11 @@ jobs:
           llvm-* microsoft-edge-stable mono-* \
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
+
+    - name: Setup /mnt/runner directory
+      run: |
+        sudo mkdir -pv /mnt/runner
+        sudo chown runner:runner /mnt/runner
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
@@ -523,6 +532,11 @@ jobs:
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test install-kind
 
+    - name: traffic-flow-tests setup
+      timeout-minutes: 5
+      if: env.TRAFFIC_FLOW_TESTS != ''
+      run: make -C test traffic-flow-tests WHAT="setup"
+
     - name: Runner Diagnostics
       uses: ./.github/actions/diagnostics
 
@@ -554,11 +568,20 @@ jobs:
         elif [ "${{ matrix.target }}" == "tools" ]; then
           make -C go-controller build
           make -C test tools
+        elif [ "${{ matrix.target }}" == "traffic-flow-test-only" ]; then
+          # Traffic Flow Tests can be ran as part of a target, as an additional
+          # set of test, set via TRAFFIC_FLOW_TESTS. See below.
+          :
         else
           make -C test ${{ matrix.target }}
           if [ "${{ matrix.ipfamily }}" != "ipv6" ]; then
             make -C test conformance
           fi
+        fi
+
+        # If target also specified traffic flow tests to run, do so now
+        if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
+          make -C test traffic-flow-tests WHAT="run"
         fi
 
     - name: Runner Diagnostics
@@ -568,7 +591,10 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
+        if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
+            mv -v /tmp/{,kind/logs/}traffic_flow_test_result.json ||:
+        fi
 
     - name: Upload kind logs
       if: always()
@@ -580,7 +606,7 @@ jobs:
   e2e-dual-conversion:
     name: e2e-dual-conversion
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -675,7 +701,7 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
 
     - name: Upload kind logs
       if: always()
