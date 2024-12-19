@@ -363,7 +363,9 @@ var _ = Describe("User Defined Network Controller", func() {
 					objs = append(objs, testNamespace(nsName))
 				}
 				cudn := testClusterUDN("test", testNamespaces...)
-				cudn.Spec.Network = udnv1.NetworkSpec{Topology: udnv1.NetworkTopologyLayer2, Layer2: &udnv1.Layer2Config{}}
+				cudn.Spec.Network = udnv1.NetworkSpec{Topology: udnv1.NetworkTopologyLayer2, Layer2: &udnv1.Layer2Config{
+					Subnets: udnv1.DualStackCIDRs{"10.10.10.0/24"},
+				}}
 				objs = append(objs, cudn)
 
 				c = newTestController(template.RenderNetAttachDefManifest, objs...)
@@ -374,7 +376,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					nad := testClusterUdnNAD(cudn.Name, nsName)
 					networkName := "cluster.udn." + cudn.Name
 					nadName := nsName + "/" + cudn.Name
-					nad.Spec.Config = `{"cniVersion":"1.0.0","name":"` + networkName + `","netAttachDefName":"` + nadName + `","role":"","topology":"layer2","type":"ovn-k8s-cni-overlay"}`
+					nad.Spec.Config = `{"cniVersion":"1.0.0","name":"` + networkName + `","netAttachDefName":"` + nadName + `","role":"","subnets":"10.10.10.0/24","topology":"layer2","type":"ovn-k8s-cni-overlay"}`
 					expectedNsNADs[nsName] = nad
 				}
 
