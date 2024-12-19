@@ -32,6 +32,7 @@ type Gateway interface {
 	Start()
 	GetGatewayBridgeIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
+	SetPodNetworkAdvertised(bool)
 	Reconcile() error
 }
 
@@ -55,6 +56,9 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+
+	isPodNetworkAdvertisedLock sync.Mutex
+	isPodNetworkAdvertised     bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -464,6 +468,12 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
 }
 
+func (g *gateway) SetPodNetworkAdvertised(isPodNetworkAdvertised bool) {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
+	g.isPodNetworkAdvertised = isPodNetworkAdvertised
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
 func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
@@ -475,7 +485,11 @@ func (g *gateway) Reconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isPodNetworkAdvertised); err != nil {
+		return err
+	}
+	err = g.updateSNATRules()
+	if err != nil {
 		return err
 	}
 	// Services create OpenFlow flows as well, need to update them all
@@ -506,6 +520,25 @@ func (g *gateway) addAllServices() []error {
 	}
 	g.servicesRetryFramework.RequestRetryObjs()
 	return errs
+}
+
+func (g *gateway) updateSNATRules() error {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
+	var ipnets []*net.IPNet
+	if g.nodeIPManager.mgmtPortConfig.ipv4 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv4.ifAddr)
+	}
+	if g.nodeIPManager.mgmtPortConfig.ipv6 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv6.ifAddr)
+	}
+	subnets := util.IPsToNetworkIPs(ipnets...)
+
+	if g.isPodNetworkAdvertised || config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNATRules(subnets...)
+	}
+
+	return addLocalGatewayPodSubnetNATRules(subnets...)
 }
 
 type bridgeConfiguration struct {
