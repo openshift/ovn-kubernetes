@@ -91,6 +91,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 							Name:        fmt.Sprintf("GR_%s_%s", networkConfig.GetNetworkName(), nodeName),
 							ExternalIDs: standardNonDefaultNetworkExtIDs(networkConfig),
 						},
+						newNetworkClusterPortGroup(networkConfig),
 					)
 				}
 
@@ -162,6 +163,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(gwConfig.NextHops).NotTo(BeEmpty())
 					expectationOptions = append(expectationOptions, withGatewayConfig(gwConfig))
+					expectationOptions = append(expectationOptions, withClusterPortGroup())
 				}
 				By("asserting the OVN entities provisioned in the NBDB are the expected ones")
 				Eventually(fakeOvn.nbClient).Should(
@@ -209,7 +211,9 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 
 		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
-			icClusterWithDisableSNATTestConfiguration(),
+			icClusterTestConfiguration(func(testConfig *testConfiguration) {
+				testConfig.gatewayConfig = &config.GatewayConfig{DisableSNATMultipleGWs: true}
+			}),
 			config.GatewayModeShared,
 		),
 		/** FIXME: tests do not support ipv6 yet
@@ -337,7 +341,9 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 		),
 		Entry("pod on a user defined primary network on an IC cluster with per-pod SNATs enabled",
 			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
-			icClusterWithDisableSNATTestConfiguration(),
+			icClusterTestConfiguration(func(testConfig *testConfiguration) {
+				testConfig.gatewayConfig = &config.GatewayConfig{DisableSNATMultipleGWs: true}
+			}),
 		),
 	)
 
