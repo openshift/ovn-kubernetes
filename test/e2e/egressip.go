@@ -616,6 +616,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 	}
 
 	f := wrappedTestFramework(egressIPName)
+	f.SkipNamespaceCreation = true
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -633,6 +634,17 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		if len(ips) == 0 {
 			framework.Failf("expect at least one IP address")
 		}
+
+		labels := map[string]string{
+			"e2e-framework": f.BaseName,
+		}
+		if !isClusterDefaultNetwork(netConfigParams) {
+			labels[RequiredUDNNamespaceLabel] = ""
+		}
+		namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, labels)
+		f.Namespace = namespace
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 		isIPv6TestRun = utilnet.IsIPv6String(ips[0])
 		egress1Node = node{
 			name:   nodes.Items[1].Name,
@@ -2928,19 +2940,21 @@ spec:
 		if !isNetworkSegmentationEnabled() {
 			ginkgo.Skip("network segmentation is disabled")
 		}
-		ginkgo.By(fmt.Sprintf("Building a namespace api object, basename %s", f.BaseName))
-		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
-			"e2e-framework":           f.BaseName,
-			RequiredUDNNamespaceLabel: "",
-		})
+		var otherNetworkNamespace *corev1.Namespace
+		var err error
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		isOtherNetworkIPv6 := utilnet.IsIPv6CIDRString(otherNetworkAttachParms.cidr)
 		// The EgressIP IP must match both networks IP family
 		if isOtherNetworkIPv6 != isIPv6TestRun {
 			ginkgo.Skip(fmt.Sprintf("Test run IP family (is IPv6: %v) doesn't match other networks IP family (is IPv6: %v)", isIPv6TestRun, isOtherNetworkIPv6))
 		}
-		// is the test namespace a CDN? If so create the UDN
+		// is the test namespace a CDN? If so create the UDN namespace
 		if isClusterDefaultNetwork(netConfigParams) {
+			ginkgo.By(fmt.Sprintf("Building other namespace api object for Primary UDN, basename %s", f.BaseName))
+			otherNetworkNamespace, err = f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
+				RequiredUDNNamespaceLabel: "",
+				"e2e-framework":           f.BaseName,
+			})
 			ginkgo.By(fmt.Sprintf("namespace is connected to CDN, create a namespace with %s primary UDN", otherNetworkAttachParms.topology))
 			// create primary UDN
 			nadClient, err := nadclient.NewForConfig(f.ClientConfig())
@@ -2954,6 +2968,10 @@ spec:
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		} else {
+			ginkgo.By(fmt.Sprintf("Building other namespace api object for CDN, basename %s", f.BaseName))
+			otherNetworkNamespace, err = f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
+				"e2e-framework": f.BaseName,
+			})
 			// if network is L3 or L2 UDN, then other network is CDN
 		}
 		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
@@ -2965,8 +2983,14 @@ spec:
 			"wants": "egress",
 		}
 		pod1Namespace := f.Namespace
+		_, isUDNRequired := pod1Namespace.Labels[RequiredUDNNamespaceLabel]
+		ginkgo.By(fmt.Sprintf("Updating namespace label for base namespace: %s, with required UDN label: %t",
+			pod1Namespace.Name, isUDNRequired))
 		updateNamespaceLabels(f, pod1Namespace, selectedByEIPLabels)
 		pod2OtherNetworkNamespace := otherNetworkNamespace.Name
+		_, isUDNRequired = otherNetworkNamespace.Labels[RequiredUDNNamespaceLabel]
+		ginkgo.By(fmt.Sprintf("Updating namespace label for other namespace: %s, with required UDN label: %t",
+			otherNetworkNamespace.Name, isUDNRequired))
 		updateNamespaceLabels(f, otherNetworkNamespace, selectedByEIPLabels)
 
 		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
@@ -3028,27 +3052,16 @@ spec:
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, pod2OtherNetworkNamespace, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected nodeIP, failed: %v", err)
 	},
-		ginkgo.Entry("IPv4 L3 Primary UDN", networkAttachmentConfigParams{
+		ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
 			name:     "l3primary",
 			topology: types.Layer3Topology,
-			cidr:     "30.10.0.0/16",
+			cidr:     correctCIDRFamily("30.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
-		ginkgo.Entry("IPv6 L3 Primary UDN", networkAttachmentConfigParams{
-			name:     "l3primary",
-			topology: types.Layer3Topology,
-			cidr:     "2014:100:200::0/60",
-		}),
-		ginkgo.Entry("IPv4 L2 Primary UDN", networkAttachmentConfigParams{
+		ginkgo.Entry("L2 Primary UDN", networkAttachmentConfigParams{
 			name:     "l2primary",
 			topology: types.Layer2Topology,
-			cidr:     "10.10.0.0/16",
-			role:     "primary",
-		}),
-		ginkgo.Entry("IPv6 L2 Primary UDN", networkAttachmentConfigParams{
-			name:     "l2primary",
-			topology: types.Layer2Topology,
-			cidr:     "2014:100:200::0/60",
+			cidr:     correctCIDRFamily("10.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
 	)
