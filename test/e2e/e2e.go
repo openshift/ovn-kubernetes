@@ -473,7 +473,9 @@ func deleteClusterExternalContainer(containerName string) {
 func updateNamespaceLabels(f *framework.Framework, namespace *v1.Namespace, labels map[string]string) {
 	// should never be nil
 	n := *namespace
-	n.Labels = labels
+	for k, v := range labels {
+		n.Labels[k] = v
+	}
 	if _, ok := namespace.Labels[RequiredUDNNamespaceLabel]; ok {
 		n.Labels[RequiredUDNNamespaceLabel] = ""
 	}
