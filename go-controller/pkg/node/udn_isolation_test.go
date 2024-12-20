@@ -19,9 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -212,11 +210,10 @@ add set inet ovn-kubernetes %s { type %s ; }
 
 var _ = Describe("UDN Host isolation", func() {
 	var (
-		manager       *UDNHostIsolationManager
-		nadController *networkAttachDefController.NetAttachDefinitionController
-		wf            *factory.WatchFactory
-		fakeClient    *util.OVNNodeClientset
-		nft           *knftables.Fake
+		manager    *UDNHostIsolationManager
+		wf         *factory.WatchFactory
+		fakeClient *util.OVNNodeClientset
+		nft        *knftables.Fake
 	)
 
 	const (
@@ -282,15 +279,9 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
 
-		testNCM := &nad.FakeNetworkControllerManager{}
-		nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), nadController)
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
 
 		err = wf.Start()
-		Expect(err).NotTo(HaveOccurred())
-		err = nadController.Start()
 		Expect(err).NotTo(HaveOccurred())
 
 		// Copy manager.Start() sequence, but using fake nft and without running systemd tracker
@@ -312,7 +303,6 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 
 		wf = nil
 		manager = nil
-		nadController = nil
 	})
 
 	AfterEach(func() {
@@ -322,9 +312,36 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		if manager != nil {
 			manager.Stop()
 		}
-		if nadController != nil {
-			nadController.Stop()
+	})
+
+	It("correctly handles host-network and not ready pods on initial sync", func() {
+		hostNetPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "hostnet",
+				UID:       ktypes.UID("hostnet"),
+				Namespace: defaultNamespace,
+			},
 		}
+		hostNetPod.Spec.HostNetwork = true
+		notReadyPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "notready",
+				UID:       ktypes.UID("notready"),
+				Namespace: defaultNamespace,
+			},
+		}
+
+		fakeClient = util.GetOVNClientset(hostNetPod, notReadyPod).GetNodeClientset()
+		var err error
+		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
+		Expect(err).NotTo(HaveOccurred())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
+		nft = nodenft.SetFakeNFTablesHelper()
+		manager.nft = nft
+
+		Expect(wf.Start()).To(Succeed())
+		Expect(manager.setupUDNIsolationFromHost()).To(Succeed())
+		Expect(manager.podInitialSync()).To(Succeed())
 	})
 
 	It("correctly generates initial rules", func() {

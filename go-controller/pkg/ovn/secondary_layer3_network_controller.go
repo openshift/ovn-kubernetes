@@ -17,7 +17,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -159,8 +159,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.NetInfo.GetNetworkName())
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.GetNetworkName())
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -310,41 +310,25 @@ type SecondaryLayer3NetworkController struct {
 }
 
 // NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController,
-	eIPController *EgressIPController, portCache *PortCache) (*SecondaryLayer3NetworkController, error) {
+func NewSecondaryLayer3NetworkController(
+	cnci *CommonNetworkControllerInfo,
+	netInfo util.NetInfo,
+	networkManager networkmanager.Interface,
+	eIPController *EgressIPController,
+	portCache *PortCache,
+) (*SecondaryLayer3NetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
-	var zoneICHandler *zoneic.ZoneInterconnectHandler
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
-	}
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
-
-	var svcController *svccontroller.Controller
-	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
-		var err error
-		svcController, err = svccontroller.NewController(
-			cnci.client, cnci.nbClient,
-			cnci.watchFactory.ServiceCoreInformer(),
-			cnci.watchFactory.EndpointSliceCoreInformer(),
-			cnci.watchFactory.NodeCoreInformer(),
-			nadController,
-			cnci.recorder,
-			netInfo,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
-		}
-	}
 
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
 				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-				NetInfo:                     netInfo,
+				ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 				lsManager:                   lsm.NewLogicalSwitchManager(),
 				logicalPortCache:            portCache,
 				namespaces:                  make(map[string]*namespaceInfo),
@@ -356,9 +340,8 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 				localZoneNodes:              &sync.Map{},
-				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
-				nadController:               nadController,
+				networkManager:              networkManager,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -368,13 +351,32 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		gatewaysFailed:              sync.Map{},
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 		gatewayManagers:             sync.Map{},
-		svcController:               svcController,
 		eIPController:               eIPController,
+	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		oc.zoneICHandler = zoneic.NewZoneInterconnectHandler(oc.GetNetInfo(), cnci.nbClient, cnci.sbClient, cnci.watchFactory)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
+		var err error
+		oc.svcController, err = svccontroller.NewController(
+			cnci.client, cnci.nbClient,
+			cnci.watchFactory.ServiceCoreInformer(),
+			cnci.watchFactory.EndpointSliceCoreInformer(),
+			cnci.watchFactory.NodeCoreInformer(),
+			networkManager,
+			cnci.recorder,
+			oc.GetNetInfo(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
+		}
 	}
 
 	if oc.allocatesPodAnnotation() {
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
-			netInfo,
+			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
 			nil)
@@ -614,7 +616,7 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 
 	// Only configure join switch, GR, cluster port groups and multicast default policies for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.NetInfo, oc.ovnClusterLRPToJoinIfAddrs); err != nil {
+		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.GetNetInfo(), oc.ovnClusterLRPToJoinIfAddrs); err != nil {
 			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
 		}
 
@@ -632,7 +634,7 @@ func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
-		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 		if err != nil {
 			return err
 		}
@@ -759,11 +761,11 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err = oc.eIPController.ensureL3ClusterRouterPoliciesForNetwork(oc.NetInfo); err != nil {
-			errs = append(errs, fmt.Errorf("failed to add network %s to EgressIP controller: %v", oc.NetInfo.GetNetworkName(), err))
+		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP router polices for network %s: %v", oc.GetNetworkName(), err))
 		}
-		if err = oc.eIPController.ensureL3SwitchPoliciesForNode(oc.NetInfo, node.Name); err != nil {
-			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies: %v", err))
+		if err = oc.eIPController.ensureSwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies for network %s: %v", oc.GetNetworkName(), err))
 		}
 	}
 
@@ -1016,13 +1018,13 @@ func (oc *SecondaryLayer3NetworkController) newClusterRouter() (*nbdb.LogicalRou
 	if oc.multicastSupport {
 		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
 			oc.GetNetworkScopedClusterRouterName(),
-			oc.NetInfo,
+			oc.GetNetInfo(),
 			oc.defaultCOPPUUID,
 		)
 	}
 	return oc.gatewayTopologyFactory.NewClusterRouter(
 		oc.GetNetworkScopedClusterRouterName(),
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.defaultCOPPUUID,
 	)
 }
@@ -1033,7 +1035,7 @@ func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *
 		oc.defaultCOPPUUID,
 		oc.kube,
 		oc.nbClient,
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.gatewayOptions()...,
 	)
