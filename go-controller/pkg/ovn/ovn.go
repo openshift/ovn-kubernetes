@@ -204,7 +204,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 
 func (oc *DefaultNetworkController) ensureRemotePodIP(oldPod, pod *kapi.Pod, addPort bool) error {
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
-		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
 		if err != nil {
 			// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
 			return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
@@ -324,7 +324,7 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 	}
 
 	if kubevirt.IsPodLiveMigratable(pod) {
-		ips, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		ips, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
 		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 			return fmt.Errorf("failed to get pod ips for the pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
@@ -487,14 +487,13 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
 	initClusterEgressPolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, ni util.NetInfo,
-		clusterSubnets []*net.IPNet, controllerName string) error {
+		clusterSubnets []*net.IPNet, controllerName, routerName string) error {
 		return nil
 	}
 	ensureNodeNoReroutePolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 		network, router, controller string, nodeLister listers.NodeLister, v4, v6 bool) error {
 		return nil
 	}
-	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string, string) error { return nil }
 	// used only when IC=true
 	createDefaultNodeRouteToExternal := func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error {
 		return nil
@@ -503,12 +502,11 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
 		ensureNodeNoReroutePolicies = ensureDefaultNoRerouteNodePolicies
-		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
-	return egresssvc_zone.NewController(oc.NetInfo, DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
-		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
+	return egresssvc_zone.NewController(oc.GetNetInfo(), DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
+		initClusterEgressPolicies, ensureNodeNoReroutePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),

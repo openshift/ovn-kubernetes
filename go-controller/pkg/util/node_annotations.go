@@ -907,6 +907,25 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 	return ip, nil
 }
 
+// ParseNodeGatewayRouterJoinIPv6 returns the IPv6 address for the node's gateway router port
+// stored in the 'OVNNodeGRLRPAddrs' annotation
+func ParseNodeGatewayRouterJoinIPv6(node *kapi.Node, netName string) (net.IP, error) {
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
+	if err != nil {
+		return nil, err
+	}
+	if primaryIfAddr.IPv6 == "" {
+		return nil, fmt.Errorf("failed to find an IPv6 address for gateway route interface in node: %s, net: %s, "+
+			"annotation values: %+v", node, netName, primaryIfAddr)
+	}
+
+	ip, _, err := net.ParseCIDR(primaryIfAddr.IPv6)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse gateway router IPv6 address %s, err: %w", primaryIfAddr.IPv6, err)
+	}
+	return ip, nil
+}
+
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
@@ -1503,7 +1522,7 @@ func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
 // GetNetworkID will retrieve the network id for the specified network from the
 // first node that contains that network at the network id annotations, it will
 // return at the first ocurrence, rest of nodes will not be parsed.
-func GetNetworkID(nodes []*corev1.Node, nInfo BasicNetInfo) (int, error) {
+func GetNetworkID(nodes []*corev1.Node, nInfo NetInfo) (int, error) {
 	for _, node := range nodes {
 		var err error
 		networkID, err := ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
