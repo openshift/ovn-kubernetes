@@ -17,7 +17,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -30,7 +30,6 @@ import (
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -148,19 +147,19 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		if !ok {
 			return fmt.Errorf("could not cast %T object to Node", newObj)
 		}
-		oldNode, ok := oldObj.(*kapi.Node)
+		oldNode, ok := oldObj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName())
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update and combine that with what failed previously
 				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
 				shouldSyncMgmtPort := mgmtUpdateFailed ||
-					macAddressChanged(oldNode, newNode, h.oc.NetInfo.GetNetworkName()) ||
+					macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) ||
 					nodeSubnetChanged
 				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
 				shouldSyncGW := gwUpdateFailed ||
@@ -257,10 +256,19 @@ type SecondaryLayer2NetworkController struct {
 
 	// Controller in charge of services
 	svcController *svccontroller.Controller
+
+	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
+	eIPController *EgressIPController
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nadController nad.NADController) (*SecondaryLayer2NetworkController, error) {
+func NewSecondaryLayer2NetworkController(
+	cnci *CommonNetworkControllerInfo,
+	netInfo util.NetInfo,
+	networkManager networkmanager.Interface,
+	eIPController *EgressIPController,
+	portCache *PortCache,
+) (*SecondaryLayer2NetworkController, error) {
 
 	stopChan := make(chan struct{})
 
@@ -280,7 +288,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			cnci.watchFactory.ServiceCoreInformer(),
 			cnci.watchFactory.EndpointSliceCoreInformer(),
 			cnci.watchFactory.NodeCoreInformer(),
-			nadController,
+			networkManager,
 			cnci.recorder,
 			netInfo,
 		)
@@ -296,9 +304,9 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-					NetInfo:                     netInfo,
+					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 					lsManager:                   lsManagerFactoryFn(),
-					logicalPortCache:            NewPortCache(stopChan),
+					logicalPortCache:            portCache,
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
 					addressSetFactory:           addressSetFactory,
@@ -309,7 +317,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 					wg:                          &sync.WaitGroup{},
 					localZoneNodes:              &sync.Map{},
 					cancelableCtx:               util.NewCancelableContext(),
-					nadController:               nadController,
+					networkManager:              networkManager,
 				},
 			},
 		},
@@ -317,10 +325,11 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 		syncZoneICFailed: sync.Map{},
 		gatewayManagers:  sync.Map{},
 		svcController:    svcController,
+		eIPController:    eIPController,
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.NetInfo, oc.nbClient, oc.sbClient, oc.watchFactory)
+		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.GetNetInfo(), oc.nbClient, oc.sbClient, oc.watchFactory)
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -328,7 +337,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 		if oc.allowPersistentIPs() {
 			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
 				oc.kube,
-				oc.NetInfo,
+				oc.GetNetInfo(),
 				oc.watchFactory.IPAMClaimsInformer().Lister(),
 			)
 			oc.ipamClaimsReconciler = ipamClaimsReconciler
@@ -418,7 +427,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	}
 	oc.defaultCOPPUUID = defaultCOPPUUID
 
-	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
+	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 	if err != nil {
 		return err
 	}
@@ -459,7 +468,7 @@ func (oc *SecondaryLayer2NetworkController) Stop() {
 func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
+	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
 		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
 	}
 
@@ -539,22 +548,31 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 				}
 			}
 		}
-		if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-			if nSyncs.syncMgmtPort {
-				// Layer 2 networks have a single, large subnet, that's the one
-				// associated to the controller.  Take the management port IP from
-				// there.
-				subnets := oc.Subnets()
-				hostSubnets := make([]*net.IPNet, 0, len(subnets))
-				for _, subnet := range oc.Subnets() {
-					hostSubnets = append(hostSubnets, subnet.CIDR)
-				}
-				if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch), oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
-					errs = append(errs, err)
-					oc.mgmtPortFailed.Store(node.Name, true)
-				} else {
-					oc.mgmtPortFailed.Delete(node.Name)
-				}
+
+		if nSyncs.syncMgmtPort {
+			// Layer 2 networks have a single, large subnet, that's the one
+			// associated to the controller.  Take the management port IP from
+			// there.
+			subnets := oc.Subnets()
+			hostSubnets := make([]*net.IPNet, 0, len(subnets))
+			for _, subnet := range oc.Subnets() {
+				hostSubnets = append(hostSubnets, subnet.CIDR)
+			}
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+				oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
+				errs = append(errs, err)
+				oc.mgmtPortFailed.Store(node.Name, true)
+			} else {
+				oc.mgmtPortFailed.Delete(node.Name)
+			}
+		}
+
+		if config.OVNKubernetesFeature.EnableEgressIP {
+			if err := oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+				errs = append(errs, fmt.Errorf("failed to ensure EgressIP router policies for network %s: %v", oc.GetNetworkName(), err))
+			}
+			if err := oc.eIPController.ensureSwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
+				errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies for network %s: %v", oc.GetNetworkName(), err))
 			}
 		}
 	}
@@ -665,7 +683,7 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *kapi.Node) error {
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *corev1.Node) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
 	if err != nil {
@@ -748,7 +766,7 @@ func (oc *SecondaryLayer2NetworkController) newGatewayManager(nodeName string) *
 		oc.defaultCOPPUUID,
 		oc.kube,
 		oc.nbClient,
-		oc.NetInfo,
+		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.gatewayOptions()...,
 	)

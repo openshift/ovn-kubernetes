@@ -226,7 +226,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		return nil
 	}
 
-	_, networkMap, err := util.GetPodNADToNetworkMapping(pod, oc.NetInfo)
+	_, networkMap, err := util.GetPodNADToNetworkMapping(pod, oc.GetNetInfo())
 	if err != nil {
 		// multus won't add this Pod if this fails, should never happen
 		return fmt.Errorf("error getting default-network's network-attachment for pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -235,7 +235,6 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	if len(networkMap) > 1 {
 		return fmt.Errorf("more than one NAD requested on default network for pod %s/%s", pod.Namespace, pod.Name)
 	}
-
 	var network *nadapi.NetworkSelectionElement
 	for _, network = range networkMap {
 		break
@@ -267,7 +266,8 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	if networkRole != ovntypes.NetworkRolePrimary && util.IsNetworkSegmentationSupportEnabled() {
 		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
-			return err
+			return fmt.Errorf("unable to add ports to port group %s for %s/%s part of NAD %s: %w",
+				pgName, pod.Namespace, pod.Name, nadName, err)
 		}
 		// set open ports for UDN pods, use function without transact, since lsp is not created yet.
 		var parseErr error
@@ -309,7 +309,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return err
 		}
-	} else if config.Gateway.DisableSNATMultipleGWs {
+	} else if config.Gateway.DisableSNATMultipleGWs && !oc.isPodNetworkAdvertisedAtNode(pod.Spec.NodeName) {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
@@ -332,7 +332,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
 	txOkCallBack()
-	oc.podRecorder.AddLSP(pod.UID, oc.NetInfo)
+	oc.podRecorder.AddLSP(pod.UID, oc.GetNetInfo())
 
 	// check if this pod is serving as an external GW
 	err = oc.addPodExternalGW(pod)
@@ -356,7 +356,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
-		metrics.RecordPodCreated(pod, oc.NetInfo)
+		metrics.RecordPodCreated(pod, oc.GetNetInfo())
 	}
 	return nil
 }
