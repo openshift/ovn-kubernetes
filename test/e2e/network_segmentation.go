@@ -351,7 +351,6 @@ var _ = Describe("Network Segmentation", func() {
 						}, 10*time.Second, 1*time.Second).Should(BeTrue())
 						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
 
-
 						if !isUDNHostIsolationDisabled() {
 							By("checking default network hostNetwork pod and non-kubelet host process can't reach the UDN pod")
 							hostNetPod, err := createPod(f, "host-net-pod", udnPodConfig.nodeSelector[nodeHostnameKey],
@@ -1201,7 +1200,7 @@ spec:
 			topology:    "layer3",
 			name:        primaryNadName,
 			networkName: primaryNadName,
-			cidr:        "10.10.100.0/24",
+			cidr:        correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 		}))
 		_, err := nadClient.NetworkAttachmentDefinitions(primaryNetTenantNs).Create(context.Background(), primaryNetNad, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
@@ -1747,8 +1746,7 @@ spec:
     topology: Layer3
     layer3:
       role: Primary
-      subnets: [{cidr: "10.100.0.0/16"}]
-`
+      subnets: ` + generateCIDRforClusterUDN()
 }
 
 func newL2SecondaryUDNManifest(name string) string {
@@ -1793,7 +1791,16 @@ func generateCIDRforUDN() string {
 `
 	}
 	return cidr
+}
 
+func generateCIDRforClusterUDN() string {
+	cidr := `[{cidr: "10.100.0.0/16"}]`
+	if isIPv6Supported() && isIPv4Supported() {
+		cidr = `[{cidr: "10.100.0.0/16"},{cidr: "2014:100:200::0/60"}]`
+	} else if isIPv6Supported() {
+		cidr = `[{cidr: "2014:100:200::0/60"}]`
+	}
+	return cidr
 }
 
 type podOption func(*podConfiguration)
