@@ -12,6 +12,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/coreos/go-iptables/iptables"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
@@ -20,10 +21,11 @@ import (
 )
 
 const (
-	iptableNodePortChain   = "OVN-KUBE-NODEPORT"   // called from nat-PREROUTING and nat-OUTPUT
-	iptableExternalIPChain = "OVN-KUBE-EXTERNALIP" // called from nat-PREROUTING and nat-OUTPUT
-	iptableETPChain        = "OVN-KUBE-ETP"        // called from nat-PREROUTING only
-	iptableITPChain        = "OVN-KUBE-ITP"        // called from mangle-OUTPUT and nat-OUTPUT
+	iptableNodePortChain      = "OVN-KUBE-NODEPORT"       // called from nat-PREROUTING and nat-OUTPUT
+	iptableExternalIPChain    = "OVN-KUBE-EXTERNALIP"     // called from nat-PREROUTING and nat-OUTPUT
+	iptableETPChain           = "OVN-KUBE-ETP"            // called from nat-PREROUTING only
+	iptableITPChain           = "OVN-KUBE-ITP"            // called from mangle-OUTPUT and nat-OUTPUT
+	iptableUDNMasqueradeChain = "OVN-KUBE-UDN-MASQUERADE" // called from nat-POSTROUTING
 )
 
 func clusterIPTablesProtocols() []iptables.Protocol {
@@ -76,6 +78,18 @@ func appendIptRules(rules []nodeipt.Rule) error {
 // deleteIptRules removes provided rules from the chain
 func deleteIptRules(rules []nodeipt.Rule) error {
 	return nodeipt.DelRules(rules)
+}
+
+// ensureChain ensures that a chain exists within a table
+func ensureChain(table, chain string) error {
+	for _, proto := range clusterIPTablesProtocols() {
+		ipt, err := util.GetIPTablesHelper(proto)
+		if err != nil {
+			return fmt.Errorf("failed to get IPTables helper to add UDN chain: %v", err)
+		}
+		addChaintoTable(ipt, table, chain)
+	}
+	return nil
 }
 
 func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
@@ -440,14 +454,14 @@ func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	}
 }
 
-func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
+func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	protocol := getIPTablesProtocol(cidr.IP.String())
 	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
 	if protocol == iptables.ProtocolIPv6 {
 		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
 	}
-	return []nodeipt.Rule{
+	rules := []nodeipt.Rule{
 		{
 			Table: "nat",
 			Chain: "POSTROUTING",
@@ -467,6 +481,78 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 			Protocol: protocol,
 		},
 	}
+	// FIXME(tssurya): If the feature is disabled we should be removing
+	// these rules
+	if util.IsNetworkSegmentationSupportEnabled() {
+		rules = append(rules, getUDNMasqueradeRules(protocol)...)
+	}
+	return rules
+}
+
+// getUDNMasqueradeRules is only called for local-gateway-mode
+func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
+	// the following rules are actively used only for the UDN Feature:
+	// -A POSTROUTING -j OVN-KUBE-UDN-MASQUERADE
+	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/29 -j RETURN
+	// -A OVN-KUBE-UDN-MASQUERADE -d 10.96.0.0/16 -j RETURN
+	// -A OVN-KUBE-UDN-MASQUERADE -s 169.254.0.0/17 -j MASQUERADE
+	// NOTE: Ordering is important here, the RETURN must come before
+	// the MASQUERADE rule. Please don't change the ordering.
+	srcUDNMasqueradePrefix := config.Gateway.V4MasqueradeSubnet
+	// defaultNetworkReservedMasqueradePrefix contains the first 6IPs in the masquerade
+	// range that shouldn't be MASQUERADED. Hence /29 and /125 is intentionally hardcoded here
+	defaultNetworkReservedMasqueradePrefix := config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String() + "/29"
+	ipFamily := utilnet.IPv4
+	if protocol == iptables.ProtocolIPv6 {
+		srcUDNMasqueradePrefix = config.Gateway.V6MasqueradeSubnet
+		defaultNetworkReservedMasqueradePrefix = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String() + "/125"
+		ipFamily = utilnet.IPv6
+	}
+	rules := []nodeipt.Rule{
+		{
+			Table:    "nat",
+			Chain:    "POSTROUTING",
+			Args:     []string{"-j", iptableUDNMasqueradeChain}, // NOTE: AddRules will take care of creating the chain
+			Protocol: protocol,
+		},
+		{
+			Table: "nat",
+			Chain: iptableUDNMasqueradeChain,
+			Args: []string{
+				"-s", defaultNetworkReservedMasqueradePrefix,
+				"-j", "RETURN",
+			},
+			Protocol: protocol,
+		},
+	}
+	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+		if utilnet.IPFamilyOfCIDR(svcCIDR) != ipFamily {
+			continue
+		}
+		rules = append(rules,
+			nodeipt.Rule{
+				Table: "nat",
+				Chain: iptableUDNMasqueradeChain,
+				Args: []string{
+					"-d", svcCIDR.String(),
+					"-j", "RETURN",
+				},
+				Protocol: protocol,
+			},
+		)
+	}
+	rules = append(rules,
+		nodeipt.Rule{
+			Table: "nat",
+			Chain: iptableUDNMasqueradeChain,
+			Args: []string{
+				"-s", srcUDNMasqueradePrefix,
+				"-j", "MASQUERADE",
+			},
+			Protocol: protocol,
+		},
+	)
+	return rules
 }
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
@@ -480,7 +566,7 @@ func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	}
 	// append the masquerade rules in POSTROUTING table since that needs to be
 	// evaluated last.
-	return appendIptRules(getLocalGatewayNATRules(ifname, cidr))
+	return appendIptRules(getLocalGatewayNATRules(cidr))
 }
 
 func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {

@@ -8,11 +8,13 @@ import (
 	"time"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
@@ -183,7 +185,8 @@ type SecondaryLocalnetNetworkController struct {
 }
 
 // NewSecondaryLocalnetNetworkController create a new OVN controller for the given secondary localnet NAD
-func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLocalnetNetworkController {
+func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
+	nadController networkAttachDefController.NADController) *SecondaryLocalnetNetworkController {
 
 	stopChan := make(chan struct{})
 
@@ -208,6 +211,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 					wg:                          &sync.WaitGroup{},
 					cancelableCtx:               util.NewCancelableContext(),
 					localZoneNodes:              &sync.Map{},
+					nadController:               nadController,
 				},
 			},
 		},
@@ -268,7 +272,7 @@ func (oc *SecondaryLocalnetNetworkController) Cleanup() error {
 func (oc *SecondaryLocalnetNetworkController) Init() error {
 	switchName := oc.GetNetworkScopedSwitchName(types.OVNLocalnetSwitch)
 
-	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
+	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets(), "", "")
 	if err != nil {
 		return err
 	}
@@ -280,9 +284,7 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 		Name:      oc.GetNetworkScopedName(types.OVNLocalnetPort),
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
-		Options: map[string]string{
-			"network_name": oc.GetNetworkName(),
-		},
+		Options:   oc.localnetPortNetworkNameOptions(),
 	}
 	intVlanID := int(oc.Vlan())
 	if intVlanID != 0 {
@@ -315,7 +317,7 @@ func (oc *SecondaryLocalnetNetworkController) initRetryFramework() {
 	// multi-network policy for IPAM-less secondary networks either.
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
-		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
+		oc.retryMultiNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 	}
 }
 
@@ -341,4 +343,14 @@ func (oc *SecondaryLocalnetNetworkController) newRetryFramework(
 		oc.watchFactory,
 		resourceHandler,
 	)
+}
+
+func (oc *SecondaryLocalnetNetworkController) localnetPortNetworkNameOptions() map[string]string {
+	localnetLSPOptions := map[string]string{
+		"network_name": oc.GetNetworkName(),
+	}
+	if oc.PhysicalNetworkName() != "" {
+		localnetLSPOptions["network_name"] = oc.PhysicalNetworkName()
+	}
+	return localnetLSPOptions
 }

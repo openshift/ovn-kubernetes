@@ -11,6 +11,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/vishvananda/netlink"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -18,7 +20,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/vishvananda/netlink"
 )
 
 const (
@@ -52,10 +53,10 @@ type UserDefinedNetworkGateway struct {
 	// masqCTMark holds the mark value for this network
 	// which is used for egress traffic in shared gateway mode
 	masqCTMark uint
-	// v4MasqIP holds the IPv4 masquerade IP for this network
-	v4MasqIP *net.IPNet
-	// v6MasqIP holds the IPv6 masquerade IP for this network
-	v6MasqIP *net.IPNet
+	// v4MasqIPs holds the IPv4 masquerade IPs for this network
+	v4MasqIPs *udn.MasqueradeIPs
+	// v6MasqIPs holds the IPv6 masquerade IPs for this network
+	v6MasqIPs *udn.MasqueradeIPs
 	// stores the pointer to default network's gateway so that
 	// we can leverage it from here to program UDN flows on breth0
 	// Currently we use the openflowmanager and nodeIPManager from
@@ -83,7 +84,7 @@ func (b *bridgeConfiguration) getBridgePortConfigurations() ([]bridgeUDNConfigur
 }
 
 // addNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
-func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint, v4MasqIP, v6MasqIP *net.IPNet) {
+func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark uint, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) {
 	b.Lock()
 	defer b.Unlock()
 
@@ -95,8 +96,8 @@ func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTM
 		netConfig := &bridgeUDNConfiguration{
 			patchPort:  patchPort,
 			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
-			v4MasqIP:   v4MasqIP,
-			v6MasqIP:   v6MasqIP,
+			v4MasqIPs:  v4MasqIPs,
+			v6MasqIPs:  v6MasqIPs,
 		}
 
 		b.netConfig[netName] = netConfig
@@ -112,6 +113,22 @@ func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
 	defer b.Unlock()
 
 	delete(b.netConfig, nInfo.GetNetworkName())
+}
+
+// getActiveNetworkBridgeConfig returns a copy of the network configuration corresponding to the
+// provided netInfo.
+//
+// NOTE: if the network configuration can't be found or if the network is not patched by OVN
+// yet this returns nil.
+func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(nInfo util.NetInfo) *bridgeUDNConfiguration {
+	b.Lock()
+	defer b.Unlock()
+
+	if netConfig, found := b.netConfig[nInfo.GetNetworkName()]; found && netConfig.ofPortPatch != "" {
+		result := *netConfig
+		return &result
+	}
+	return nil
 }
 
 func (b *bridgeConfiguration) patchedNetConfigs() []*bridgeUDNConfiguration {
@@ -133,8 +150,12 @@ type bridgeUDNConfiguration struct {
 	patchPort   string
 	ofPortPatch string
 	masqCTMark  string
-	v4MasqIP    *net.IPNet
-	v6MasqIP    *net.IPNet
+	v4MasqIPs   *udn.MasqueradeIPs
+	v6MasqIPs   *udn.MasqueradeIPs
+}
+
+func (netConfig *bridgeUDNConfiguration) isDefaultNetwork() bool {
+	return netConfig.masqCTMark == ctMarkOVN
 }
 
 func (netConfig *bridgeUDNConfiguration) setBridgeNetworkOfPortsInternal() error {
@@ -163,28 +184,27 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
 	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.
 	var (
-		v4MasqIP *net.IPNet
-		v6MasqIP *net.IPNet
+		v4MasqIPs *udn.MasqueradeIPs
+		v6MasqIPs *udn.MasqueradeIPs
+		err       error
 	)
 	masqCTMark := ctMarkUDNBase + uint(networkID)
 	if config.IPv4Mode {
-		v4MasqIPs, err := udn.AllocateV4MasqueradeIPs(networkID)
+		v4MasqIPs, err = udn.AllocateV4MasqueradeIPs(networkID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get v4 masquerade IP, network %s (%d): %v", netInfo.GetNetworkName(), networkID, err)
 		}
-		v4MasqIP = v4MasqIPs.GatewayRouter
 	}
 	if config.IPv6Mode {
-		v6MasqIPs, err := udn.AllocateV6MasqueradeIPs(networkID)
+		v6MasqIPs, err = udn.AllocateV6MasqueradeIPs(networkID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get v6 masquerade IP, network %s (%d): %v", netInfo.GetNetworkName(), networkID, err)
 		}
-		v6MasqIP = v6MasqIPs.GatewayRouter
 	}
 
 	gw, ok := defaultNetworkGateway.(*gateway)
 	if !ok {
-		return nil, fmt.Errorf("unable to deference default node network controller gateway object")
+		return nil, fmt.Errorf("unable to dereference default node network controller gateway object")
 	}
 
 	return &UserDefinedNetworkGateway{
@@ -195,8 +215,8 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.
 		kubeInterface: kubeInterface,
 		vrfManager:    vrfManager,
 		masqCTMark:    masqCTMark,
-		v4MasqIP:      v4MasqIP,
-		v6MasqIP:      v6MasqIP,
+		v4MasqIPs:     v4MasqIPs,
+		v6MasqIPs:     v6MasqIPs,
 		gateway:       gw,
 		ruleManager:   ruleManager,
 	}, nil
@@ -236,8 +256,13 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return fmt.Errorf("unable to create iprule %v for network %s, err: %v", rule, udng.GetNetworkName(), err)
 		}
 	}
+	// add loose mode for rp filter on management port
+	mgmtPortName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
+	if err := addRPFilterLooseModeForManagementPort(mgmtPortName); err != nil {
+		return fmt.Errorf("could not set loose mode for reverse path filtering on management port %s: %v", mgmtPortName, err)
+	}
 	if udng.openflowManager != nil {
-		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIP, udng.v6MasqIP)
+		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.v4MasqIPs, udng.v6MasqIPs)
 
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {
@@ -300,6 +325,7 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 // STEP2: It saves the MAC address generated on the 1st go as an option on the OVS interface
 // so that it persists on reboots
 // STEP3: sets up the management port link on the host
+// STEP4: enables IPv4 forwarding on the interface if the network has a v4 subnet
 // Returns a netlink Link which is the UDN management port interface along with its MAC address
 func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net.HardwareAddr, error) {
 	var err error
@@ -337,6 +363,16 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, net
 			interfaceName, udng.GetNetworkName(), err)
 	}
 	klog.V(3).Infof("Setup management port link %s for network %s succeeded", interfaceName, udng.GetNetworkName())
+
+	// STEP4
+	// IPv6 forwarding is enabled globally
+	if ipv4, _ := udng.IPMode(); ipv4 {
+		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", interfaceName))
+		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", interfaceName) {
+			return nil, nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				interfaceName, stdout, stderr, err)
+		}
+	}
 	return mplink, macAddress, nil
 }
 
@@ -539,4 +575,19 @@ func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlin
 	}
 	r.Dst = util.GetIPNetFullMaskFromIP(masqIP)
 	return r
+}
+
+func addRPFilterLooseModeForManagementPort(mgmtPortName string) error {
+	// update the reverse path filtering options for ovn-k8s-mpX interface to avoid dropping packets with masqueradeIP
+	// coming out of managementport interface
+	// NOTE: v6 doesn't have rp_filter strict mode block
+	rpFilterLooseMode := "2"
+	// TODO: Convert testing framework to mock golang module utilities. Example:
+	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), rpFilterLooseMode)
+	stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", mgmtPortName, rpFilterLooseMode))
+	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", mgmtPortName, rpFilterLooseMode) {
+		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
+			mgmtPortName, stdout, stderr, err)
+	}
+	return nil
 }

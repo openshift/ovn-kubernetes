@@ -141,7 +141,7 @@ func NewZoneInterconnectHandler(nInfo util.NetInfo, nbClient, sbClient libovsdbc
 		nbClient:     nbClient,
 		sbClient:     sbClient,
 		watchFactory: watchFactory,
-		networkId:    util.InvalidNetworkID,
+		networkId:    util.InvalidID,
 	}
 
 	zic.networkClusterRouterName = zic.GetNetworkScopedName(types.OVNClusterRouter)
@@ -444,7 +444,11 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int, chassisId string) error {
 	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
 	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
-		return fmt.Errorf("failed to get the node transit switch port Ips : %w", err)
+		err = fmt.Errorf("failed to get the node transit switch port IP addresses : %w", err)
+		if util.IsAnnotationNotSetError(err) {
+			return types.NewSuppressedError(err)
+		}
+		return err
 	}
 
 	transitRouterPortMac := util.IPAddrToHWAddr(nodeTransitSwitchPortIPs[0].IP)
@@ -590,7 +594,12 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 
 	nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, zic.GetNetworkName())
 	if err != nil {
-		return fmt.Errorf("failed to parse node %s subnets annotation %w", node.Name, err)
+		err = fmt.Errorf("failed to parse node %s subnets annotation %w", node.Name, err)
+		if util.IsAnnotationNotSetError(err) {
+			// remote node may not have the annotation yet, suppress it
+			return types.NewSuppressedError(err)
+		}
+		return err
 	}
 
 	nodeSubnetStaticRoutes := zic.getStaticRoutes(nodeSubnets, nodeTransitSwitchPortIPs, false)
@@ -601,9 +610,11 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 		}
 	}
 
-	if zic.IsSecondary() {
+	if zic.IsSecondary() && !(util.IsNetworkSegmentationSupportEnabled() && zic.IsPrimaryNetwork()) {
 		// Secondary network cluster router doesn't connect to a join switch
 		// or to a Gateway router.
+		//
+		// Except for UDN primary L3 networks.
 		return nil
 	}
 
@@ -615,7 +626,11 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 			var err1 error
 			nodeGRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
 			if err1 != nil {
-				return fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
+				err1 = fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
+				if util.IsAnnotationNotSetError(err1) {
+					return types.NewSuppressedError(err1)
+				}
+				return err1
 			}
 		}
 	}
@@ -733,14 +748,14 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 func (zic *ZoneInterconnectHandler) getNetworkId() (int, error) {
 	nodes, err := zic.watchFactory.GetNodes()
 	if err != nil {
-		return util.InvalidNetworkID, err
+		return util.InvalidID, err
 	}
 	return zic.getNetworkIdFromNodes(nodes)
 }
 
 // getNetworkId returns the cached network ID or looks it up in any of the provided nodes
 func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []*corev1.Node) (int, error) {
-	if zic.networkId != util.InvalidNetworkID {
+	if zic.networkId != util.InvalidID {
 		return zic.networkId, nil
 	}
 
@@ -754,11 +769,11 @@ func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []*corev1.Node) 
 		if err != nil {
 			break
 		}
-		if networkId != util.InvalidNetworkID {
+		if networkId != util.InvalidID {
 			zic.networkId = networkId
 			return zic.networkId, nil
 		}
 	}
 
-	return util.InvalidNetworkID, fmt.Errorf("could not find network ID: %w", err)
+	return util.InvalidID, fmt.Errorf("could not find network ID: %w", err)
 }

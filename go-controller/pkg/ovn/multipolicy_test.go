@@ -9,8 +9,8 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/urfave/cli/v2"
@@ -120,7 +120,7 @@ func (p testPod) populateSecondaryNetworkLogicalSwitchCache(fakeOvn *FakeOVN, oc
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
-func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []testPod) []libovsdb.TestData {
+func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []testPod, netInfo util.NetInfo) []libovsdb.TestData {
 	data := []libovsdb.TestData{}
 	for _, ocInfo := range fakeOvn.secondaryControllers {
 		nodeslsps := make(map[string][]string)
@@ -172,10 +172,13 @@ func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []
 				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
 			}
 			data = append(data, &nbdb.LogicalSwitch{
-				UUID:        switchName + "-UUID",
-				Name:        switchName,
-				Ports:       nodeslsps[switchName],
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: ocInfo.bnc.GetNetworkName()},
+				UUID:  switchName + "-UUID",
+				Name:  switchName,
+				Ports: nodeslsps[switchName],
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
+					ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+				},
 			})
 		}
 	}
@@ -264,15 +267,21 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		switch topology {
 		case ovntypes.Layer2Topology:
 			initialDB.NBData = append(initialDB.NBData, &nbdb.LogicalSwitch{
-				Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
-				UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch) + "_UUID",
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: secondaryNetworkName},
+				Name: netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch),
+				UUID: netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch) + "_UUID",
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     secondaryNetworkName,
+					ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+				},
 			})
 		case ovntypes.LocalnetTopology:
 			initialDB.NBData = append(initialDB.NBData, &nbdb.LogicalSwitch{
-				Name:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
-				UUID:        netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch) + "_UUID",
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: secondaryNetworkName},
+				Name: netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch),
+				UUID: netInfo.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch) + "_UUID",
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     secondaryNetworkName,
+					ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+				},
 			})
 		}
 	}
@@ -383,7 +392,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 	getUpdatedInitialDB := func(tPods []testPod) []libovsdb.TestData {
 		updatedSwitchAndPods := getDefaultNetExpectedPodsAndSwitches(tPods, []string{nodeName})
-		secondarySwitchAndPods := getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn, tPods)
+		secondarySwitchAndPods := getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn, tPods, netInfo)
 		if len(secondarySwitchAndPods) != 0 {
 			updatedSwitchAndPods = append(updatedSwitchAndPods, secondarySwitchAndPods...)
 		}
@@ -523,7 +532,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		table.DescribeTable("correctly adds and deletes pod IPs from secondary network namespace address set",
+		ginkgo.DescribeTable("correctly adds and deletes pod IPs from secondary network namespace address set",
 			func(topology string, remote bool) {
 				app.Action = func(ctx *cli.Context) error {
 					var err error
@@ -535,7 +544,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 						nodeSubnet = "10.1.1.0/24"
 					}
 
-					setSecondaryNetworkTestData(topology, subnets)
+					setSecondaryNetworkTestData(topology, subnets) // here I set network role if layer2
 
 					watchNodes := true
 					node := *newNode(nodeName, "192.168.126.202/24")
@@ -614,12 +623,12 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			table.Entry("on local zone for layer3 topology", ovntypes.Layer3Topology, false),
-			table.Entry("on remote zone for layer3 topology", ovntypes.Layer3Topology, true),
-			table.Entry("on local zone for layer2 topology", ovntypes.Layer2Topology, false),
-			table.Entry("on remote zone for layer2 topology", ovntypes.Layer2Topology, true),
-			table.Entry("on local zone for localnet topology", ovntypes.LocalnetTopology, false),
-			table.Entry("on remote zone for localnet topology", ovntypes.LocalnetTopology, true),
+			ginkgo.Entry("on local zone for layer3 topology", ovntypes.Layer3Topology, false),
+			ginkgo.Entry("on remote zone for layer3 topology", ovntypes.Layer3Topology, true),
+			ginkgo.Entry("on local zone for layer2 topology", ovntypes.Layer2Topology, false),
+			ginkgo.Entry("on remote zone for layer2 topology", ovntypes.Layer2Topology, true),
+			ginkgo.Entry("on local zone for localnet topology", ovntypes.LocalnetTopology, false),
+			ginkgo.Entry("on remote zone for localnet topology", ovntypes.LocalnetTopology, true),
 		)
 	})
 })

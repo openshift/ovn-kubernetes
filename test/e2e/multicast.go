@@ -158,7 +158,6 @@ var _ = ginkgo.Describe("Multicast", func() {
 var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	const (
 		svcname              string = "igmp-test"
-		ovnNs                string = "ovn-kubernetes"
 		ovnWorkerNode        string = "ovn-worker"
 		ovnWorkerNode2       string = "ovn-worker2"
 		mcastGroup           string = "224.1.1.1"
@@ -204,7 +203,6 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
 			if err != nil {
-				time.Sleep(5 * time.Hour)
 				framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
 			}
 			if !strings.Contains(kubectlOut, tcpdumpFileName) {

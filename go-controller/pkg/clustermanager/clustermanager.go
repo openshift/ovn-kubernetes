@@ -114,7 +114,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 		}
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf)
+		cm.endpointSliceMirrorController, err = endpointslicemirror.NewController(ovnClient, wf, cm.secondaryNetClusterManager.nadController)
 		if err != nil {
 			return nil, err
 		}
@@ -131,11 +131,17 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	if util.IsNetworkSegmentationSupportEnabled() {
 		udnController := udncontroller.New(
 			ovnClient.NetworkAttchDefClient, wf.NADInformer(),
-			ovnClient.UserDefinedNetworkClient, wf.UserDefinedNetworkInformer(),
+			ovnClient.UserDefinedNetworkClient,
+			wf.UserDefinedNetworkInformer(), wf.ClusterUserDefinedNetworkInformer(),
 			udntemplate.RenderNetAttachDefManifest,
 			wf.PodCoreInformer(),
+			wf.NamespaceInformer(),
+			cm.recorder,
 		)
 		cm.userDefinedNetworkController = udnController
+		if cm.secondaryNetClusterManager != nil {
+			cm.secondaryNetClusterManager.SetNetworkStatusReporter(udnController.UpdateSubsystemCondition)
+		}
 	}
 
 	return cm, nil
@@ -150,18 +156,19 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Start secondary CM first so that NAD controller initializes before other controllers
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		if err := cm.secondaryNetClusterManager.Start(); err != nil {
+			return err
+		}
+	}
+
 	if err := cm.defaultNetClusterController.Start(ctx); err != nil {
 		return err
 	}
 
 	if err := cm.zoneClusterController.Start(ctx); err != nil {
 		return fmt.Errorf("could not start zone controller, err: %w", err)
-	}
-
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		if err := cm.secondaryNetClusterManager.Start(); err != nil {
-			return err
-		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {

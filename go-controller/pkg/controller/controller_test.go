@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -57,7 +57,7 @@ var _ = Describe("Level-driven controller", func() {
 		config.Informer = coreFactory.Core().V1().Pods().Informer()
 		config.Lister = coreFactory.Core().V1().Pods().Lister().List
 		if config.RateLimiter == nil {
-			config.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+			config.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, 5)
 		}
 		controller = NewController[v1.Pod]("controller-name", config)
 
@@ -91,6 +91,11 @@ var _ = Describe("Level-driven controller", func() {
 		Stop(controller)
 	})
 
+	It("has idempotent Stop", func() {
+		startController(getDefaultConfig(), nil)
+		Stop(controller)
+		Stop(controller)
+	})
 	It("handles initial objects once", func() {
 		namespace := util.NewNamespace(namespace1Name)
 		pod1 := &v1.Pod{
@@ -132,7 +137,7 @@ var _ = Describe("Level-driven controller", func() {
 			failureCounter.Add(1)
 			return fmt.Errorf("failure")
 		}
-		config.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, maxRetries)
+		config.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, maxRetries)
 		startController(config, nil, namespace, pod)
 
 		Eventually(failureCounter.Load, (maxRetries+1)*100*time.Millisecond).Should(BeEquivalentTo(maxRetries))
@@ -245,14 +250,14 @@ var _ = Describe("Level-driven controllers with shared initialSync", func() {
 		podConfig.Informer = coreFactory.Core().V1().Pods().Informer()
 		podConfig.Lister = coreFactory.Core().V1().Pods().Lister().List
 		if podConfig.RateLimiter == nil {
-			podConfig.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+			podConfig.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, 5)
 		}
 		podController = NewController[v1.Pod]("podController", podConfig)
 
 		nsConfig.Informer = coreFactory.Core().V1().Namespaces().Informer()
 		nsConfig.Lister = coreFactory.Core().V1().Namespaces().Lister().List
 		if nsConfig.RateLimiter == nil {
-			nsConfig.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+			nsConfig.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, 5)
 		}
 		namespaceController = NewController[v1.Namespace]("namespaceController", nsConfig)
 
