@@ -189,44 +189,25 @@ func (c *controller) Stop() {
 }
 
 func (c *controller) subscribe(stop <-chan struct{}) {
-	// helper function to set a new timer or reset an existing timer
-	setTimer := func(t *time.Timer, d time.Duration) *time.Timer {
-		if t == nil {
-			return time.NewTimer(d)
-		}
-		t.Stop()
-		select {
-		case <-t.C:
-		default:
-		}
-		t.Reset(d)
-		return t
-	}
-
 	go func() {
 		onError := func(err error) {
 			c.log.Error(err, "Error on netlink route event subscription")
 		}
 		routeEventCh := subscribeNetlinkRouteEvents(c.netlink, stop, onError)
-		t := setTimer(nil, subscribePeriod)
-		defer t.Stop()
+		subscribeTicker := time.NewTicker(subscribePeriod)
+		defer subscribeTicker.Stop()
 		for {
 			select {
 			case <-stop:
 				return
-			case <-t.C:
+			case <-subscribeTicker.C:
 				if routeEventCh != nil {
 					continue
 				}
 				routeEventCh = subscribeNetlinkRouteEvents(c.netlink, stop, onError)
-				if routeEventCh == nil {
-					t = setTimer(t, subscribePeriod)
-				}
 			case r, open := <-routeEventCh:
 				if !open {
-					c.log.Info("Subscription to netlink route events closed")
-					routeEventCh = nil
-					t = setTimer(t, subscribePeriod)
+					routeEventCh = subscribeNetlinkRouteEvents(c.netlink, stop, onError)
 					continue
 				}
 				c.log.V(5).Info("Received route event", "event", r)
@@ -240,27 +221,21 @@ func (c *controller) subscribe(stop <-chan struct{}) {
 			c.log.Error(err, "Error on netlink link event subscription")
 		}
 		linkEventCh := subscribeNetlinkLinkEvents(c.netlink, stop, onError)
-		t := setTimer(nil, subscribePeriod)
-		defer t.Stop()
+		subscribeTicker := time.NewTicker(subscribePeriod)
+		defer subscribeTicker.Stop()
 		for {
 			select {
 			case <-stop:
 				return
-			case <-t.C:
+			case <-subscribeTicker.C:
 				if linkEventCh != nil {
 					continue
 				}
 				linkEventCh = subscribeNetlinkLinkEvents(c.netlink, stop, onError)
-				if linkEventCh == nil {
-					t = setTimer(t, subscribePeriod)
-					continue
-				}
-				c.tables = map[int]int{}
 			case l, open := <-linkEventCh:
 				if !open {
-					c.log.Info("Subscription to netlink link events closed")
-					linkEventCh = nil
-					t = setTimer(t, subscribePeriod)
+					c.tables = map[int]int{}
+					linkEventCh = subscribeNetlinkLinkEvents(c.netlink, stop, onError)
 					continue
 				}
 				c.log.V(5).Info("Received link event", "event", l)
