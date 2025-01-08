@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -359,7 +360,7 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(subnets []*net.IPNet
 	case config.GatewayModeLocal, config.GatewayModeShared:
 		klog.Info("Preparing Gateway")
 		gw, err = newGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.nadController, config.Gateway.Mode)
+			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager, nc.linkManager, nc.nadController, config.Gateway.Mode)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
@@ -570,8 +571,11 @@ func CleanupClusterNode(name string) error {
 		klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 	}
 
-	// Delete iptable rules for management port
-	DelMgtPortIptRules()
+	// Clean up legacy IPTables rules for management port
+	DelLegacyMgtPortIptRules()
+
+	// Delete nftables rules
+	nodenft.CleanupNFTables()
 
 	return nil
 }

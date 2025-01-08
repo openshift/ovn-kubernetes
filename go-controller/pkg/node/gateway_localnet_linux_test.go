@@ -8,19 +8,19 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/urfave/cli/v2"
+	"github.com/vishvananda/netlink"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/urfave/cli/v2"
-	"github.com/vishvananda/netlink"
 
-	"github.com/coreos/go-iptables/iptables"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -28,6 +28,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/knftables"
 )
 
 const (
@@ -261,6 +262,7 @@ var _ = Describe("Node Operations", func() {
 		fakeOvnNode        *FakeOVNNode
 		fExec              *ovntest.FakeExec
 		iptV4, iptV6       util.IPTablesHelper
+		nft                *knftables.Fake
 		fNPW               *nodePortWatcher
 		fakeMgmtPortConfig managementPortConfig
 		netlinkMock        *mocks.NetLinkOps
@@ -284,11 +286,11 @@ var _ = Describe("Node Operations", func() {
 		})
 
 		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
+		nft = nodenft.SetFakeNFTablesHelper()
 		_, nodeNet, err := net.ParseCIDR("10.1.1.0/24")
 		Expect(err).NotTo(HaveOccurred())
 		// Make a fake MgmtPortConfig with only the fields we care about
 		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
-			ipt:        nil,
 			allSubnets: nil,
 			ifAddr:     nodeNet,
 			gwIP:       nodeNet.IP,
@@ -297,9 +299,13 @@ var _ = Describe("Node Operations", func() {
 			ifName:    fakeNodeName,
 			link:      nil,
 			routerMAC: nil,
+			nft:       nft,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
 			ipv6:      nil,
 		}
+		err = setupManagementPortNFTables(&fakeMgmtPortConfig)
+		Expect(err).NotTo(HaveOccurred())
+
 		fNPW = initFakeNodePortWatcher(iptV4, iptV6)
 	})
 
@@ -309,7 +315,7 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	Context("on startup", func() {
-		It("removes stale iptables rules while keeping remaining intact", func() {
+		It("removes stale iptables/nftables rules while keeping remaining intact", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				externalIPPort := int32(8032)
@@ -348,17 +354,26 @@ var _ = Describe("Node Operations", func() {
 				Expect(insertIptRules(fakeRules)).To(Succeed())
 
 				// Inject rules into SNAT MGMT chain that shouldn't exist and should be cleared on a restore, even if the chain has no rules
-				fakeRule := getSkipMgmtSNATRule("TCP", "1337", "8.8.8.8", iptables.ProtocolIPv4)
-				Expect(insertIptRules([]nodeipt.Rule{fakeRule})).To(Succeed())
+				tx := nft.NewTransaction()
+				tx.Add(&knftables.Chain{
+					Name:    nftablesMgmtPortChain,
+					Comment: knftables.PtrTo("OVN SNAT to Management Port"),
+
+					Type:     knftables.PtrTo(knftables.NATType),
+					Hook:     knftables.PtrTo(knftables.PostroutingHook),
+					Priority: knftables.PtrTo(knftables.SNATPriority),
+				})
+				tx.Add(&knftables.Rule{
+					Chain: nftablesMgmtPortChain,
+					Rule:  "blah blah blah",
+				})
+				Expect(nft.Run(context.Background(), tx)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p UDP -d 10.10.10.10 --dport 27000 -j DNAT --to-destination 172.32.0.12:27000"),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
-						},
-						iptableMgmPortChain: []string{
-							fmt.Sprintf("-p TCP -d 8.8.8.8 --dport 1337 -j RETURN"),
 						},
 					},
 					"filter": {},
@@ -367,6 +382,10 @@ var _ = Describe("Node Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables, nil)
+				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName) + "\nadd rule inet ovn-kubernetes mgmtport-snat blah blah blah\n"
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
 				fakeOvnNode.start(ctx,
@@ -380,6 +399,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Expect(setupManagementPortNFTables(&fakeMgmtPortConfig)).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -400,10 +420,9 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -416,6 +435,10 @@ var _ = Describe("Node Operations", func() {
 
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
+				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
 				return nil
@@ -477,10 +500,9 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -494,6 +516,10 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -555,11 +581,10 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -573,6 +598,10 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -645,9 +674,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{
-							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
 						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
@@ -666,8 +692,15 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -744,10 +777,9 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -761,6 +793,10 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -838,9 +874,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{
-							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -871,6 +904,12 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
@@ -975,10 +1014,6 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
 						"OVN-KUBE-NODEPORT": []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{
-							fmt.Sprintf("-p TCP -d %s --dport %d -j RETURN", ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
-							fmt.Sprintf("-p TCP -d %s --dport %d -j RETURN", ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
-						},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -1009,6 +1044,13 @@ var _ = Describe("Node Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %d }\n", ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()))
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %d }\n", ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()))
+				err := nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
 				Expect(fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_80"]).To(Equal(expectedLBIngressFlows))
 				Expect(fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_80"]).To(Equal(expectedLBExternalIPFlows))
 				return nil
@@ -1087,7 +1129,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -1115,6 +1156,10 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
@@ -1199,9 +1244,6 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{
-							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -1244,6 +1286,12 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedNodePortFlows))
 				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
@@ -1316,11 +1364,10 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1347,6 +1394,10 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1412,11 +1463,10 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIPv4, service.Spec.Ports[0].Port, clusterIPv4, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-NODEPORT":      []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1444,6 +1494,10 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1504,12 +1558,11 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-NODEPORT":      []string{},
-						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1523,6 +1576,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
 					"filter": {},
@@ -1531,6 +1585,10 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1585,12 +1643,11 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-NODEPORT":      []string{},
-						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1614,6 +1671,10 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1676,11 +1737,10 @@ var _ = Describe("Node Operations", func() {
 								service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port,
 								service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-NODEPORT":      []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1694,6 +1754,9 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034}, {"10.129.0.2", 8034}})
 				err = fNPW.DeleteService(&service)
@@ -1716,10 +1779,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1733,6 +1795,10 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2005,11 +2071,10 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2023,6 +2088,9 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 38034}})
 				err = fNPW.DeleteService(&service)
@@ -2045,10 +2113,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2062,6 +2129,9 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				return nil
 			}
@@ -2135,9 +2205,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{
-							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
 						"OVN-KUBE-ETP": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
@@ -2155,7 +2222,12 @@ var _ = Describe("Node Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
@@ -2180,10 +2252,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2197,6 +2268,9 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2274,9 +2348,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{
-							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-ITP":        []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{},
@@ -2299,6 +2370,12 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
@@ -2323,10 +2400,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2340,6 +2416,9 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2422,11 +2501,10 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2446,6 +2524,10 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
@@ -2470,10 +2552,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2487,6 +2568,9 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2563,9 +2647,6 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{
-							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
-						},
 						"OVN-KUBE-ITP":        []string{},
 						"OVN-KUBE-ETP":        []string{},
 						"OVN-KUBE-EGRESS-SVC": []string{},
@@ -2590,6 +2671,12 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
@@ -2615,9 +2702,8 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2631,6 +2717,9 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2710,8 +2799,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-EXTERNALIP":    []string{},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
+						"OVN-KUBE-EXTERNALIP": []string{},
 						"OVN-KUBE-ITP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %d -j REDIRECT --to-port %d", service.Spec.Ports[0].Protocol, service.Spec.ClusterIP, service.Spec.Ports[0].Port, int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
@@ -2736,6 +2824,10 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
@@ -2760,10 +2852,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2777,6 +2868,9 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -2812,10 +2906,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {
 						"FORWARD": []string{
@@ -2872,10 +2965,9 @@ var _ = Describe("Node Operations", func() {
 						"POSTROUTING": []string{
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
-						"OVN-KUBE-SNAT-MGMTPORT": []string{},
-						"OVN-KUBE-ETP":           []string{},
-						"OVN-KUBE-ITP":           []string{},
-						"OVN-KUBE-EGRESS-SVC":    []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {
 						"FORWARD": []string{},

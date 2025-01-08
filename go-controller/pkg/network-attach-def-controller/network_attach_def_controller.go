@@ -10,8 +10,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	coreinformers "k8s.io/client-go/informers/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -51,12 +54,18 @@ type NetworkControllerManager interface {
 type watchFactory interface {
 	NADInformer() nadinformers.NetworkAttachmentDefinitionInformer
 	UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer
+	ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer
+	NamespaceInformer() coreinformers.NamespaceInformer
 }
 
 type NADController interface {
 	Start() error
 	Stop()
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
+	GetNetwork(networkName string) (util.NetInfo, error)
+	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
+	DoWithLock(f func(network util.NetInfo) error) error
+	GetActiveNetworkNamespaces(networkName string) ([]string, error)
 }
 
 // NetAttachDefinitionController handles namespaced scoped NAD events and
@@ -70,6 +79,8 @@ type NetAttachDefinitionController struct {
 	name               string
 	netAttachDefLister nadlisters.NetworkAttachmentDefinitionLister
 	udnLister          userdefinednetworklister.UserDefinedNetworkLister
+	cudnLister         userdefinednetworklister.ClusterUserDefinedNetworkLister
+	namespaceLister    corev1listers.NamespaceLister
 	controller         controller.Controller
 	recorder           record.EventRecorder
 	// networkManager is used to manage the network controllers
@@ -110,10 +121,14 @@ func NewNetAttachDefinitionController(
 		config.Lister = nadController.netAttachDefLister.List
 	}
 	if util.IsNetworkSegmentationSupportEnabled() {
-		udnInformer := wf.UserDefinedNetworkInformer()
-
-		if udnInformer != nil {
+		if udnInformer := wf.UserDefinedNetworkInformer(); udnInformer != nil {
 			nadController.udnLister = udnInformer.Lister()
+		}
+		if cudnInformer := wf.ClusterUserDefinedNetworkInformer(); cudnInformer != nil {
+			nadController.cudnLister = cudnInformer.Lister()
+		}
+		if nsInformer := wf.NamespaceInformer(); nsInformer != nil {
+			nadController.namespaceLister = nsInformer.Lister()
 		}
 	}
 
@@ -347,7 +362,7 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 		return n, nil
 	}
 
-	// no primary network found, make sure we just haven't processed it yet and no UDN exists
+	// no primary network found, make sure we just haven't processed it yet and no UDN / CUDN exists
 	udns, err := nadController.udnLister.UserDefinedNetworks(namespace).List(labels.Everything())
 	if err != nil {
 		return nil, fmt.Errorf("error getting user defined networks: %w", err)
@@ -357,6 +372,100 @@ func (nadController *NetAttachDefinitionController) GetActiveNetworkForNamespace
 			return nil, util.NewUnprocessedActiveNetworkError(namespace, udn.Name)
 		}
 	}
+	cudns, err := nadController.cudnLister.List(labels.Everything())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list CUDNs: %w", err)
+	}
+	for _, cudn := range cudns {
+		if !utiludn.IsPrimaryNetwork(&cudn.Spec.Network) {
+			continue
+		}
+		// check the subject namespace referred by the specified namespace-selector
+		cudnNamespaceSelector, err := metav1.LabelSelectorAsSelector(&cudn.Spec.NamespaceSelector)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert CUDN %q namespaceSelector: %w", cudn.Name, err)
+		}
+		selectedNamespaces, err := nadController.namespaceLister.List(cudnNamespaceSelector)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list namespaces using selector %q: %w", cudnNamespaceSelector, err)
+		}
+		for _, ns := range selectedNamespaces {
+			if ns.Name == namespace {
+				return nil, util.NewUnprocessedActiveNetworkError(namespace, cudn.Name)
+			}
+		}
+	}
 
 	return &util.DefaultNetInfo{}, nil
+}
+
+func (nadController *NetAttachDefinitionController) GetNetwork(networkName string) (util.NetInfo, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return &util.DefaultNetInfo{}, nil
+	}
+	nadController.RLock()
+	defer nadController.RUnlock()
+	if networkName == "" {
+		return nil, fmt.Errorf("network must not be empty")
+	}
+	if networkName == "default" {
+		return &util.DefaultNetInfo{}, nil
+	}
+	network := nadController.networkManager.getNetwork(networkName)
+	if network == nil {
+		return nil, fmt.Errorf("failed to find network %q", networkName)
+	}
+	return util.CopyNetInfo(network), nil
+}
+
+func (nadController *NetAttachDefinitionController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return []string{"default"}, nil
+	}
+	namespaces := make([]string, 0)
+	nadController.RLock()
+	defer nadController.RUnlock()
+	for namespaceName, primaryNAD := range nadController.primaryNADs {
+		nadNetworkName := nadController.nads[primaryNAD]
+		if nadNetworkName != networkName {
+			continue
+		}
+		namespaces = append(namespaces, namespaceName)
+	}
+	return namespaces, nil
+}
+
+// DoWithLock iterates over all role primary user defined networks and executes the given fn with each network as input.
+// An error will not block execution and instead all errors will be aggregated and returned when all networks are processed.
+func (nadController *NetAttachDefinitionController) DoWithLock(f func(network util.NetInfo) error) error {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		defaultNetwork := &util.DefaultNetInfo{}
+		return f(defaultNetwork)
+	}
+	nadController.RLock()
+	defer nadController.RUnlock()
+
+	var errs []error
+	for _, primaryNAD := range nadController.primaryNADs {
+		if primaryNAD == "" {
+			continue
+		}
+		netName := nadController.nads[primaryNAD]
+		if netName == "" {
+			// this should never happen where we have a nad keyed in the primaryNADs
+			// map, but it doesn't exist in the nads map
+			panic("NAD Controller broken consistency between primary NADs and cached NADs")
+		}
+		network := nadController.networkManager.getNetwork(netName)
+		n := util.CopyNetInfo(network)
+		// update the returned netInfo copy to only have the primary NAD for this namespace
+		n.SetNADs(primaryNAD)
+		if err := f(n); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }
