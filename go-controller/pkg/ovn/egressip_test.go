@@ -2106,8 +2106,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/egress-assignable": "",
 					}
 					node2 := nodes[1]
-					egressNamespace := newNamespace(eipNamespace)
-					egressNamespace2 := newNamespace(eipNamespace2)
+					egressNamespace := newUDNNamespace(eipNamespace)
+					egressNamespace2 := newUDNNamespace(eipNamespace2)
 					egressPod1Node1 := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 					egressPod2Node1 := *newPodWithLabels(eipNamespace2, podName, node1Name, podV4IP2, egressPodLabel)
 					egressPod3Node2 := *newPodWithLabels(eipNamespace, podName2, node2Name, podV4IP3, egressPodLabel)
@@ -7303,8 +7303,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					if !isNode1Local && isNode2Local {
 						return nil
 					}
-					recordedEvent := <-fakeOvn.fakeRecorder.Events
-					gomega.Expect(recordedEvent).To(gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"))
+					gomega.Eventually(fakeOvn.fakeRecorder.Events).Should(gomega.Receive(
+						gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"),
+					))
 
 					assignedEIP := egressIPs1[0]
 					var pas *podAssignmentState
@@ -7581,9 +7582,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						g.Expect(pas.egressStatuses.statusMap[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
 						g.Expect(pas.standbyEgressIPNames.Has(egressIP2Name)).To(gomega.BeTrue())
 					}).Should(gomega.Succeed())
-					gomega.Eventually(func() string {
-						return <-fakeOvn.fakeRecorder.Events
-					}).Should(gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"))
+					gomega.Eventually(fakeOvn.fakeRecorder.Events).Should(gomega.Receive(
+						gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"),
+					))
 
 					gomega.Eventually(getEgressIPStatusLen(egressIP2Name)).Should(gomega.Equal(1))
 					egressIPs2, nodes2 = getEgressIPStatus(egressIP2Name)

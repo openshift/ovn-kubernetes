@@ -89,6 +89,10 @@ rules:
           - network-attachment-definitions
           - multi-networkpolicies
       verbs: ["list", "get", "watch"]
+    - apiGroups: ["k8s.cni.cncf.io"]
+      resources:
+          - network-attachment-definitions
+      verbs: ["patch"]
     - apiGroups: ["policy.networking.k8s.io"]
       resources:
           - adminnetworkpolicies/status
