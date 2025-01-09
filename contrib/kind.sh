@@ -618,6 +618,10 @@ set_default_params() {
     echo "Route advertisements requires multi-network to be enabled (-mne)"
     exit 1
   fi
+  if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != true ]; then
+    echo "Route advertisements requires interconnect to be enabled (-ic)"
+    exit 1
+  fi
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
