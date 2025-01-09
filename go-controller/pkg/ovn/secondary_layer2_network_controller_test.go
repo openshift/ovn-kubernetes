@@ -93,6 +93,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, podInfo, pod)).To(Succeed())
+				defer fakeOvn.networkManager.Stop()
 
 				// for layer2 on interconnect, it is the cluster manager that
 				// allocates the OVN annotation; on unit tests, this just
@@ -199,6 +200,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, sourcePodInfo, sourcePod)).To(Succeed())
+				defer fakeOvn.networkManager.Stop()
 
 				// for layer2 on interconnect, it is the cluster manager that
 				// allocates the OVN annotation; on unit tests, this just
