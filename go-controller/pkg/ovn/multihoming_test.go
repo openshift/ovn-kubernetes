@@ -8,7 +8,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	iputils "github.com/containernetworking/plugins/pkg/ip"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -85,6 +86,7 @@ type secondaryNetworkExpectationMachine struct {
 	pods                  []testPod
 	gatewayConfig         *util.L3GatewayConfig
 	isInterconnectCluster bool
+	hasClusterPortGroup   bool
 }
 
 func newSecondaryNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opts ...option) *secondaryNetworkExpectationMachine {
@@ -111,25 +113,36 @@ func withInterconnectCluster() option {
 	}
 }
 
-func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() []libovsdbtest.TestData {
+func withClusterPortGroup() option {
+	return func(machine *secondaryNetworkExpectationMachine) {
+		machine.hasClusterPortGroup = true
+	}
+}
+
+func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(isPrimary bool) []libovsdbtest.TestData {
+	return em.expectedLogicalSwitchesAndPortsWithLspEnabled(isPrimary, nil)
+}
+
+func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWithLspEnabled(isPrimary bool, expectedPodLspEnabled map[string]*bool) []libovsdbtest.TestData {
 	data := []libovsdbtest.TestData{}
 	for _, ocInfo := range em.fakeOvn.secondaryControllers {
 		nodeslsps := make(map[string][]string)
 		acls := make(map[string][]string)
 		var switchName string
+		switchNodeMap := make(map[string]*nbdb.LogicalSwitch)
+		alreadyAddedManagementElements := make(map[string]struct{})
 		for _, pod := range em.pods {
 			podInfo, ok := pod.secondaryPodInfos[ocInfo.bnc.GetNetworkName()]
 			if !ok {
 				continue
 			}
-
-			subnets := ocInfo.bnc.Subnets()
+			subnets := podInfo.nodeSubnet
 			var (
-				subnet     config.CIDRNetworkEntry
+				subnet     *net.IPNet
 				hasSubnets bool
 			)
 			if len(subnets) > 0 {
-				subnet = subnets[0]
+				subnet = ovntest.MustParseIPNet(subnets)
 				hasSubnets = true
 			}
 
@@ -143,6 +156,9 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				}
 				podAddr := fmt.Sprintf("%s %s", portInfo.podMAC, portInfo.podIP)
 				lsp := newExpectedSwitchPort(lspUUID, portName, podAddr, pod, ocInfo.bnc, nad)
+				if expectedPodLspEnabled != nil {
+					lsp.Enabled = expectedPodLspEnabled[pod.podName]
+				}
 
 				if pod.noIfaceIdVer {
 					delete(lsp.Options, "iface-id-ver")
@@ -151,20 +167,22 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					lsp.Options["requested-tnl-key"] = "1" // hardcode this for now.
 				}
 				data = append(data, lsp)
+
 				switch ocInfo.bnc.TopologyType() {
 				case ovntypes.Layer3Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(pod.nodeName)
-					managementIP := managementPortIP(subnet.CIDR)
+					managementIP := managementPortIP(subnet)
 
 					switchToRouterPortName := "stor-" + switchName
 					switchToRouterPortUUID := switchToRouterPortName + "-UUID"
 					data = append(data, newExpectedSwitchToRouterPort(switchToRouterPortUUID, switchToRouterPortName, pod, ocInfo.bnc, nad))
 					nodeslsps[switchName] = append(nodeslsps[switchName], switchToRouterPortUUID)
 
-					if em.gatewayConfig != nil {
+					if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
+						em.gatewayConfig != nil {
 						mgmtPortName := managementPortName(switchName)
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := expectedManagementPort(mgmtPortName, managementIP.String())
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP)
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 						const aclUUID = "acl1-UUID"
@@ -176,26 +194,20 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					}
 				case ovntypes.Layer2Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
-					managementIP := managementPortIP(subnet.CIDR)
+					managementIP := managementPortIP(subnet)
 
-					if em.gatewayConfig != nil {
+					if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
+						em.gatewayConfig != nil {
 						// there are multiple mgmt ports in the cluster, thus the ports must be scoped with the node name
 						mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := expectedManagementPort(mgmtPortName, managementIP.String())
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP)
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 
-						// there are multiple GRs in the cluster, thus their names must be scoped with the node name
-						gwRouterName := fmt.Sprintf(
-							"%s%s",
-							ovntypes.GWRouterPrefix,
-							ocInfo.bnc.GetNetworkScopedName(nodeName),
-						)
-						networkSwitchToGWRouterLSPName := ovntypes.JoinSwitchToGWRouterPrefix + gwRouterName
+						networkSwitchToGWRouterLSPName := ovntypes.SwitchToRouterPrefix + switchName
 						networkSwitchToGWRouterLSPUUID := networkSwitchToGWRouterLSPName + "-UUID"
-
-						data = append(data, &nbdb.LogicalSwitchPort{
+						lsp := &nbdb.LogicalSwitchPort{
 							UUID:      networkSwitchToGWRouterLSPUUID,
 							Name:      networkSwitchToGWRouterLSPName,
 							Addresses: []string{"router"},
@@ -203,9 +215,13 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 								"k8s.ovn.org/topology": ocInfo.bnc.TopologyType(),
 								"k8s.ovn.org/network":  ocInfo.bnc.GetNetworkName(),
 							},
-							Options: map[string]string{"router-port": ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName},
+							Options: map[string]string{"router-port": ovntypes.RouterToSwitchPrefix + switchName},
 							Type:    "router",
-						})
+						}
+						data = append(data, lsp)
+						if util.IsNetworkSegmentationSupportEnabled() && ocInfo.bnc.IsPrimaryNetwork() {
+							lsp.Options["requested-tnl-key"] = "25"
+						}
 						nodeslsps[switchName] = append(nodeslsps[switchName], networkSwitchToGWRouterLSPUUID)
 
 						const aclUUID = "acl1-UUID"
@@ -222,8 +238,15 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 			var otherConfig map[string]string
 			if hasSubnets {
 				otherConfig = map[string]string{
-					"exclude_ips": managementPortIP(subnet.CIDR).String(),
-					"subnet":      subnet.CIDR.String(),
+					"subnet": subnet.String(),
+				}
+				if !ocInfo.bnc.IsPrimaryNetwork() {
+					// FIXME: This is weird that for secondary networks that don't have
+					// management ports these tests are expecting managementportIP to be
+					// excluded for no reason.
+					// FIXME2: Why are we setting exclude_ips on OVN switches when we don't
+					// even use OVN IPAMs.
+					otherConfig["exclude_ips"] = managementPortIP(subnet).String()
 				}
 			}
 
@@ -234,23 +257,29 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 				otherConfig = nil
 			}
 
-			data = append(data, &nbdb.LogicalSwitch{
-				UUID:        switchName + "-UUID",
-				Name:        switchName,
-				Ports:       nodeslsps[switchName],
-				ExternalIDs: map[string]string{ovntypes.NetworkExternalID: ocInfo.bnc.GetNetworkName()},
+			switchNodeMap[switchName] = &nbdb.LogicalSwitch{
+				UUID:  switchName + "-UUID",
+				Name:  switchName,
+				Ports: nodeslsps[switchName],
+				ExternalIDs: map[string]string{
+					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
+					ovntypes.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(isPrimary),
+				},
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
-			})
-			if em.gatewayConfig != nil {
+			}
+
+			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
+				em.gatewayConfig != nil {
 				if ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
-					data = append(data, expectedGWEntities(pod.nodeName, ocInfo.bnc, *em.gatewayConfig)...)
-					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig)...)
+					data = append(data, expectedGWEntities(pod.nodeName, subnets, ocInfo.bnc, *em.gatewayConfig)...)
+					data = append(data, expectedLayer3EgressEntities(ocInfo.bnc, *em.gatewayConfig, subnet)...)
 				} else {
 					data = append(data, expectedLayer2EgressEntities(ocInfo.bnc, *em.gatewayConfig, pod.nodeName)...)
 				}
 			}
-			if em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
+			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
+				em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
 				transitSwitchName := ocInfo.bnc.GetNetworkName() + "_transit_switch"
 				data = append(data, &nbdb.LogicalSwitch{
 					UUID: transitSwitchName + "-UUID",
@@ -264,9 +293,22 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() 
 					},
 				})
 			}
-		}
+			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
+				em.hasClusterPortGroup {
+				mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
+				mgmtPortUUID := mgmtPortName + "-UUID"
 
+				clusterPG := newNetworkClusterPortGroup(ocInfo.bnc)
+				clusterPG.Ports = []string{mgmtPortUUID}
+				data = append(data, clusterPG)
+			}
+			alreadyAddedManagementElements[pod.nodeName] = struct{}{}
+		}
+		for _, logicalSwitch := range switchNodeMap {
+			data = append(data, logicalSwitch)
+		}
 	}
+
 	return data
 }
 
@@ -295,7 +337,6 @@ func newExpectedSwitchToRouterPort(lspUUID string, portName string, pod testPod,
 	lrp.ExternalIDs = nil
 	lrp.Options = map[string]string{
 		"router-port": "rtos-isolatednet_test-node",
-		"arp_proxy":   "0a:58:a9:fe:01:01 169.254.1.1 fe80::1 10.128.0.0/14",
 	}
 	lrp.PortSecurity = nil
 	lrp.Type = "router"
@@ -314,20 +355,21 @@ func managementPortName(switchName string) string {
 	return fmt.Sprintf("k8s-%s", switchName)
 }
 
-func expectedManagementPort(portName string, ip string) *nbdb.LogicalSwitchPort {
+func expectedManagementPort(portName string, ip net.IP) *nbdb.LogicalSwitchPort {
 	return &nbdb.LogicalSwitchPort{
 		UUID:      portName + "-UUID",
-		Addresses: []string{fmt.Sprintf("02:03:04:05:06:07 %s", ip)},
+		Addresses: []string{fmt.Sprintf("%s %s", util.IPAddrToHWAddr(ip).String(), ip.String())},
 		Name:      portName,
 	}
 }
 
 func gwRouterExternalIDs(netInfo util.NetInfo, gwConfig util.L3GatewayConfig) map[string]string {
 	return map[string]string{
-		ovntypes.NetworkExternalID:  netInfo.GetNetworkName(),
-		ovntypes.TopologyExternalID: netInfo.TopologyType(),
-		"physical_ip":               hostPhysicalIP(gwConfig),
-		"physical_ips":              strings.Join(hostIPsFromGWConfig(gwConfig), ","),
+		ovntypes.NetworkExternalID:     netInfo.GetNetworkName(),
+		ovntypes.NetworkRoleExternalID: getNetworkRole(netInfo),
+		ovntypes.TopologyExternalID:    netInfo.TopologyType(),
+		"physical_ip":                  hostPhysicalIP(gwConfig),
+		"physical_ips":                 strings.Join(hostIPsFromGWConfig(gwConfig), ","),
 	}
 }
 
@@ -341,7 +383,7 @@ func hostPhysicalIP(gwConfig util.L3GatewayConfig) string {
 
 func hostIPsFromGWConfig(gwConfig util.L3GatewayConfig) []string {
 	var hostIPs []string
-	for _, ip := range append(gwConfig.IPAddresses, dummyJoinIP()) {
+	for _, ip := range append(gwConfig.IPAddresses, dummyMasqueradeIP()) {
 		hostIPs = append(hostIPs, ip.IP.String())
 	}
 	return hostIPs
@@ -381,19 +423,40 @@ func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
 	return featConfig
 }
 
-func icClusterTestConfiguration() testConfiguration {
-	return testConfiguration{
+type testConfigOpt = func(*testConfiguration)
+
+func icClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{
 		configToOverride:   enableICFeatureConfig(),
 		expectationOptions: []option{withInterconnectCluster()},
 	}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
 }
 
-func nonICClusterTestConfiguration() testConfiguration {
-	return testConfiguration{}
+func nonICClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
+	config := testConfiguration{}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
 }
 
-func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
-	pod := newPod(namespace, name, node, podIP)
+func newMultiHomedKubevirtPod(vmName string, liveMigrationInfo liveMigrationPodInfo, testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
+	pod := newMultiHomedPod(testPod, multiHomingConfigs...)
+	pod.Labels[kubevirtv1.VirtualMachineNameLabel] = vmName
+	pod.Status.Phase = liveMigrationInfo.podPhase
+	for key, val := range liveMigrationInfo.annotation {
+		pod.Annotations[key] = val
+	}
+	pod.CreationTimestamp = liveMigrationInfo.creationTimestamp
+	return pod
+}
+
+func newMultiHomedPod(testPod testPod, multiHomingConfigs ...secondaryNetInfo) *v1.Pod {
+	pod := newPod(testPod.namespace, testPod.podName, testPod.nodeName, testPod.podIP)
 	var secondaryNetworks []nadapi.NetworkSelectionElement
 	for _, multiHomingConf := range multiHomingConfigs {
 		if multiHomingConf.isPrimary {
@@ -415,7 +478,7 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 	serializedNetworkSelectionElements, _ := json.Marshal(secondaryNetworks)
 	pod.Annotations = map[string]string{nadapi.NetworkAttachmentAnnot: string(serializedNetworkSelectionElements)}
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(multiHomingConfigs)
+		dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(testPod.secondaryPodInfos, multiHomingConfigs)
 		if dummyOVNNetAnnotations != "{}" {
 			pod.Annotations["k8s.ovn.org/pod-networks"] = dummyOVNNetAnnotations
 		}
@@ -423,7 +486,7 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 	return pod
 }
 
-func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string {
+func dummyOVNPodNetworkAnnotations(secondaryPodInfos map[string]*secondaryPodInfo, multiHomingConfigs []secondaryNetInfo) string {
 	var ovnPodNetworksAnnotations []byte
 	podAnnotations := map[string]podAnnotation{}
 	for i, netConfig := range multiHomingConfigs {
@@ -431,7 +494,8 @@ func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string
 		// for layer2 topology since allocating the annotation for this cluster configuration
 		// is performed by cluster manager - which doesn't exist in the unit tests.
 		if netConfig.topology == ovntypes.Layer2Topology {
-			podAnnotations[netConfig.nadName] = dummyOVNPodNetworkAnnotationForNetwork(netConfig, i+1)
+			portInfo := secondaryPodInfos[netConfig.netName].allportInfo[netConfig.nadName]
+			podAnnotations[netConfig.nadName] = dummyOVNPodNetworkAnnotationForNetwork(portInfo, netConfig, i+1)
 		}
 	}
 
@@ -443,38 +507,30 @@ func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string
 	return string(ovnPodNetworksAnnotations)
 }
 
-func dummyOVNPodNetworkAnnotationForNetwork(netConfig secondaryNetInfo, tunnelID int) podAnnotation {
+func dummyOVNPodNetworkAnnotationForNetwork(portInfo portInfo, netConfig secondaryNetInfo, tunnelID int) podAnnotation {
 	role := ovntypes.NetworkRoleSecondary
 	if netConfig.isPrimary {
 		role = ovntypes.NetworkRolePrimary
 	}
-	var (
-		gateways []string
-		ips      []string
-	)
-	for _, subnetStr := range strings.Split(netConfig.subnets, ",") {
+	var gateways []string
+	for _, subnetStr := range strings.Split(netConfig.clustersubnets, ",") {
 		subnet := testing.MustParseIPNet(subnetStr)
-		ips = append(ips, GetWorkloadSecondaryNetworkDummyIP(subnet).String())
 		gateways = append(gateways, util.GetNodeGatewayIfAddr(subnet).IP.String())
 	}
+	ip := testing.MustParseIP(portInfo.podIP)
+	_, maskSize := util.GetIPFullMask(ip).Size()
+	ipNet := net.IPNet{
+		IP:   ip,
+		Mask: net.CIDRMask(portInfo.prefixLen, maskSize),
+	}
 	return podAnnotation{
-		IPs:      ips,
-		MAC:      util.IPAddrToHWAddr(testing.MustParseIPNet(ips[0]).IP).String(),
+		IPs:      []string{ipNet.String()},
+		MAC:      util.IPAddrToHWAddr(ip).String(),
 		Gateways: gateways,
 		Routes:   nil, // TODO: must add here the expected routes.
 		TunnelID: tunnelID,
 		Role:     role,
 	}
-}
-
-// GetWorkloadSecondaryNetworkDummyIP returns the workload logical switch port
-// address (the ".3" address), return nil if the subnet is invalid
-func GetWorkloadSecondaryNetworkDummyIP(subnet *net.IPNet) *net.IPNet {
-	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
-	if mgmtIfAddr == nil {
-		return nil
-	}
-	return &net.IPNet{IP: iputils.NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
 }
 
 // Internal struct used to marshal PodAnnotation to the pod annotationç

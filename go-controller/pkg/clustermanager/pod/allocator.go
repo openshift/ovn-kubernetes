@@ -14,11 +14,11 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -41,7 +41,7 @@ type PodAllocator struct {
 
 	ipamClaimsReconciler persistentips.PersistentAllocations
 
-	nadLister nadlister.NetworkAttachmentDefinitionLister
+	nadController nad.NADController
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -58,16 +58,18 @@ func NewPodAllocator(
 	podAnnotationAllocator *pod.PodAnnotationAllocator,
 	ipAllocator subnet.Allocator,
 	claimsReconciler persistentips.PersistentAllocations,
-	nadLister nadlister.NetworkAttachmentDefinitionLister,
+	nadController nad.NADController,
 	recorder record.EventRecorder,
+	idAllocator id.Allocator,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
 		releasedPods:           map[string]sets.Set[string]{},
 		releasedPodsMutex:      sync.Mutex{},
 		podAnnotationAllocator: podAnnotationAllocator,
-		nadLister:              nadLister,
+		nadController:          nadController,
 		recorder:               recorder,
+		idAllocator:            idAllocator,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
@@ -81,21 +83,8 @@ func NewPodAllocator(
 	return podAllocator
 }
 
-// Init initializes the allocator with as configured for the network
+// Init checks if persistentIPs controller elements are correctly configured for the network
 func (a *PodAllocator) Init() error {
-	var err error
-	if util.DoesNetworkRequireTunnelIDs(a.netInfo) {
-		a.idAllocator, err = id.NewIDAllocator(a.netInfo.GetNetworkName(), types.MaxLogicalPortTunnelKey)
-		if err != nil {
-			return err
-		}
-		// Reserve the id 0. We don't want to assign this id to any of the pods.
-		err = a.idAllocator.ReserveID("zero", 0)
-		if err != nil {
-			return err
-		}
-	}
-
 	if a.netInfo.AllowsPersistentIPs() && a.ipamClaimsReconciler == nil {
 		return fmt.Errorf(
 			"network %q allows persistent IPs but missing the claims reconciler",
@@ -107,11 +96,11 @@ func (a *PodAllocator) Init() error {
 }
 
 // getActiveNetworkForNamespace returns the active network for the given pod's namespace
-// and is a wrapper around util.GetActiveNetworkForNamespace
+// and is a wrapper around GetActiveNetworkForNamespace
 func (a *PodAllocator) getActiveNetworkForPod(pod *corev1.Pod) (util.NetInfo, error) {
-	activeNetwork, err := util.GetActiveNetworkForNamespace(pod.Namespace, a.nadLister)
+	activeNetwork, err := a.nadController.GetActiveNetworkForNamespace(pod.Namespace)
 	if err != nil {
-		if util.IsUnknownActiveNetworkError(err) {
+		if util.IsUnprocessedActiveNetworkError(err) {
 			a.recordPodErrorEvent(pod, err)
 		}
 		return nil, err

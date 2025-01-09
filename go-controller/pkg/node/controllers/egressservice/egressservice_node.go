@@ -55,7 +55,7 @@ type Controller struct {
 
 	egressServiceLister egressservicelisters.EgressServiceLister
 	egressServiceSynced cache.InformerSynced
-	egressServiceQueue  workqueue.RateLimitingInterface
+	egressServiceQueue  workqueue.TypedRateLimitingInterface[string]
 
 	serviceLister  corelisters.ServiceLister
 	servicesSynced cache.InformerSynced
@@ -94,9 +94,9 @@ func NewController(stopCh <-chan struct{}, returnMark, thisNode string,
 
 	c.egressServiceLister = esInformer.Lister()
 	c.egressServiceSynced = esInformer.Informer().HasSynced
-	c.egressServiceQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressservices",
+	c.egressServiceQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressservices"},
 	)
 	_, err := esInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEgressServiceAdd,
@@ -613,6 +613,11 @@ func (c *Controller) repairIPTables(v4EpsToServices, v6EpsToServices map[string]
 		errorList := []error{}
 		for _, rule := range rulesToDel {
 			args := strings.Fields(rule)
+			if len(args) < 2 {
+				continue
+			}
+			// strip "-A OVN-KUBE-EGRESS-SVC"
+			args = args[2:]
 			err := ipt.Delete("nat", Chain, args...)
 			if err != nil {
 				errorList = append(errorList, err)
@@ -677,7 +682,7 @@ func (c *Controller) processNextEgressServiceWorkItem(wg *sync.WaitGroup) bool {
 
 	defer c.egressServiceQueue.Done(key)
 
-	err := c.syncEgressService(key.(string))
+	err := c.syncEgressService(key)
 	if err == nil {
 		c.egressServiceQueue.Forget(key)
 		return true

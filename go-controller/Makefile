@@ -22,7 +22,9 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-OVN_SCHEMA_VERSION ?= v24.03.1
+# FIXME(tssurya): In one week when OVN 24.09 is released change the schema version
+OVN_SCHEMA_VERSION ?= 8efac26f6637fc
+OVS_VERSION ?= v2.17.0
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
 else
@@ -50,7 +52,7 @@ export NOROOT
 #       (disables symbol table and DWARF generation when building ovnk binaries)
 
 all build:
-	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity
+	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity cmd/ovnkube-observ
 
 windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
@@ -64,7 +66,7 @@ else
 	RACE=1 hack/test-go.sh
 endif
 
-modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema pkg/vswitchd/vswitch.ovsschema
 	hack/update-modelgen.sh
 
 codegen:
@@ -85,6 +87,7 @@ clean:
 	rm -rf ${TEST_REPORT_DIR}
 	rm -f ./pkg/nbdb/ovn-nb.ovsschema
 	rm -f ./pkg/sbdb/ovn-sb.ovsschema
+	rm -f ./pkg/vswitchd/vswitch.ovsschema
 
 .PHONY: lint gofmt
 
@@ -107,6 +110,9 @@ pkg/nbdb/ovn-nb.ovsschema:
 
 pkg/sbdb/ovn-sb.ovsschema:
 	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-sb.ovsschema -o $@
+
+pkg/vswitchd/vswitch.ovsschema:
+	curl -sSL https://raw.githubusercontent.com/openvswitch/ovs/${OVS_VERSION}/vswitchd/vswitch.ovsschema -o $@
 
 ${TOOLS_OUTPUT_DIR}:
 	mkdir -p ${TOOLS_OUTPUT_DIR}

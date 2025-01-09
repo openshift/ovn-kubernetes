@@ -3,7 +3,7 @@ package topology
 import (
 	"net"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -11,6 +11,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -33,6 +34,9 @@ var _ = Describe("Topology factory", func() {
 
 	When("the original OVN DBs are empty", func() {
 		BeforeEach(func() {
+			// required so that NewNetInfo can properly determine the IP families the cluster supports
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			initialNBDB := []libovsdbtest.TestData{}
 			initialSBDB := []libovsdbtest.TestData{}
 			dbSetup := libovsdbtest.TestSetup{
@@ -160,8 +164,8 @@ var _ = Describe("Topology factory", func() {
 					"0a:58:c0:a8:c8:0a",
 					nil,
 					map[string]string{
-						"k8s.ovn.org/network":  "angrytenant",
-						"k8s.ovn.org/topology": "layer3",
+						ovntypes.NetworkExternalID:  "angrytenant",
+						ovntypes.TopologyExternalID: "layer3",
 					},
 					ips(gwRoutersIPs...)...,
 				),

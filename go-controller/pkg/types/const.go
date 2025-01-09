@@ -108,18 +108,27 @@ const (
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
 	InterNodePolicyPriority               = "1003"
+	UDNHostCIDRPolicyPriority             = "99"
 	HybridOverlaySubnetPriority           = 1002
 	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 102
 	EgressSVCReroutePriority              = 101
 	EgressIPReroutePriority               = 100
 	EgressIPRerouteQoSRulePriority        = 103
-	EgressLiveMigrationReroutePiority     = 10
+	// priority of logical router policies on a nodes gateway router
+	EgressIPSNATMarkPriority           = 95
+	EgressLiveMigrationReroutePriority = 10
 
 	// EndpointSliceMirrorControllerName mirror EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
 	EndpointSliceMirrorControllerName = "endpointslice-mirror-controller.k8s.ovn.org"
 	// EndpointSliceDefaultControllerName default kubernetes EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
 	EndpointSliceDefaultControllerName = "endpointslice-controller.k8s.io"
+	// LabelSourceEndpointSlice label key used in mirrored EndpointSlice
+	// that has the value of the default EndpointSlice name
+	LabelSourceEndpointSlice = "k8s.ovn.org/source-endpointslice"
+	// LabelSourceEndpointSliceVersion label key used in mirrored EndpointSlice
+	// that has the value of the last known default EndpointSlice ResourceVersion
+	LabelSourceEndpointSliceVersion = "k8s.ovn.org/source-endpointslice-version"
 	// LabelUserDefinedEndpointSliceNetwork label key used in mirrored EndpointSlices that contains the current primary user defined network name
 	LabelUserDefinedEndpointSliceNetwork = "k8s.ovn.org/endpointslice-network"
 	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
@@ -146,6 +155,11 @@ const (
 
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"
+
+	// DefaultNetworkLabelSelector is the label that needs to be matched on a
+	// selector to select the default network
+	DefaultNetworkLabelSelector = OvnK8sPrefix + "/default-network"
+
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
 	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
@@ -179,7 +193,12 @@ const (
 
 	// key for network name external-id
 	NetworkExternalID = OvnK8sPrefix + "/" + "network"
+	// key for node name external-id
+	NodeExternalID = OvnK8sPrefix + "/" + "node"
+	// key for network role external-id: possible values are "default", "primary", "secondary"
+	NetworkRoleExternalID = OvnK8sPrefix + "/" + "role"
 	// key for NAD name external-id, only used for secondary logical switch port of a pod
+	// key for network name external-id
 	NADExternalID = OvnK8sPrefix + "/" + "nad"
 	// key for topology type external-id, only used for secondary network logical entities
 	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
@@ -187,6 +206,8 @@ const (
 	LoadBalancerKindExternalID = OvnK8sPrefix + "/" + "kind"
 	// key for load_balancer service external-id
 	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
+	// key for UDN enabled services routes
+	UDNEnabledServiceExternalID = OvnK8sPrefix + "/" + "udn-enabled-default-service"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology   = "layer3"
@@ -197,6 +218,7 @@ const (
 	// defined in CNI netconf as a user defined network
 	NetworkRolePrimary   = "primary"
 	NetworkRoleSecondary = "secondary"
+	NetworkRoleDefault   = "default"
 	// defined internally by ovnkube to recognize "default"
 	// network's role as a "infrastructure-locked" network
 	// when user defined network is the primary network for

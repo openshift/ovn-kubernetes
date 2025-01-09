@@ -8,7 +8,7 @@ case $(uname -m) in
 esac
 
 # from https://github.com/kubernetes-sigs/kind/releases
-KIND_URL=https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-${ARCH}
+KIND_URL=https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-${ARCH}
 KIND_SHA_URL=$KIND_URL.sha256sum
 KIND_SHA="$( curl -L -s ${KIND_SHA_URL}| awk '{ print $1 }')"
 KIND_DOWNLOAD_RETRIES=5
@@ -45,7 +45,7 @@ install_kind() {
 }
 
 pushd $TMP_DIR
-K8S_VERSION="v1.30.2"
+K8S_VERSION="v1.31.0"
 
 # Install kubectl for K8S_VERSION in use
 # (to get latest stable version: $(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt )

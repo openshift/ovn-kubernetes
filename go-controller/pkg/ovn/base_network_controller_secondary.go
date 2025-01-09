@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
@@ -13,8 +14,11 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -23,9 +27,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
+	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 )
 
@@ -90,7 +96,7 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 		return nil
 
 	default:
-		return fmt.Errorf("object type %s not supported", objType)
+		return bsnc.AddResourceCommon(objType, obj)
 	}
 	return nil
 }
@@ -212,7 +218,7 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 
 	default:
-		return fmt.Errorf("object type %s not supported", objType)
+		return bsnc.DeleteResourceCommon(objType, obj)
 	}
 	return nil
 }
@@ -226,12 +232,28 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		return nil
 	}
 
-	if util.PodWantsHostNetwork(pod) && !addPort {
+	if util.PodWantsHostNetwork(pod) {
+		return nil
+	}
+
+	var kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus
+	var err error
+
+	if kubevirt.IsPodAllowedForMigration(pod, bsnc.NetInfo) {
+		kubevirtLiveMigrationStatus, err = kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory, pod)
+		if err != nil {
+			return fmt.Errorf("failed to discover Live-migration status: %w", err)
+		}
+	}
+	updatePort := kubevirtLiveMigrationStatus != nil && pod.Name == kubevirtLiveMigrationStatus.TargetPod.Name
+
+	if !addPort && !updatePort {
 		return nil
 	}
 
 	// If a node does not have an assigned hostsubnet don't wait for the logical switch to appear
-	switchName, err := bsnc.getExpectedSwitchName(pod)
+	var switchName string
+	switchName, err = bsnc.getExpectedSwitchName(pod)
 	if err != nil {
 		return err
 	}
@@ -265,7 +287,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 
 	var errs []error
 	for nadName, network := range networkMap {
-		if err = bsnc.addLogicalPortToNetworkForNAD(pod, nadName, switchName, network); err != nil {
+		if err = bsnc.addLogicalPortToNetworkForNAD(pod, nadName, switchName, network, kubevirtLiveMigrationStatus); err != nil {
 			errs = append(errs, fmt.Errorf("failed to add logical port of Pod %s/%s for NAD %s: %w", pod.Namespace, pod.Name, nadName, err))
 		}
 	}
@@ -276,7 +298,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 }
 
 func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *kapi.Pod, nadName, switchName string,
-	network *nadapi.NetworkSelectionElement) error {
+	network *nadapi.NetworkSelectionElement, kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
 	var libovsdbExecuteTime time.Duration
 
 	start := time.Now()
@@ -291,6 +313,15 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	var lsp *nbdb.LogicalSwitchPort
 	var newlyCreated bool
 
+	var lspEnabled *bool
+	// actions on the pods' LSP are only triggerred from the target pod
+	shouldHandleLiveMigration := kubevirtLiveMigrationStatus != nil && pod.Name == kubevirtLiveMigrationStatus.TargetPod.Name
+	if shouldHandleLiveMigration {
+		// LSP should be altered inside addLogicalPortToNetwork() before ops are generated because one cannot append
+		// multiple ops regarding the same object in the same transact, so passing enabled parameter.
+		lspEnabled = ptr.To(kubevirtLiveMigrationStatus.IsTargetDomainReady())
+	}
+
 	// we need to create a logical port for all local pods
 	// we also need to create a remote logical port for remote pods on layer2
 	// topologies with interconnect
@@ -298,7 +329,7 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	requiresLogicalPort := isLocalPod || bsnc.isLayer2Interconnect()
 
 	if requiresLogicalPort {
-		ops, lsp, podAnnotation, newlyCreated, err = bsnc.addLogicalPortToNetwork(pod, nadName, network)
+		ops, lsp, podAnnotation, newlyCreated, err = bsnc.addLogicalPortToNetwork(pod, nadName, network, lspEnabled)
 		if err != nil {
 			return err
 		}
@@ -322,6 +353,14 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		bsnc.logicalPortCache.remove(pod, nadName)
 	}
 
+	if shouldHandleLiveMigration &&
+		kubevirtLiveMigrationStatus.IsTargetDomainReady() {
+		ops, err = bsnc.disableLiveMigrationSourceLSPOps(kubevirtLiveMigrationStatus, nadName, ops)
+		if err != nil {
+			return fmt.Errorf("failed to create LSP ops for source pod during Live-migration status: %w", err)
+		}
+	}
+
 	if podAnnotation == nil {
 		podAnnotation, err = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 		if err != nil {
@@ -329,13 +368,30 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		}
 	}
 
-	if bsnc.doesNetworkRequireIPAM() && util.IsMultiNetworkPoliciesSupportEnabled() {
+	if bsnc.doesNetworkRequireIPAM() &&
+		(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
 		// Ensure the namespace/nsInfo exists
-		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs)
+		portUUID := ""
+		if lsp != nil {
+			portUUID = lsp.UUID
+		}
+		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs, portUUID)
 		if err != nil {
 			return err
 		}
 		ops = append(ops, addOps...)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() && config.Gateway.DisableSNATMultipleGWs {
+		// we need to add per-pod SNATs for UDN networks
+		snatOps, err := bsnc.addPerPodSNATOps(pod, podAnnotation.IPs)
+		if err != nil {
+			return fmt.Errorf("failed to construct SNAT for pod %s/%s which is part of network %s, err: %v",
+				pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+		}
+		if snatOps != nil {
+			ops = append(ops, snatOps...)
+		}
 	}
 
 	recordOps, txOkCallBack, _, err := bsnc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
@@ -354,6 +410,11 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 
 	if lsp != nil {
 		_ = bsnc.logicalPortCache.add(pod, switchName, nadName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+		if bsnc.requireDHCP(pod) {
+			if err := bsnc.ensureDHCP(pod, podAnnotation, lsp); err != nil {
+				return err
+			}
+		}
 	}
 
 	if isLocalPod {
@@ -366,6 +427,30 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	return nil
 }
 
+// addPerPodSNATOps returns the ops that will add the SNAT towards masqueradeIP for this given pod
+func (bsnc *BaseSecondaryNetworkController) addPerPodSNATOps(pod *kapi.Pod, podIPs []*net.IPNet) ([]ovsdb.Operation, error) {
+	if !bsnc.isPodScheduledinLocalZone(pod) {
+		// nothing to do if its a remote zone pod
+		return nil, nil
+	}
+	// we need to add per-pod SNATs for UDN networks
+	networkID, err := bsnc.getNetworkID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
+	}
+	masqIPs, err := udn.GetUDNGatewayMasqueradeIPs(networkID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
+	}
+
+	ops, err := addOrUpdatePodSNATOps(bsnc.nbClient, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podIPs, bsnc.NetInfo.GetNetworkScopedClusterSubnetSNATMatch(pod.Spec.NodeName), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct SNAT pods for pod %s/%s which is part of network %s, err: %v",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+	}
+	return ops, nil
+}
+
 // removePodForSecondaryNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *kapi.Pod, portInfoMap map[string]*lpInfo) error {
@@ -374,26 +459,11 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
-	klog.Infof("Deleting pod: %s for network %s", podDesc, bsnc.GetNetworkName())
 
 	// there is only a logical port for local pods or remote pods of layer2
 	// networks on interconnect, so only delete in these cases
 	isLocalPod := bsnc.isPodScheduledinLocalZone(pod)
 	hasLogicalPort := isLocalPod || bsnc.isLayer2Interconnect()
-
-	// otherwise just delete pod IPs from the namespace address set
-	if !hasLogicalPort {
-		if bsnc.doesNetworkRequireIPAM() && util.IsMultiNetworkPoliciesSupportEnabled() {
-			return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
-		}
-
-		// except for localnet networks, continue the delete flow in case a node just
-		// became remote where we might still need to cleanup. On L3 networks
-		// the node switch is removed so there is no need to do this.
-		if bsnc.TopologyType() != types.LocalnetTopology {
-			return nil
-		}
-	}
 
 	// for a specific NAD belongs to this network, Pod's logical port might already be created half-way
 	// without its lpInfo cache being created; need to deleted resources created for that NAD as well.
@@ -407,26 +477,51 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		portInfoMap = map[string]*lpInfo{}
 	}
 
-	activeNetwork, err := bsnc.getActiveNetworkForNamespace(pod.Namespace)
-	if err != nil {
-		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
-	}
-
+	var alreadyProcessed bool
 	for nadName := range podNetworks {
 		if !bsnc.HasNAD(nadName) {
 			continue
 		}
 
-		_, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.NetInfo, activeNetwork)
-		if err != nil {
-			bsnc.recordPodErrorEvent(pod, err)
-			return err
+		// pod has a network managed by this controller
+		klog.Infof("Deleting pod: %s for network %s, NAD: %s", podDesc, bsnc.GetNetworkName(), nadName)
+
+		// handle remote pod clean up but only do this one time
+		if !hasLogicalPort && !alreadyProcessed {
+			if bsnc.doesNetworkRequireIPAM() &&
+				// address set is for network policy only. So either multi network policy is enabled or network
+				// segmentation, and it is a primary UDN (regular netpol)
+				(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
+				return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
+			}
+
+			// except for localnet networks, continue the delete flow in case a node just
+			// became remote where we might still need to cleanup. On L3 networks
+			// the node switch is removed so there is no need to do this.
+			if bsnc.TopologyType() != types.LocalnetTopology {
+				return nil
+			}
+			alreadyProcessed = true
 		}
 
+		if kubevirt.IsPodAllowedForMigration(pod, bsnc.NetInfo) {
+			if err = bsnc.enableSourceLSPFailedLiveMigration(pod, nadName); err != nil {
+				return err
+			}
+		}
 		bsnc.logicalPortCache.remove(pod, nadName)
 		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadName], nadName)
 		if err != nil {
 			return err
+		}
+
+		// Cleanup the SNAT entries before checking whether this controller handled the IP allocation
+		if util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork() && config.Gateway.DisableSNATMultipleGWs {
+			// we need to delete per-pod SNATs for UDN networks
+			if err := bsnc.delPerPodSNAT(pod, nadName); err != nil {
+				return fmt.Errorf("failed to delete SNAT for pod %s/%s which is part of network %s, err: %v",
+					pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+			}
 		}
 
 		// do not release IP address if this controller does not handle IP allocation
@@ -440,32 +535,18 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
-		network := networkMap[nadName]
-
-		hasPersistentIPs := bsnc.allowPersistentIPs()
-		hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
-		if hasIPAMClaim && !hasPersistentIPs {
-			klog.Errorf(
-				"Pod %s/%s referencing an IPAMClaim on network %q which does not honor it",
-				pod.GetNamespace(),
-				pod.GetName(),
-				bsnc.NetInfo.GetNetworkName(),
-			)
-			hasIPAMClaim = false
-		}
-		if hasIPAMClaim {
-			ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
-			hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
-			if apierrors.IsNotFound(err) {
-				klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
-			} else if err != nil {
-				return fmt.Errorf("failed to get IPAMClaim %s/%s: %w", network.Namespace, network.IPAMClaimReference, err)
+		// if we allow for persistent IPs, then we need to check if this pod has an IPAM Claim
+		if bsnc.allowPersistentIPs() {
+			hasIPAMClaim, err := bsnc.hasIPAMClaim(pod, nadName)
+			if err != nil {
+				return fmt.Errorf("unable to determine if pod %s has IPAM Claim: %w", podDesc, err)
+			}
+			// if there is an IPAM claim, don't release the pod IPs
+			if hasIPAMClaim {
+				continue
 			}
 		}
 
-		if hasIPAMClaim {
-			continue
-		}
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
@@ -477,6 +558,91 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		}
 
 		bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadName)
+
+	}
+	return nil
+}
+
+// hasIPAMClaim determines whether a pod's IPAM is being handled by IPAMClaim CR.
+// pod passed should already be validated as having a network connection to nadName
+func (bsnc *BaseSecondaryNetworkController) hasIPAMClaim(pod *kapi.Pod, nadNamespacedName string) (bool, error) {
+	if !bsnc.AllowsPersistentIPs() {
+		return false, nil
+	}
+
+	var ipamClaimName string
+	var wasPersistentIPRequested bool
+	if bsnc.IsPrimaryNetwork() {
+		// primary network ipam reference claim is on the annotation
+		ipamClaimName, wasPersistentIPRequested = pod.Annotations[util.OvnUDNIPAMClaimName]
+	} else {
+		// secondary network the IPAM claim reference is on the network selection element
+		nadKeys := strings.Split(nadNamespacedName, "/")
+		if len(nadKeys) != 2 {
+			return false, fmt.Errorf("invalid NAD name %s", nadNamespacedName)
+		}
+		nadNamespace := nadKeys[0]
+		nadName := nadKeys[1]
+		allNetworks, err := util.GetK8sPodAllNetworkSelections(pod)
+		if err != nil {
+			return false, err
+		}
+		for _, network := range allNetworks {
+			if network.Namespace == nadNamespace && network.Name == nadName {
+				// found network selection element, check if it has IPAM
+				if len(network.IPAMClaimReference) > 0 {
+					ipamClaimName = network.IPAMClaimReference
+					wasPersistentIPRequested = true
+				}
+				break
+			}
+		}
+	}
+
+	if !wasPersistentIPRequested || len(ipamClaimName) == 0 {
+		return false, nil
+	}
+
+	ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(ipamClaimName, pod.Namespace)
+	if apierrors.IsNotFound(err) {
+		klog.Errorf("IPAMClaim %q for namespace: %q not found...will release IPs: %v",
+			ipamClaimName, pod.Namespace, err)
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("failed to get IPAMClaim %s/%s: %w", pod.Namespace, ipamClaimName, err)
+	}
+
+	hasIPAMClaim := ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+	return hasIPAMClaim, nil
+}
+
+// delPerPodSNAT will delete the SNAT towards masqueradeIP for this given pod
+func (bsnc *BaseSecondaryNetworkController) delPerPodSNAT(pod *kapi.Pod, nadName string) error {
+	if !bsnc.isPodScheduledinLocalZone(pod) {
+		// nothing to do if its a remote zone pod
+		return nil
+	}
+	// we need to add per-pod SNATs for UDN networks
+	networkID, err := bsnc.getNetworkID()
+	if err != nil {
+		return fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
+	}
+	masqIPs, err := udn.GetUDNGatewayMasqueradeIPs(networkID)
+	if err != nil {
+		return fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
+	}
+	podNetAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if err != nil {
+		return fmt.Errorf("failed to fetch annotations for pod %s/%s in network %s; err: %v", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+	}
+	ops, err := deletePodSNATOps(bsnc.nbClient, nil, bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), masqIPs, podNetAnnotation.IPs, bsnc.GetNetworkScopedClusterSubnetSNATMatch(pod.Spec.NodeName))
+	if err != nil {
+		return fmt.Errorf("failed to construct SNAT pods for pod %s/%s which is part of network %s, err: %v",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+	}
+	if _, err = libovsdbops.TransactAndCheck(bsnc.nbClient, ops); err != nil {
+		return fmt.Errorf("failed to delete SNAT rule for pod %s/%s in network %s on gateway router %s: %w",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), bsnc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), err)
 	}
 	return nil
 }
@@ -549,8 +715,7 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 }
 
 // addPodToNamespaceForSecondaryNetwork returns the ops needed to add pod's IP to the namespace's address set.
-func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork(ns string, ips []*net.IPNet) ([]ovsdb.Operation, error) {
-	var ops []ovsdb.Operation
+func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork(ns string, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
 	var err error
 	nsInfo, nsUnlock, err := bsnc.ensureNamespaceLockedForSecondaryNetwork(ns, true, nil)
 	if err != nil {
@@ -559,11 +724,7 @@ func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork
 
 	defer nsUnlock()
 
-	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
-		return nil, err
-	}
-
-	return ops, nil
+	return bsnc.addLocalPodToNamespaceLocked(nsInfo, ips, portUUID)
 }
 
 // AddNamespaceForSecondaryNetwork creates corresponding addressset in ovn db for secondary network
@@ -634,21 +795,32 @@ func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns 
 	return nil
 }
 
-// WatchMultiNetworkPolicy starts the watching of multinetworkpolicy resource and calls
+// WatchNetworkPolicy starts the watching of networkpolicy resource and calls
 // back the appropriate handler logic
-func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
-	if !util.IsMultiNetworkPoliciesSupportEnabled() {
-		return nil
-	}
-
-	if bsnc.policyHandler != nil {
+func (bsnc *BaseSecondaryNetworkController) WatchNetworkPolicy() error {
+	if bsnc.netPolicyHandler != nil {
 		return nil
 	}
 	handler, err := bsnc.retryNetworkPolicies.WatchResource()
 	if err != nil {
-		bsnc.policyHandler = handler
+		return err
 	}
-	return err
+	bsnc.netPolicyHandler = handler
+	return nil
+}
+
+// WatchMultiNetworkPolicy starts the watching of multinetworkpolicy resource and calls
+// back the appropriate handler logic
+func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
+	if bsnc.multiNetPolicyHandler != nil {
+		return nil
+	}
+	handler, err := bsnc.retryMultiNetworkPolicies.WatchResource()
+	if err != nil {
+		return err
+	}
+	bsnc.multiNetPolicyHandler = handler
+	return nil
 }
 
 // cleanupPolicyLogicalEntities cleans up all the port groups and address sets that belong to the given controller
@@ -687,22 +859,149 @@ func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
 
 func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 	return config.OVNKubernetesFeature.EnablePersistentIPs &&
-		oc.NetInfo.AllowsPersistentIPs() &&
 		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
-		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
+		util.AllowsPersistentIPs(oc.NetInfo)
 }
 
 func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
-	if oc.networkID == nil || *oc.networkID == util.InvalidNetworkID {
-		oc.networkID = ptr.To(util.InvalidNetworkID)
+	if oc.networkID == nil || *oc.networkID == util.InvalidID {
+		oc.networkID = ptr.To(util.InvalidID)
 		nodes, err := oc.watchFactory.GetNodes()
 		if err != nil {
-			return util.InvalidNetworkID, err
+			return util.InvalidID, err
 		}
 		*oc.networkID, err = util.GetNetworkID(nodes, oc.NetInfo)
 		if err != nil {
-			return util.InvalidNetworkID, err
+			return util.InvalidID, err
 		}
 	}
 	return *oc.networkID, nil
+}
+
+// buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
+// steer traffic correctly via mp0 when leaving OVN to the host
+func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string,
+	node *kapi.Node) ([]*nbdb.NAT, error) {
+	if len(localPodSubnets) == 0 {
+		return nil, nil // nothing to do
+	}
+	var snats []*nbdb.NAT
+	var masqIP *udn.MasqueradeIPs
+	var err error
+	networkID, err := bsnc.getNetworkID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
+	}
+	// legacy lookup for mac
+	dstMac, err := util.ParseNodeManagementPortMACAddresses(node, bsnc.GetNetworkName())
+	if err != nil && !util.IsAnnotationNotSetError(err) {
+		return nil, fmt.Errorf("failed to parse mac address annotation for network %q on node %q, err: %w",
+			bsnc.GetNetworkName(), node.Name, err)
+	}
+	if len(dstMac) == 0 && len(localPodSubnets) > 0 {
+		// calculate MAC
+		dstMac = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(localPodSubnets[0]).IP)
+	}
+
+	extIDs := map[string]string{
+		types.NetworkExternalID:  bsnc.GetNetworkName(),
+		types.TopologyExternalID: bsnc.TopologyType(),
+	}
+	for _, localPodSubnet := range localPodSubnets {
+		if utilnet.IsIPv6CIDR(localPodSubnet) {
+			masqIP, err = udn.AllocateV6MasqueradeIPs(networkID)
+		} else {
+			masqIP, err = udn.AllocateV4MasqueradeIPs(networkID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if masqIP == nil {
+			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
+		}
+		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
+			extIDs, getMasqueradeManagementIPSNATMatch(dstMac.String())))
+	}
+	return snats, nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
+	opts := []kubevirt.DHCPConfigsOpt{}
+
+	ipv4DNSServer, ipv6DNSServer, err := kubevirt.RetrieveDNSServiceClusterIPs(bsnc.watchFactory)
+	if err != nil {
+		return err
+	}
+
+	ipv4Gateway, _ := util.MatchFirstIPFamily(false /*ipv4*/, podAnnotation.Gateways)
+	if ipv4Gateway != nil {
+		opts = append(opts, kubevirt.WithIPv4Router(ipv4Gateway.String()))
+	}
+
+	if bsnc.MTU() > 0 {
+		opts = append(opts, kubevirt.WithIPv4MTU(bsnc.MTU()))
+	}
+
+	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
+
+	return kubevirt.EnsureDHCPOptionsForLSP(bsnc.controllerName, bsnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
+}
+
+func getMasqueradeManagementIPSNATMatch(dstMac string) string {
+	return fmt.Sprintf("eth.dst == %s", dstMac)
+}
+
+func (bsnc *BaseSecondaryNetworkController) requireDHCP(pod *corev1.Pod) bool {
+	// Configure DHCP only for kubevirt VMs layer2 primary udn with subnets
+	return kubevirt.IsPodOwnedByVirtualMachine(pod) &&
+		util.IsNetworkSegmentationSupportEnabled() &&
+		bsnc.IsPrimaryNetwork() &&
+		bsnc.TopologyType() == types.Layer2Topology
+}
+
+func (bsnc *BaseSecondaryNetworkController) setPodLogicalSwitchPortEnabledField(
+	pod *corev1.Pod, nadName string, ops []ovsdb.Operation, enabled bool) ([]ovsdb.Operation, *nbdb.LogicalSwitchPort, error) {
+	lsp := &nbdb.LogicalSwitchPort{Name: bsnc.GetLogicalPortName(pod, nadName)}
+	lsp.Enabled = ptr.To(enabled)
+	switchName, err := bsnc.getExpectedSwitchName(pod)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch switch name for pod %s: %w", pod.Name, err)
+	}
+	customFields := []libovsdbops.ModelUpdateField{libovsdbops.LogicalSwitchPortEnabled}
+	ops, err = libovsdbops.UpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps(bsnc.nbClient, ops, &nbdb.LogicalSwitch{Name: switchName}, customFields, lsp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed updating logical switch port %+v on switch %s: %w", *lsp, switchName, err)
+	}
+	return ops, lsp, nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) disableLiveMigrationSourceLSPOps(
+	kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
+	nadName string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+	// closing the sourcePod lsp to ensure traffic goes to the now ready targetPod.
+	ops, _, err := bsnc.setPodLogicalSwitchPortEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, ops, false)
+	return ops, err
+}
+
+func (bsnc *BaseSecondaryNetworkController) enableSourceLSPFailedLiveMigration(pod *corev1.Pod, nadName string) error {
+	kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory, pod)
+	if err != nil {
+		return fmt.Errorf("failed to discover Live-migration status after pod termination: %w", err)
+	}
+	if kubevirtLiveMigrationStatus == nil ||
+		pod.Name != kubevirtLiveMigrationStatus.TargetPod.Name ||
+		kubevirtLiveMigrationStatus.State != kubevirt.LiveMigrationFailed {
+		return nil
+	}
+	// make sure sourcePod lsp is enabled if migration failed after DomainReady was set.
+	ops, sourcePodLsp, err := bsnc.setPodLogicalSwitchPortEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, nil, true)
+	if err != nil {
+		return fmt.Errorf("failed to set source Pod lsp to enabled after migration failed: %w", err)
+	}
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(bsnc.nbClient, sourcePodLsp, ops)
+	if err != nil {
+		return fmt.Errorf("failed transacting operations %+v: %w", ops, err)
+	}
+
+	return nil
 }

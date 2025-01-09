@@ -45,8 +45,8 @@ RUN INSTALL_PKGS=" \
 	ethtool conntrack-tools \
 	openshift-clients \
 	" && \
-	dnf install -y --nodocs $INSTALL_PKGS && \
-	eval "dnf install -y --nodocs $(cat /more-pkgs)" && \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
+	eval "dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $(cat /more-pkgs)" && \
 	dnf clean all && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
@@ -57,6 +57,7 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovndbchecker /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/hybrid-overlay-node /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-observ /usr/bin/
 
 # Copy RHEL-8 and RHEL-9 shim binaries where the CNO's ovnkube-node container startup script can find them
 RUN mkdir -p /usr/libexec/cni/rhel9

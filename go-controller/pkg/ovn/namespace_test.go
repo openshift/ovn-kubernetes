@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 )
 
@@ -67,8 +67,12 @@ func newNamespace(namespace string) *v1.Namespace {
 	}
 }
 
-func getNsAddrSetHashNames(ns string) (string, string) {
-	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, DefaultNetworkControllerName))
+func getDefaultNetNsAddrSetHashNames(ns string) (string, string) {
+	return getNsAddrSetHashNames(DefaultNetworkControllerName, ns)
+}
+
+func getNsAddrSetHashNames(netControllerName, ns string) (string, string) {
+	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, netControllerName))
 }
 
 func buildNamespaceAddressSets(namespace string, ips []string) (*nbdb.AddressSet, *nbdb.AddressSet) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -17,6 +18,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
+
+// reconcile period for vrf manager, this would kick in for every 60 seconds if there is no
+// explicit link update events. In the event of link update, reconcile period is automatically
+// extended by another 60 seconds.
+var reconcilePeriod = 60 * time.Second
 
 type vrf struct {
 	name  string
@@ -82,13 +88,13 @@ func (vrfm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitG
 	go func() {
 		defer doneWg.Done()
 		err = currentNs.Do(func(netNS ns.NetNS) error {
-			linkSyncTimer := time.NewTicker(60 * time.Second)
+			linkSyncTimer := time.NewTicker(reconcilePeriod)
 			defer linkSyncTimer.Stop()
 
 			for {
 				select {
 				case linkUpdateEvent, ok := <-linkUpdateCh:
-					linkSyncTimer.Reset(60 * time.Second)
+					linkSyncTimer.Reset(reconcilePeriod)
 					if !ok {
 						if subscribed, linkUpdateCh, err = subscribe(); err != nil {
 							klog.Errorf("VRF Manager: Error during netlink re-subscribe due to channel closing: %v", err)
@@ -96,7 +102,7 @@ func (vrfm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitG
 						continue
 					}
 					ifName := linkUpdateEvent.Link.Attrs().Name
-					klog.V(3).Infof("VRF Manager: link update received for interface %s", ifName)
+					klog.V(5).Infof("VRF Manager: link update received for interface %s", ifName)
 					err = vrfm.syncVRF(linkUpdateEvent.Link)
 					if err != nil {
 						klog.Errorf("VRF Manager: Error syncing link %s update event, err: %v", ifName, err)
@@ -268,6 +274,26 @@ func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32,
 	return vrfm.sync(vrfDev)
 }
 
+// AddVRFRoutes adds routes to the specified VRF
+func (vrfm *Controller) AddVRFRoutes(name string, routes []netlink.Route) error {
+	vrfm.mu.Lock()
+	defer vrfm.mu.Unlock()
+
+	vrfLink, err := util.GetNetLinkOps().LinkByName(name)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
+	}
+
+	vrfDev, ok := vrfm.vrfs[vrfLink.Attrs().Index]
+	if !ok {
+		return fmt.Errorf("failed to find VRF %s", name)
+	}
+
+	vrfDev.routes = append(vrfDev.routes, routes...)
+
+	return vrfm.sync(vrfDev)
+}
+
 // Repair deletes stale VRF device(s) on the host. This helps remove
 // device(s) for which DeleteVRF is never invoked.
 // Assumptions: 1) The validVRFs list must contain device for which AddVRF
@@ -293,11 +319,12 @@ func (vrfm *Controller) repair(validVRFs sets.Set[string]) error {
 			!strings.HasPrefix(name, types.UDNVRFDevicePrefix) {
 			continue
 		}
-		if !validVRFs.Has(name) {
-			err = util.GetNetLinkOps().LinkDelete(link)
-			if err != nil {
-				klog.Errorf("VRF Manager: error deleting stale VRF device %s, err: %v", name, err)
-			}
+		if validVRFs.Has(name) {
+			continue
+		}
+		err = util.GetNetLinkOps().LinkDelete(link)
+		if err != nil {
+			klog.Errorf("VRF Manager: error deleting stale VRF device %s, err: %v", name, err)
 		}
 		delete(vrfm.vrfs, link.Attrs().Index)
 	}

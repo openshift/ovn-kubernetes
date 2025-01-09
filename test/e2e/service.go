@@ -31,6 +31,7 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 )
@@ -132,7 +133,7 @@ var _ = ginkgo.Describe("Services", func() {
 
 		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
 		// find the ovn-kube node pod on this node
-		pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+		pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
@@ -164,7 +165,7 @@ var _ = ginkgo.Describe("Services", func() {
 		replicas := 3
 		config := testutils.RCConfig{
 			Client:               cs,
-			Image:                framework.ServeHostnameImage,
+			Image:                imageutils.GetE2EImage(imageutils.Agnhost),
 			Command:              []string{"/agnhost", "serve-hostname"},
 			Name:                 "backend",
 			Labels:               jig.Labels,
@@ -487,7 +488,7 @@ var _ = ginkgo.Describe("Services", func() {
 							// flush this on all 3 nodes else we will run into the
 							// bug: https://issues.redhat.com/browse/OCPBUGS-7609.
 							// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
-							ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+							ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 								LabelSelector: "name=ovnkube-node",
 							})
 							if err != nil {
@@ -503,7 +504,7 @@ var _ = ginkgo.Describe("Services", func() {
 								arguments := []string{"exec", ovnKubeNodePod.Name, "--container", containerName, "--"}
 								sepFlush := strings.Split(flushCmd, " ")
 								arguments = append(arguments, sepFlush...)
-								_, err := e2ekubectl.RunKubectl(ovnNs, arguments...)
+								_, err := e2ekubectl.RunKubectl(ovnNamespace, arguments...)
 								framework.ExpectNoError(err, "Flushing the ip route cache failed")
 							}
 						}
@@ -565,7 +566,7 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 		node := nodes.Items[0]
 		nodeName := node.Name
-		pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+		pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
@@ -605,7 +606,7 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 		cleanupFn = func() {
 			// initial pod used for host command may be deleted at this point, refetch
-			pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+			pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 				LabelSelector: "app=ovnkube-node",
 				FieldSelector: "spec.nodeName=" + nodeName,
 			})
@@ -708,11 +709,8 @@ var _ = ginkgo.Describe("Services", func() {
 		var nodes *v1.NodeList
 		var err error
 		nodeIPs := make(map[string]map[int]string)
-		var egressPod *v1.Pod
 		var egressNode string
-		targetSecondaryNode := node{
-			name: "egressSecondaryTargetNode-allowed",
-		}
+		var targetSecondaryNode node
 
 		const (
 			endpointHTTPPort    = 80
@@ -721,6 +719,14 @@ var _ = ginkgo.Describe("Services", func() {
 			clusterUDPPort      = 91
 			clientContainerName = "npclient"
 		)
+
+		ginkgo.BeforeEach(func() {
+			nodeIPs = make(map[string]map[int]string)
+			egressNode = ""
+			targetSecondaryNode = node{
+				name: "egressSecondaryTargetNode-allowed",
+			}
+		})
 
 		ginkgo.AfterEach(func() {
 			ginkgo.By("Cleaning up external container")
@@ -745,7 +751,6 @@ var _ = ginkgo.Describe("Services", func() {
 				e2ekubectl.RunKubectlOrDie("default", "delete", "eip", "egressip", "--ignore-not-found=true")
 				e2ekubectl.RunKubectlOrDie("default", "label", "node", egressNode, "k8s.ovn.org/egress-assignable-")
 				tearDownNetworkAndTargetForMultiNIC([]string{egressNode}, targetSecondaryNode)
-				targetSecondaryNode.nodeIP = ""
 			}
 		})
 
@@ -924,7 +929,7 @@ var _ = ginkgo.Describe("Services", func() {
 			}
 
 			ginkgo.By("Choosing egressIP pod")
-			egressPod = endPoints[0]
+			egressPod := endPoints[0]
 			framework.Logf("EgressIP pod is %s/%s", endPoints[0].Namespace, endPoints[0].Name)
 
 			ginkgo.By("Label egress node" + egressNode + " create external container to send egress traffic to via secondary MultiNIC EIP")
@@ -1799,12 +1804,25 @@ spec:
 				return (numberOfETPRules == value), nil
 			}
 		}
+		checkNumberOfNFTElements := func(value int, name string) wait.ConditionFunc {
+			return func() (bool, error) {
+				numberOfNFTElements := countNFTablesElements(backendNodeName, name)
+				return (numberOfNFTElements == value), nil
+			}
+		}
+		noSNATServicesSet := "mgmtport-no-snat-services-v4"
+		if utilnet.IsIPv6String(svcLoadBalancerIP) {
+			noSNATServicesSet = "mgmtport-no-snat-services-v6"
+		}
+
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(2, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(5, "OVN-KUBE-EXTERNALIP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(3, "OVN-KUBE-SNAT-MGMTPORT"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(0, noSNATServicesSet))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(0, "mgmtport-no-snat-nodeports"))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
@@ -1829,8 +1847,10 @@ spec:
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(10, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(11, "OVN-KUBE-SNAT-MGMTPORT"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(8, noSNATServicesSet))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(0, "mgmtport-no-snat-nodeports"))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
@@ -1843,20 +1863,24 @@ spec:
 		}
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		// FIXME: This used to check that the no-snat rule had been hit, but nftables
+		// doesn't attach counters to rules unless you explicitly request them, which
+		// we don't... Is this check really needed?
 
 		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
 		e2ekubectl.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
 		err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 3, time.Second, time.Second*120)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
-
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
-		// number of iptable rules should have decreased by 2
+
+		// number of rules/elements should have decreased by 2 (one for the TCP port,
+		// one for UDP)
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(8, "OVN-KUBE-ETP"))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(9, "OVN-KUBE-SNAT-MGMTPORT"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(6, noSNATServicesSet))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(0, "mgmtport-no-snat-nodeports"))
+		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
@@ -1865,9 +1889,9 @@ spec:
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(1, fmt.Sprintf("[1:%d] -A OVN-KUBE-SNAT-MGMTPORT", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-
+		// FIXME: This used to check that the no-snat rule had been hit, but nftables
+		// doesn't attach counters to rules unless you explicitly request them, which
+		// we don't... Is this check really needed?
 	})
 
 	ginkgo.It("Should ensure load balancer service works when ETP=local and session affinity is set", func() {

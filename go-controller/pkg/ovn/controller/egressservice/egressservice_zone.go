@@ -44,11 +44,11 @@ const (
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName, clusterRouter string) error
+	ni util.NetInfo, clusterSubnets []*net.IPNet, controllerName string) error
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName, clusterRouter string, nodeLister corelisters.NodeLister) error
+	networkName, controllerName, clusterRouter string, nodeLister corelisters.NodeLister, v4, v6 bool) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error
-type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error
+type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error
 
 type Controller struct {
 	// network information
@@ -71,7 +71,7 @@ type Controller struct {
 
 	egressServiceLister egressservicelisters.EgressServiceLister
 	egressServiceSynced cache.InformerSynced
-	egressServiceQueue  workqueue.RateLimitingInterface
+	egressServiceQueue  workqueue.TypedRateLimitingInterface[string]
 
 	serviceLister  corelisters.ServiceLister
 	servicesSynced cache.InformerSynced
@@ -81,7 +81,7 @@ type Controller struct {
 
 	nodeLister  corelisters.NodeLister
 	nodesSynced cache.InformerSynced
-	nodesQueue  workqueue.RateLimitingInterface
+	nodesQueue  workqueue.TypedRateLimitingInterface[string]
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
@@ -150,9 +150,9 @@ func NewController(
 
 	c.egressServiceLister = esInformer.Lister()
 	c.egressServiceSynced = esInformer.Informer().HasSynced
-	c.egressServiceQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressservices",
+	c.egressServiceQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressservices"},
 	)
 	_, err := esInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEgressServiceAdd,
@@ -189,9 +189,9 @@ func NewController(
 
 	c.nodeLister = nodeInformer.Lister()
 	c.nodesSynced = nodeInformer.Informer().HasSynced
-	c.nodesQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressservicenodes",
+	c.nodesQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressservicenodes"},
 	)
 	_, err = nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNodeAdd,
@@ -231,8 +231,8 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 	if err != nil {
 		klog.Errorf("Failed to repair Egress Services entries: %v", err)
 	}
-
-	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.GetNetworkScopedClusterRouterName())
+	subnets := util.GetAllClusterSubnetsFromEntries(c.Subnets())
+	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, &util.DefaultNetInfo{}, subnets, c.controllerName)
 	if err != nil {
 		klog.Errorf("Failed to init Egress Services cluster policies: %v", err)
 	}
@@ -624,7 +624,7 @@ func (c *Controller) processNextEgressServiceWorkItem(wg *sync.WaitGroup) bool {
 
 	defer c.egressServiceQueue.Done(key)
 
-	err := c.syncEgressService(key.(string))
+	err := c.syncEgressService(key)
 	if err == nil {
 		c.egressServiceQueue.Forget(key)
 		return true

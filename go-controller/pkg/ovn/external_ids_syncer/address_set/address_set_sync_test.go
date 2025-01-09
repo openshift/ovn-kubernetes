@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -542,12 +542,12 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 		testData := []asSync{
 			{
 				before:                createInitialAS(asName1, []string{testIPv4}),
-				after:                 syncerToBuildData.getEgressIPAddrSetDbIDs(egressIPServedPodsAddrSetName),
+				after:                 syncerToBuildData.getEgressIPAddrSetDbIDs(egressIPServedPodsAddrSetName, "default"),
 				addressSetFactoryIPID: ipv4AddressSetFactoryID,
 			},
 			{
 				before:                createInitialAS(asName2, []string{testIPv4}),
-				after:                 syncerToBuildData.getEgressIPAddrSetDbIDs(nodeIPAddrSetName),
+				after:                 syncerToBuildData.getEgressIPAddrSetDbIDs(nodeIPAddrSetName, "default"),
 				addressSetFactoryIPID: ipv4AddressSetFactoryID,
 			},
 			{
@@ -694,7 +694,7 @@ var _ = ginkgo.Describe("OVN Address Set Syncer", func() {
 			},
 			{
 				before:                createInitialAS(asName2, []string{testIPv4}),
-				after:                 syncerToBuildData.getEgressIPAddrSetDbIDs(nodeIPAddrSetName),
+				after:                 syncerToBuildData.getEgressIPAddrSetDbIDs(nodeIPAddrSetName, "default"),
 				addressSetFactoryIPID: ipv4AddressSetFactoryID,
 			},
 			{

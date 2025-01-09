@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -31,6 +32,7 @@ type testNetworkController struct {
 func (tnc *testNetworkController) Start(context.Context) error {
 	tnc.tncm.Lock()
 	defer tnc.tncm.Unlock()
+	fmt.Printf("starting network: %s\n", testNetworkKey(tnc))
 	tnc.tncm.started = append(tnc.tncm.started, testNetworkKey(tnc))
 	return nil
 }
@@ -65,12 +67,17 @@ type testNetworkControllerManager struct {
 	stopped     []string
 	cleaned     []string
 
+	raiseErrorWhenCreatingController error
+
 	valid []util.BasicNetInfo
 }
 
 func (tncm *testNetworkControllerManager) NewNetworkController(netInfo util.NetInfo) (NetworkController, error) {
 	tncm.Lock()
 	defer tncm.Unlock()
+	if tncm.raiseErrorWhenCreatingController != nil {
+		return nil, tncm.raiseErrorWhenCreatingController
+	}
 	t := &testNetworkController{
 		NetInfo: netInfo,
 		tncm:    tncm,
@@ -85,33 +92,45 @@ func (tncm *testNetworkControllerManager) CleanupDeletedNetworks(validNetworks .
 }
 
 func TestNetAttachDefinitionController(t *testing.T) {
-	network_A := &ovncnitypes.NetConf{
+	networkAPrimary := &ovncnitypes.NetConf{
 		Topology: types.Layer2Topology,
 		NetConf: cnitypes.NetConf{
-			Name: "network_A",
+			Name: "networkAPrimary",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Subnets: "10.1.130.0/24",
+		Role:    types.NetworkRolePrimary,
+		MTU:     1400,
+	}
+	networkAIncompatible := &ovncnitypes.NetConf{
+		Topology: types.LocalnetTopology,
+		NetConf: cnitypes.NetConf{
+			Name: "networkAPrimary",
 			Type: "ovn-k8s-cni-overlay",
 		},
 		MTU: 1400,
 	}
-	network_A_incompatible := &ovncnitypes.NetConf{
+	networkASecondary := &ovncnitypes.NetConf{
+		Topology: types.Layer2Topology,
+		NetConf: cnitypes.NetConf{
+			Name: "networkAPrimary",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Subnets: "10.1.130.0/24",
+		Role:    types.NetworkRoleSecondary,
+		MTU:     1400,
+	}
+
+	networkBSecondary := &ovncnitypes.NetConf{
 		Topology: types.LocalnetTopology,
 		NetConf: cnitypes.NetConf{
-			Name: "network_A",
+			Name: "networkBSecondary",
 			Type: "ovn-k8s-cni-overlay",
 		},
 		MTU: 1400,
 	}
 
-	network_B := &ovncnitypes.NetConf{
-		Topology: types.LocalnetTopology,
-		NetConf: cnitypes.NetConf{
-			Name: "network_B",
-			Type: "ovn-k8s-cni-overlay",
-		},
-		MTU: 1400,
-	}
-
-	network_Default := &ovncnitypes.NetConf{
+	networkDefault := &ovncnitypes.NetConf{
 		Topology: types.Layer3Topology,
 		NetConf: cnitypes.NetConf{
 			Name: "default",
@@ -139,7 +158,7 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_Default,
+					network: networkDefault,
 				},
 			},
 			expected: []expected{},
@@ -149,12 +168,12 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkAPrimary,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_A,
+					network: networkAPrimary,
 					nads:    []string{"test/nad_1"},
 				},
 			},
@@ -164,7 +183,7 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkAPrimary,
 				},
 				{
 					nad: "test/nad_1",
@@ -176,17 +195,59 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad:     "test/nad_2",
-					network: network_A,
+					network: networkASecondary,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_A,
+					network: networkASecondary,
 					nads:    []string{"test/nad_1", "test/nad_2"},
+				},
+			},
+		},
+		{
+			name: "Two Primary NADs added for same namespace",
+			args: []args{
+				{
+					nad:     "test/nad_1",
+					network: networkAPrimary,
+				},
+				{
+					nad:     "test/nad_2",
+					network: networkAPrimary,
+					wantErr: true,
+				},
+			},
+			expected: []expected{
+				{
+					network: networkAPrimary,
+					nads:    []string{"test/nad_1"},
+				},
+			},
+		},
+		{
+			name: "two Primary NADs added then one deleted",
+			args: []args{
+				{
+					nad:     "test/nad_1",
+					network: networkAPrimary,
+				},
+				{
+					nad:     "test2/nad_2",
+					network: networkAPrimary,
+				},
+				{
+					nad: "test/nad_1",
+				},
+			},
+			expected: []expected{
+				{
+					network: networkAPrimary,
+					nads:    []string{"test2/nad_2"},
 				},
 			},
 		},
@@ -195,11 +256,11 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad:     "test/nad_2",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad: "test/nad_1",
@@ -207,7 +268,7 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			},
 			expected: []expected{
 				{
-					network: network_A,
+					network: networkASecondary,
 					nads:    []string{"test/nad_2"},
 				},
 			},
@@ -217,11 +278,11 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad:     "test/nad_2",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad: "test/nad_2",
@@ -236,16 +297,16 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkAPrimary,
 				},
 				{
 					nad:     "test/nad_1",
-					network: network_B,
+					network: networkBSecondary,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_B,
+					network: networkBSecondary,
 					nads:    []string{"test/nad_1"},
 				},
 			},
@@ -255,24 +316,24 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad:     "test/nad_2",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad:     "test/nad_1",
-					network: network_B,
+					network: networkBSecondary,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_A,
+					network: networkASecondary,
 					nads:    []string{"test/nad_2"},
 				},
 				{
-					network: network_B,
+					network: networkBSecondary,
 					nads:    []string{"test/nad_1"},
 				},
 			},
@@ -282,20 +343,20 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkAPrimary,
 				},
 				{
 					nad:     "test/nad_2",
-					network: network_B,
+					network: networkBSecondary,
 				},
 				{
 					nad:     "test/nad_1",
-					network: network_B,
+					network: networkBSecondary,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_B,
+					network: networkBSecondary,
 					nads:    []string{"test/nad_1", "test/nad_2"},
 				},
 			},
@@ -305,17 +366,17 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkAPrimary,
 				},
 				{
 					nad:     "test/nad_2",
-					network: network_A_incompatible,
+					network: networkAIncompatible,
 					wantErr: true,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_A,
+					network: networkAPrimary,
 					nads:    []string{"test/nad_1"},
 				},
 			},
@@ -325,16 +386,16 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkAPrimary,
 				},
 				{
 					nad:     "test/nad_1",
-					network: network_A_incompatible,
+					network: networkAIncompatible,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_A_incompatible,
+					network: networkAIncompatible,
 					nads:    []string{"test/nad_1"},
 				},
 			},
@@ -344,21 +405,21 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			args: []args{
 				{
 					nad:     "test/nad_1",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad:     "test/nad_2",
-					network: network_A,
+					network: networkASecondary,
 				},
 				{
 					nad:     "test/nad_1",
-					network: network_A_incompatible,
+					network: networkAIncompatible,
 					wantErr: true,
 				},
 			},
 			expected: []expected{
 				{
-					network: network_A,
+					network: networkASecondary,
 					nads:    []string{"test/nad_2"},
 				},
 			},
@@ -367,13 +428,17 @@ func TestNetAttachDefinitionController(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := gomega.NewWithT(t)
+			err := config.PrepareTestConfig()
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			tncm := &testNetworkControllerManager{
 				controllers: map[string]NetworkController{},
 			}
 			nadController := &NetAttachDefinitionController{
-				networks:       map[string]util.NetInfo{},
 				nads:           map[string]string{},
 				networkManager: newNetworkManager("", tncm),
+				primaryNADs:    map[string]string{},
 			}
 
 			g.Expect(nadController.networkManager.Start()).To(gomega.Succeed())
@@ -399,9 +464,6 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			}
 
 			meetsExpectations := func(g gomega.Gomega) {
-				tncm.Lock()
-				defer tncm.Unlock()
-
 				var expectRunning []string
 				for _, expected := range tt.expected {
 					netInfo, err := util.NewNetInfo(expected.network)
@@ -409,17 +471,30 @@ func TestNetAttachDefinitionController(t *testing.T) {
 
 					name := netInfo.GetNetworkName()
 					testNetworkKey := testNetworkKey(netInfo)
-
-					// test that the controller have the expected config and NADs
-					g.Expect(tncm.controllers).To(gomega.HaveKey(testNetworkKey))
-					g.Expect(tncm.controllers[testNetworkKey].Equals(netInfo)).To(gomega.BeTrue(),
-						fmt.Sprintf("matching network config for network %s", name))
-					g.Expect(tncm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
-						fmt.Sprintf("matching NADs for network %s", name))
+					func() {
+						tncm.Lock()
+						defer tncm.Unlock()
+						// test that the controller have the expected config and NADs
+						g.Expect(tncm.controllers).To(gomega.HaveKey(testNetworkKey))
+						g.Expect(tncm.controllers[testNetworkKey].Equals(netInfo)).To(gomega.BeTrue(),
+							fmt.Sprintf("matching network config for network %s", name))
+						g.Expect(tncm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
+							fmt.Sprintf("matching NADs for network %s", name))
+					}()
 					expectRunning = append(expectRunning, testNetworkKey)
+					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
+						netInfo.SetNADs(expected.nads...)
+						key := expected.nads[0]
+						namespace, _, err := cache.SplitMetaNamespaceKey(key)
+						g.Expect(err).ToNot(gomega.HaveOccurred())
+						netInfoFound, err := nadController.GetActiveNetworkForNamespace(namespace)
+						g.Expect(err).ToNot(gomega.HaveOccurred())
+						g.Expect(reflect.DeepEqual(netInfoFound, netInfo)).To(gomega.BeTrue())
+					}
 				}
+				tncm.Lock()
+				defer tncm.Unlock()
 				expectStopped := sets.New(tncm.started...).Difference(sets.New(expectRunning...)).UnsortedList()
-
 				// test that the controllers are started, stopped and cleaned up as expected
 				g.Expect(tncm.started).To(gomega.ContainElements(expectRunning), "started network controllers")
 				g.Expect(tncm.stopped).To(gomega.ConsistOf(expectStopped), "stopped network controllers")
@@ -434,13 +509,15 @@ func TestNetAttachDefinitionController(t *testing.T) {
 
 func TestSyncAll(t *testing.T) {
 	network_A := &ovncnitypes.NetConf{
-		Topology: types.Layer2Topology,
+		Topology: types.Layer3Topology,
 		NetConf: cnitypes.NetConf{
 			Name: "network_A",
 			Type: "ovn-k8s-cni-overlay",
 		},
-		MTU: 1400,
+		Role: types.NetworkRolePrimary,
+		MTU:  1400,
 	}
+	network_A_Copy := *network_A
 	network_B := &ovncnitypes.NetConf{
 		Topology: types.LocalnetTopology,
 		NetConf: cnitypes.NetConf{
@@ -454,8 +531,9 @@ func TestSyncAll(t *testing.T) {
 		netconf *ovncnitypes.NetConf
 	}
 	tests := []struct {
-		name     string
-		testNADs []TestNAD
+		name         string
+		testNADs     []TestNAD
+		syncAllError error
 	}{
 		{
 			name: "multiple networks referenced by multiple nads",
@@ -469,16 +547,20 @@ func TestSyncAll(t *testing.T) {
 					netconf: network_B,
 				},
 				{
-					name:    "test/nad3",
-					netconf: network_A,
+					name:    "test2/nad3",
+					netconf: &network_A_Copy,
 				},
 			},
+			syncAllError: ErrNetworkControllerTopologyNotManaged,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := gomega.NewWithT(t)
 
+			err := config.PrepareTestConfig()
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
 			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
@@ -487,14 +569,20 @@ func TestSyncAll(t *testing.T) {
 			tncm := &testNetworkControllerManager{
 				controllers: map[string]NetworkController{},
 			}
+			if tt.syncAllError != nil {
+				tncm.raiseErrorWhenCreatingController = tt.syncAllError
+			}
+
 			nadController, err := NewNetAttachDefinitionController(
 				"SUT",
 				tncm,
 				wf,
+				nil,
 			)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			expectedNetworks := map[string]util.NetInfo{}
+			expectedPrimaryNetworks := map[string]util.BasicNetInfo{}
 			for _, testNAD := range tt.testNADs {
 				namespace, name, err := cache.SplitMetaNamespaceKey(testNAD.name)
 				g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -512,6 +600,9 @@ func TestSyncAll(t *testing.T) {
 					netInfo, err = util.NewNetInfo(testNAD.netconf)
 					g.Expect(err).ToNot(gomega.HaveOccurred())
 					expectedNetworks[testNAD.netconf.Name] = netInfo
+					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
+						expectedPrimaryNetworks[netInfo.GetNetworkName()] = netInfo
+					}
 				}
 			}
 
@@ -534,6 +625,11 @@ func TestSyncAll(t *testing.T) {
 				g.Expect(actualNetworks).To(gomega.HaveKey(name))
 				g.Expect(actualNetworks[name].Equals(network)).To(gomega.BeTrue())
 			}
+
+			actualPrimaryNetwork, err := nadController.GetActiveNetworkForNamespace("test")
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			g.Expect(expectedPrimaryNetworks).To(gomega.HaveKey(actualPrimaryNetwork.GetNetworkName()))
+			g.Expect(expectedPrimaryNetworks[actualPrimaryNetwork.GetNetworkName()].Equals(actualPrimaryNetwork)).To(gomega.BeTrue())
 		})
 	}
 }

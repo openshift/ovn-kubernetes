@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/urfave/cli/v2"
@@ -451,8 +451,13 @@ func getNamespaceWithMultiplePoliciesExpectedData(networkPolicies []*knet.Networ
 }
 
 func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
-	clusterPortGroup := newClusterPortGroup()
-	fakeController := getFakeController(DefaultNetworkControllerName)
+	return getHairpinningACLsV4AndPortGroupForNetwork(&util.DefaultNetInfo{}, nil)
+}
+
+func getHairpinningACLsV4AndPortGroupForNetwork(netInfo util.NetInfo, ports []string) []libovsdbtest.TestData {
+	controllerName := getNetworkControllerName(netInfo.GetNetworkName())
+	clusterPortGroup := newNetworkClusterPortGroup(netInfo)
+	fakeController := getFakeController(controllerName)
 	egressIDs := fakeController.getNetpolDefaultACLDbIDs("Egress")
 	egressACL := libovsdbops.BuildACL(
 		"",
@@ -469,7 +474,7 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		},
 		types.DefaultACLTier,
 	)
-	egressACL.UUID = "hairpinning-egress-UUID"
+	egressACL.UUID = fmt.Sprintf("hp-egress-%s", controllerName)
 	ingressIDs := fakeController.getNetpolDefaultACLDbIDs("Ingress")
 	ingressACL := libovsdbops.BuildACL(
 		"",
@@ -484,8 +489,9 @@ func getHairpinningACLsV4AndPortGroup() []libovsdbtest.TestData {
 		nil,
 		types.DefaultACLTier,
 	)
-	ingressACL.UUID = "hairpinning-ingress-UUID"
+	ingressACL.UUID = fmt.Sprintf("hp-ingress-%s", controllerName)
 	clusterPortGroup.ACLs = []string{egressACL.UUID, ingressACL.UUID}
+	clusterPortGroup.Ports = ports
 	return []libovsdbtest.TestData{egressACL, ingressACL, clusterPortGroup}
 }
 
@@ -949,7 +955,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 	})
 
 	ginkgo.Context("during execution", func() {
-		table.DescribeTable("correctly uses namespace and shared peer selector address sets",
+		ginkgo.DescribeTable("correctly uses namespace and shared peer selector address sets",
 			func(peer knet.NetworkPolicyPeer, peerNamespaces []string) {
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)
@@ -974,11 +980,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
 			},
-			table.Entry("empty pod selector => use pod selector",
+			ginkgo.Entry("empty pod selector => use pod selector",
 				knet.NetworkPolicyPeer{
 					PodSelector: &metav1.LabelSelector{},
 				}, nil),
-			table.Entry("namespace selector with nil pod selector => use a set of selected namespace address sets",
+			ginkgo.Entry("namespace selector with nil pod selector => use a set of selected namespace address sets",
 				knet.NetworkPolicyPeer{
 					NamespaceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
@@ -986,12 +992,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				}, []string{namespaceName2}),
-			table.Entry("empty namespace and pod selector => use all pods shared address set",
+			ginkgo.Entry("empty namespace and pod selector => use all pods shared address set",
 				knet.NetworkPolicyPeer{
 					PodSelector:       &metav1.LabelSelector{},
 					NamespaceSelector: &metav1.LabelSelector{},
 				}, nil),
-			table.Entry("pod selector with nil namespace => use static namespace+pod selector",
+			ginkgo.Entry("pod selector with nil namespace => use static namespace+pod selector",
 				knet.NetworkPolicyPeer{
 					PodSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
@@ -999,7 +1005,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				}, nil),
-			table.Entry("pod selector with namespace selector => use namespace selector+pod selector",
+			ginkgo.Entry("pod selector with namespace selector => use namespace selector+pod selector",
 				knet.NetworkPolicyPeer{
 					PodSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
@@ -1012,7 +1018,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				}, nil),
-			table.Entry("pod selector with empty namespace selector => use global pod selector",
+			ginkgo.Entry("pod selector with empty namespace selector => use global pod selector",
 				knet.NetworkPolicyPeer{
 					PodSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
@@ -1936,7 +1942,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			originalNamespace.Annotations = map[string]string{util.AclLoggingAnnotation: originalACLLogSeverity}
 		})
 
-		table.DescribeTable("ACL logging for network policies reacts to severity updates", func(networkPolicies ...*knet.NetworkPolicy) {
+		ginkgo.DescribeTable("ACL logging for network policies reacts to severity updates", func(networkPolicies ...*knet.NetworkPolicy) {
 			ginkgo.By("Provisioning the system with an initial empty policy, we know deterministically the names of the default deny ACLs")
 			initialDenyAllPolicy := newNetworkPolicy("emptyPol", namespaceName1, metav1.LabelSelector{}, nil, nil)
 			// originalACLLogSeverity.Deny == nbdb.ACLSeverityAlert
@@ -2000,12 +2006,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			}
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		},
-			table.Entry("when the namespace features a network policy with a single rule",
+			ginkgo.Entry("when the namespace features a network policy with a single rule",
 				getMatchLabelsNetworkPolicy(netPolicyName1, namespaceName1, namespaceName2, "", true, false)),
-			table.Entry("when the namespace features *multiple* network policies with a single rule",
+			ginkgo.Entry("when the namespace features *multiple* network policies with a single rule",
 				getMatchLabelsNetworkPolicy(netPolicyName1, namespaceName1, namespaceName2, "", true, false),
 				getMatchLabelsNetworkPolicy(netPolicyName2, namespaceName1, namespaceName2, "", false, true)),
-			table.Entry("when the namespace features a network policy with *multiple* rules",
+			ginkgo.Entry("when the namespace features a network policy with *multiple* rules",
 				getMatchLabelsNetworkPolicy(netPolicyName1, namespaceName1, namespaceName2, "tiny-winy-pod", true, false)))
 
 		ginkgo.It("policies created after namespace logging level updates inherit updated logging level", func() {

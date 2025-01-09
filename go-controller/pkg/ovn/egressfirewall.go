@@ -476,7 +476,7 @@ func (oc *DefaultNetworkController) createEgressFirewallACLOps(ops []libovsdb.Op
 		libovsdbutil.LportIngress,
 	)
 	var err error
-	ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, egressFirewallACL)
+	ops, err = libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, oc.GetSamplingConfig(), egressFirewallACL)
 	if err != nil {
 		return ops, fmt.Errorf("failed to create egressFirewall ACL %v: %v", egressFirewallACL, err)
 	}
@@ -748,7 +748,7 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 
 func (oc *DefaultNetworkController) newEFNodeController(nodeInformer coreinformers.NodeInformer) controller.Controller {
 	controllerConfig := &controller.ControllerConfig[kapi.Node]{
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       nodeInformer.Informer(),
 		Lister:         nodeInformer.Lister().List,
 		ObjNeedsUpdate: oc.efNodeNeedsUpdate,

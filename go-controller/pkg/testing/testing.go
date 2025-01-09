@@ -1,9 +1,7 @@
 package testing
 
 import (
-	"os"
-
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega/format"
 
 	kruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -14,7 +12,7 @@ import (
 // tests that are unable to execute in certain environments. Such as those without
 // root or cap_net_admin privileges
 func OnSupportedPlatformsIt(description string, f interface{}) {
-	if os.Getenv("NOROOT") != "TRUE" {
+	if !NoRoot() {
 		ginkgo.It(description, f)
 	} else {
 		defer ginkgo.GinkgoRecover()

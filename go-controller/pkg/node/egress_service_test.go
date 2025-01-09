@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
@@ -281,8 +281,8 @@ var _ = Describe("Egress Service Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"OVN-KUBE-EGRESS-SVC": []string{
-							"-A OVN-KUBE-EGRESS-SVC -m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
-							"-A OVN-KUBE-EGRESS-SVC -s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
+							"-m mark --mark 0x3f0 -m comment --comment DoNotSNAT -j RETURN",
+							"-s 10.128.0.3 -m comment --comment namespace1/service1 -j SNAT --to-source 5.5.5.5",
 						},
 					},
 					"filter": {},

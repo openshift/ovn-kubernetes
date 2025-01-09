@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
@@ -59,6 +60,7 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 		KubeClient:             fake.NewSimpleClientset(v1Objects...),
 		EgressServiceClient:    egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
+		NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 	}
 	o.init() // initializes the node
 }
@@ -83,8 +85,9 @@ func (o *FakeOVNNode) init() {
 	Expect(err).NotTo(HaveOccurred())
 
 	cnnci := NewCommonNodeNetworkControllerInfo(o.fakeClient.KubeClient, o.fakeClient.AdminPolicyRouteClient, o.watcher, o.recorder, fakeNodeName, routemanager.NewController())
-	o.nc = newDefaultNodeNetworkController(cnnci, o.stopChan, o.wg, routemanager.NewController())
+	o.nc = newDefaultNodeNetworkController(cnnci, o.stopChan, o.wg, routemanager.NewController(), nil)
 	// watcher is started by nodeNetworkControllerManager, not by nodeNetworkcontroller, so start it here.
 	o.watcher.Start()
+	o.nc.PreStart(context.TODO())
 	o.nc.Start(context.TODO())
 }

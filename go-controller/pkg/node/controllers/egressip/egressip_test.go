@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"os"
 	"os/exec"
 	"reflect"
 	"runtime"
@@ -22,8 +21,15 @@ import (
 	ovniptables "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,13 +41,6 @@ import (
 	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
-
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
-	"github.com/onsi/gomega"
-	"github.com/vishvananda/netlink"
 )
 
 // testPodConfig holds all the information needed to validate a config is applied for a pod
@@ -257,8 +256,10 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	kubeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: []corev1.Node{getNodeObj(node, createEIPAnnot)}},
 		&corev1.NamespaceList{Items: namespaces}, &corev1.PodList{Items: pods})
 	egressIPClient := egressipfake.NewSimpleClientset(&egressipv1.EgressIPList{Items: egressIPs})
-	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient}
+	nadClient := nadfake.NewSimpleClientset()
+	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient, NetworkAttchDefClient: nadClient}
 	rm := routemanager.NewController()
+	ovnconfig.OVNKubernetesFeature.EnableMultiNetwork = true // force addition of NAD informer for node watch factory
 	ovnconfig.OVNKubernetesFeature.EnableEgressIP = true
 	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, node1Name)
 	if err != nil {
@@ -268,8 +269,12 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 		return nil, nil, err
 	}
 	linkManager := linkmanager.NewController(node1Name, v4, v6, nil)
+	// only CDN network is supported
+	getActiveNetForNsFn := func(namespace string) (util.NetInfo, error) {
+		return &util.DefaultNetInfo{}, nil
+	}
 	c, err := NewController(&ovnkube.Kube{KClient: kubeClient}, watchFactory.EgressIPInformer(), watchFactory.NodeInformer(), watchFactory.NamespaceInformer(),
-		watchFactory.PodCoreInformer(), rm, v4, v6, node1Name, linkManager)
+		watchFactory.PodCoreInformer(), getActiveNetForNsFn, rm, v4, v6, node1Name, linkManager)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -413,10 +418,10 @@ func runSubControllers(testNS ns.NetNS, c *Controller, wg *sync.WaitGroup, stopC
 
 // FIXME(mk) - Within GH VM, if I need to create a new NetNs. I see the following error:
 // "failed to create new network namespace: mount --make-rshared /run/user/1001/netns failed: "operation not permitted""
-var _ = table.DescribeTable("EgressIP selectors",
+var _ = ginkgo.DescribeTable("EgressIP selectors",
 	func(expectedEIPConfigs []eipConfig, pods []corev1.Pod, namespaces []corev1.Namespace, nodeConfig nodeConfig) {
 		defer ginkgo.GinkgoRecover()
-		if os.Getenv("NOROOT") == "TRUE" {
+		if ovntest.NoRoot() {
 			ginkgo.Skip("Test requires root privileges")
 		}
 		if !commandExists("iptables") {
@@ -702,7 +707,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 		gomega.Expect(cleanupControllerFn()).ShouldNot(gomega.HaveOccurred())
 		gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
 	},
-	table.Entry("configures nothing when EIPs dont select anything",
+	ginkgo.Entry("configures nothing when EIPs dont select anything",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -715,7 +720,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv4 EIP and one Pod",
+	ginkgo.Entry("configures one IPv4 EIP and one Pod",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -739,7 +744,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv6 EIP and one Pod",
+	ginkgo.Entry("configures one IPv6 EIP and one Pod",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Compressed, node1Name, namespace1Label, egressPodLabel),
@@ -764,7 +769,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures one uncompressed IPv6 EIP and one Pod",
+	ginkgo.Entry("configures one uncompressed IPv6 EIP and one Pod",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Uncompressed, node1Name, namespace1Label, egressPodLabel),
@@ -789,7 +794,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures one IPv4 EIP and multiple pods",
+	ginkgo.Entry("configures one IPv4 EIP and multiple pods",
 		// Test pod and namespace selection -
 		[]eipConfig{
 			{
@@ -821,7 +826,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv6 EIP and multiple pods",
+	ginkgo.Entry("configures one IPv6 EIP and multiple pods",
 		// Test pod and namespace selection -
 		[]eipConfig{
 			{
@@ -854,7 +859,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures one IPv4 EIP and multiple namespaces and multiple pods",
+	ginkgo.Entry("configures one IPv4 EIP and multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -887,7 +892,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv6 EIP and multiple namespaces and multiple pods",
+	ginkgo.Entry("configures one IPv6 EIP and multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Compressed, node1Name, namespace1Label, egressPodLabel),
@@ -920,7 +925,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures multiple IPv4 EIPs on different links, multiple namespaces and multiple pods",
+	ginkgo.Entry("configures multiple IPv4 EIPs on different links, multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -974,7 +979,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink4Name, []address{{dummy4IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures multiple IPv6 EIPs on different links, multiple namespaces and multiple pods",
+	ginkgo.Entry("configures multiple IPv6 EIPs on different links, multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Compressed, node1Name, namespace1Label, egressPodLabel),
@@ -1036,7 +1041,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 	// Test using root and a test netns because we want to test between netlink lib
 	// and the egress IP components (link manager, route manager)
 	defer ginkgo.GinkgoRecover()
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		ginkgo.Skip("Test requires root privileges")
 	}
 	if !commandExists("iptables") {
@@ -1096,7 +1101,7 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 var _ = ginkgo.Describe("VRF", func() {
 	ginkgo.It("copies routes from the VRF routing table for a link enslaved by VRF device", func() {
 		defer ginkgo.GinkgoRecover()
-		if os.Getenv("NOROOT") == "TRUE" {
+		if ovntest.NoRoot() {
 			ginkgo.Skip("Test requires root privileges")
 		}
 		if !commandExists("iptables") {
@@ -1142,12 +1147,12 @@ var _ = ginkgo.Describe("VRF", func() {
 	})
 })
 
-var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []eipConfig,
+var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []eipConfig,
 	nodeConfigsBeforeRepair nodeConfig, pods []corev1.Pod, namespaces []corev1.Namespace) {
 	// Test using root and a test netns because we want to test between netlink lib
 	// and the egress IP components (link manager, route manager)
 	defer ginkgo.GinkgoRecover()
-	if os.Getenv("NOROOT") == "TRUE" {
+	if ovntest.NoRoot() {
 		ginkgo.Skip("Test requires root privileges")
 	}
 	if !commandExists("iptables") {
@@ -1237,7 +1242,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 	close(stopCh)
 	wg.Wait()
 	gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
-}, table.Entry("should not fail when node is clean and nothing to apply",
+}, ginkgo.Entry("should not fail when node is clean and nothing to apply",
 	[]eipConfig{},
 	nodeConfig{
 		linkConfigs: []linkConfig{
@@ -1246,7 +1251,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 	},
 	[]corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, map[string]string{})},
 	[]corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)}),
-	table.Entry("should remove stale route with no assigned IP",
+	ginkgo.Entry("should remove stale route with no assigned IP",
 		[]eipConfig{},
 		nodeConfig{ // node state before repair
 			routes: []netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name))},
@@ -1256,7 +1261,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale address",
+	ginkgo.Entry("should remove stale address",
 		[]eipConfig{},
 		nodeConfig{ // node state before repair
 			linkConfigs: []linkConfig{
@@ -1265,7 +1270,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale route and EIP address on wrong link",
+	ginkgo.Entry("should remove stale route and EIP address on wrong link",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -1280,7 +1285,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale iptables rules",
+	ginkgo.Entry("should remove stale iptables rules",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -1292,7 +1297,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale iptables rules but not valid rules",
+	ginkgo.Entry("should remove stale iptables rules but not valid rules",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),

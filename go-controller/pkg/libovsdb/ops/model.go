@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -49,6 +50,12 @@ func getUUID(model model.Model) string {
 	case *nbdb.MeterBand:
 		return t.UUID
 	case *nbdb.Meter:
+		return t.UUID
+	case *nbdb.Sample:
+		return t.UUID
+	case *nbdb.SampleCollector:
+		return t.UUID
+	case *nbdb.SamplingApp:
 		return t.UUID
 	case *nbdb.StaticMACBinding:
 		return t.UUID
@@ -112,6 +119,12 @@ func setUUID(model model.Model, uuid string) {
 	case *nbdb.MeterBand:
 		t.UUID = uuid
 	case *nbdb.Meter:
+		t.UUID = uuid
+	case *nbdb.Sample:
+		t.UUID = uuid
+	case *nbdb.SampleCollector:
+		t.UUID = uuid
+	case *nbdb.SamplingApp:
 		t.UUID = uuid
 	case *nbdb.StaticMACBinding:
 		t.UUID = uuid
@@ -229,6 +242,21 @@ func copyIndexes(model model.Model) model.Model {
 			UUID: t.UUID,
 			Name: t.Name,
 		}
+	case *nbdb.Sample:
+		return &nbdb.Sample{
+			UUID:     t.UUID,
+			Metadata: t.Metadata,
+		}
+	case *nbdb.SampleCollector:
+		return &nbdb.SampleCollector{
+			UUID: t.UUID,
+			ID:   t.ID,
+		}
+	case *nbdb.SamplingApp:
+		return &nbdb.SamplingApp{
+			UUID: t.UUID,
+			Type: t.Type,
+		}
 	case *nbdb.StaticMACBinding:
 		return &nbdb.StaticMACBinding{
 			UUID:        t.UUID,
@@ -327,6 +355,12 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*nbdb.MeterBand{}
 	case *nbdb.Meter:
 		return &[]*nbdb.Meter{}
+	case *nbdb.Sample:
+		return &[]*nbdb.Sample{}
+	case *nbdb.SampleCollector:
+		return &[]*nbdb.SampleCollector{}
+	case *nbdb.SamplingApp:
+		return &[]*nbdb.SamplingApp{}
 	case *nbdb.StaticMACBinding:
 		return &[]*nbdb.StaticMACBinding{}
 	case *sbdb.Chassis:
@@ -437,7 +471,12 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 			Function: ovsdb.ConditionEqual,
 			Value:    t.Match,
 		}
-		return c.WhereAll(t, condPriority, condMatch).Wait(
+		condExtID := model.Condition{
+			Field:    &t.ExternalIDs,
+			Function: ovsdb.ConditionIncludes,
+			Value:    t.ExternalIDs,
+		}
+		return c.WhereAll(t, condPriority, condMatch, condExtID).Wait(
 			ovsdb.WaitConditionNotEqual,
 			&timeout,
 			t,
@@ -454,6 +493,64 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 		Value:    value,
 	}
 	return c.WhereAny(m, cond).Wait(ovsdb.WaitConditionNotEqual, &timeout, m, field)
+}
+
+// ModelUpdateField enumeration represents fields that can be updated on the supported models
+type ModelUpdateField int
+
+const (
+	LogicalSwitchPortAddresses ModelUpdateField = iota
+	LogicalSwitchPortType
+	LogicalSwitchPortTagRequest
+	LogicalSwitchPortOptions
+	LogicalSwitchPortPortSecurity
+	LogicalSwitchPortEnabled
+
+	PortGroupACLs
+	PortGroupPorts
+	PortGroupExternalIDs
+)
+
+// getFieldsToUpdate gets a model and a list of ModelUpdateField and returns a list of their related interface{} fields.
+func getFieldsToUpdate(model model.Model, fieldNames []ModelUpdateField) []interface{} {
+	var fields []interface{}
+	switch t := model.(type) {
+	case *nbdb.LogicalSwitchPort:
+		for _, field := range fieldNames {
+			switch field {
+			case LogicalSwitchPortAddresses:
+				fields = append(fields, &t.Addresses)
+			case LogicalSwitchPortType:
+				fields = append(fields, &t.Type)
+			case LogicalSwitchPortTagRequest:
+				fields = append(fields, &t.TagRequest)
+			case LogicalSwitchPortOptions:
+				fields = append(fields, &t.Options)
+			case LogicalSwitchPortPortSecurity:
+				fields = append(fields, &t.PortSecurity)
+			case LogicalSwitchPortEnabled:
+				fields = append(fields, &t.Enabled)
+			default:
+				panic(fmt.Sprintf("getFieldsToUpdate: unknown or unsupported field %q for LogicalSwitchPort", field))
+			}
+		}
+	case *nbdb.PortGroup:
+		for _, field := range fieldNames {
+			switch field {
+			case PortGroupACLs:
+				fields = append(fields, &t.ACLs)
+			case PortGroupPorts:
+				fields = append(fields, &t.Ports)
+			case PortGroupExternalIDs:
+				fields = append(fields, &t.ExternalIDs)
+			default:
+				panic(fmt.Sprintf("getFieldsToUpdate: unknown or unsupported field %q for PortGroup", field))
+			}
+		}
+	default:
+		panic(fmt.Sprintf("getFieldsToUpdate: unknown model type %T", t))
+	}
+	return fields
 }
 
 // getAllUpdatableFields returns a list of all of the columns/fields that can be updated for a model

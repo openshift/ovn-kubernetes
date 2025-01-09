@@ -64,7 +64,7 @@ FROM fedora:39
 
 # Install needed dependencies.
 RUN INSTALL_PKGS=" \
-    iptables iproute iputils hostname unbound-libs kubernetes-client kmod" && \
+    iptables nftables iproute iputils hostname unbound-libs kubernetes-client kmod" && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
     dnf clean all && rm -rf /var/cache/dnf/*
 
@@ -83,6 +83,7 @@ COPY ovn-kube-util /usr/bin/
 COPY ovndbchecker /usr/bin/
 COPY hybrid-overlay-node /usr/bin
 COPY ovnkube-identity /usr/bin/
+COPY ovnkube-observ /usr/bin
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment
