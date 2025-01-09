@@ -31,10 +31,10 @@ var _ = Describe("Network Segmentation: services", func() {
 	Context("on a user defined primary network", func() {
 		const (
 			nadName                      = "tenant-red"
-			servicePort                  = 80
+			servicePort                  = 88
 			serviceTargetPort            = 80
-			userDefinedNetworkIPv4Subnet = "203.203.0.0/16"
-			userDefinedNetworkIPv6Subnet = "fda9::0/60"
+			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
 		)
 
 		var (
@@ -129,8 +129,8 @@ var _ = Describe("Network Segmentation: services", func() {
 						{
 							Name:       "udp",
 							Protocol:   v1.ProtocolUDP,
-							Port:       80,
-							TargetPort: intstr.FromInt(int(serviceTargetPort)),
+							Port:       servicePort,
+							TargetPort: intstr.FromInt(serviceTargetPort),
 						},
 					}
 					s.Spec.Type = v1.ServiceTypeNodePort
@@ -160,12 +160,8 @@ var _ = Describe("Network Segmentation: services", func() {
 				checkConnectionToClusterIPs(f, udnClientPod, udnService, udnServerPod.Name)
 				By("Connect to the UDN service nodePort on all 3 nodes from the UDN client pod")
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[0], "endpoint node", udnServerPod.Name)
-				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
-				if !IsGatewayModeLocal() {
-					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
-					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
-				}
-
+				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
+				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
 				By(fmt.Sprintf("Creating a UDN client pod on a different node (%s)", clientNode))
 				udnClientPod2 := e2epod.NewAgnhostPod(namespace, "udn-client2", nil, nil, nil)
 				udnClientPod2.Spec.NodeName = clientNode
@@ -174,11 +170,8 @@ var _ = Describe("Network Segmentation: services", func() {
 				By("Connect to the UDN service from the UDN client pod on a different node")
 				checkConnectionToClusterIPs(f, udnClientPod2, udnService, udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[1], "local node", udnServerPod.Name)
-				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
-				if !IsGatewayModeLocal() {
-					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-					checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
-				}
+				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
 
 				// Default network -> UDN
 				// Check that it cannot connect
@@ -199,11 +192,8 @@ var _ = Describe("Network Segmentation: services", func() {
 
 				checkNoConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[1], "local node") // TODO change to checkConnectionToNodePort when we have full UDN support in ovnkube-node
 
-				// FIXME(dceara): Remove this check when Local Gateway external->service support is implemented.
-				if !IsGatewayModeLocal() {
-					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-					checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
-				}
+				checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+				checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
 
 				// UDN -> Default network
 				// Create a backend pod and service in the default network and verify that the client pod in the UDN
@@ -224,9 +214,10 @@ var _ = Describe("Network Segmentation: services", func() {
 					Spec: v1.ServiceSpec{
 						Ports: []v1.ServicePort{
 							{
-								Name:     "udp-port",
-								Port:     int32(servicePort),
-								Protocol: v1.ProtocolUDP,
+								Name:       "udp-port",
+								Port:       int32(servicePort),
+								Protocol:   v1.ProtocolUDP,
+								TargetPort: intstr.FromInt(serviceTargetPort),
 							},
 						},
 						Selector:       defaultLabels,
@@ -377,18 +368,18 @@ func checkNoConnectionToClusterIPs(f *framework.Framework, clientPod *v1.Pod, se
 
 func checkConnectionOrNoConnectionToClusterIPs(f *framework.Framework, clientPod *v1.Pod, service *v1.Service, expectedOutput string, shouldConnect bool) {
 	var err error
-	targetPort := service.Spec.Ports[0].TargetPort.String()
+	servicePort := service.Spec.Ports[0].Port
 	notStr := ""
 	if !shouldConnect {
 		notStr = "not "
 	}
 
 	for _, clusterIP := range service.Spec.ClusterIPs {
-		msg := fmt.Sprintf("Client %s/%s should %sreach service %s/%s on cluster IP %s port %s",
-			clientPod.Namespace, clientPod.Name, notStr, service.Namespace, service.Name, clusterIP, targetPort)
+		msg := fmt.Sprintf("Client %s/%s should %sreach service %s/%s on cluster IP %s port %d",
+			clientPod.Namespace, clientPod.Name, notStr, service.Namespace, service.Name, clusterIP, servicePort)
 		By(msg)
 
-		cmd := fmt.Sprintf(`/bin/sh -c 'echo hostname | nc -u -w 1 %s %s '`, clusterIP, targetPort)
+		cmd := fmt.Sprintf(`/bin/sh -c 'echo hostname | nc -u -w 1 %s %d '`, clusterIP, servicePort)
 
 		if shouldConnect {
 			err = checkConnectionToAgnhostPod(f, clientPod, expectedOutput, cmd)
