@@ -137,10 +137,6 @@ func GetNetworkScopedK8sMgmtHostIntfName(networkID uint) string {
 	return intfName
 }
 
-func GetVRFDeviceNameForUDN(networkID int) string {
-	return fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, networkID, types.UDNVRFDeviceSuffix)
-}
-
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
 func GetWorkerFromGatewayRouter(gr string) string {
 	return strings.TrimPrefix(gr, types.GWRouterPrefix)
@@ -388,6 +384,21 @@ func IsUnprocessedActiveNetworkError(err error) bool {
 
 func NewUnprocessedActiveNetworkError(namespace, udnName string) *UnprocessedActiveNetworkError {
 	return &UnprocessedActiveNetworkError{namespace: namespace, udnName: udnName}
+}
+
+type InvalidPrimaryNetworkError struct {
+	namespace string
+}
+
+func (m *InvalidPrimaryNetworkError) Error() string {
+	return fmt.Sprintf("invalid primary network state for namespace %q: "+
+		"a valid primary user defined network or network attachment definition custom resource, "+
+		"and required namespace label %q must both be present",
+		m.namespace, types.RequiredUDNNamespaceLabel)
+}
+
+func NewInvalidPrimaryNetworkError(namespace string) *InvalidPrimaryNetworkError {
+	return &InvalidPrimaryNetworkError{namespace: namespace}
 }
 
 func GetUserDefinedNetworkRole(isPrimary bool) string {

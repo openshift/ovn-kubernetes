@@ -159,6 +159,12 @@ const (
 	// DefaultNetworkLabelSelector is the label that needs to be matched on a
 	// selector to select the default network
 	DefaultNetworkLabelSelector = OvnK8sPrefix + "/default-network"
+	// OvnNetworkNameAnnotation is the name of the network annotated on the NAD
+	// by cluster manager nad controller
+	OvnNetworkNameAnnotation = OvnK8sPrefix + "/network-name"
+	// OvnNetworkIDAnnotation is a unique network identifier annotated on the
+	// NAD by cluster manager nad controller
+	OvnNetworkIDAnnotation = OvnK8sPrefix + "/network-id"
 
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
 	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
@@ -209,6 +215,8 @@ const (
 	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
 	// key for UDN enabled services routes
 	UDNEnabledServiceExternalID = OvnK8sPrefix + "/" + "udn-enabled-default-service"
+	// RequiredUDNNamespaceLabel is the required namespace label for enabling primary UDNs
+	RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology   = "layer3"
