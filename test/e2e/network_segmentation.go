@@ -955,7 +955,7 @@ spec:
 		var actualConditions []metav1.Condition
 		Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed())
 
-		Expect(actualConditions[0].Type).To(Equal("NetworkReady"))
+		Expect(actualConditions[0].Type).To(Equal("NetworkCreated"))
 		Expect(actualConditions[0].Status).To(Equal(metav1.ConditionFalse))
 		Expect(actualConditions[0].Reason).To(Equal("SyncError"))
 		expectedMessage := fmt.Sprintf("primary network already exist in namespace %q: %q", f.Namespace.Name, primaryNadName)
@@ -1222,7 +1222,7 @@ spec:
 			g.Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed())
 			return normalizeConditions(actualConditions)
 		}, 5*time.Second, 1*time.Second).Should(ConsistOf(metav1.Condition{
-			Type:    "NetworkReady",
+			Type:    "NetworkCreated",
 			Status:  metav1.ConditionFalse,
 			Reason:  "NetworkAttachmentDefinitionSyncError",
 			Message: expectedMessage,
@@ -1554,12 +1554,12 @@ func generateLayer3Subnets(cidrs string) []string {
 }
 
 func waitForUserDefinedNetworkReady(namespace, name string, timeout time.Duration) error {
-	_, err := e2ekubectl.RunKubectl(namespace, "wait", "userdefinednetwork", name, "--for", "condition=NetworkReady=True", "--timeout", timeout.String())
+	_, err := e2ekubectl.RunKubectl(namespace, "wait", "userdefinednetwork", name, "--for", "condition=NetworkCreated=True", "--timeout", timeout.String())
 	return err
 }
 
 func waitForClusterUserDefinedNetworkReady(name string, timeout time.Duration) error {
-	_, err := e2ekubectl.RunKubectl("", "wait", "clusteruserdefinednetwork", name, "--for", "condition=NetworkReady=True", "--timeout", timeout.String())
+	_, err := e2ekubectl.RunKubectl("", "wait", "clusteruserdefinednetwork", name, "--for", "condition=NetworkCreated=True", "--timeout", timeout.String())
 	return err
 }
 
@@ -1620,7 +1620,7 @@ func assertUDNStatusReportsConsumers(udnNamesapce, udnName, expectedPodName stri
 	found := false
 	for _, condition := range conditions {
 		if found, _ = Equal(metav1.Condition{
-			Type:    "NetworkReady",
+			Type:    "NetworkCreated",
 			Status:  "False",
 			Reason:  "SyncError",
 			Message: expectedMsg,
@@ -1679,9 +1679,9 @@ func assertClusterUDNStatusReportsActiveNamespaces(cudnName string, expectedActi
 
 	c := conditions[0]
 	// equality matcher cannot be used since condition message namespaces order is inconsistent
-	ExpectWithOffset(1, c.Type).Should(Equal("NetworkReady"))
+	ExpectWithOffset(1, c.Type).Should(Equal("NetworkCreated"))
 	ExpectWithOffset(1, c.Status).Should(Equal(metav1.ConditionTrue))
-	ExpectWithOffset(1, c.Reason).Should(Equal("NetworkAttachmentDefinitionReady"))
+	ExpectWithOffset(1, c.Reason).Should(Equal("NetworkAttachmentDefinitionCreated"))
 
 	ExpectWithOffset(1, c.Message).To(ContainSubstring("NetworkAttachmentDefinition has been created in following namespaces:"))
 	for _, ns := range expectedActiveNsNames {
@@ -1700,7 +1700,7 @@ func assertClusterUDNStatusReportConsumers(conditionsJSON, udnName, udnNamespace
 		udnNamespace, udnName, expectedPodName)
 	ExpectWithOffset(1, conditions).To(Equal([]metav1.Condition{
 		{
-			Type:    "NetworkReady",
+			Type:    "NetworkCreated",
 			Status:  "False",
 			Reason:  "NetworkAttachmentDefinitionSyncError",
 			Message: expectedMsg,
