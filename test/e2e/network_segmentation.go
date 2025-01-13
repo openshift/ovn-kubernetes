@@ -34,6 +34,7 @@ import (
 
 const openDefaultPortsAnnotation = "k8s.ovn.org/open-default-ports"
 const RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
+const OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 
 var _ = Describe("Network Segmentation", func() {
 	f := wrappedTestFramework("network-segmentation")
@@ -783,6 +784,37 @@ var _ = Describe("Network Segmentation", func() {
 		var (
 			defaultNetNamespace *v1.Namespace
 		)
+
+		Context("for primary UDN without required namespace label", func() {
+			BeforeEach(func() {
+				// default cluster network namespace, for use when doing negative testing for UDNs/NADs
+				defaultNetNamespace = &v1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: f.Namespace.Name + "-default",
+					},
+				}
+				f.AddNamespacesToDelete(defaultNetNamespace)
+				_, err := cs.CoreV1().Namespaces().Create(context.Background(), defaultNetNamespace, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("create tests UserDefinedNetwork")
+				cleanup, err := createManifest(defaultNetNamespace.Name, newPrimaryUserDefinedNetworkManifest(testUdnName))
+				DeferCleanup(cleanup)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(waitForUserDefinedNetworkReady(defaultNetNamespace.Name, testUdnName, 5*time.Second)).To(Not(Succeed()))
+			})
+
+			It("should be able to create pod and it will attach to the cluster default network", func() {
+				podConfig := *podConfig("some-pod")
+				podConfig.namespace = defaultNetNamespace.Name
+				pod := runUDNPod(cs, defaultNetNamespace.Name, podConfig, nil)
+				ovnPodAnnotation, err := unmarshalPodAnnotationAllNetworks(pod.Annotations)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(ovnPodAnnotation)).To(BeNumerically("==", 1))
+				Expect(ovnPodAnnotation).To(HaveKey("default"))
+			})
+
+		})
 
 		Context("for L2 secondary network", func() {
 			BeforeEach(func() {
@@ -2005,4 +2037,16 @@ func expectedNumberOfRoutes(netConfig networkAttachmentConfigParams) int {
 		return 6 // 3 v4 routes + 3 v6 routes for UDN
 	}
 	return 3 //only one family, each has 3 routes
+}
+
+func unmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[string]podAnnotation, error) {
+	podNetworks := make(map[string]podAnnotation)
+	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
+	if ok {
+		if err := json.Unmarshal([]byte(ovnAnnotation), &podNetworks); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
+				ovnAnnotation, err)
+		}
+	}
+	return podNetworks, nil
 }
