@@ -814,6 +814,24 @@ var _ = Describe("Network Segmentation", func() {
 				Expect(ovnPodAnnotation).To(HaveKey("default"))
 			})
 
+			It("should not be able to update the namespace and add the UDN label", func() {
+				defaultNetNamespace.Labels = map[string]string{
+					RequiredUDNNamespaceLabel: "",
+				}
+				_, err := cs.CoreV1().Namespaces().Update(context.TODO(), defaultNetNamespace, metav1.UpdateOptions{})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("The 'k8s.ovn.org/primary-user-defined-network' label cannot be added/removed after the namespace was created"))
+			})
+
+			It("should not be able to update the namespace and remove the UDN label", func() {
+				udnNamespace, err := cs.CoreV1().Namespaces().Get(context.TODO(), f.Namespace.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				udnNamespace.Labels = map[string]string{}
+				_, err = cs.CoreV1().Namespaces().Update(context.TODO(), udnNamespace, metav1.UpdateOptions{})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("The 'k8s.ovn.org/primary-user-defined-network' label cannot be added/removed after the namespace was created"))
+			})
+
 		})
 
 		Context("for L2 secondary network", func() {
