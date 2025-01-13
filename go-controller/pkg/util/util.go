@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/exp/constraints"
+	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
@@ -521,10 +522,10 @@ func IsDefaultEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
 }
 
 // IsEndpointSliceForNetwork checks if the provided EndpointSlice is meant for the given network
-// if types.LabelUserDefinedEndpointSliceNetwork is set it compares it to the network name,
+// if types.UserDefinedNetworkEndpointSliceAnnotation is set it compares it to the network name,
 // otherwise it returns true if the network is the default
 func IsEndpointSliceForNetwork(endpointSlice *discoveryv1.EndpointSlice, network NetInfo) bool {
-	if endpointSliceNetwork, ok := endpointSlice.Labels[types.LabelUserDefinedEndpointSliceNetwork]; ok {
+	if endpointSliceNetwork, ok := endpointSlice.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation]; ok {
 		return endpointSliceNetwork == network.GetNetworkName()
 	}
 	return network.IsDefault()
@@ -597,13 +598,24 @@ func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceL
 		selector = metav1.LabelSelector{MatchLabels: map[string]string{
 			discovery.LabelServiceName: svcName,
 		}}
-	} else {
-		selector = metav1.LabelSelector{MatchLabels: map[string]string{
-			types.LabelUserDefinedServiceName:          svcName,
-			types.LabelUserDefinedEndpointSliceNetwork: network,
-		}}
+		return GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
 	}
-	return GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
+
+	selector = metav1.LabelSelector{MatchLabels: map[string]string{
+		types.LabelUserDefinedServiceName: svcName,
+	}}
+	endpointSlices, err := GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list endpoint slices for service %s/%s: %w", namespace, svcName, err)
+	}
+	networkEndpointSlices := make([]*discovery.EndpointSlice, 0, len(endpointSlices))
+	for _, endpointSlice := range endpointSlices {
+		if endpointSlice.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation] == network {
+			networkEndpointSlices = append(networkEndpointSlices, endpointSlice)
+		}
+	}
+
+	return networkEndpointSlices, nil
 }
 
 // IsUDNEnabledService checks whether the provided namespaced name key is a UDN enabled service specified in config.Default.UDNAllowedDefaultServices
@@ -621,7 +633,7 @@ func IsUDNEnabledService(key string) bool {
 func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netInfo NetInfo) (*k8stypes.NamespacedName, error) {
 	labelKey := discovery.LabelServiceName
 	if netInfo.IsPrimaryNetwork() {
-		if eps.Labels[types.LabelUserDefinedEndpointSliceNetwork] != netInfo.GetNetworkName() {
+		if eps.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation] != netInfo.GetNetworkName() {
 			return nil, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netInfo.GetNetworkName())
 		}
 		labelKey = types.LabelUserDefinedServiceName
@@ -637,4 +649,24 @@ func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netInfo NetInfo) (*k
 	}
 
 	return &k8stypes.NamespacedName{Namespace: eps.Namespace, Name: svcName}, nil
+}
+
+// GetMirroredEndpointSlices retrieves all EndpointSlices in the given namespace that are managed
+// by the controller and are mirrored from the sourceName EndpointSlice.
+func GetMirroredEndpointSlices(controller, sourceName, namespace string, endpointSliceLister discoverylisters.EndpointSliceLister) (ret []*discovery.EndpointSlice, err error) {
+	mirrorEndpointSliceSelector := labels.Set(map[string]string{
+		discovery.LabelManagedBy: controller,
+	}).AsSelectorPreValidated()
+	allMirroredEndpointSlices, err := endpointSliceLister.EndpointSlices(namespace).List(mirrorEndpointSliceSelector)
+	if err != nil {
+		return nil, err
+	}
+
+	var mirroredEndpointSlices []*discovery.EndpointSlice
+	for _, endpointSlice := range allMirroredEndpointSlices {
+		if val, exists := endpointSlice.Annotations[types.SourceEndpointSliceAnnotation]; exists && val == sourceName {
+			mirroredEndpointSlices = append(mirroredEndpointSlices, endpointSlice)
+		}
+	}
+	return mirroredEndpointSlices, nil
 }

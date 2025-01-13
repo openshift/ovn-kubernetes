@@ -289,9 +289,11 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "test-namespace",
 						Name:      "test-eps",
+						Annotations: map[string]string{
+							types.UserDefinedNetworkEndpointSliceAnnotation: "primary-network",
+						},
 						Labels: map[string]string{
-							types.LabelUserDefinedEndpointSliceNetwork: "primary-network",
-							types.LabelUserDefinedServiceName:          "test-service",
+							types.LabelUserDefinedServiceName: "test-service",
 						},
 					},
 				},
@@ -310,9 +312,11 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "test-namespace",
 						Name:      "test-eps",
+						Annotations: map[string]string{
+							types.UserDefinedNetworkEndpointSliceAnnotation: "wrong-network",
+						},
 						Labels: map[string]string{
-							types.LabelUserDefinedEndpointSliceNetwork: "wrong-network",
-							types.LabelUserDefinedServiceName:          "test-service",
+							types.LabelUserDefinedServiceName: "test-service",
 						},
 					},
 				},
@@ -328,8 +332,8 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "test-namespace",
 						Name:      "test-eps",
-						Labels: map[string]string{
-							types.LabelUserDefinedEndpointSliceNetwork: "primary-network",
+						Annotations: map[string]string{
+							types.UserDefinedNetworkEndpointSliceAnnotation: "primary-network",
 						},
 					},
 				},
