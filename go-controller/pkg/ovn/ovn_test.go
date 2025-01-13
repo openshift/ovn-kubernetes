@@ -318,28 +318,6 @@ func generateUDNPostInitDB(testData []libovsdbtest.TestData, netName string) []l
 	}
 	testData = append(testData, copp)
 
-	clusterLBGroupName := types.ClusterLBGroupName
-	clusterSwitchLBGroupName := types.ClusterSwitchLBGroupName
-	clusterRouterLBGroupName := types.ClusterRouterLBGroupName
-	if len(netName) > 0 {
-		clusterLBGroupName = fmt.Sprintf("%s_%s", netName, clusterLBGroupName)
-		clusterSwitchLBGroupName = fmt.Sprintf("%s_%s", netName, clusterSwitchLBGroupName)
-		clusterRouterLBGroupName = fmt.Sprintf("%s_%s", netName, clusterRouterLBGroupName)
-	}
-
-	testData = append(testData,
-		&nbdb.LoadBalancerGroup{
-			Name: clusterLBGroupName,
-			UUID: clusterLBGroupName + "-UUID",
-		},
-		&nbdb.LoadBalancerGroup{
-			Name: clusterSwitchLBGroupName,
-			UUID: clusterSwitchLBGroupName + "-UUID",
-		},
-		&nbdb.LoadBalancerGroup{
-			Name: clusterRouterLBGroupName,
-			UUID: clusterRouterLBGroupName + "-UUID",
-		})
 	return testData
 }
 
