@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		})
 
 		ginkgo.It("should be able to send multicast UDP traffic between nodes", func() {
-			testMulticastUDPTraffic(fr, clientNodeInfo, serverNodeInfo)
+			testMulticastUDPTraffic(fr, clientNodeInfo, serverNodeInfo, defaultPodInterface)
 		})
 		ginkgo.It("should be able to receive multicast IGMP query", func() {
 			testMulticastIGMPQuery(fr, clientNodeInfo, serverNodeInfo)
@@ -66,7 +66,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 	})
 })
 
-func testMulticastUDPTraffic(fr *framework.Framework, clientNodeInfo, serverNodeInfo nodeInfo) {
+func testMulticastUDPTraffic(fr *framework.Framework, clientNodeInfo, serverNodeInfo nodeInfo, iface string) {
 	ginkgo.GinkgoHelper()
 	const (
 		mcastSource  = "pod-client"
@@ -91,48 +91,48 @@ func testMulticastUDPTraffic(fr *framework.Framework, clientNodeInfo, serverNode
 	// Start the multicast source (iperf client is the sender in multicast)
 	ginkgo.By("creating a pod as a multicast source in node " + clientNodeInfo.name)
 	// multicast group (-c 224.3.3.3), UDP (-u), TTL (-T 3), during (-t 3000) seconds, report every (-i 5) seconds
-	iperf := fmt.Sprintf("iperf -c %s -u -T 3 -t 3000 -i 5", mcastGroup)
+	iperf := fmt.Sprintf("iperf -c %s%%%s -u -T 3 -t 3000 -i 5", mcastGroup, iface)
 	if IsIPv6Cluster(fr.ClientSet) {
 		iperf = iperf + " -V"
 	}
 	cmd := []string{"/bin/sh", "-c", iperf}
-	clientPod := newAgnhostPod(fr.Namespace.Name, mcastSource, cmd...)
+	clientPod := newLatestAgnhostPod(fr.Namespace.Name, mcastSource, cmd...)
 	clientPod.Spec.NodeName = clientNodeInfo.name
 	e2epod.NewPodClient(fr).CreateSync(context.TODO(), clientPod)
 
 	// Start a multicast listener on the same groups and verify it received the traffic (iperf server is the multicast listener)
 	// join multicast group (-B 224.3.3.3), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
 	ginkgo.By("creating first multicast listener pod in node " + serverNodeInfo.name)
-	iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroup)
+	iperf = fmt.Sprintf("iperf -s -B %s%%%s -u -t 180 -i 5", mcastGroup, iface)
 	if IsIPv6Cluster(fr.ClientSet) {
 		iperf = iperf + " -V"
 	}
 	cmd = []string{"/bin/sh", "-c", iperf}
-	mcastServerPod1 := newAgnhostPod(fr.Namespace.Name, mcastServer1, cmd...)
+	mcastServerPod1 := newLatestAgnhostPod(fr.Namespace.Name, mcastServer1, cmd...)
 	mcastServerPod1.Spec.NodeName = serverNodeInfo.name
 	e2epod.NewPodClient(fr).CreateSync(context.TODO(), mcastServerPod1)
 
 	// Start a multicast listener on on other group and verify it does not receive the traffic (iperf server is the multicast listener)
 	// join multicast group (-B 224.4.4.4), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
 	ginkgo.By("creating second multicast listener pod in node " + serverNodeInfo.name)
-	iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroupBad)
+	iperf = fmt.Sprintf("iperf -s -B %s%%%s -u -t 180 -i 5", mcastGroupBad, iface)
 	if IsIPv6Cluster(fr.ClientSet) {
 		iperf = iperf + " -V"
 	}
 	cmd = []string{"/bin/sh", "-c", iperf}
-	mcastServerPod2 := newAgnhostPod(fr.Namespace.Name, mcastServer2, cmd...)
+	mcastServerPod2 := newLatestAgnhostPod(fr.Namespace.Name, mcastServer2, cmd...)
 	mcastServerPod2.Spec.NodeName = serverNodeInfo.name
 	e2epod.NewPodClient(fr).CreateSync(context.TODO(), mcastServerPod2)
 
 	// Start a multicast listener on the same groups and verify it received the traffic (iperf server is the multicast listener)
 	// join multicast group (-B 224.3.3.3), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
 	ginkgo.By("creating first multicast listener pod in node " + clientNodeInfo.name)
-	iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroup)
+	iperf = fmt.Sprintf("iperf -s -B %s%%%s -u -t 180 -i 5", mcastGroup, iface)
 	if IsIPv6Cluster(fr.ClientSet) {
 		iperf = iperf + " -V"
 	}
 	cmd = []string{"/bin/sh", "-c", iperf}
-	mcastServerPod3 := newAgnhostPod(fr.Namespace.Name, mcastServer3, cmd...)
+	mcastServerPod3 := newLatestAgnhostPod(fr.Namespace.Name, mcastServer3, cmd...)
 	mcastServerPod3.Spec.NodeName = clientNodeInfo.name
 	e2epod.NewPodClient(fr).CreateSync(context.TODO(), mcastServerPod3)
 
@@ -174,21 +174,26 @@ func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeIn
 			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
 	)
 
-	// Create a multicast source pod
+	// FIXME(trozet): the tcpdump filter is not correct for ipv6, it should be
+	// 'icmp6 and (ip6[40] == 0x8a or ip6[40] == 0x8b or ip6[40] == 0x8c or ip6[40] == 0x8d)'
+	// additionally this function needs to be modified like testMulticastUDPTraffic to specify correct pod interfaces
 	if IsIPv6Cluster(f.ClientSet) {
 		// Multicast group (-c ff3e::4321:1234), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds, -V (Set the domain to IPv6)
 		multicastSourceCommand = []string{"bash", "-c",
 			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5 -V", mcastV6Group)}
 	}
+	// Create a multicast source pod
 	ginkgo.By("creating a multicast source pod in node " + clientNodeInfo.name)
-	createGenericPod(f, multicastSourcePod, clientNodeInfo.name, f.Namespace.Name, multicastSourceCommand)
+	_, err := createGenericPod(f, multicastSourcePod, clientNodeInfo.name, f.Namespace.Name, multicastSourceCommand)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	// Create a multicast listener pod
 	ginkgo.By("creating a multicast listener pod in node " + serverNodeInfo.name)
-	createGenericPod(f, multicastListenerPod, serverNodeInfo.name, f.Namespace.Name, tcpDumpCommand)
+	_, err = createGenericPod(f, multicastListenerPod, serverNodeInfo.name, f.Namespace.Name, tcpDumpCommand)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	// Wait for tcpdump on listener pod to be ready
-	err := wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true /*immediate*/, func(context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true /*immediate*/, func(context.Context) (bool, error) {
 		kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
 		if err != nil {
 			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())

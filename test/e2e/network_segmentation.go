@@ -732,7 +732,7 @@ var _ = Describe("Network Segmentation", func() {
 					metav1.CreateOptions{},
 				)
 				framework.ExpectNoError(err)
-				testMulticastUDPTraffic(f, clientNodeInfo, serverNodeInfo)
+				testMulticastUDPTraffic(f, clientNodeInfo, serverNodeInfo, udnPodInterface)
 			},
 				ginkgo.Entry("with primary layer3 UDN", networkAttachmentConfigParams{
 					name:     nadName,

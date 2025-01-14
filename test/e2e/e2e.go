@@ -44,10 +44,13 @@ const (
 	retryTimeout         = 40 * time.Second // polling timeout
 	rolloutTimeout       = 10 * time.Minute
 	agnhostImage         = "registry.k8s.io/e2e-test-images/agnhost:2.26"
+	agnhostImageNew      = "registry.k8s.io/e2e-test-images/agnhost:2.53"
 	iperf3Image          = "quay.io/sronanrh/iperf"
 	redirectIP           = "123.123.123.123"
 	redirectPort         = "13337"
 	exContainerName      = "tcp-continuous-client"
+	defaultPodInterface  = "eth0"
+	udnPodInterface      = "ovn-udn1"
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
