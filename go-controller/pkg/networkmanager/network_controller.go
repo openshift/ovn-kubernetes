@@ -36,12 +36,16 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 		networkControllers: map[string]*networkControllerState{},
 	}
 
+	threadiness := 1
+	//if node != "" {
+	//	threadiness = 4
+	//}
 	// this controller does not feed from an informer, networks are manually
 	// added to the queue for processing
 	networkConfig := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.syncNetwork,
-		Threadiness: 1,
+		Threadiness: threadiness,
 	}
 	nc.networkReconciler = controller.NewReconciler(
 		nc.name,

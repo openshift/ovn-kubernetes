@@ -170,6 +170,9 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 			return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IPs, err : %w",
 				node.Name, err)
 		}
+		if node.Annotations[util.OvnTransitSwitchPortAddr] == node.Annotations[util.OvnTransitSwitchPortAddr] {
+			return nil
+		}
 	}
 	// TODO (numans)  If EnableInterconnect is false, clear the NodeTransitSwitchPortAddrAnnotation if set.
 
