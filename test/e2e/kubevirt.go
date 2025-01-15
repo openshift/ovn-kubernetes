@@ -1515,7 +1515,7 @@ runcmd:
 				l[RequiredUDNNamespaceLabel] = ""
 			}
 			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, l)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 			fr.Namespace = ns
 			namespace = fr.Namespace.Name
 
@@ -1532,7 +1532,7 @@ runcmd:
 			if td.topology == "localnet" {
 				By("setting up the localnet underlay")
 				nodes := ovsPods(clientSet)
-				Expect(nodes).NotTo(BeEmpty())
+				Expect(nodes).ToNot(BeEmpty())
 				defer func() {
 					By("tearing down the localnet underlay")
 					Expect(teardownUnderlay(nodes)).To(Succeed())
@@ -1661,6 +1661,24 @@ runcmd:
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
 				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
 				checkNorthSouthEgressICMPTraffic(vmi, []string{externalContainerIPV4Address, externalContainerIPV6Address}, step)
+			}
+
+			if td.role == "primary" && td.test.description == liveMigrate.description && isIPv4Supported() && isInterconnectEnabled() {
+				step = by(vm.Name, fmt.Sprintf("Checking IPv4 gateway cached mac after %s %s", td.resource.description, td.test.description))
+				Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
+
+				targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
+				Expect(err).ToNot(HaveOccurred(), step)
+
+				expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, netConfig.networkName)
+				Expect(err).ToNot(HaveOccurred(), step)
+
+				Expect(err).ToNot(HaveOccurred(), step)
+				Eventually(kubevirt.RetrieveCachedGatewayMAC).
+					WithArguments(vmi, "enp1s0", cidrIPv4).
+					WithTimeout(10*time.Second).
+					WithPolling(time.Second).
+					Should(Equal(expectedGatewayMAC), step)
 			}
 		},
 			func(td testData) string {
