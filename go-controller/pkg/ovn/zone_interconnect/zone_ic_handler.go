@@ -159,12 +159,15 @@ func getTransitSwitchName(nInfo util.NetInfo) string {
 }
 
 func (zic *ZoneInterconnectHandler) createOrUpdateTransitSwitch(networkID int) error {
-	ts := &nbdb.LogicalSwitch{
-		Name: zic.networkTransitSwitchName,
+	externalIDs := make(map[string]string)
+	if zic.IsSecondary() {
+		externalIDs = getSecondaryNetTransitSwitchExtIDs(zic.GetNetworkName(), zic.TopologyType(), zic.IsPrimaryNetwork())
 	}
-
+	ts := &nbdb.LogicalSwitch{
+		Name:        zic.networkTransitSwitchName,
+		ExternalIDs: externalIDs,
+	}
 	zic.addTransitSwitchConfig(ts, networkID)
-
 	// Create transit switch if it doesn't exist
 	if err := libovsdbops.CreateOrUpdateLogicalSwitch(zic.nbClient, ts); err != nil {
 		return fmt.Errorf("failed to create/update transit switch %s: %w", zic.networkTransitSwitchName, err)
@@ -776,4 +779,12 @@ func (zic *ZoneInterconnectHandler) getNetworkIdFromNodes(nodes []*corev1.Node) 
 	}
 
 	return util.InvalidID, fmt.Errorf("could not find network ID: %w", err)
+}
+
+func getSecondaryNetTransitSwitchExtIDs(networkName, topology string, isPrimaryUDN bool) map[string]string {
+	return map[string]string{
+		types.NetworkExternalID:     networkName,
+		types.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(isPrimaryUDN),
+		types.TopologyExternalID:    topology,
+	}
 }
