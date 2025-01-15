@@ -200,6 +200,11 @@ func (o *FakeOVN) shutdown() {
 
 func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	var err error
+	// Use shorter event queues for unit tests (reduce to 10 from the default)
+	// to avoid running out of resources in constrained CI environments (e.g.,
+	// on GitHub).
+	factory.SetEventQueueConfig(&factory.EventQueueConfig{QueueSize: 10, InitialQueueSize: 10})
+
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -504,7 +509,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 			}
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.networkManager.Interface())
+			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.networkManager.Interface(), o.eIPController, o.portCache)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l2Controller.addressSetFactory = asf

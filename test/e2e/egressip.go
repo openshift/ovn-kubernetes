@@ -42,6 +42,7 @@ const (
 	secondaryIPV4Subnet                        = "10.10.10.0/24"
 	secondaryIPV6Subnet                        = "2001:db8:abcd:1234::/64"
 	secondaryNetworkName                       = "secondary-network"
+	httpdContainerImageName                    = "docker.io/httpd:latest"
 )
 
 func labelNodeForEgress(f *framework.Framework, nodeName string) {
@@ -214,7 +215,7 @@ func configNetworkAndGetTarget(subnet string, nodesToAttachNet []string, v6 bool
 	for _, nodeName := range nodesToAttachNet {
 		attachNetwork(secondaryNetworkName, nodeName)
 	}
-	v4Addr, v6Addr := createClusterExternalContainer(targetSecondaryNode.name, "docker.io/httpd", []string{"--network", secondaryNetworkName, "-P"}, []string{})
+	v4Addr, v6Addr := createClusterExternalContainer(targetSecondaryNode.name, httpdContainerImageName, []string{"--network", secondaryNetworkName, "-P"}, []string{})
 	if v4Addr == "" && !v6 {
 		panic("failed to get v4 address")
 	}
@@ -529,7 +530,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		if !isInterconnectEnabled() {
 			return false, "interconnect is disabled. Environment variable 'OVN_ENABLE_INTERCONNECT' must have value true"
 		}
-		if netConfigParams.topology != types.Layer3Topology {
+		if netConfigParams.topology == types.LocalnetTopology {
 			return false, "unsupported network topology"
 		}
 		if netConfigParams.cidr == "" {
@@ -615,6 +616,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 	}
 
 	f := wrappedTestFramework(egressIPName)
+	f.SkipNamespaceCreation = true
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -632,6 +634,17 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		if len(ips) == 0 {
 			framework.Failf("expect at least one IP address")
 		}
+
+		labels := map[string]string{
+			"e2e-framework": f.BaseName,
+		}
+		if !isClusterDefaultNetwork(netConfigParams) {
+			labels[RequiredUDNNamespaceLabel] = ""
+		}
+		namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, labels)
+		f.Namespace = namespace
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 		isIPv6TestRun = utilnet.IsIPv6String(ips[0])
 		egress1Node = node{
 			name:   nodes.Items[1].Name,
@@ -660,13 +673,13 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		}
 		isV6 := utilnet.IsIPv6String(egress1Node.nodeIP)
 		if isV6 {
-			_, targetNode.nodeIP = createClusterExternalContainer(targetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
-			_, deniedTargetNode.nodeIP = createClusterExternalContainer(deniedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
+			_, targetNode.nodeIP = createClusterExternalContainer(targetNode.name, httpdContainerImageName, []string{"--network", ciNetworkName, "-P"}, []string{})
+			_, deniedTargetNode.nodeIP = createClusterExternalContainer(deniedTargetNode.name, httpdContainerImageName, []string{"--network", ciNetworkName, "-P"}, []string{})
 			// configure and add additional network to worker containers for EIP multi NIC feature
 			_, targetSecondaryNode.nodeIP = configNetworkAndGetTarget(secondaryIPV6Subnet, []string{egress1Node.name, egress2Node.name}, isV6, targetSecondaryNode)
 		} else {
-			targetNode.nodeIP, _ = createClusterExternalContainer(targetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
-			deniedTargetNode.nodeIP, _ = createClusterExternalContainer(deniedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
+			targetNode.nodeIP, _ = createClusterExternalContainer(targetNode.name, httpdContainerImageName, []string{"--network", ciNetworkName, "-P"}, []string{})
+			deniedTargetNode.nodeIP, _ = createClusterExternalContainer(deniedTargetNode.name, httpdContainerImageName, []string{"--network", ciNetworkName, "-P"}, []string{})
 			// configure and add additional network to worker containers for EIP multi NIC feature
 			targetSecondaryNode.nodeIP, _ = configNetworkAndGetTarget(secondaryIPV4Subnet, []string{egress1Node.name, egress2Node.name}, isV6, targetSecondaryNode)
 		}
@@ -770,10 +783,10 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 				usedEgressNodeAvailabilityHandler.Enable(egress2Node.name)
 
 				podNamespace := f.Namespace
-				podNamespace.Labels = map[string]string{
+				labels := map[string]string{
 					"name": f.Namespace.Name,
 				}
-				updateNamespace(f, podNamespace)
+				updateNamespaceLabels(f, f.Namespace, labels)
 
 				ginkgo.By("1. Create an EgressIP object with two egress IPs defined")
 				// Assign the egress IP without conflicting with any node IP,
@@ -949,7 +962,6 @@ spec:
 	   20. Check connectivity from second pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 	*/
 	ginkgo.It("[OVN network] Should validate the egress IP SNAT functionality against host-networked pods", func() {
-
 		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
 
 		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
@@ -984,7 +996,7 @@ spec:
 		hostNetPodName := egress2Node.name + "-host-net-pod"
 		p, err := createPod(f, hostNetPodName, egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
 			p.Spec.HostNetwork = true
-			p.Spec.Containers[0].Image = "docker.io/httpd"
+			p.Spec.Containers[0].Image = httpdContainerImageName
 		})
 		framework.ExpectNoError(err)
 		// block until host network pod is fully deleted because subsequent tests that require binding to the same port may fail
@@ -1003,10 +1015,10 @@ spec:
 		framework.Logf("Created pod %s on node %s", hostNetPod.name, egress2Node.name)
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -1143,10 +1155,10 @@ spec:
 		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -1256,13 +1268,14 @@ spec:
 		e2enode.ExpectNodeHasLabel(context.TODO(), f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node)")
-		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		_, err := createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		framework.ExpectNoError(err, "Step 1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node), failed, err: %v", err)
 		srcPodIP, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, podNamespace.Name, pod1Name)
 		framework.ExpectNoError(err, "Step 1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node), failed, err: %v", err)
 		framework.Logf("Created pod %s on node %s", pod1Name, pod2Node.name)
@@ -1546,7 +1559,6 @@ spec:
 		ginkgo.By("20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{pod2Node.nodeIP}))
 		framework.ExpectNoError(err, "Step 20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP, failed: %v", err)
-
 	})
 
 	/* This test does the following:
@@ -1593,10 +1605,10 @@ spec:
 		egressIP1[len(egressIP1)-2]++
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
@@ -1776,10 +1788,10 @@ spec:
 		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -1920,10 +1932,10 @@ spec:
 		usedEgressNodeAvailabilityHandler.Enable(egress1Node.name)
 
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("Creating an EgressIP object with one egress IPs defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -2082,10 +2094,10 @@ spec:
 		// check that node has both of them
 		v4, v6 := getIPVersions(egressIPIP1, egressIPIP2)
 		if v4 && isIPv6TestRun {
-			ginkgo.Skip("environment supports IPv6 only")
+			ginkgo.Skip("IPv4 EIP but IPv6 test run")
 		}
 		if v6 && !isIPv6TestRun {
-			ginkgo.Skip("environment supports IPv4 only")
+			ginkgo.Skip("IPv6 EIP but IPv4 test run")
 		}
 		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
 		ginkgo.By("0. Set two nodes as available for egress")
@@ -2094,10 +2106,10 @@ spec:
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress2Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with two egress IPs - both hosted by the same secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
@@ -2331,10 +2343,10 @@ spec:
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress2Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create an EgressIP object with two egress IPs - one hosted by an OVN network and one by a secondary host network")
 		// Assign the egress IP without conflicting with any node IP,
@@ -2589,10 +2601,10 @@ spec:
 		egressNodeAvailabilityHandler.Enable(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("1. Create two EgressIP objects with one egress IP each - hosted by a secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
@@ -2766,10 +2778,10 @@ spec:
 		egressNodeAvailabilityHandler.Enable(egress1Node.name)
 		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
 		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
+		labels := map[string]string{
 			"name": f.Namespace.Name,
 		}
-		updateNamespace(f, podNamespace)
+		updateNamespaceLabels(f, podNamespace, labels)
 
 		ginkgo.By("2. Create one EgressIP object with one egress IP hosted by a secondary host network")
 		egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
@@ -2819,11 +2831,12 @@ spec:
 		}
 		ginkgo.By(fmt.Sprintf("Building another namespace api object, basename %s", f.BaseName))
 		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
-			"e2e-framework": f.BaseName,
+			"e2e-framework":           f.BaseName,
+			RequiredUDNNamespaceLabel: "",
 		})
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-		ginkgo.By("namespace is connected to UDN, create a namespace attached to this primary as a layer3 UDN")
+		ginkgo.By(fmt.Sprintf("namespace is connected to UDN, create a namespace attached to this primary as a %s UDN", netConfigParams.topology))
 		nadClient, err := nadclient.NewForConfig(f.ClientConfig())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		netConfig := newNetworkAttachmentConfig(netConfigParams)
@@ -2843,11 +2856,9 @@ spec:
 			"wants": "egress",
 		}
 		pod1Namespace := f.Namespace
-		pod1Namespace.Labels = selectedByEIPLabels
-		updateNamespace(f, pod1Namespace)
+		updateNamespaceLabels(f, pod1Namespace, selectedByEIPLabels)
 		pod2OtherNetworkNamespace := otherNetworkNamespace.Name
-		otherNetworkNamespace.Labels = selectedByEIPLabels
-		updateNamespace(f, otherNetworkNamespace)
+		updateNamespaceLabels(f, otherNetworkNamespace, selectedByEIPLabels)
 
 		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -2929,14 +2940,23 @@ spec:
 		if !isNetworkSegmentationEnabled() {
 			ginkgo.Skip("network segmentation is disabled")
 		}
-		ginkgo.By(fmt.Sprintf("Building a namespace api object, basename %s", f.BaseName))
-		otherNetworkNamespace, err := f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
-			"e2e-framework": f.BaseName,
-		})
+		var otherNetworkNamespace *corev1.Namespace
+		var err error
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		isOtherNetworkIPv6 := utilnet.IsIPv6CIDRString(otherNetworkAttachParms.cidr)
+		// The EgressIP IP must match both networks IP family
+		if isOtherNetworkIPv6 != isIPv6TestRun {
+			ginkgo.Skip(fmt.Sprintf("Test run IP family (is IPv6: %v) doesn't match other networks IP family (is IPv6: %v)", isIPv6TestRun, isOtherNetworkIPv6))
+		}
+		// is the test namespace a CDN? If so create the UDN namespace
 		if isClusterDefaultNetwork(netConfigParams) {
-			ginkgo.By("namespace is connected to CDN, create a namespace with primary as a layer3 UDN")
-			// create L3 Primary UDN
+			ginkgo.By(fmt.Sprintf("Building other namespace api object for Primary UDN, basename %s", f.BaseName))
+			otherNetworkNamespace, err = f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
+				RequiredUDNNamespaceLabel: "",
+				"e2e-framework":           f.BaseName,
+			})
+			ginkgo.By(fmt.Sprintf("namespace is connected to CDN, create a namespace with %s primary UDN", otherNetworkAttachParms.topology))
+			// create primary UDN
 			nadClient, err := nadclient.NewForConfig(f.ClientConfig())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			netConfig := newNetworkAttachmentConfig(otherNetworkAttachParms)
@@ -2948,7 +2968,11 @@ spec:
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		} else {
-			// if network is L2,L3 or other, then other network is CDN
+			ginkgo.By(fmt.Sprintf("Building other namespace api object for CDN, basename %s", f.BaseName))
+			otherNetworkNamespace, err = f.CreateNamespace(context.Background(), f.BaseName, map[string]string{
+				"e2e-framework": f.BaseName,
+			})
+			// if network is L3 or L2 UDN, then other network is CDN
 		}
 		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
 		ginkgo.By("1. Set one node as available for egress")
@@ -2959,11 +2983,15 @@ spec:
 			"wants": "egress",
 		}
 		pod1Namespace := f.Namespace
-		pod1Namespace.Labels = selectedByEIPLabels
-		updateNamespace(f, pod1Namespace)
+		_, isUDNRequired := pod1Namespace.Labels[RequiredUDNNamespaceLabel]
+		ginkgo.By(fmt.Sprintf("Updating namespace label for base namespace: %s, with required UDN label: %t",
+			pod1Namespace.Name, isUDNRequired))
+		updateNamespaceLabels(f, pod1Namespace, selectedByEIPLabels)
 		pod2OtherNetworkNamespace := otherNetworkNamespace.Name
-		otherNetworkNamespace.Labels = selectedByEIPLabels
-		updateNamespace(f, otherNetworkNamespace)
+		_, isUDNRequired = otherNetworkNamespace.Labels[RequiredUDNNamespaceLabel]
+		ginkgo.By(fmt.Sprintf("Updating namespace label for other namespace: %s, with required UDN label: %t",
+			otherNetworkNamespace.Name, isUDNRequired))
+		updateNamespaceLabels(f, otherNetworkNamespace, selectedByEIPLabels)
 
 		ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 		// Assign the egress IP without conflicting with any node IP,
@@ -3023,16 +3051,17 @@ spec:
 		ginkgo.By("7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected egressIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, pod2OtherNetworkNamespace, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 7. Check connectivity from pod connected to a different network and verify that the srcIP is the expected nodeIP, failed: %v", err)
-	}, ginkgo.Entry("IPv4 L3 Primary UDN", networkAttachmentConfigParams{
-		name:     "l3primary",
-		topology: types.Layer3Topology,
-		cidr:     "10.10.0.0/16",
-		role:     "primary",
-	}),
-		ginkgo.Entry("IPv6 L3 Primary UDN", networkAttachmentConfigParams{
+	},
+		ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
 			name:     "l3primary",
 			topology: types.Layer3Topology,
-			cidr:     "2014:100:200::0/60",
+			cidr:     correctCIDRFamily("30.10.0.0/16", "2014:100:200::0/60"),
+			role:     "primary",
+		}),
+		ginkgo.Entry("L2 Primary UDN", networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     correctCIDRFamily("10.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
 	)
@@ -3060,6 +3089,24 @@ spec:
 			name:     "l3primaryv6",
 			topology: types.Layer3Topology,
 			cidr:     "2014:100:200::0/60",
+			role:     "primary",
+		},
+	),
+	ginkgo.Entry(
+		"Network Segmentation: IPv4 L2 role primary",
+		networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     "20.10.0.0/16",
+			role:     "primary",
+		},
+	),
+	ginkgo.Entry(
+		"Network Segmentation: IPv6 L2 role primary",
+		networkAttachmentConfigParams{
+			name:     "l2primary",
+			topology: types.Layer2Topology,
+			cidr:     "2015:100:200::0/60",
 			role:     "primary",
 		},
 	),

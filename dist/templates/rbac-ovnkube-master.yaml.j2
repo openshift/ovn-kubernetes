@@ -146,6 +146,17 @@ rules:
       verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
     {%- endif %}
 
+    {% if ovn_route_advertisements_enable == "true" -%}
+    - apiGroups: ["frrk8s.metallb.io"]
+      resources:
+          - frrconfigurations
+      verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
+    - apiGroups: [ "k8s.cni.cncf.io" ]
+      resources:
+      - network-attachment-definitions
+      verbs: ["patch"]
+    {%- endif %}
+
 
 # https://github.com/ovn-org/ovn-kubernetes/blob/e1e7d40f9a6c6038b52696c1b8f8915a4d73160e/go-controller/pkg/ovn/topology_version.go#L28
 ---
@@ -158,3 +169,35 @@ rules:
     - apiGroups: [""]
       resources: ["configmaps"]
       verbs: ["create", "patch", "update"]
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: disable-udn-label-change
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["UPDATE"]
+        resources:   ["namespaces"]
+  failurePolicy: Fail
+  validations:
+    - expression: "('k8s.ovn.org/primary-user-defined-network' in oldObject.metadata.labels) == ('k8s.ovn.org/primary-user-defined-network' in object.metadata.labels)"
+      message: "The 'k8s.ovn.org/primary-user-defined-network' label cannot be added/removed after the namespace was created"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: disable-udn-label-change-binding
+spec:
+  policyName: disable-udn-label-change
+  validationActions: [Deny]
+  matchResources:
+    resourceRules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["UPDATE"]
+        resources:   ["namespaces"]

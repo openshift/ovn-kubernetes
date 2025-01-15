@@ -63,7 +63,9 @@ type ControllerManager struct {
 }
 
 func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	// Pass a shallow clone of the watch factory, this allows multiplexing
+	// informers for secondary networks.
+	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory.ShallowClone())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
@@ -72,7 +74,7 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.networkManager.Interface())
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.eIPController, cm.portCache)
 	case ovntypes.LocalnetTopology:
 		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.networkManager.Interface()), nil
 	}
@@ -81,7 +83,9 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (cm *ControllerManager) newDummyNetworkController(topoType, netName string) (networkmanager.NetworkController, error) {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	// Pass a shallow clone of the watch factory, this allows multiplexing
+	// informers for secondary networks.
+	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory.ShallowClone())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
@@ -90,7 +94,7 @@ func (cm *ControllerManager) newDummyNetworkController(topoType, netName string)
 	case ovntypes.Layer3Topology:
 		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.networkManager.Interface())
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.eIPController, cm.portCache)
 	case ovntypes.LocalnetTopology:
 		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.networkManager.Interface()), nil
 	}
@@ -292,14 +296,14 @@ func (cm *ControllerManager) createACLLoggingMeter() error {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *ControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
-	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
+func (cm *ControllerManager) newCommonNetworkControllerInfo(wf *factory.WatchFactory) (*ovn.CommonNetworkControllerInfo, error) {
+	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, wf, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
 func (cm *ControllerManager) initDefaultNetworkController(observManager *observability.Manager) error {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory)
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
@@ -464,4 +468,8 @@ func (cm *ControllerManager) Stop() {
 	if cm.networkManager != nil {
 		cm.networkManager.Stop()
 	}
+}
+
+func (cm *ControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+	return nil
 }

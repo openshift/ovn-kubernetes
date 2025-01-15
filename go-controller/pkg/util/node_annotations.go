@@ -132,9 +132,9 @@ const (
 	OvnNodeMigratedZoneName = "k8s.ovn.org/remote-zone-migrated"
 	/** HACK END **/
 
-	// ovnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
+	// OvnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
 	// It is set by cluster manager.
-	ovnTransitSwitchPortAddr = "k8s.ovn.org/node-transit-switch-port-ifaddr"
+	OvnTransitSwitchPortAddr = "k8s.ovn.org/node-transit-switch-port-ifaddr"
 
 	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
 	ovnNodeID = "k8s.ovn.org/node-id"
@@ -725,11 +725,11 @@ func parseJoinSubnetAnnotation(nodeAnnotations map[string]string, annotationName
 // CreateNodeTransitSwitchPortAddrAnnotation creates the node annotation for the node's Transit switch port addresses.
 func CreateNodeTransitSwitchPortAddrAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
 	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
-	return createPrimaryIfAddrAnnotation(ovnTransitSwitchPortAddr, nodeAnnotation, nodeIPNetv4, nodeIPNetv6)
+	return createPrimaryIfAddrAnnotation(OvnTransitSwitchPortAddr, nodeAnnotation, nodeIPNetv4, nodeIPNetv6)
 }
 
 func NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode *corev1.Node) bool {
-	return oldNode.Annotations[ovnTransitSwitchPortAddr] != newNode.Annotations[ovnTransitSwitchPortAddr]
+	return oldNode.Annotations[OvnTransitSwitchPortAddr] != newNode.Annotations[OvnTransitSwitchPortAddr]
 }
 
 // CreateNodeMasqueradeSubnetAnnotation sets the IPv4 / IPv6 values of the node's Masquerade subnet.
@@ -874,18 +874,28 @@ func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 }
 
 func ParseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
-	var val primaryIfAddrAnnotation
-	joinSubnetMap, err := parseJoinSubnetAnnotation(node.Annotations, OVNNodeGRLRPAddrs)
-	if err != nil {
-		return val, fmt.Errorf("unable to parse annotation %s on node %s: err %w",
-			OVNNodeGRLRPAddrs, node.Name, err)
+	var joinSubnetMap map[string]json.RawMessage
+	var ret primaryIfAddrAnnotation
+
+	annotation, ok := node.Annotations[OVNNodeGRLRPAddrs]
+	if !ok {
+		return primaryIfAddrAnnotation{}, newAnnotationNotSetError("could not find %q annotation", OVNNodeGRLRPAddrs)
+	}
+
+	if err := json.Unmarshal([]byte(annotation), &joinSubnetMap); err != nil {
+		return primaryIfAddrAnnotation{}, fmt.Errorf("failed to unmarshal %q annotation on node %s: %v", OVNNodeGRLRPAddrs, node.Name, err)
 	}
 	val, ok := joinSubnetMap[netName]
 	if !ok {
-		return val, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
+		return primaryIfAddrAnnotation{}, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
 			node.Name, netName)
 	}
-	return val, nil
+
+	if err := json.Unmarshal(val, &ret); err != nil {
+		return primaryIfAddrAnnotation{}, fmt.Errorf("failed to unmarshal the %q annotation on node %s for %s network err: %w", OVNNodeGRLRPAddrs, node.Name, netName, err)
+	}
+
+	return ret, nil
 }
 
 // ParseNodeGatewayRouterJoinIPv4 returns the IPv4 address for the node's gateway router port
@@ -907,6 +917,25 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 	return ip, nil
 }
 
+// ParseNodeGatewayRouterJoinIPv6 returns the IPv6 address for the node's gateway router port
+// stored in the 'OVNNodeGRLRPAddrs' annotation
+func ParseNodeGatewayRouterJoinIPv6(node *kapi.Node, netName string) (net.IP, error) {
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
+	if err != nil {
+		return nil, err
+	}
+	if primaryIfAddr.IPv6 == "" {
+		return nil, fmt.Errorf("failed to find an IPv6 address for gateway route interface in node: %s, net: %s, "+
+			"annotation values: %+v", node, netName, primaryIfAddr)
+	}
+
+	ip, _, err := net.ParseCIDR(primaryIfAddr.IPv6)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse gateway router IPv6 address %s, err: %w", primaryIfAddr.IPv6, err)
+	}
+	return ip, nil
+}
+
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
@@ -920,7 +949,7 @@ func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IP
 // ParseNodeTransitSwitchPortAddrs returns the IPv4 and/or IPv6 addresses for the node's transit switch port
 // stored in the 'ovnTransitSwitchPortAddr' annotation
 func ParseNodeTransitSwitchPortAddrs(node *kapi.Node) ([]*net.IPNet, error) {
-	return parsePrimaryIfAddrAnnotation(node, ovnTransitSwitchPortAddr)
+	return parsePrimaryIfAddrAnnotation(node, OvnTransitSwitchPortAddr)
 }
 
 // ParseNodeMasqueradeSubnet returns the IPv4 and/or IPv6 networks for the node's gateway router port

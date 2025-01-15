@@ -77,8 +77,9 @@ func (bnc *BaseNetworkController) WatchNamespaces() error {
 		return nil
 	}
 
-	if bnc.IsSecondary() && !util.IsMultiNetworkPoliciesSupportEnabled() {
-		// For secondary networks, we don't have to watch namespace events if
+	if (!util.IsNetworkSegmentationSupportEnabled() || !bnc.IsPrimaryNetwork()) &&
+		bnc.IsSecondary() && !util.IsMultiNetworkPoliciesSupportEnabled() {
+		// For secondary networks (that are not primary....), we don't have to watch namespace events if
 		// multi-network policy support is not enabled.
 		return nil
 	}

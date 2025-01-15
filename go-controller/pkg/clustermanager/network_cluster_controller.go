@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -60,7 +62,6 @@ type networkClusterController struct {
 	tunnelIDAllocator   id.Allocator
 	podAllocator        *pod.PodAllocator
 	nodeAllocator       *node.NodeAllocator
-	networkIDAllocator  id.NamedAllocator
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
 
@@ -82,7 +83,6 @@ type networkClusterController struct {
 }
 
 func newNetworkClusterController(
-	networkIDAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
 	ovnClient *util.OVNClusterManagerClientset,
 	wf *factory.WatchFactory,
@@ -105,7 +105,6 @@ func newNetworkClusterController(
 		kube:                kube,
 		stopChan:            make(chan struct{}),
 		wg:                  wg,
-		networkIDAllocator:  networkIDAllocator,
 		recorder:            recorder,
 		networkManager:      networkManager,
 		statusReporter:      errorReporter,
@@ -126,8 +125,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 		panic(fmt.Errorf("could not reserve default network ID: %w", err))
 	}
 
-	namedIDAllocator := networkIDAllocator.ForName(types.DefaultNetworkName)
-	return newNetworkClusterController(namedIDAllocator, netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil)
+	return newNetworkClusterController(netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -171,11 +169,9 @@ func (ncc *networkClusterController) init() error {
 		return fmt.Errorf("failed to reset network status: %w", err)
 	}
 
-	networkID, err := ncc.networkIDAllocator.AllocateID()
-	if err != nil {
-		return err
-	}
+	networkID := ncc.GetNetworkID()
 
+	var err error
 	if util.DoesNetworkRequireTunnelIDs(ncc.GetNetInfo()) {
 		ncc.tunnelIDAllocator = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
 		// Reserve the id 0. We don't want to assign this id to any of the pods or nodes.
@@ -362,19 +358,30 @@ func getNetworkAllocationUDNCondition(errorNode string) *metav1.Condition {
 //   - initializes the persistent ip allocator and starts listening to IPAMClaim events
 //   - initializes the pod ip allocator and starts listening to pod events
 func (ncc *networkClusterController) Start(ctx context.Context) error {
+	start := time.Now()
+	defer func() {
+		klog.Infof("{PADI networkClusterController.Start for %s took %s", ncc.GetNetworkName(), time.Since(start))
+	}()
 	err := ncc.init()
 	if err != nil {
 		return err
 	}
-
+	klog.Infof("{PADI networkClusterController.Start.init for %s took %s", ncc.GetNetworkName(), time.Since(start))
 	if ncc.hasNodeAllocation() {
+		//go func() {
+		//	nodeHandler, err := ncc.retryNodes.WatchResource()
+		//	if err != nil {
+		//		klog.Errorf("PADI: unable to watch pods: %w", err)
+		//	}
+		//	ncc.nodeHandler = nodeHandler
+		//}()
 		nodeHandler, err := ncc.retryNodes.WatchResource()
 		if err != nil {
 			return fmt.Errorf("unable to watch pods: %w", err)
 		}
 		ncc.nodeHandler = nodeHandler
 	}
-
+	klog.Infof("{PADI networkClusterController.Start.WatchResource for %s took %s", ncc.GetNetworkName(), time.Since(start))
 	if ncc.hasPodAllocation() {
 		if ncc.allowPersistentIPs() {
 			// we need to start listening to IPAMClaim events before pod events, to
@@ -438,7 +445,6 @@ func (ncc *networkClusterController) Cleanup() error {
 		if err != nil {
 			return err
 		}
-		ncc.networkIDAllocator.ReleaseID()
 	}
 
 	return nil
@@ -461,6 +467,10 @@ type networkClusterControllerEventHandler struct {
 	objType  reflect.Type
 	ncc      *networkClusterController
 	syncFunc func([]interface{}) error
+}
+
+func (h *networkClusterControllerEventHandler) FilterResource(obj interface{}) bool {
+	return true
 }
 
 // networkClusterControllerEventHandler functions
@@ -599,6 +609,24 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = h.ncc.podAllocator.Sync
 		case factory.NodeType:
 			syncFunc = h.ncc.nodeAllocator.Sync
+			//syncFunc = func(objs []interface{}) error {
+			//	if util.IsNetworkSegmentationSupportEnabled() {
+			//		wg := sync.WaitGroup{}
+			//		for _, n := range objs {
+			//			go func() {
+			//				wg.Add(1)
+			//				defer wg.Done()
+			//
+			//				if err := h.AddResource(n, false); err != nil {
+			//					klog.Errorf("PADI: failed to add retry obj to retry node: %v", err)
+			//				}
+			//			}()
+			//		}
+			//		wg.Wait()
+			//	}
+			//	return h.ncc.nodeAllocator.Sync(objs)
+			//}
+
 		case factory.IPAMClaimsType:
 			syncFunc = func(claims []interface{}) error {
 				return h.ncc.ipamClaimReconciler.Sync(
@@ -673,6 +701,10 @@ func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key 
 func (h *networkClusterControllerEventHandler) clearInitialNodeNetworkUnavailableCondition(origNode *corev1.Node) {
 	// If it is not a Cloud Provider node, then nothing to do.
 	if origNode.Spec.ProviderID == "" {
+		return
+	}
+
+	if !h.ncc.IsDefault() {
 		return
 	}
 

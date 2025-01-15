@@ -2,10 +2,10 @@ package ovn
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"reflect"
 	"sync"
 	"time"
 
@@ -406,35 +406,46 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
-	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
+	return oldNode.Annotations[util.OvnNodeL3GatewayConfig] != newNode.Annotations[util.OvnNodeL3GatewayConfig] ||
+		oldNode.Annotations[util.OvnNodeChassisID] != newNode.Annotations[util.OvnNodeChassisID]
 }
 
 // hostCIDRsChanged compares old annotations to new and returns true if the something has changed.
 func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
-	oldAddrs, _ := util.ParseNodeHostCIDRs(oldNode)
-	Addrs, _ := util.ParseNodeHostCIDRs(newNode)
-	return !oldAddrs.Equal(Addrs)
+	return util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 }
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
 func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
-	oldMacAddress, _ := util.ParseNodeManagementPortMACAddresses(oldNode, netName)
-	macAddress, _ := util.ParseNodeManagementPortMACAddresses(node, netName)
-	return !bytes.Equal(oldMacAddress, macAddress)
+	var oldMacAddress, newMacAddress map[string]json.RawMessage
+
+	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OvnNodeManagementPortMacAddresses]), &oldMacAddress); err != nil {
+		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
+		return true
+	}
+	if err := json.Unmarshal([]byte(node.Annotations[util.OvnNodeManagementPortMacAddresses]), &newMacAddress); err != nil {
+		klog.Errorf("Failed to unmarshal new node %s annotation: %v", node.Name, err)
+		return true
+	}
+	return !bytes.Equal(oldMacAddress[netName], newMacAddress[netName])
 }
 
 func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
-	return !reflect.DeepEqual(oldSubnets, newSubnets)
+	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, node, netName)
 }
 
 func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {
-	oldSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(oldNode, netName)
-	newSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(node, netName)
-	return !reflect.DeepEqual(oldSubnets, newSubnets)
+	var oldCIDRs, newCIDRs map[string]json.RawMessage
+
+	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OVNNodeGRLRPAddrs]), &oldCIDRs); err != nil {
+		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
+		return true
+	}
+	if err := json.Unmarshal([]byte(node.Annotations[util.OVNNodeGRLRPAddrs]), &newCIDRs); err != nil {
+		klog.Errorf("Failed to unmarshal new node %s annotation: %v", node.Name, err)
+		return true
+	}
+	return !bytes.Equal(oldCIDRs[netName], newCIDRs[netName])
 }
 
 func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {
@@ -444,14 +455,12 @@ func primaryAddrChanged(oldNode, newNode *kapi.Node) bool {
 }
 
 func nodeChassisChanged(oldNode, node *kapi.Node) bool {
-	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
-	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
-	return oldChassis != newChassis
+	return util.NodeChassisIDAnnotationChanged(oldNode, node)
 }
 
 // nodeGatewayMTUSupportChanged returns true if annotation "k8s.ovn.org/gateway-mtu-support" on the node was updated.
 func nodeGatewayMTUSupportChanged(oldNode, node *kapi.Node) bool {
-	return util.ParseNodeGatewayMTUSupport(oldNode) != util.ParseNodeGatewayMTUSupport(node)
+	return oldNode.Annotations[util.OvnNodeGatewayMtuSupport] != node.Annotations[util.OvnNodeGatewayMtuSupport]
 }
 
 // shouldUpdateNode() determines if the ovn-kubernetes plugin should update the state of the node.
@@ -469,17 +478,14 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 }
 
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the
-		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
-		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
-		}
-	}()
+	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
+	// use 5 workers like most of the kubernetes controllers in the
+	// kubernetes controller-manager
+	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, oc.svcTemplateSupport)
+	if err != nil {
+
+		return fmt.Errorf("error running OVN Kubernetes Services controller: %v", err)
+	}
 	return nil
 }
 
@@ -487,14 +493,13 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
 	initClusterEgressPolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, ni util.NetInfo,
-		clusterSubnets []*net.IPNet, controllerName string) error {
+		clusterSubnets []*net.IPNet, controllerName, routerName string) error {
 		return nil
 	}
 	ensureNodeNoReroutePolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 		network, router, controller string, nodeLister listers.NodeLister, v4, v6 bool) error {
 		return nil
 	}
-	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string, string) error { return nil }
 	// used only when IC=true
 	createDefaultNodeRouteToExternal := func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error {
 		return nil
@@ -503,12 +508,11 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
 		ensureNodeNoReroutePolicies = ensureDefaultNoRerouteNodePolicies
-		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
 	return egresssvc_zone.NewController(oc.GetNetInfo(), DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
-		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
+		initClusterEgressPolicies, ensureNodeNoReroutePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),

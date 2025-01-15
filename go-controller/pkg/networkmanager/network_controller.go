@@ -36,12 +36,16 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 		networkControllers: map[string]*networkControllerState{},
 	}
 
+	threadiness := 1
+	//if node != "" {
+	//	threadiness = 4
+	//}
 	// this controller does not feed from an informer, networks are manually
 	// added to the queue for processing
 	networkConfig := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.syncNetwork,
-		Threadiness: 1,
+		Threadiness: threadiness,
 	}
 	nc.networkReconciler = controller.NewReconciler(
 		nc.name,
@@ -301,6 +305,13 @@ func (c *networkController) syncNetwork(network string) error {
 		return nil
 	}
 
+	// inform controller manager of upcoming changes so other controllers are
+	// aware
+	err = c.cm.Reconcile(network, have, want)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile controller manager for network %s: %w", network, err)
+	}
+
 	// ensure the network controller
 	err = c.ensureNetwork(want)
 	if err != nil {
@@ -322,7 +333,7 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	if reconcilable != nil {
 		err := reconcilable.Reconcile(network)
 		if err != nil {
-			return fmt.Errorf("failed to reconcile network %s: %w", networkName, err)
+			return fmt.Errorf("failed to reconcile controller for network %s: %w", networkName, err)
 		}
 		return nil
 	}
@@ -520,4 +531,16 @@ func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 	}
 
 	return !reflect.DeepEqual(oldNode.Labels, newNode.Labels) || oldNode.Annotations[util.OvnNodeZoneName] != newNode.Annotations[util.OvnNodeZoneName]
+}
+
+func (c *networkController) getRunningNetwork(id int) string {
+	if id == DefaultNetworkID {
+		return types.DefaultNetworkName
+	}
+	for _, state := range c.getAllNetworkStates() {
+		if state.controller.GetNetworkID() == id {
+			return state.controller.GetNetworkName()
+		}
+	}
+	return ""
 }

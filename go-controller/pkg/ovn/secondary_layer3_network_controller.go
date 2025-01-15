@@ -42,6 +42,10 @@ type secondaryLayer3NetworkControllerEventHandler struct {
 	syncFunc     func([]interface{}) error
 }
 
+func (h *secondaryLayer3NetworkControllerEventHandler) FilterResource(obj interface{}) bool {
+	return h.oc.FilterResource(h.objType, obj)
+}
+
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
@@ -320,29 +324,8 @@ func NewSecondaryLayer3NetworkController(
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
-	var zoneICHandler *zoneic.ZoneInterconnectHandler
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
-	}
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
-
-	var svcController *svccontroller.Controller
-	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
-		var err error
-		svcController, err = svccontroller.NewController(
-			cnci.client, cnci.nbClient,
-			cnci.watchFactory.ServiceCoreInformer(),
-			cnci.watchFactory.EndpointSliceCoreInformer(),
-			cnci.watchFactory.NodeCoreInformer(),
-			networkManager,
-			cnci.recorder,
-			netInfo,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
-		}
-	}
 
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
@@ -361,7 +344,6 @@ func NewSecondaryLayer3NetworkController(
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 				localZoneNodes:              &sync.Map{},
-				zoneICHandler:               zoneICHandler,
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
 			},
@@ -373,13 +355,32 @@ func NewSecondaryLayer3NetworkController(
 		gatewaysFailed:              sync.Map{},
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 		gatewayManagers:             sync.Map{},
-		svcController:               svcController,
 		eIPController:               eIPController,
+	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		oc.zoneICHandler = zoneic.NewZoneInterconnectHandler(oc.GetNetInfo(), cnci.nbClient, cnci.sbClient, cnci.watchFactory)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
+		var err error
+		oc.svcController, err = svccontroller.NewController(
+			cnci.client, cnci.nbClient,
+			cnci.watchFactory.ServiceCoreInformer(),
+			cnci.watchFactory.EndpointSliceCoreInformer(),
+			cnci.watchFactory.NodeCoreInformer(),
+			networkManager,
+			cnci.recorder,
+			oc.GetNetInfo(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
+		}
 	}
 
 	if oc.allocatesPodAnnotation() {
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
-			netInfo,
+			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
 			nil)
@@ -764,11 +765,11 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if err = oc.eIPController.ensureL3ClusterRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
-			errs = append(errs, fmt.Errorf("failed to add network %s to EgressIP controller: %v", oc.GetNetworkName(), err))
+		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP router polices for network %s: %v", oc.GetNetworkName(), err))
 		}
-		if err = oc.eIPController.ensureL3SwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
-			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies: %v", err))
+		if err = oc.eIPController.ensureSwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
+			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies for network %s: %v", oc.GetNetworkName(), err))
 		}
 	}
 
@@ -1075,16 +1076,12 @@ func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName strin
 }
 
 func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
-		// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, false)
-		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
-		}
-	}()
+	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
+	// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
+	// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
+	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, false)
+	if err != nil {
+		return fmt.Errorf("error running OVN Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+	}
 	return nil
 }

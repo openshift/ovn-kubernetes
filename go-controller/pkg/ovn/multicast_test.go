@@ -259,11 +259,11 @@ func getNodeData(netInfo util.NetInfo, nodeName string) []libovsdb.TestData {
 	}
 }
 
-func newNodeWithNad(nad *nadapi.NetworkAttachmentDefinition, networkName string) *v1.Node {
+func newNodeWithNad(nad *nadapi.NetworkAttachmentDefinition, networkName, networkID string) *v1.Node {
 	n := newNode(nodeName, "192.168.126.202/24")
 	if nad != nil {
 		n.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf("{\"default\":\"192.168.126.202/24\", \"%s\":\"192.168.127.202/24\"}", networkName)
-		n.Annotations["k8s.ovn.org/network-ids"] = fmt.Sprintf("{\"default\":\"0\",\"%s\":\"50\"}", networkName)
+		n.Annotations["k8s.ovn.org/network-ids"] = fmt.Sprintf("{\"default\":\"0\",\"%s\":\"%s\"}", networkName, networkID)
 		n.Annotations["k8s.ovn.org/node-mgmt-port-mac-addresses"] = fmt.Sprintf("{\"default\":\"96:8f:e8:25:a2:e5\",\"%s\":\"d6:bc:85:32:30:fb\"}", networkName)
 		n.Annotations["k8s.ovn.org/node-chassis-id"] = "abdcef"
 		n.Annotations["k8s.ovn.org/l3-gateway-config"] = "{\"default\":{\"mac-address\":\"52:54:00:e2:ed:d0\",\"ip-addresses\":[\"10.1.1.10/24\"],\"ip-address\":\"10.1.1.10/24\",\"next-hops\":[\"10.1.1.1\"],\"next-hop\":\"10.1.1.1\"}}"
@@ -332,7 +332,9 @@ func startBaseNetworkController(fakeOvn *FakeOVN, nad *nadapi.NetworkAttachmentD
 
 var _ = Describe("OVN Multicast with IP Address Family", func() {
 	const (
-		namespaceName1 = "namespace1"
+		namespaceName1         = "namespace1"
+		longnamespaceName1Name = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk" // create with 63 characters
+
 	)
 
 	var (
@@ -341,18 +343,22 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		gomegaFormatMaxLength int
 		networkName           = "bluenet"
 		nadName               = "rednad"
+		networkID             = "50"
 
-		nadFromIPMode = func(useIPv4, useIPv6 bool) *nadapi.NetworkAttachmentDefinition {
+		nadFromIPMode = func(namespace string, useIPv4, useIPv6 bool) *nadapi.NetworkAttachmentDefinition {
+			var nad *nadapi.NetworkAttachmentDefinition
 			if useIPv4 && useIPv6 {
-				return ovntest.GenerateNAD(networkName, nadName, namespaceName1,
+				nad = ovntest.GenerateNAD(networkName, nadName, namespace,
 					types.Layer3Topology, "100.128.0.0/16,ae70::66/60", types.NetworkRolePrimary)
 			} else if useIPv4 {
-				return ovntest.GenerateNAD(networkName, nadName, namespaceName1,
+				nad = ovntest.GenerateNAD(networkName, nadName, namespace,
 					types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
 			} else {
-				return ovntest.GenerateNAD(networkName, nadName, namespaceName1,
+				nad = ovntest.GenerateNAD(networkName, nadName, namespace,
 					types.Layer3Topology, "ae70::66/60", types.NetworkRolePrimary)
 			}
+			nad.Annotations = map[string]string{types.OvnNetworkIDAnnotation: networkID}
+			return nad
 		}
 	)
 
@@ -413,8 +419,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 
 		DescribeTable("updates stale default Multicast ACLs", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -445,8 +451,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 
 		DescribeTable("cleans up Multicast resources when multicast is disabled", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -492,8 +498,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 
 		DescribeTable("creates namespace Multicast ACLs", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -508,13 +514,22 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				// namespace exists, but multicast acls do not
 				namespace1 := *newNamespace(namespaceName1)
 				namespace1.Annotations[util.NsMulticastAnnotation] = "true"
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
+
+				objs := []runtime.Object{&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespace1,
 					},
-				)
+				}}
+				if nad != nil {
+					objs = append(objs, &nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					})
+				}
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData}, objs...)
+				if nad != nil {
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
+				}
 				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
@@ -528,8 +543,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 
 		DescribeTable("updates stale namespace Multicast ACLs", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -545,13 +560,22 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				expectedData = append(expectedData, getMulticastPolicyStaleData(netInfo, namespaceName1, nil)...)
 				namespace1 := *newNamespace(namespaceName1)
 				namespace1.Annotations[util.NsMulticastAnnotation] = "true"
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
+
+				objs := []runtime.Object{&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespace1,
 					},
-				)
+				}}
+				if nad != nil {
+					objs = append(objs, &nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					})
+				}
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: expectedData}, objs...)
+				if nad != nil {
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
+				}
 				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
@@ -566,8 +590,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 
 		DescribeTable("cleans up namespace Multicast ACLs when multicast is disabled for namespace", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -583,13 +607,21 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				namespaceMulticastData := getMulticastPolicyExpectedData(netInfo, namespaceName1, nil)
 				namespace1 := *newNamespace(namespaceName1)
 
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: append(defaultMulticastData, namespaceMulticastData...)},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
+				objs := []runtime.Object{&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespace1,
 					},
-				)
+				}}
+				if nad != nil {
+					objs = append(objs, &nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					})
+				}
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: append(defaultMulticastData, namespaceMulticastData...)}, objs...)
+				if nad != nil {
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
+				}
 				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
@@ -605,8 +637,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 	})
 
@@ -618,13 +650,24 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 
 				netInfo := getNetInfoFromNAD(nad)
 				namespace1 := *newNamespace(namespaceName1)
-				fakeOvn.startWithDBSetup(libovsdb.TestSetup{},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
+
+				objs := []runtime.Object{&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespace1,
 					},
-				)
+				}}
+				if nad != nil {
+					objs = append(objs, &nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					})
+				}
+
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{}, objs...)
+
+				if nad != nil {
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
+				}
 
 				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 				Expect(bnc.WatchNamespaces()).To(Succeed())
@@ -656,8 +699,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 
 		DescribeTable("tests enabling multicast in a namespace with a pod", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -666,8 +709,11 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				config.IPv6Mode = useIPv6
 
 				netInfo := getNetInfoFromNAD(nad)
-				node := newNodeWithNad(nad, networkName)
+				node := newNodeWithNad(nad, networkName, networkID)
 				namespace1 := *newNamespace(namespaceName1)
+				if nad != nil {
+					namespace1 = *newUDNNamespace(namespaceName1)
+				}
 				pods, tPods, tPodIPs := createTestPods(nodeName, namespaceName1, useIPv4, useIPv6)
 
 				objs := []runtime.Object{
@@ -727,8 +773,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 
 		DescribeTable("tests enabling multicast in multiple namespaces with a long name > 42 characters", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -737,11 +783,10 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				config.IPv6Mode = useIPv6
 
 				netInfo := getNetInfoFromNAD(nad)
-				longNameSpace1Name := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk" // create with 63 characters
-				namespace1 := *newNamespace(longNameSpace1Name)
+				namespace1 := *newNamespace(longnamespaceName1Name)
 				longNameSpace2Name := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijl" // create with 63 characters
 				namespace2 := *newNamespace(longNameSpace2Name)
-				node := newNodeWithNad(nad, networkName)
+				node := newNodeWithNad(nad, networkName, networkID)
 
 				objs := []runtime.Object{
 					&v1.NamespaceList{
@@ -780,17 +825,22 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				Expect(ns2).NotTo(BeNil())
 
 				portsns1 := []string{}
-				expectedData := getMulticastPolicyExpectedData(netInfo, longNameSpace1Name, portsns1)
+				expectedData := getMulticastPolicyExpectedData(netInfo, longnamespaceName1Name, portsns1)
 				acl := expectedData[0].(*nbdb.ACL)
 				// Post ACL indexing work, multicast ACL's don't have names
 				// We use externalIDs instead; so we can check if the expected IDs exist for the long namespace so that
 				// isEquivalent logic will be correct
 				Expect(acl.Name).To(BeNil())
-				Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(Equal(longNameSpace1Name))
-				expectedData = append(expectedData, getMulticastPolicyExpectedData(netInfo, longNameSpace2Name, nil)...)
-				acl = expectedData[3].(*nbdb.ACL)
-				Expect(acl.Name).To(BeNil())
-				Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(Equal(longNameSpace2Name))
+				Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(Equal(longnamespaceName1Name))
+
+				// the NAD is configured in longnamespaceName1Name so there should be any entries for
+				// longNameSpace2Name
+				if nad == nil {
+					expectedData = append(expectedData, getMulticastPolicyExpectedData(netInfo, longNameSpace2Name, nil)...)
+					acl = expectedData[3].(*nbdb.ACL)
+					Expect(acl.Name).To(BeNil())
+					Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(Equal(longNameSpace2Name))
+				}
 				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), []testPod{}, []string{node.Name})...)
 				// Enable multicast in the namespace.
 				updateMulticast(fakeOvn, ns1, true)
@@ -805,8 +855,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(longnamespaceName1Name, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(longnamespaceName1Name, false, true)),
 		)
 
 		DescribeTable("tests adding a pod to a multicast enabled namespace", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
@@ -816,7 +866,10 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 
 				netInfo := getNetInfoFromNAD(nad)
 				namespace1 := *newNamespace(namespaceName1)
-				node := newNodeWithNad(nad, networkName)
+				if nad != nil {
+					namespace1 = *newUDNNamespace(namespaceName1)
+				}
+				node := newNodeWithNad(nad, networkName, networkID)
 				_, tPods, tPodIPs := createTestPods(nodeName, namespaceName1, useIPv4, useIPv6)
 
 				ports := []string{}
@@ -897,8 +950,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		},
 			Entry("IPv4", true, false, nil),
 			Entry("IPv6", false, true, nil),
-			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(true, false)),
-			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(false, true)),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
 		)
 	})
 })

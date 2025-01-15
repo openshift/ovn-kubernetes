@@ -196,6 +196,40 @@ func (oc *BaseSecondaryNetworkController) Reconcile(netInfo util.NetInfo) error 
 	return util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
 }
 
+func (oc *BaseSecondaryNetworkController) FilterResource(objType reflect.Type, obj interface{}) bool {
+	if !oc.IsPrimaryNetwork() {
+		return true
+	}
+	switch objType {
+	case factory.NamespaceType:
+		ns, ok := obj.(*kapi.Namespace)
+		if !ok {
+			klog.Errorf("Failed to cast the provided object to a namespace")
+			return false
+		}
+		namespaceNet, err := oc.networkManager.GetActiveNetworkForNamespace(ns.Name)
+		if err != nil {
+			klog.Errorf("No active network for %q namespace: %v", ns.Name, err)
+			return false
+		}
+		return namespaceNet.GetNetworkName() == oc.GetNetworkName()
+	case factory.PodType:
+		pod, ok := obj.(*kapi.Pod)
+		if !ok {
+			klog.Errorf("Failed to cast the provided object to a pod")
+			return false
+		}
+		namespaceNet, err := oc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			klog.Errorf("No active network for %s/%s pod: %v", pod.Namespace, pod.Name, err)
+			return false
+		}
+		return namespaceNet.GetNetworkName() == oc.GetNetworkName()
+	default:
+		return true
+	}
+}
+
 func getNetworkControllerName(netName string) string {
 	return netName + "-network-controller"
 }

@@ -22,6 +22,10 @@ type gwEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
+func (h *gwEventHandler) FilterResource(obj interface{}) bool {
+	return true
+}
+
 // Create a retry framework for the service and endpointslice controller in gateway.go
 func (g *gateway) newRetryFrameworkNodeWithParameters(
 	objectType reflect.Type,

@@ -3,6 +3,9 @@ package node
 import (
 	"fmt"
 	"net"
+	"reflect"
+	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -199,6 +203,38 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 	return na.syncNodeNetworkAnnotations(node)
 }
 
+type StringLocker struct {
+	mu sync.Mutex
+	m  map[string]*sync.Mutex
+}
+
+func NewStringLocker() *StringLocker {
+	return &StringLocker{
+		m: make(map[string]*sync.Mutex),
+	}
+}
+
+func (sl *StringLocker) Lock(key string) {
+	sl.mu.Lock()
+	if _, exists := sl.m[key]; !exists {
+		sl.m[key] = &sync.Mutex{}
+	}
+	lock := sl.m[key]
+	sl.mu.Unlock()
+
+	lock.Lock()
+}
+
+func (sl *StringLocker) Unlock(key string) {
+	sl.mu.Lock()
+	if lock, exists := sl.m[key]; exists {
+		lock.Unlock()
+	}
+	sl.mu.Unlock()
+}
+
+var stringLocker = NewStringLocker()
+
 // syncNodeNetworkAnnotations does 2 things
 //   - syncs the node's allocated subnets in the node subnet annotation
 //   - syncs the network id in the node network id annotation
@@ -302,6 +338,10 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 
 	// Also update the node annotation if the networkID doesn't match
 	if len(updatedSubnetsMap) > 0 || na.networkID != networkID || len(allocatedJoinSubnets) > 0 || newTunnelID != util.NoID {
+		//t := time.Now()
+		//stringLocker.Lock(node.Name)
+		//klog.Infof("PADI: lock took %s", time.Since(t))
+		//defer stringLocker.Unlock(node.Name)
 		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, na.networkID, newTunnelID, allocatedJoinSubnets)
 		if err != nil {
 			if errR := na.clusterSubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); errR != nil {
@@ -334,6 +374,7 @@ func (na *NodeAllocator) HandleDeleteNode(node *corev1.Node) error {
 }
 
 func (na *NodeAllocator) Sync(nodes []interface{}) error {
+	start := time.Now()
 	if !na.hasNodeSubnetAllocation() {
 		return nil
 	}
@@ -341,6 +382,7 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 	defer na.recordSubnetUsage()
 
 	networkName := na.netInfo.GetNetworkName()
+	defer func() { klog.Infof("PADI: Running na.Sync for %s took %s", networkName, time.Since(start)) }()
 
 	for _, tmp := range nodes {
 		node, ok := tmp.(*corev1.Node)
@@ -419,6 +461,11 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 		}
 		// It is possible to update the node annotations using status subresource
 		// because changes to metadata via status subresource are not restricted for nodes.
+		if reflect.DeepEqual(node.Annotations, cnode.Annotations) {
+			klog.Infof("PADI: NOT updating network %s node status %s", na.netInfo.GetNetworkName(), cnode.Name)
+			return nil
+		}
+		//klog.Infof("PADI: network %s node status %s", na.netInfo.GetNetworkName(), cnode.Name)
 		return na.kube.UpdateNodeStatus(cnode)
 	})
 	if resultErr != nil {

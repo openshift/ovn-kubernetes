@@ -864,6 +864,10 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 
 func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
 	if oc.networkID == nil || *oc.networkID == util.InvalidID {
+		if oc.GetNetworkID() != util.InvalidID {
+			oc.networkID = ptr.To(oc.GetNetworkID())
+			return *oc.networkID, nil
+		}
 		oc.networkID = ptr.To(util.InvalidID)
 		nodes, err := oc.watchFactory.GetNodes()
 		if err != nil {
