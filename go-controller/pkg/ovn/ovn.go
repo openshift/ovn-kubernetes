@@ -469,17 +469,14 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 }
 
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-		// use 5 workers like most of the kubernetes controllers in the
-		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups, oc.svcTemplateSupport)
-		if err != nil {
-			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
-		}
-	}()
+	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
+	// use 5 workers like most of the kubernetes controllers in the
+	// kubernetes controller-manager
+	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, oc.svcTemplateSupport)
+	if err != nil {
+
+		return fmt.Errorf("error running OVN Kubernetes Services controller: %v", err)
+	}
 	return nil
 }
 
@@ -487,14 +484,13 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
 	initClusterEgressPolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, ni util.NetInfo,
-		clusterSubnets []*net.IPNet, controllerName string) error {
+		clusterSubnets []*net.IPNet, controllerName, routerName string) error {
 		return nil
 	}
 	ensureNodeNoReroutePolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 		network, router, controller string, nodeLister listers.NodeLister, v4, v6 bool) error {
 		return nil
 	}
-	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string, string) error { return nil }
 	// used only when IC=true
 	createDefaultNodeRouteToExternal := func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error {
 		return nil
@@ -503,12 +499,11 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
 		ensureNodeNoReroutePolicies = ensureDefaultNoRerouteNodePolicies
-		deleteLegacyDefaultNoRerouteNodePolicies = DeleteLegacyDefaultNoRerouteNodePolicies
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
 	return egresssvc_zone.NewController(oc.GetNetInfo(), DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
-		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
+		initClusterEgressPolicies, ensureNodeNoReroutePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),
