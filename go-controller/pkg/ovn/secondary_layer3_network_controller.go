@@ -798,7 +798,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.
 	var err error
 	if syncZoneIc && config.OVNKubernetesFeature.EnableInterconnect {
 		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
-			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %v", node.Name, err)
+			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %w", node.Name, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)
