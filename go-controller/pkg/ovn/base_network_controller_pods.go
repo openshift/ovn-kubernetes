@@ -931,8 +931,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 	if !bnc.allocatesPodAnnotation() {
 		podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 		if !util.IsValidPodAnnotation(podAnnotation) {
-			return nil, false, fmt.Errorf("failed to get PodAnnotation for %s/%s/%s, cluster manager might have not allocated it yet",
-				nadName, pod.Namespace, pod.Name)
+			return nil, false, ovntypes.NewSuppressedError(fmt.Errorf(
+				"failed to get PodAnnotation for %s/%s/%s, cluster manager might have not allocated it yet",
+				nadName, pod.Namespace, pod.Name))
 		}
 
 		return podAnnotation, false, nil
