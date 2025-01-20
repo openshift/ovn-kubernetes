@@ -3169,8 +3169,9 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 		Direction: nbdb.QoSDirectionFromLport,
 	}
 	if isIPv4Mode {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv4EgressIPServedPodsAS == "" {
-			return nil, nil, fmt.Errorf("failed to fetch IPv4 address set %s hash names", EgressIPServedPodsAddrSetName)
+			return nil, nil, types.NewSuppressedError(fmt.Errorf("failed to fetch IPv4 address set %s hash names", EgressIPServedPodsAddrSetName))
 		}
 		qosV4Rule := qosRule
 		qosV4Rule.Match = fmt.Sprintf(`ip4.src == $%s && ct.trk && ct.rpl`, ipv4EgressIPServedPodsAS)
@@ -3182,8 +3183,9 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 		qoses = append(qoses, &qosV4Rule)
 	}
 	if isIPv6Mode {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv6EgressIPServedPodsAS == "" {
-			return nil, nil, fmt.Errorf("failed to fetch IPv6 address set %s hash names", EgressIPServedPodsAddrSetName)
+			return nil, nil, types.NewSuppressedError(fmt.Errorf("failed to fetch IPv6 address set %s hash names", EgressIPServedPodsAddrSetName))
 		}
 		qosV6Rule := qosRule
 		qosV6Rule.Match = fmt.Sprintf(`ip6.src == $%s && ct.trk && ct.rpl`, ipv6EgressIPServedPodsAS)
@@ -3386,15 +3388,17 @@ func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 	var matchV4, matchV6 string
 	// construct the policy match
 	if len(v4NodeAddrs) > 0 {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv4EgressIPServedPodsAS == "" || ipv4EgressServiceServedPodsAS == "" || ipv4ClusterNodeIPAS == "" {
-			return fmt.Errorf("address set name(s) %s not found %q %q %q", as.GetName(), ipv4EgressServiceServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS)
+			return types.NewSuppressedError(fmt.Errorf("address set name(s) %s not found %q %q %q", as.GetName(), ipv4EgressServiceServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS))
 		}
 		matchV4 = fmt.Sprintf(`(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s`,
 			ipv4EgressIPServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS)
 	}
 	if len(v6NodeAddrs) > 0 {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv6EgressIPServedPodsAS == "" || ipv6EgressServiceServedPodsAS == "" || ipv6ClusterNodeIPAS == "" {
-			return fmt.Errorf("address set hash name(s) %s not found", as.GetName())
+			return types.NewSuppressedError(fmt.Errorf("address set hash name(s) %s not found", as.GetName()))
 		}
 		matchV6 = fmt.Sprintf(`(ip6.src == $%s || ip6.src == $%s) && ip6.dst == $%s`,
 			ipv6EgressIPServedPodsAS, ipv6EgressServiceServedPodsAS, ipv6ClusterNodeIPAS)
@@ -3600,14 +3604,17 @@ func ensureDefaultNoRerouteUDNEnabledSvcPolicies(nbClient libovsdbclient.Client,
 	if err != nil {
 		return fmt.Errorf("failed to retrieve UDN enabled service address set from NB DB: %v", err)
 	}
-
+	// if address set hash name is empty, the address set has yet to be created
+	if (v4 && ipv4UDNEnabledSvcAS == "") || (v6 && ipv6UDNEnabledSvcAS == "") {
+		return types.NewSuppressedError(fmt.Errorf("failed to retrieve UDN enabled service address set"))
+	}
 	var matchV4, matchV6 string
 	// construct the policy match
-	if v4 && ipv4UDNEnabledSvcAS != "" {
+	if v4 {
 		matchV4 = fmt.Sprintf(`(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s`,
 			ipv4EgressIPServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4UDNEnabledSvcAS)
 	}
-	if v6 && ipv6UDNEnabledSvcAS != "" {
+	if v6 {
 		if ipv6EgressIPServedPodsAS == "" || ipv6EgressServiceServedPodsAS == "" || ipv6UDNEnabledSvcAS == "" {
 			return fmt.Errorf("address set hash name(s) %s not found", as.GetName())
 		}
