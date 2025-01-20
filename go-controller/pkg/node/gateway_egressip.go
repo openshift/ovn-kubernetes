@@ -518,7 +518,7 @@ func getEIPBridgeNetlinkAddress(ip net.IP, ifindex int) netlink.Addr {
 	return netlink.Addr{
 		IPNet:     &net.IPNet{IP: ip, Mask: util.GetIPFullMask(ip)},
 		Flags:     getEIPNetlinkAddressFlag(ip),
-		Scope:     int(netlink.SCOPE_LINK),
+		Scope:     int(netlink.SCOPE_UNIVERSE),
 		ValidLft:  getEIPNetlinkAddressValidLft(ip),
 		LinkIndex: ifindex,
 	}
