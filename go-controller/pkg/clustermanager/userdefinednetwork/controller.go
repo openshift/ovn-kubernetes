@@ -253,14 +253,18 @@ func (c *Controller) ReconcileNetAttachDef(key string) error {
 
 // ReconcileNamespace enqueue relevant Cluster UDN CR requests following namespace events.
 func (c *Controller) ReconcileNamespace(key string) error {
-	c.namespaceTrackerLock.RLock()
-	defer c.namespaceTrackerLock.RUnlock()
-
 	namespace, err := c.namespaceInformer.Lister().Get(key)
 	if err != nil {
-		return fmt.Errorf("failed to get namespace %q from cahce: %w", key, err)
+		// Ignore removed namespaces
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get namespace %q from cache: %w", key, err)
 	}
 	namespaceLabels := labels.Set(namespace.Labels)
+
+	c.namespaceTrackerLock.RLock()
+	defer c.namespaceTrackerLock.RUnlock()
 
 	for cudnName, affectedNamespaces := range c.namespaceTracker {
 		affectedNamespace := affectedNamespaces.Has(key)
