@@ -6,21 +6,24 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -676,7 +679,7 @@ var _ = Describe("Network Segmentation", func() {
 				udnManifest := generateUserDefinedNetworkManifest(c)
 				cleanup, err := createManifest(c.namespace, udnManifest)
 				DeferCleanup(cleanup)
-				Expect(waitForUserDefinedNetworkReady(c.namespace, c.name, 5*time.Second)).To(Succeed())
+				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, c.namespace, c.name), 5*time.Second, time.Second).Should(Succeed())
 				return err
 			}),
 			Entry("ClusterUserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
@@ -691,7 +694,7 @@ var _ = Describe("Network Segmentation", func() {
 					_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", cudnName, "--wait", fmt.Sprintf("--timeout=%ds", 120))
 					Expect(err).NotTo(HaveOccurred())
 				})
-				Expect(waitForClusterUserDefinedNetworkReady(c.name, 5*time.Second)).To(Succeed())
+				Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, c.name), 5*time.Second, time.Second).Should(Succeed())
 				return err
 			}),
 		)
@@ -802,7 +805,7 @@ var _ = Describe("Network Segmentation", func() {
 				cleanup, err := createManifest(defaultNetNamespace.Name, newPrimaryUserDefinedNetworkManifest(testUdnName))
 				DeferCleanup(cleanup)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(waitForUserDefinedNetworkReady(defaultNetNamespace.Name, testUdnName, 5*time.Second)).To(Not(Succeed()))
+				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, defaultNetNamespace.Name, testUdnName), 5*time.Second).Should(Not(Succeed()))
 			})
 
 			It("should be able to create pod and it will attach to the cluster default network", func() {
@@ -851,7 +854,7 @@ var _ = Describe("Network Segmentation", func() {
 				cleanup, err := createManifest(defaultNetNamespace.Name, newL2SecondaryUDNManifest(testUdnName))
 				DeferCleanup(cleanup)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(waitForUserDefinedNetworkReady(defaultNetNamespace.Name, testUdnName, 5*time.Second)).To(Succeed())
+				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, defaultNetNamespace.Name, testUdnName), 5*time.Second, time.Second).Should(Succeed())
 			})
 
 			It("should create NetworkAttachmentDefinition according to spec", func() {
@@ -914,7 +917,8 @@ var _ = Describe("Network Segmentation", func() {
 						"should fail to delete UserDefinedNetwork associated NetworkAttachmentDefinition when used")
 
 					By("verify UserDefinedNetwork status reports consuming pod")
-					assertUDNStatusReportsConsumers(defaultNetNamespace.Name, testUdnName, testPodName)
+					err = validateUDNStatusReportsConsumers(f.DynamicClient, defaultNetNamespace.Name, testUdnName, testPodName)
+					Expect(err).ToNot(HaveOccurred())
 
 					By("delete test pod")
 					err = cs.CoreV1().Pods(defaultNetNamespace.Name).Delete(context.Background(), testPodName, metav1.DeleteOptions{})
@@ -961,7 +965,7 @@ spec:
 			cleanup, err := createManifest(f.Namespace.Name, udnManifest)
 			defer cleanup()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, testUdnName, 5*time.Second)).To(Succeed())
+			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, testUdnName), 5*time.Second, time.Second).Should(Succeed())
 
 			conditionsJSON, err := e2ekubectl.RunKubectl(f.Namespace.Name, "get", "userdefinednetwork", testUdnName, "-o", "jsonpath={.status.conditions}")
 			Expect(err).NotTo(HaveOccurred())
@@ -1094,11 +1098,13 @@ spec:
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(waitForClusterUserDefinedNetworkReady(testClusterUdnName, 5*time.Second)).To(Succeed())
+			Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, testClusterUdnName), 5*time.Second, time.Second).Should(Succeed())
 		})
 
 		It("should create NAD according to spec in each target namespace and report active namespaces", func() {
-			assertClusterUDNStatusReportsActiveNamespaces(testClusterUdnName, testTenantNamespaces...)
+			Eventually(
+				validateClusterUDNStatusReportsActiveNamespacesFunc(f.DynamicClient, testClusterUdnName, testTenantNamespaces...),
+				1*time.Minute, 3*time.Second).Should(Succeed())
 
 			udnUidRaw, err := e2ekubectl.RunKubectl("", "get", clusterUserDefinedNetworkResource, testClusterUdnName, "-o", "jsonpath='{.metadata.uid}'")
 			Expect(err).NotTo(HaveOccurred(), "should get the ClsuterUserDefinedNetwork UID")
@@ -1132,8 +1138,9 @@ spec:
 			patch := fmt.Sprintf(`[{"op": "add", "path": "./spec/namespaceSelector/matchExpressions/0/values/-", "value": "%s"}]`, testNewNs)
 			_, err := e2ekubectl.RunKubectl("", "patch", clusterUserDefinedNetworkResource, testClusterUdnName, "--type=json", "-p="+patch)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(waitForClusterUserDefinedNetworkReady(testClusterUdnName, 5*time.Second)).To(Succeed())
-			assertClusterUDNStatusReportsActiveNamespaces(testClusterUdnName, testTenantNamespaces...)
+			Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, testClusterUdnName), 5*time.Second, time.Second).Should(Succeed())
+			err = validateClusterUDNStatusReportsActiveNamespacesFunc(f.DynamicClient, testClusterUdnName, testTenantNamespaces...)()
+			Expect(err).NotTo(HaveOccurred())
 
 			By("create the new target namespace")
 			_, err = cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
@@ -1148,7 +1155,9 @@ spec:
 			})
 
 			expectedActiveNamespaces := append(testTenantNamespaces, testNewNs)
-			assertClusterUDNStatusReportsActiveNamespaces(testClusterUdnName, expectedActiveNamespaces...)
+			Eventually(
+				validateClusterUDNStatusReportsActiveNamespacesFunc(f.DynamicClient, testClusterUdnName, expectedActiveNamespaces...),
+				1*time.Minute, 3*time.Second).Should(Succeed())
 
 			udnUidRaw, err := e2ekubectl.RunKubectl("", "get", clusterUserDefinedNetworkResource, testClusterUdnName, "-o", "jsonpath='{.metadata.uid}'")
 			Expect(err).NotTo(HaveOccurred(), "should get the ClusterUserDefinedNetwork UID")
@@ -1181,8 +1190,9 @@ spec:
 
 				By("verify status reports the new added namespace as active")
 				expectedActiveNs := append(testTenantNamespaces, testNewNs)
-				assertClusterUDNStatusReportsActiveNamespaces(testClusterUdnName, expectedActiveNs...)
-
+				Eventually(
+					validateClusterUDNStatusReportsActiveNamespacesFunc(f.DynamicClient, testClusterUdnName, expectedActiveNs...),
+					1*time.Minute, 3*time.Second).Should(Succeed())
 				By("verify a NAD is created in new target namespace according to spec")
 				udnUidRaw, err := e2ekubectl.RunKubectl("", "get", clusterUserDefinedNetworkResource, testClusterUdnName, "-o", "jsonpath='{.metadata.uid}'")
 				Expect(err).NotTo(HaveOccurred(), "should get the ClusterUserDefinedNetwork UID")
@@ -1199,7 +1209,9 @@ spec:
 
 				By("verify status reports remained target namespaces only as active")
 				expectedActiveNs := []string{activeTenantNs}
-				assertClusterUDNStatusReportsActiveNamespaces(testClusterUdnName, expectedActiveNs...)
+				Eventually(
+					validateClusterUDNStatusReportsActiveNamespacesFunc(f.DynamicClient, testClusterUdnName, expectedActiveNs...),
+					1*time.Minute, 3*time.Second).Should(Succeed())
 
 				removedTenantNs := testTenantNamespaces[0]
 				By("verify managed NAD not exist in removed target namespace")
@@ -1252,9 +1264,8 @@ spec:
 					"should fail to delete UserDefinedNetwork associated NetworkAttachmentDefinition when used")
 
 				By("verify CR status reports consuming pod")
-				conditionsJSON, err := e2ekubectl.RunKubectl("", "get", clusterUserDefinedNetworkResource, testClusterUdnName, "-o", "jsonpath='{.status.conditions}'")
+				err = validateClusterUDNStatusReportConsumers(f.DynamicClient, testClusterUdnName, inUseNetTestTenantNamespace, testPodName)
 				Expect(err).NotTo(HaveOccurred())
-				assertClusterUDNStatusReportConsumers(conditionsJSON, testClusterUdnName, inUseNetTestTenantNamespace, testPodName)
 
 				By("delete test pod")
 				err = cs.CoreV1().Pods(inUseNetTestTenantNamespace).Delete(context.Background(), testPodName, metav1.DeleteOptions{})
@@ -1429,7 +1440,7 @@ spec:
 				udnManifest := generateUserDefinedNetworkManifest(c)
 				cleanup, err := createManifest(f.Namespace.Name, udnManifest)
 				DeferCleanup(cleanup)
-				Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, c.name, 5*time.Second)).To(Succeed())
+				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, c.name), 5*time.Second, time.Second).Should(Succeed())
 				return err
 			}),
 			Entry("ClusterUserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
@@ -1443,7 +1454,7 @@ spec:
 					_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", c.name, "--wait", fmt.Sprintf("--timeout=%ds", 120))
 					Expect(err).NotTo(HaveOccurred())
 				})
-				Expect(waitForClusterUserDefinedNetworkReady(c.name, 5*time.Second)).To(Succeed())
+				Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, c.name), 5*time.Second, time.Second).Should(Succeed())
 				return err
 			}),
 		)
@@ -1462,7 +1473,7 @@ spec:
 			cleanup, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(testUdnName))
 			DeferCleanup(cleanup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(waitForUserDefinedNetworkReady(f.Namespace.Name, testUdnName, 5*time.Second)).To(Succeed())
+			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, testUdnName), 5*time.Second, time.Second).Should(Succeed())
 			By("create UDN pod")
 			cfg := podConfig(testPodName, withCommand(func() []string {
 				return httpServerContainerCmd(port)
@@ -1603,7 +1614,7 @@ spec:
 				cleanup, err := createManifest(netConfig.namespace, udnManifest)
 				Expect(err).ShouldNot(HaveOccurred(), "creating manifest must succeed")
 				DeferCleanup(cleanup)
-				Expect(waitForUserDefinedNetworkReady(netConfig.namespace, netConfig.name, 5*time.Second)).To(Succeed())
+				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, netConfig.namespace, netConfig.name), 5*time.Second, time.Second).Should(Succeed())
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), f.ClientSet, 2)
 				Expect(err).ShouldNot(HaveOccurred(), "test requires at least two schedulable nodes")
 				Expect(len(nodes.Items)).Should(BeNumerically(">=", 2), "test requires >= 2 Ready nodes")
@@ -1744,14 +1755,50 @@ func generateLayer3Subnets(cidrs string) []string {
 	return subnets
 }
 
-func waitForUserDefinedNetworkReady(namespace, name string, timeout time.Duration) error {
-	_, err := e2ekubectl.RunKubectl(namespace, "wait", "userdefinednetwork", name, "--for", "condition=NetworkCreated=True", "--timeout", timeout.String())
-	return err
+// userDefinedNetworkReadyFunc returns a function that checks for the NetworkCreated condition in the provided udn
+func userDefinedNetworkReadyFunc(client dynamic.Interface, namespace, name string) func() error {
+	return func() error {
+		udn, err := client.Resource(udnGVR).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{}, "status")
+		if err != nil {
+			return err
+		}
+		conditions, err := getConditions(udn)
+		if err != nil {
+			return err
+		}
+		if len(conditions) == 0 {
+			return fmt.Errorf("no conditions found in: %v", udn)
+		}
+		for _, condition := range conditions {
+			if condition.Type == "NetworkCreated" && condition.Status == metav1.ConditionTrue {
+				return nil
+			}
+		}
+		return fmt.Errorf("no NetworkCreated condition found in: %v", udn)
+	}
 }
 
-func waitForClusterUserDefinedNetworkReady(name string, timeout time.Duration) error {
-	_, err := e2ekubectl.RunKubectl("", "wait", "clusteruserdefinednetwork", name, "--for", "condition=NetworkCreated=True", "--timeout", timeout.String())
-	return err
+// userDefinedNetworkReadyFunc returns a function that checks for the NetworkCreated condition in the provided cluster udn
+func clusterUserDefinedNetworkReadyFunc(client dynamic.Interface, name string) func() error {
+	return func() error {
+		cUDN, err := client.Resource(clusterUDNGVR).Get(context.Background(), name, metav1.GetOptions{}, "status")
+		if err != nil {
+			return err
+		}
+		conditions, err := getConditions(cUDN)
+		if err != nil {
+			return err
+		}
+		if len(conditions) == 0 {
+			return fmt.Errorf("no conditions found in: %v", cUDN)
+		}
+		for _, condition := range conditions {
+			if condition.Type == "NetworkCreated" && condition.Status == metav1.ConditionTrue {
+				return nil
+			}
+		}
+		return fmt.Errorf("no NetworkCreated condition found in: %v", cUDN)
+	}
 }
 
 func createManifest(namespace, manifest string) (func(), error) {
@@ -1798,34 +1845,37 @@ func assertL2SecondaryNetAttachDefManifest(nadClient nadclient.K8sCniCncfIoV1Int
 	}`))
 }
 
-func assertUDNStatusReportsConsumers(udnNamesapce, udnName, expectedPodName string) {
-	conditionsRaw, err := e2ekubectl.RunKubectl(udnNamesapce, "get", "userdefinednetwork", udnName, "-o", "jsonpath='{.status.conditions}'")
-	Expect(err).NotTo(HaveOccurred())
-	conditionsRaw = strings.ReplaceAll(conditionsRaw, `\`, ``)
-	conditionsRaw = strings.ReplaceAll(conditionsRaw, `'`, ``)
-	var conditions []metav1.Condition
-	Expect(json.Unmarshal([]byte(conditionsRaw), &conditions)).To(Succeed())
+func validateUDNStatusReportsConsumers(client dynamic.Interface, udnNamesapce, udnName, expectedPodName string) error {
+	udn, err := client.Resource(udnGVR).Namespace(udnNamesapce).Get(context.Background(), udnName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	conditions, err := getConditions(udn)
+	if err != nil {
+		return err
+	}
 	conditions = normalizeConditions(conditions)
 	expectedMsg := fmt.Sprintf("failed to delete NetworkAttachmentDefinition [%[1]s/%[2]s]: network in use by the following pods: [%[1]s/%[3]s]",
 		udnNamesapce, udnName, expectedPodName)
-	found := false
+	expectedCondition := metav1.Condition{
+		Type:    "NetworkCreated",
+		Status:  "False",
+		Reason:  "SyncError",
+		Message: expectedMsg,
+	}
 	for _, condition := range conditions {
-		if found, _ = Equal(metav1.Condition{
-			Type:    "NetworkCreated",
-			Status:  "False",
-			Reason:  "SyncError",
-			Message: expectedMsg,
-		}).Match(condition); found {
-			break
+		if condition == expectedCondition {
+			return nil
 		}
 	}
-	Expect(found).To(BeTrue(), "expected condition not found in %v", conditions)
+	return fmt.Errorf("expected condition %v not found in %v", expectedCondition, conditions)
 }
 
 func normalizeConditions(conditions []metav1.Condition) []metav1.Condition {
 	for i := range conditions {
 		t := metav1.NewTime(time.Time{})
 		conditions[i].LastTransitionTime = t
+		conditions[i].ObservedGeneration = 0
 	}
 	return conditions
 }
@@ -1860,43 +1910,100 @@ func assertClusterNADManifest(nadClient nadclient.K8sCniCncfIoV1Interface, names
 	}`))
 }
 
-func assertClusterUDNStatusReportsActiveNamespaces(cudnName string, expectedActiveNsNames ...string) {
-	conditionsRaw, err := e2ekubectl.RunKubectl("", "get", "clusteruserdefinednetwork", cudnName, "-o", "jsonpath='{.status.conditions}'")
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	conditionsRaw = strings.ReplaceAll(conditionsRaw, `\`, ``)
-	conditionsRaw = strings.ReplaceAll(conditionsRaw, `'`, ``)
+var clusterUDNGVR = schema.GroupVersionResource{
+	Group:    "k8s.ovn.org",
+	Version:  "v1",
+	Resource: "clusteruserdefinednetworks",
+}
+
+var udnGVR = schema.GroupVersionResource{
+	Group:    "k8s.ovn.org",
+	Version:  "v1",
+	Resource: "userdefinednetworks",
+}
+
+// getConditions extracts metav1 conditions from .status.conditions of an unstructured object
+func getConditions(uns *unstructured.Unstructured) ([]metav1.Condition, error) {
 	var conditions []metav1.Condition
-	ExpectWithOffset(1, json.Unmarshal([]byte(conditionsRaw), &conditions)).To(Succeed())
+	conditionsRaw, found, err := unstructured.NestedFieldNoCopy(uns.Object, "status", "conditions")
+	if err != nil {
+		return nil, fmt.Errorf("failed getting conditions in %s: %v", uns.GetName(), err)
+	}
+	if !found {
+		return nil, fmt.Errorf("conditions not found in %v", uns)
+	}
 
-	c := conditions[0]
-	// equality matcher cannot be used since condition message namespaces order is inconsistent
-	ExpectWithOffset(1, c.Type).Should(Equal("NetworkCreated"))
-	ExpectWithOffset(1, c.Status).Should(Equal(metav1.ConditionTrue))
-	ExpectWithOffset(1, c.Reason).Should(Equal("NetworkAttachmentDefinitionCreated"))
+	conditionsJSON, err := json.Marshal(conditionsRaw)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(conditionsJSON, &conditions); err != nil {
+		return nil, err
+	}
 
-	ExpectWithOffset(1, c.Message).To(ContainSubstring("NetworkAttachmentDefinition has been created in following namespaces:"))
-	for _, ns := range expectedActiveNsNames {
-		Expect(c.Message).To(ContainSubstring(ns))
+	return conditions, nil
+}
+
+func validateClusterUDNStatusReportsActiveNamespacesFunc(client dynamic.Interface, cUDNName string, expectedActiveNsNames ...string) func() error {
+	return func() error {
+		cUDN, err := client.Resource(clusterUDNGVR).Get(context.Background(), cUDNName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		conditions, err := getConditions(cUDN)
+		if err != nil {
+			return err
+		}
+		if len(conditions) == 0 {
+			return fmt.Errorf("expected at least one condition in %v", cUDN)
+		}
+
+		c := conditions[0]
+		if c.Type != "NetworkCreated" {
+			return fmt.Errorf("expected NetworkCreated type in %v", c)
+		}
+		if c.Status != metav1.ConditionTrue {
+			return fmt.Errorf("expected True status in %v", c)
+		}
+		if c.Reason != "NetworkAttachmentDefinitionCreated" {
+			return fmt.Errorf("expected NetworkAttachmentDefinitionCreated reason in %v", c)
+		}
+		if !strings.Contains(c.Message, "NetworkAttachmentDefinition has been created in following namespaces:") {
+			return fmt.Errorf("expected \"NetworkAttachmentDefinition has been created in following namespaces:\" in %s", c.Message)
+		}
+
+		for _, ns := range expectedActiveNsNames {
+			if !strings.Contains(c.Message, ns) {
+				return fmt.Errorf("expected to find %q namespace in %s", ns, c.Message)
+			}
+		}
+		return nil
 	}
 }
 
-func assertClusterUDNStatusReportConsumers(conditionsJSON, udnName, udnNamespace, expectedPodName string) {
-	conditionsJSON = strings.ReplaceAll(conditionsJSON, `\`, ``)
-	conditionsJSON = strings.ReplaceAll(conditionsJSON, `'`, ``)
-
-	var conditions []metav1.Condition
-	ExpectWithOffset(1, json.Unmarshal([]byte(conditionsJSON), &conditions)).To(Succeed())
+func validateClusterUDNStatusReportConsumers(client dynamic.Interface, cUDNName, udnNamespace, expectedPodName string) error {
+	cUDN, err := client.Resource(clusterUDNGVR).Get(context.Background(), cUDNName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	conditions, err := getConditions(cUDN)
+	if err != nil {
+		return err
+	}
 	conditions = normalizeConditions(conditions)
 	expectedMsg := fmt.Sprintf("failed to delete NetworkAttachmentDefinition [%[1]s/%[2]s]: network in use by the following pods: [%[1]s/%[3]s]",
-		udnNamespace, udnName, expectedPodName)
-	ExpectWithOffset(1, conditions).To(Equal([]metav1.Condition{
+		udnNamespace, cUDNName, expectedPodName)
+	expectedConditions := []metav1.Condition{
 		{
 			Type:    "NetworkCreated",
 			Status:  "False",
 			Reason:  "NetworkAttachmentDefinitionSyncError",
 			Message: expectedMsg,
-		},
-	}))
+		}}
+	if !reflect.DeepEqual(conditions, expectedConditions) {
+		return fmt.Errorf("expected conditions: %v, got: %v", expectedConditions, conditions)
+	}
+	return nil
 }
 
 func newClusterUDNManifest(name string, targetNamespaces ...string) string {
