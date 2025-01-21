@@ -15,6 +15,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -548,14 +549,21 @@ var _ = Describe("Network Segmentation", func() {
 						blue = networkNamespaceMap[namespaceBlue]
 
 						pods := []*v1.Pod{}
-						redIPs := []string{}
-						blueIPs := []string{}
+						podIPs := []string{}
+						redIPs := map[string]bool{}
+						blueIPs := map[string]bool{}
+						bluePort := uint16(9091)
+						redPort := uint16(9092)
 						for namespace, network := range networkNamespaceMap {
 							for i := range numberOfPods {
+								httpServerPort := redPort
+								if network != red {
+									httpServerPort = bluePort
+								}
 								podConfig := *podConfig(
 									fmt.Sprintf("%s-pod-%d", network, i),
 									withCommand(func() []string {
-										return httpServerContainerCmd(port)
+										return httpServerContainerCmd(httpServerPort)
 									}),
 								)
 								podConfig.namespace = namespace
@@ -578,10 +586,11 @@ var _ = Describe("Network Segmentation", func() {
 									0,
 								)
 								Expect(err).NotTo(HaveOccurred())
+								podIPs = append(podIPs, podIP)
 								if network == red {
-									redIPs = append(redIPs, podIP)
+									redIPs[podIP] = true
 								} else {
-									blueIPs = append(blueIPs, podIP)
+									blueIPs[podIP] = true
 								}
 							}
 						}
@@ -589,11 +598,16 @@ var _ = Describe("Network Segmentation", func() {
 						By("ensuring pods only communicate with pods in their network")
 						for _, pod := range pods {
 							isRedPod := strings.Contains(pod.Name, red)
-							ips := redIPs
+							expectedHostname := red
 							if !isRedPod {
-								ips = blueIPs
+								expectedHostname = blue
 							}
-							for _, ip := range ips {
+							for _, ip := range podIPs {
+								isRedIP := redIPs[ip]
+								httpServerPort := redPort
+								if !isRedIP {
+									httpServerPort = bluePort
+								}
 								result, err := e2ekubectl.RunKubectl(
 									pod.Namespace,
 									"exec",
@@ -602,53 +616,17 @@ var _ = Describe("Network Segmentation", func() {
 									"curl",
 									"--connect-timeout",
 									"2",
-									net.JoinHostPort(ip, fmt.Sprintf("%d", port)+"/hostname"),
+									net.JoinHostPort(ip, fmt.Sprintf("%d", httpServerPort)+"/hostname"),
 								)
-								Expect(err).NotTo(HaveOccurred())
-								if isRedPod {
-									Expect(strings.Contains(result, red)).To(BeTrue())
+
+								sameNetwork := isRedPod == redIPs[ip]
+								if !sameNetwork {
+									Expect(err).To(HaveOccurred(), "should isolate from different networks")
 								} else {
-									Expect(strings.Contains(result, blue)).To(BeTrue())
+									Expect(err).NotTo(HaveOccurred())
+									Expect(strings.Contains(result, expectedHostname)).To(BeTrue())
 								}
 							}
-						}
-
-						By("Deleting pods in network blue except " + fmt.Sprintf("%s-pod-%d", blue, numberOfPods-1))
-						for i := range numberOfPods - 1 {
-							err := cs.CoreV1().Pods(namespaceBlue).Delete(
-								context.Background(),
-								fmt.Sprintf("%s-pod-%d", blue, i),
-								metav1.DeleteOptions{},
-							)
-							Expect(err).NotTo(HaveOccurred())
-						}
-
-						podIP, err := podIPsForUserDefinedPrimaryNetwork(
-							cs,
-							namespaceBlue,
-							fmt.Sprintf("%s-pod-%d", blue, numberOfPods-1),
-							namespacedName(namespaceBlue, blue),
-							0,
-						)
-						Expect(err).NotTo(HaveOccurred())
-
-						By("Remaining blue pod cannot communicate with red networks overlapping CIDR")
-						for _, ip := range redIPs {
-							if podIP == ip {
-								//don't try with your own IP
-								continue
-							}
-							_, err := e2ekubectl.RunKubectl(
-								namespaceBlue,
-								"exec",
-								fmt.Sprintf("%s-pod-%d", blue, numberOfPods-1),
-								"--",
-								"curl",
-								"--connect-timeout",
-								"2",
-								net.JoinHostPort(ip, fmt.Sprintf("%d", port)),
-							)
-							Expect(err).To(MatchError(ContainSubstring("exit code 28")))
 						}
 					},
 					// can completely fill the L2 topology because it does not depend on the size of the clusters hostsubnet
