@@ -380,6 +380,20 @@ iperf3 -t 0 -c %[1]s -p %[2]d --logfile %[3]s &
 			}
 		}
 
+		checkNorthSouthEgressICMPTraffic = func(vmi *kubevirtv1.VirtualMachineInstance, addresses []string, stage string) {
+			GinkgoHelper()
+			Expect(addresses).NotTo(BeEmpty())
+			for _, ip := range addresses {
+				if ip == "" {
+					continue
+				}
+				cmd := fmt.Sprintf("ping -c 3 -W 2 %s", ip)
+				stdout, err := kubevirt.RunCommand(vmi, cmd, 5*time.Second)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(stdout).To(ContainSubstring(" 0% packet loss"))
+			}
+		}
+
 		httpServerTestPodsDefaultNetworkIPs = func() map[string][]string {
 			ips := map[string][]string{}
 			for _, pod := range httpServerTestPods {
@@ -535,6 +549,19 @@ iperf3 -t 0 -c %[1]s -p %[2]d --logfile %[3]s &
 				Expect(err).NotTo(HaveOccurred())
 				return vmi.Status.MigrationState.Completed
 			}).WithPolling(time.Second).WithTimeout(20*time.Minute).Should(BeTrue(), "should complete migration")
+			Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
+			Expect(vmi.Status.MigrationState.SourcePod).NotTo(BeEmpty())
+			Eventually(func() corev1.PodPhase {
+				sourcePod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Name:      vmi.Status.MigrationState.SourcePod,
+					},
+				}
+				err = crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(sourcePod), sourcePod)
+				Expect(err).NotTo(HaveOccurred())
+				return sourcePod.Status.Phase
+			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Equal(corev1.PodSucceeded), "should move source pod to Completed")
 			err = crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
 			Expect(err).NotTo(HaveOccurred(), "should success retrieving vmi after migration")
 			Expect(vmi.Status.MigrationState.Failed).To(BeFalse(), func() string {
@@ -1130,8 +1157,8 @@ fi
 			return nil
 		}
 
-		createIperfExternalContainer = func(name string) {
-			createClusterExternalContainer(
+		createIperfExternalContainer = func(name string) (string, string) {
+			return createClusterExternalContainer(
 				name,
 				iperf3Image,
 				[]string{"--network", "kind", "--entrypoint", "/bin/bash"},
@@ -1508,7 +1535,7 @@ runcmd:
 			Expect(err).NotTo(HaveOccurred())
 
 			externalContainerName := namespace + "-iperf"
-			createIperfExternalContainer(externalContainerName)
+			externalContainerIPV4Address, externalContainerIPV6Address := createIperfExternalContainer(externalContainerName)
 			DeferCleanup(func() {
 				if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
 					deleteClusterExternalContainer(externalContainerName)
@@ -1577,6 +1604,7 @@ runcmd:
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
 				startNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
 				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				checkNorthSouthEgressICMPTraffic(vmi, []string{externalContainerIPV4Address, externalContainerIPV6Address}, step)
 			}
 
 			by(vmi.Name, fmt.Sprintf("Running %s for %s", td.test.description, td.resource.description))
@@ -1613,6 +1641,7 @@ runcmd:
 			if td.role == "primary" {
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
 				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				checkNorthSouthEgressICMPTraffic(vmi, []string{externalContainerIPV4Address, externalContainerIPV6Address}, step)
 			}
 		},
 			func(td testData) string {
