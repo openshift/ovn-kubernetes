@@ -376,7 +376,7 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ServiceFromEndpointSlice(tt.args.eps, tt.args.netInfo)
+			got, err := ServiceFromEndpointSlice(tt.args.eps, tt.args.netInfo.GetNetworkName())
 			if !tt.wantErr(t, err, fmt.Sprintf("ServiceFromEndpointSlice(%v, %v)", tt.args.eps, tt.args.netInfo)) {
 				return
 			}
