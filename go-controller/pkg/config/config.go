@@ -662,6 +662,12 @@ func PrepareTestConfig() error {
 		return err
 	}
 
+	// set klog level here as some tests will not call InitConfig
+	var level klog.Level
+	if err := level.Set(strconv.Itoa(Logging.Level)); err != nil {
+		return fmt.Errorf("failed to set klog log level %v", err)
+	}
+
 	// Don't pick up defaults from the environment
 	os.Unsetenv("KUBECONFIG")
 	os.Unsetenv("K8S_CACERT")
