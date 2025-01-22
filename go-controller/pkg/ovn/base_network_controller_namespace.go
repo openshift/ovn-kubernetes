@@ -68,18 +68,21 @@ func getNamespaceAddrSetDbIDs(namespaceName, controller string) *libovsdbops.DbO
 	})
 }
 
+func (bnc *BaseNetworkController) shouldWatchNamespaces() bool {
+	// Watch namespaces only if one of the following conditions is met:
+	// - The network is the default network.
+	// - The network is primary, and network segmentation is enabled.
+	// - The network is secondary, and multi NetworkPolicies are enabled.
+	return bnc.IsDefault() ||
+		bnc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() ||
+		bnc.IsSecondary() && util.IsMultiNetworkPoliciesSupportEnabled()
+}
+
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (bnc *BaseNetworkController) WatchNamespaces() error {
-	if bnc.IsPrimaryNetwork() && !util.IsNetworkSegmentationSupportEnabled() {
-		// For primary user defined networks, we don't have to watch namespace events if
-		// network segmentation support is not enabled.
-		return nil
-	}
-
-	if bnc.IsSecondary() && !util.IsMultiNetworkPoliciesSupportEnabled() {
-		// For secondary networks, we don't have to watch namespace events if
-		// multi-network policy support is not enabled.
+	if !bnc.shouldWatchNamespaces() {
+		klog.Infof("Ignoring namespaces events for network: %s", bnc.GetNetworkName())
 		return nil
 	}
 
