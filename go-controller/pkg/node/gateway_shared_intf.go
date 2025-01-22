@@ -1091,7 +1091,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 		return nil
 	}
 
-	svcNamespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
+	svcNamespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo.GetNetworkName())
 	if err != nil || svcNamespacedName == nil {
 		return err
 	}
@@ -1158,21 +1158,20 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	var errors []error
 	var hasLocalHostNetworkEp = false
 
-	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(epSlice.Namespace)
-	if err != nil {
-		return fmt.Errorf("error getting active network for endpointslice %s in namespace %s: %w", epSlice.Name, epSlice.Namespace, err)
-	}
-	if util.IsNetworkSegmentationSupportEnabled() && !util.IsEndpointSliceForNetwork(epSlice, netInfo) {
-		return nil
+	networkName := types.DefaultNetworkName
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if netName, ok := epSlice.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation]; ok {
+			networkName = netName
+		}
 	}
 
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	namespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
+	namespacedName, err := util.ServiceFromEndpointSlice(epSlice, networkName)
 	if err != nil || namespacedName == nil {
 		return err
 	}
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, netInfo.GetNetworkName())
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, networkName)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during endpointslice delete on %s: %w",
@@ -1233,7 +1232,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 		return nil
 	}
 
-	namespacedName, err := util.ServiceFromEndpointSlice(newEpSlice, netInfo)
+	namespacedName, err := util.ServiceFromEndpointSlice(newEpSlice, netInfo.GetNetworkName())
 	if err != nil || namespacedName == nil {
 		return err
 	}
