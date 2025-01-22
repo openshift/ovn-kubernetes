@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -618,8 +619,9 @@ func TestSyncAll(t *testing.T) {
 		MTU: 1400,
 	}
 	type TestNAD struct {
-		name    string
-		netconf *ovncnitypes.NetConf
+		name      string
+		netconf   *ovncnitypes.NetConf
+		networkID string
 	}
 	tests := []struct {
 		name         string
@@ -643,6 +645,16 @@ func TestSyncAll(t *testing.T) {
 				},
 			},
 			syncAllError: ErrNetworkControllerTopologyNotManaged,
+		},
+		{
+			name: "nad already annotated with network ID",
+			testNADs: []TestNAD{
+				{
+					name:      "test/nad1",
+					netconf:   network_A,
+					networkID: "1",
+				},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -689,7 +701,11 @@ func TestSyncAll(t *testing.T) {
 				namespace, name, err := cache.SplitMetaNamespaceKey(testNAD.name)
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				testNAD.netconf.NADName = testNAD.name
-				nad, err := buildNAD(name, namespace, testNAD.netconf)
+				nadAnnotations := map[string]string{
+					types.OvnNetworkNameAnnotation: testNAD.netconf.Name,
+					types.OvnNetworkIDAnnotation:   testNAD.networkID,
+				}
+				nad, err := buildNADWithAnnotations(name, namespace, testNAD.netconf, nadAnnotations)
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(
 					context.Background(),
@@ -700,6 +716,13 @@ func TestSyncAll(t *testing.T) {
 				netInfo := expectedNetworks[testNAD.netconf.Name]
 				if netInfo == nil {
 					netInfo, err = util.NewNetInfo(testNAD.netconf)
+					mutableNetInfo := util.NewMutableNetInfo(netInfo)
+					if testNAD.networkID != "" {
+						id, err := strconv.Atoi(testNAD.networkID)
+						g.Expect(err).ToNot(gomega.HaveOccurred())
+						mutableNetInfo.SetNetworkID(id)
+						netInfo = mutableNetInfo
+					}
 					g.Expect(err).ToNot(gomega.HaveOccurred())
 					expectedNetworks[testNAD.netconf.Name] = netInfo
 					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
@@ -726,6 +749,9 @@ func TestSyncAll(t *testing.T) {
 			for name, network := range expectedNetworks {
 				g.Expect(actualNetworks).To(gomega.HaveKey(name))
 				g.Expect(util.AreNetworksCompatible(actualNetworks[name], network)).To(gomega.BeTrue())
+				if network.GetNetworkID() != util.InvalidID {
+					g.Expect(actualNetworks[name].GetNetworkID()).To(gomega.Equal(network.GetNetworkID()))
+				}
 			}
 
 			actualPrimaryNetwork, err := controller.Interface().GetActiveNetworkForNamespace("test")
@@ -751,5 +777,14 @@ func buildNAD(name, namespace string, network *ovncnitypes.NetConf) (*nettypes.N
 			Config: string(config),
 		},
 	}
+	return nad, nil
+}
+
+func buildNADWithAnnotations(name, namespace string, network *ovncnitypes.NetConf, annotations map[string]string) (*nettypes.NetworkAttachmentDefinition, error) {
+	nad, err := buildNAD(name, namespace, network)
+	if err != nil {
+		return nil, err
+	}
+	nad.Annotations = annotations
 	return nad, nil
 }
