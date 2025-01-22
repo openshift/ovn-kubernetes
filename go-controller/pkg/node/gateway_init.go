@@ -450,7 +450,6 @@ func (nc *DefaultNodeNetworkController) initGatewayMainStart(gw *gateway, waiter
 	if portClaimWatcher != nil {
 		gw.portClaimWatcher = portClaimWatcher
 	}
-	gw.isPodNetworkAdvertised = nc.isPodNetworkAdvertisedAtNode()
 
 	initGwFunc := func() error {
 		return gw.Init(nc.stopChan, nc.wg)

@@ -463,6 +463,14 @@ func (oc *SecondaryLayer2NetworkController) Stop() {
 	oc.BaseSecondaryLayer2NetworkController.stop()
 }
 
+func (oc *SecondaryLayer2NetworkController) Reconcile(netInfo util.NetInfo) error {
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		klog.Errorf("Failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
+	}
+	return nil
+}
+
 func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
