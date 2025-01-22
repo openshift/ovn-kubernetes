@@ -460,6 +460,7 @@ type GatewayConfig struct {
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
 	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+	// only applicable to the default network not for UDNs
 	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 	// V4JoinSubnet to be used in the cluster
 	V4JoinSubnet string `gcfg:"v4-join-subnet"`
