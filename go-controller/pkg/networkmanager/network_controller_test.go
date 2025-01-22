@@ -184,11 +184,11 @@ func TestSetAdvertisements(t *testing.T) {
 
 			namespace, name, err := cache.SplitMetaNamespaceKey(testNADName)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
-			nad, err := buildNAD(name, namespace, tt.network)
-			g.Expect(err).ToNot(gomega.HaveOccurred())
-			nad.Annotations = map[string]string{
+			nadAnnotations := map[string]string{
 				types.OvnRouteAdvertisementsKey: "[\"" + tt.ra.Name + "\"]",
 			}
+			nad, err := buildNADWithAnnotations(name, namespace, tt.network, nadAnnotations)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			_, err = fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), &tt.node, v1.CreateOptions{})
 			g.Expect(err).ToNot(gomega.HaveOccurred())
