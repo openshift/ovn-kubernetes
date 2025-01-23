@@ -209,6 +209,8 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 		return fmt.Errorf("failed looking for an active network: %w", err)
 	}
 
+	klog.Infof("[DBG] Active network for %s/%s: %s", pod.Namespace, pod.Name, activeNetwork.GetNetworkName())
+
 	onNetwork, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, a.netInfo, activeNetwork)
 	if err != nil {
 		a.recordPodErrorEvent(pod, err)
@@ -219,11 +221,13 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 	// Note: we are not considering a hotplug scenario where we would have to
 	// release IPs if the pod was unplugged from the network
 	if !onNetwork {
+		klog.Infof("[DBG] pod %s/%s is not on %s", pod.Namespace, pod.Name, a.netInfo.GetNetworkName())
 		return nil
 	}
 
 	// reconcile for each NAD
 	for nadName, network := range networkMap {
+		klog.Infof("[DBG] reconcileForNAD %s/%s: %s", pod.Namespace, pod.Name, network.Name)
 		err = a.reconcileForNAD(old, new, nadName, network, releaseFromAllocator)
 		if err != nil {
 			return err
@@ -245,9 +249,10 @@ func (a *PodAllocator) reconcileForNAD(old, new *corev1.Pod, nad string, network
 	podCompleted := util.PodCompleted(pod)
 
 	if podCompleted || podDeleted {
+		klog.Infof("[DBG] releasePodOnNAD %s/%s: %s", pod.Namespace, pod.Name, network.Name)
 		return a.releasePodOnNAD(pod, nad, network, podDeleted, releaseIPsFromAllocator)
 	}
-
+	klog.Infof("[DBG] allocatePodOnNAD %s/%s: %s", pod.Namespace, pod.Name, network.Name)
 	return a.allocatePodOnNAD(pod, nad, network)
 }
 
@@ -359,7 +364,7 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 	}
 
 	if updatedPod != nil {
-		klog.V(5).Infof("Allocated IP addresses %v, mac address %s, gateways %v, routes %s and tunnel id %d for pod %s/%s on nad %s",
+		klog.Infof("[DBG] Allocated IP addresses %v, mac address %s, gateways %v, routes %s and tunnel id %d for pod %s/%s on nad %s",
 			util.StringSlice(podAnnotation.IPs),
 			podAnnotation.MAC,
 			util.StringSlice(podAnnotation.Gateways),

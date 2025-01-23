@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"golang.org/x/exp/maps"
+	"k8s.io/klog/v2"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -398,6 +399,7 @@ func (nInfo *mutableNetInfo) AddNADs(nadNames ...string) {
 
 func (nInfo *mutableNetInfo) addNADs(nadNames ...string) {
 	for _, name := range nadNames {
+		klog.Infof("[DBG] Adding nad %s to network %s", name, nInfo.id)
 		nInfo.getNads().Insert(name)
 		nInfo.getNamespaces().Insert(strings.Split(name, "/")[0])
 	}
@@ -1268,6 +1270,8 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 					nadName, podDesc)
 			}
 			networkSelections[nadName] = network
+		} else {
+			klog.Infof("[DBG] network %s doesn't have NAD %s for pod %s", nInfo.GetNetworkName(), nadName, podDesc)
 		}
 	}
 
