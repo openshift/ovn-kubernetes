@@ -402,6 +402,11 @@ func NewInvalidPrimaryNetworkError(namespace string) *InvalidPrimaryNetworkError
 	return &InvalidPrimaryNetworkError{namespace: namespace}
 }
 
+func IsInvalidPrimaryNetworkError(err error) bool {
+	var invalidPrimaryNetworkError *InvalidPrimaryNetworkError
+	return errors.As(err, &invalidPrimaryNetworkError)
+}
+
 func GetUserDefinedNetworkRole(isPrimary bool) string {
 	networkRole := types.NetworkRoleSecondary
 	if isPrimary {

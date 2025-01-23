@@ -1005,10 +1005,13 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
 		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(knp.Namespace)
-		if err != nil {
-			return fmt.Errorf("could not get active network for namespace %s: %v", knp.Namespace, err)
+		// The InvalidPrimaryNetworkError error is thrown when UDN is not found because
+		// it has been already deleted, so just proceed with deleting NetworkPolicy in
+		// such a scenario as well.
+		if err != nil && !util.IsInvalidPrimaryNetworkError(err) {
+			return fmt.Errorf("could not get active network for namespace %s: %w", knp.Namespace, err)
 		}
-		if bnc.GetNetworkName() != netinfo.GetNetworkName() {
+		if err == nil && bnc.GetNetworkName() != netinfo.GetNetworkName() {
 			return nil
 		}
 		return bnc.deleteNetworkPolicy(knp)
