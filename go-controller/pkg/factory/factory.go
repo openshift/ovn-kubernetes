@@ -188,11 +188,18 @@ const (
 	defaultHandlerPriority int = 0
 	// lowest priority among various handlers (See GetHandlerPriority for more information)
 	minHandlerPriority int = 4
+)
 
+var (
 	// Use a larger queue for incoming events to avoid bottlenecks
 	// due to handlers being slow.
 	eventQueueSize uint32 = 1000
 )
+
+// Override default event queue configuration.  Used only for tests.
+func SetEventQueueSize(newEventQueueSize uint32) {
+	eventQueueSize = newEventQueueSize
+}
 
 // types for dynamic handlers created when adding a network policy
 type addressSetNamespaceAndPodSelector struct{}
