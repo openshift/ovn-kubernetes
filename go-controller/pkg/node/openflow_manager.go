@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -27,24 +28,30 @@ type openflowManager struct {
 	exGWFlowCache map[string][]string
 	exGWFlowMutex sync.Mutex
 	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	flowChan     chan struct{}
+	watchFactory factory.NodeWatchFactory
 }
 
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
 
-func (c *openflowManager) getDefaultBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string) {
+func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string) {
 	return c.defaultBridge.getBridgePortConfigurations()
 }
 
-func (c *openflowManager) getExGwBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string) {
+func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string) {
 	return c.externalGatewayBridge.getBridgePortConfigurations()
 }
 
-func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) {
-	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs)
-	if c.externalGatewayBridge != nil {
-		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs)
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, nodeSubnets []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
+	if err := c.defaultBridge.addNetworkBridgeConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
+		return err
 	}
+	if c.externalGatewayBridge != nil {
+		if err := c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
@@ -150,7 +157,8 @@ func (c *openflowManager) syncFlows() {
 //
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnets []*net.IPNet, extraIPs []net.IP) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration,
+	extraIPs []net.IP, watchFactory factory.NodeWatchFactory) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
@@ -160,10 +168,10 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnet
 		exGWFlowCache:         make(map[string][]string),
 		exGWFlowMutex:         sync.Mutex{},
 		flowChan:              make(chan struct{}, 1),
+		watchFactory:          watchFactory,
 	}
 
-	isRoutingAdvertised := false
-	if err := ofm.updateBridgeFlowCache(subnets, extraIPs, isRoutingAdvertised); err != nil {
+	if err := ofm.updateBridgeFlowCache(extraIPs); err != nil {
 		return nil, err
 	}
 
@@ -207,7 +215,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 
 // updateBridgeFlowCache generates the "static" per-bridge flows
 // note: this is shared between shared and local gateway modes
-func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs []net.IP, isPodNetworkAdvertised bool) error {
+func (c *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
 	// protect defaultBridge config from being updated by gw.nodeIPManager
 	c.defaultBridge.Lock()
 	defer c.defaultBridge.Unlock()
@@ -219,7 +227,7 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 	if err != nil {
 		return err
 	}
-	dftCommonFlows, err := commonFlows(subnets, c.defaultBridge, isPodNetworkAdvertised)
+	dftCommonFlows, err := commonFlows(c.defaultBridge)
 	if err != nil {
 		return err
 	}
@@ -233,7 +241,7 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 		c.externalGatewayBridge.Lock()
 		defer c.externalGatewayBridge.Unlock()
 		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows, err := commonFlows(subnets, c.externalGatewayBridge, false)
+		exGWBridgeDftFlows, err := commonFlows(c.externalGatewayBridge)
 		if err != nil {
 			return err
 		}
@@ -242,7 +250,7 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 	return nil
 }
 
-func checkPorts(netConfigs []bridgeUDNConfiguration, physIntf, ofPortPhys string) error {
+func checkPorts(netConfigs []*bridgeUDNConfiguration, physIntf, ofPortPhys string) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
 	for _, netConfig := range netConfigs {
