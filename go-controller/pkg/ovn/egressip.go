@@ -3533,8 +3533,11 @@ func (e *EgressIPController) createNATRuleOps(ni util.NetInfo, ops []ovsdb.Opera
 func (e *EgressIPController) deleteNATRuleOps(ni util.NetInfo, ops []ovsdb.Operation, status egressipv1.EgressIPStatusItem,
 	egressIPName, podNamespace, podName string) ([]ovsdb.Operation, error) {
 	var err error
-	pV4 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV4, e.controllerName), nil)
-	pV6 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV6, e.controllerName), nil)
+	filterByIP := func(n *nbdb.NAT) bool {
+		return n.ExternalIP == status.EgressIP
+	}
+	pV4 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV4, e.controllerName), filterByIP)
+	pV6 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV6, e.controllerName), filterByIP)
 	router := &nbdb.LogicalRouter{
 		Name: ni.GetNetworkScopedGWRouterName(status.Node),
 	}
