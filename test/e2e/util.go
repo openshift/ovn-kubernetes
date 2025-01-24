@@ -125,6 +125,27 @@ func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
 	}
 }
 
+// newLatestAgnhostPod returns a pod that uses the newer agnhost image. The image's binary supports various subcommands
+// that behave the same, no matter the underlying OS.
+func newLatestAgnhostPod(namespace, name string, command ...string) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:    name,
+					Image:   agnhostImageNew,
+					Command: command,
+				},
+			},
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+}
+
 // newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
 // that behave the same, no matter the underlying OS.
 func newAgnhostPodOnNode(name, nodeName string, labels map[string]string, command ...string) *v1.Pod {
