@@ -92,7 +92,8 @@ type FakeOVN struct {
 	portCache      *PortCache
 
 	// information map of all secondary network controllers
-	secondaryControllers map[string]secondaryControllerInfo
+	secondaryControllers       map[string]secondaryControllerInfo
+	fullSecondaryL2Controllers map[string]*SecondaryLayer2NetworkController
 }
 
 // NOTE: the FakeAddressSetFactory is no longer needed and should no longer be used. starting to phase out FakeAddressSetFactory
@@ -108,7 +109,8 @@ func NewFakeOVN(useFakeAddressSet bool) *FakeOVN {
 		egressSVCWg:  &sync.WaitGroup{},
 		anpWg:        &sync.WaitGroup{},
 
-		secondaryControllers: map[string]secondaryControllerInfo{},
+		secondaryControllers:       map[string]secondaryControllerInfo{},
+		fullSecondaryL2Controllers: map[string]*SecondaryLayer2NetworkController{},
 	}
 }
 
@@ -200,6 +202,11 @@ func (o *FakeOVN) shutdown() {
 
 func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	var err error
+	// Use shorter event queues for unit tests (reduce to 10 from the default)
+	// to avoid running out of resources in constrained CI environments
+	// (e.g., on GitHub).
+	factory.SetEventQueueSize(10)
+
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -278,6 +285,45 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		}
 	}
 
+}
+
+// creates the global entities that should remain after a UDN created and removed
+func generateUDNPostInitDB(testData []libovsdbtest.TestData, netName string) []libovsdbtest.TestData {
+	testData = append(testData, &nbdb.MeterBand{
+		UUID:   "25-pktps-rate-limiter-UUID",
+		Action: types.MeterAction,
+		Rate:   int(25),
+	})
+	meters := map[string]string{
+		OVNARPRateLimiter:              getMeterNameForProtocol(OVNARPRateLimiter),
+		OVNARPResolveRateLimiter:       getMeterNameForProtocol(OVNARPResolveRateLimiter),
+		OVNBFDRateLimiter:              getMeterNameForProtocol(OVNBFDRateLimiter),
+		OVNControllerEventsRateLimiter: getMeterNameForProtocol(OVNControllerEventsRateLimiter),
+		OVNICMPV4ErrorsRateLimiter:     getMeterNameForProtocol(OVNICMPV4ErrorsRateLimiter),
+		OVNICMPV6ErrorsRateLimiter:     getMeterNameForProtocol(OVNICMPV6ErrorsRateLimiter),
+		OVNRejectRateLimiter:           getMeterNameForProtocol(OVNRejectRateLimiter),
+		OVNTCPRSTRateLimiter:           getMeterNameForProtocol(OVNTCPRSTRateLimiter),
+		OVNServiceMonitorLimiter:       getMeterNameForProtocol(OVNServiceMonitorLimiter),
+	}
+	fairness := true
+	for _, v := range meters {
+		testData = append(testData, &nbdb.Meter{
+			UUID:  v + "-UUID",
+			Bands: []string{"25-pktps-rate-limiter-UUID"},
+			Name:  v,
+			Unit:  types.PacketsPerSecond,
+			Fair:  &fairness,
+		})
+	}
+
+	copp := &nbdb.Copp{
+		UUID:   "copp-UUID",
+		Name:   "ovnkube-default",
+		Meters: meters,
+	}
+	testData = append(testData, copp)
+
+	return testData
 }
 
 func setupClusterController(clusterController *DefaultNetworkController, setupCOPP bool) {
@@ -510,6 +556,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 				l2Controller.addressSetFactory = asf
 			}
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
+			o.fullSecondaryL2Controllers[netName] = l2Controller
 		case types.LocalnetTopology:
 			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.networkManager.Interface())
 			if o.asf != nil { // use fake asf only when enabled

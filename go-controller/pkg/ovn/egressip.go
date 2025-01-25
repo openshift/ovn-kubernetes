@@ -720,6 +720,7 @@ func (e *EgressIPController) addPodEgressIPAssignmentsWithLock(ni util.NetInfo, 
 // pod w.r.t to each status. This is mainly done to avoid a lot of duplicated
 // work on ovnkube-master restarts when all egress IP handlers will most likely
 // match and perform the setup for the same pod and status multiple times over.
+// requires holding the podAssignmentMutex lock
 func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name string, statusAssignments []egressipv1.EgressIPStatusItem, mark util.EgressIPMark, pod *kapi.Pod) error {
 	podKey := getPodKey(pod)
 	// If pod is already in succeeded or failed state, return it without proceeding further.
@@ -865,27 +866,27 @@ func (e *EgressIPController) deleteEgressIPAssignments(name string, statusesToRe
 				continue
 			}
 			podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-			ni, err := e.networkManager.GetActiveNetworkForNamespace(podNamespace)
-			if err != nil {
-				return fmt.Errorf("failed to get active network for namespace %s", podNamespace)
-			}
 			cachedNetwork := e.getNetworkFromPodAssignment(podKey)
-			err = e.nodeZoneState.DoWithLock(statusToRemove.Node, func(key string) error {
+			if cachedNetwork == nil {
+				panic(fmt.Sprintf("cached network is missing for egress IP pod assignment: %q. This should never happen!", podKey))
+			}
+
+			err := e.nodeZoneState.DoWithLock(statusToRemove.Node, func(key string) error {
 				// this statusToRemove was managing at least one pod, hence let's tear down the setup for this status
-				if _, ok := processedNetworks[ni.GetNetworkName()]; !ok {
+				if _, ok := processedNetworks[cachedNetwork.GetNetworkName()]; !ok {
 					klog.V(2).Infof("Deleting pod egress IP status: %v for EgressIP: %s", statusToRemove, name)
-					if err := e.deleteEgressIPStatusSetup(ni, name, statusToRemove); err != nil {
-						return fmt.Errorf("failed to delete EgressIP %s status setup for network %s: %v", name, ni.GetNetworkName(), err)
+					if err := e.deleteEgressIPStatusSetup(cachedNetwork, name, statusToRemove); err != nil {
+						return fmt.Errorf("failed to delete EgressIP %s status setup for network %s: %v", name, cachedNetwork.GetNetworkName(), err)
 					}
-					if cachedNetwork != nil && util.AreNetworksCompatible(cachedNetwork, ni) {
+					if cachedNetwork != nil {
 						if err := e.deleteEgressIPStatusSetup(cachedNetwork, name, statusToRemove); err != nil {
 							klog.Errorf("Failed to delete EgressIP %s status setup for network %s: %v", name, cachedNetwork.GetNetworkName(), err)
 						}
 					}
 				}
-				processedNetworks[ni.GetNetworkName()] = struct{}{}
+				processedNetworks[cachedNetwork.GetNetworkName()] = struct{}{}
 				// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
-				if err := e.addExternalGWPodSNAT(ni, podNamespace, podName, statusToRemove); err != nil {
+				if err := e.addExternalGWPodSNAT(cachedNetwork, podNamespace, podName, statusToRemove); err != nil {
 					return err
 				}
 				podStatus.egressStatuses.delete(statusToRemove)
@@ -902,14 +903,14 @@ func (e *EgressIPController) deleteEgressIPAssignments(name string, statusesToRe
 				// delete the podIP from the global egressIP address set since its no longer managed by egressIPs
 				// NOTE(tssurya): There is no way to infer if pod was local to this zone or not,
 				// so we try to nuke the IP from address-set anyways - it will be a no-op for remote pods
-				if err := e.deletePodIPsFromAddressSet(ni.GetNetworkName(), e.controllerName, podStatus.podIPs...); err != nil {
+				if err := e.deletePodIPsFromAddressSet(cachedNetwork.GetNetworkName(), e.controllerName, podStatus.podIPs...); err != nil {
 					return fmt.Errorf("cannot delete egressPodIPs for the pod %s from the address set: err: %v", podKey, err)
 				}
 				delete(e.podAssignment, podKey)
 			} else if len(podStatus.egressStatuses.statusMap) == 0 && len(podStatus.standbyEgressIPNames) > 0 {
 				klog.V(2).Infof("Pod %s has standby egress IP %+v", podKey, podStatus.standbyEgressIPNames.UnsortedList())
 				podStatus.egressIPName = "" // we have deleted the current egressIP that was managing the pod
-				if err := e.addStandByEgressIPAssignment(ni, podKey, podStatus); err != nil {
+				if err := e.addStandByEgressIPAssignment(cachedNetwork, podKey, podStatus); err != nil {
 					klog.Errorf("Adding standby egressIPs for pod %s with status %v failed: %v", podKey, podStatus, err)
 					// We are not returning the error on purpose, this will be best effort without any retries because
 					// retrying deleteEgressIPAssignments for original EIP because addStandByEgressIPAssignment failed is useless.
@@ -3168,8 +3169,9 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 		Direction: nbdb.QoSDirectionFromLport,
 	}
 	if isIPv4Mode {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv4EgressIPServedPodsAS == "" {
-			return nil, nil, fmt.Errorf("failed to fetch IPv4 address set %s hash names", EgressIPServedPodsAddrSetName)
+			return nil, nil, types.NewSuppressedError(fmt.Errorf("failed to fetch IPv4 address set %s hash names", EgressIPServedPodsAddrSetName))
 		}
 		qosV4Rule := qosRule
 		qosV4Rule.Match = fmt.Sprintf(`ip4.src == $%s && ct.trk && ct.rpl`, ipv4EgressIPServedPodsAS)
@@ -3181,8 +3183,9 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 		qoses = append(qoses, &qosV4Rule)
 	}
 	if isIPv6Mode {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv6EgressIPServedPodsAS == "" {
-			return nil, nil, fmt.Errorf("failed to fetch IPv6 address set %s hash names", EgressIPServedPodsAddrSetName)
+			return nil, nil, types.NewSuppressedError(fmt.Errorf("failed to fetch IPv6 address set %s hash names", EgressIPServedPodsAddrSetName))
 		}
 		qosV6Rule := qosRule
 		qosV6Rule.Match = fmt.Sprintf(`ip6.src == $%s && ct.trk && ct.rpl`, ipv6EgressIPServedPodsAS)
@@ -3385,15 +3388,17 @@ func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 	var matchV4, matchV6 string
 	// construct the policy match
 	if len(v4NodeAddrs) > 0 {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv4EgressIPServedPodsAS == "" || ipv4EgressServiceServedPodsAS == "" || ipv4ClusterNodeIPAS == "" {
-			return fmt.Errorf("address set name(s) %s not found %q %q %q", as.GetName(), ipv4EgressServiceServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS)
+			return types.NewSuppressedError(fmt.Errorf("address set name(s) %s not found %q %q %q", as.GetName(), ipv4EgressServiceServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS))
 		}
 		matchV4 = fmt.Sprintf(`(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s`,
 			ipv4EgressIPServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS)
 	}
 	if len(v6NodeAddrs) > 0 {
+		// if address set hash name is empty, the address set has yet to be created
 		if ipv6EgressIPServedPodsAS == "" || ipv6EgressServiceServedPodsAS == "" || ipv6ClusterNodeIPAS == "" {
-			return fmt.Errorf("address set hash name(s) %s not found", as.GetName())
+			return types.NewSuppressedError(fmt.Errorf("address set hash name(s) %s not found", as.GetName()))
 		}
 		matchV6 = fmt.Sprintf(`(ip6.src == $%s || ip6.src == $%s) && ip6.dst == $%s`,
 			ipv6EgressIPServedPodsAS, ipv6EgressServiceServedPodsAS, ipv6ClusterNodeIPAS)
@@ -3528,8 +3533,11 @@ func (e *EgressIPController) createNATRuleOps(ni util.NetInfo, ops []ovsdb.Opera
 func (e *EgressIPController) deleteNATRuleOps(ni util.NetInfo, ops []ovsdb.Operation, status egressipv1.EgressIPStatusItem,
 	egressIPName, podNamespace, podName string) ([]ovsdb.Operation, error) {
 	var err error
-	pV4 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV4, e.controllerName), nil)
-	pV6 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV6, e.controllerName), nil)
+	filterByIP := func(n *nbdb.NAT) bool {
+		return n.ExternalIP == status.EgressIP
+	}
+	pV4 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV4, e.controllerName), filterByIP)
+	pV6 := libovsdbops.GetPredicate[*nbdb.NAT](getEgressIPNATDbIDs(egressIPName, podNamespace, podName, IPFamilyValueV6, e.controllerName), filterByIP)
 	router := &nbdb.LogicalRouter{
 		Name: ni.GetNetworkScopedGWRouterName(status.Node),
 	}
@@ -3599,14 +3607,17 @@ func ensureDefaultNoRerouteUDNEnabledSvcPolicies(nbClient libovsdbclient.Client,
 	if err != nil {
 		return fmt.Errorf("failed to retrieve UDN enabled service address set from NB DB: %v", err)
 	}
-
+	// if address set hash name is empty, the address set has yet to be created
+	if (v4 && ipv4UDNEnabledSvcAS == "") || (v6 && ipv6UDNEnabledSvcAS == "") {
+		return types.NewSuppressedError(fmt.Errorf("failed to retrieve UDN enabled service address set"))
+	}
 	var matchV4, matchV6 string
 	// construct the policy match
-	if v4 && ipv4UDNEnabledSvcAS != "" {
+	if v4 {
 		matchV4 = fmt.Sprintf(`(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s`,
 			ipv4EgressIPServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4UDNEnabledSvcAS)
 	}
-	if v6 && ipv6UDNEnabledSvcAS != "" {
+	if v6 {
 		if ipv6EgressIPServedPodsAS == "" || ipv6EgressServiceServedPodsAS == "" || ipv6UDNEnabledSvcAS == "" {
 			return fmt.Errorf("address set hash name(s) %s not found", as.GetName())
 		}
