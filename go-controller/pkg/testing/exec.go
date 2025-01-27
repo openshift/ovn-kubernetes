@@ -127,6 +127,18 @@ func (f *FakeExec) CalledMatchesExpected() bool {
 	return len(f.executedCommands) == len(f.expectedCommands)
 }
 
+// CalledMatchesExpectedAtLeastN returns true if the number of commands the code under
+// test called is at least 'minNumberOfMatches' and less than or equal to the number of
+// expected commands in the FakeExec's list
+func (f *FakeExec) CalledMatchesExpectedAtLeastN(minNumberOfMatches int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.receivedUnexpected {
+		return false
+	}
+	return len(f.executedCommands) >= minNumberOfMatches && len(f.executedCommands) <= len(f.expectedCommands)
+}
+
 // ExpectedCmd contains properties that the testcase expects a called command
 // to have as well as the output that the fake command should return
 type ExpectedCmd struct {
@@ -296,6 +308,15 @@ func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.expectedCommands = append(f.expectedCommands, expected)
+}
+
+// AddRepeatedFakeCmd takes the ExpectedCmd and appends its runner function to
+// a fake command action list of the FakeExec repeatCount times
+func (f *FakeExec) AddRepeatedFakeCmd(expected *ExpectedCmd, repeatCount int) {
+	for i := 0; i < repeatCount; i++ {
+		cmdCopy := *expected
+		f.AddFakeCmd(&cmdCopy)
+	}
 }
 
 // AddFakeCmdsNoOutputNoError appends a list of commands to the expected

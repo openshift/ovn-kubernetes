@@ -44,10 +44,13 @@ const (
 	retryTimeout         = 40 * time.Second // polling timeout
 	rolloutTimeout       = 10 * time.Minute
 	agnhostImage         = "registry.k8s.io/e2e-test-images/agnhost:2.26"
+	agnhostImageNew      = "registry.k8s.io/e2e-test-images/agnhost:2.53"
 	iperf3Image          = "quay.io/sronanrh/iperf"
 	redirectIP           = "123.123.123.123"
 	redirectPort         = "13337"
 	exContainerName      = "tcp-continuous-client"
+	defaultPodInterface  = "eth0"
+	udnPodInterface      = "ovn-udn1"
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
@@ -469,8 +472,17 @@ func deleteClusterExternalContainer(containerName string) {
 	}, 5).Should(gomega.HaveLen(0))
 }
 
-func updateNamespace(f *framework.Framework, namespace *v1.Namespace) {
-	_, err := f.ClientSet.CoreV1().Namespaces().Update(context.Background(), namespace, metav1.UpdateOptions{})
+// updatesNamespace labels while preserving the required UDN label
+func updateNamespaceLabels(f *framework.Framework, namespace *v1.Namespace, labels map[string]string) {
+	// should never be nil
+	n := *namespace
+	for k, v := range labels {
+		n.Labels[k] = v
+	}
+	if _, ok := namespace.Labels[RequiredUDNNamespaceLabel]; ok {
+		n.Labels[RequiredUDNNamespaceLabel] = ""
+	}
+	_, err := f.ClientSet.CoreV1().Namespaces().Update(context.Background(), &n, metav1.UpdateOptions{})
 	framework.ExpectNoError(err, fmt.Sprintf("unable to update namespace: %s, err: %v", namespace.Name, err))
 }
 func getNamespace(f *framework.Framework, name string) *v1.Namespace {
