@@ -93,6 +93,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, podInfo, pod)).To(Succeed())
+				defer fakeOvn.networkManager.Stop()
 
 				// for layer2 on interconnect, it is the cluster manager that
 				// allocates the OVN annotation; on unit tests, this just
@@ -199,6 +200,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, testNode, sourcePodInfo, sourcePod)).To(Succeed())
+				defer fakeOvn.networkManager.Stop()
 
 				// for layer2 on interconnect, it is the cluster manager that
 				// allocates the OVN annotation; on unit tests, this just
@@ -350,6 +352,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					*netConf,
 				)
 				Expect(err).NotTo(HaveOccurred())
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 
 				const nodeIPv4CIDR = "192.168.126.202/24"
 				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
@@ -424,6 +427,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 						networkConfig,
 						nodeName,
 						fakeNetworkManager,
+						nil,
+						NewPortCache(ctx.Done()),
 					).Cleanup()).To(Succeed())
 				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{nbZone}))
 
@@ -673,8 +678,10 @@ func newSecondaryLayer2NetworkController(
 	netInfo util.NetInfo,
 	nodeName string,
 	networkManager networkmanager.Interface,
+	eIPController *EgressIPController,
+	portCache *PortCache,
 ) *SecondaryLayer2NetworkController {
-	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, networkManager)
+	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, networkManager, eIPController, portCache)
 	layer2NetworkController.gatewayManagers.Store(
 		nodeName,
 		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
@@ -705,6 +712,7 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 		*netInfo.netconf(),
 	)
 	Expect(err).NotTo(HaveOccurred())
+	nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
 	By("setting up the OVN DB without any entities in it")
 	Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
 

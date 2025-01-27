@@ -48,7 +48,7 @@ function testrun {
             go_test="sudo ${testfile}"
         fi
     fi
-    if [[ -n "$gingko_focus" ]]; then
+    if [[ -n "$ginkgo_focus" ]]; then
         local ginkgoargs=${ginkgo_focus:-}
     fi
     local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
