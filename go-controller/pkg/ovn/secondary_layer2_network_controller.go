@@ -414,6 +414,16 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 		}
 		return true
 	})
+
+	// remove load balancer groups
+	lbGroups := make([]*nbdb.LoadBalancerGroup, 0, 3)
+	for _, lbGroupUUID := range []string{oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID} {
+		lbGroups = append(lbGroups, &nbdb.LoadBalancerGroup{UUID: lbGroupUUID})
+	}
+	if err := libovsdbops.DeleteLoadBalancerGroups(oc.nbClient, lbGroups); err != nil {
+		klog.Errorf("Failed to delete load balancer groups on network: %q, error: %v", oc.GetNetworkName(), err)
+	}
+
 	return nil
 }
 

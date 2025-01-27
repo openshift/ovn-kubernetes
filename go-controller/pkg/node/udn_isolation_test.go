@@ -449,6 +449,27 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 			}).Should(Succeed())
 		})
 
+		It("on pod update", func() {
+			start(
+				newPodWithIPs(nadNamespace, "pod1", true, []string{"1.1.1.1", "2014:100:200::1"}))
+			err := nodenft.MatchNFTRules(getExpectedDumpWithOpenPorts([]string{"1.1.1.1"}, []string{"2014:100:200::1"}, nil), nft.Dump())
+			Expect(err).NotTo(HaveOccurred())
+			pod, err := fakeClient.KubeClient.CoreV1().Pods(nadNamespace).Get(context.TODO(),
+				"pod1", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			pod.Annotations[util.UDNOpenPortsAnnotationName] = getOpenPortAnnotation([]util.OpenPort{{Protocol: "tcp", Port: intRef(80)}})[util.UDNOpenPortsAnnotationName]
+			_, err = fakeClient.KubeClient.CoreV1().Pods(nadNamespace).Update(context.TODO(),
+				pod, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() error {
+				return nodenft.MatchNFTRules(getExpectedDumpWithOpenPorts([]string{"1.1.1.1"}, []string{"2014:100:200::1"}, map[string][]*util.OpenPort{
+					"1.1.1.1":         {{Protocol: "tcp", Port: intRef(80)}},
+					"2014:100:200::1": {{Protocol: "tcp", Port: intRef(80)}},
+				}), nft.Dump())
+			}).Should(Succeed())
+		})
+
 		It("on pod delete", func() {
 			start(
 				newPodWithIPs(nadNamespace, "pod1", true, []string{"1.1.1.1", "2014:100:200::1"}, util.OpenPort{Protocol: "tcp", Port: intRef(80)}),

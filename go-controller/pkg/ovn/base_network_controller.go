@@ -10,6 +10,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -1005,10 +1006,12 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
 		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(knp.Namespace)
-		if err != nil {
-			return fmt.Errorf("could not get active network for namespace %s: %v", knp.Namespace, err)
+		// The InvalidPrimaryNetworkError is returned when the UDN is not found because it has already been deleted,
+		// while the NotFound error occurs when the namespace no longer exists. In both cases, proceed with deleting the NetworkPolicy.
+		if err != nil && !util.IsInvalidPrimaryNetworkError(err) && !kapierrors.IsNotFound(err) {
+			return fmt.Errorf("could not get active network for namespace %s: %w", knp.Namespace, err)
 		}
-		if bnc.GetNetworkName() != netinfo.GetNetworkName() {
+		if err == nil && bnc.GetNetworkName() != netinfo.GetNetworkName() {
 			return nil
 		}
 		return bnc.deleteNetworkPolicy(knp)

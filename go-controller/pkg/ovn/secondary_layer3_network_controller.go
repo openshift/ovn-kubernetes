@@ -532,6 +532,16 @@ func (oc *SecondaryLayer3NetworkController) Cleanup() error {
 			return fmt.Errorf("failed to delete interconnect transit switch of network %s: %v", netName, err)
 		}
 	}
+
+	// remove load balancer groups
+	lbGroups := make([]*nbdb.LoadBalancerGroup, 0, 3)
+	for _, lbGroupUUID := range []string{oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID} {
+		lbGroups = append(lbGroups, &nbdb.LoadBalancerGroup{UUID: lbGroupUUID})
+	}
+	if err := libovsdbops.DeleteLoadBalancerGroups(oc.nbClient, lbGroups); err != nil {
+		klog.Errorf("Failed to delete load balancer groups on network: %q, error: %v", oc.GetNetworkName(), err)
+	}
+
 	return nil
 }
 
@@ -788,7 +798,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.
 	var err error
 	if syncZoneIc && config.OVNKubernetesFeature.EnableInterconnect {
 		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
-			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %v", node.Name, err)
+			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %w", node.Name, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)

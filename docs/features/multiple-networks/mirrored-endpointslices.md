@@ -17,9 +17,12 @@ The EndpointSlices mirror controller uses a separate set of labels:
 
 - `endpointslice.kubernetes.io/managed-by:endpointslice-mirror-controller.k8s.ovn.org` -  Indicates that the EndpointSlice is managed by the mirror controller.
 - `k8s.ovn.org/service-name:<service-name>` - The service that this mirrored EndpointSlice belongs to, used by the user-defined network service controller. Note that the label key is different from the default EndpointSlice.
+- `k8s.ovn.org/source-endpointslice-version:<default-endpointslice-resourceversion>` - The last reconciled resource version from the default EndpointSlice.
+
+and annotations (Label values have a length limit of 63 characters):
 - `k8s.ovn.org/endpointslice-network:<udn-network-name>` - The user-defined network that the IP addresses in the mirrored EndpointSlice belong to.
 - `k8s.ovn.org/source-endpointslice:<default-endpointslice>` -  The name of the default EndpointSlice that was the source of the mirrored EndpointSlice.
-- `k8s.ovn.org/source-endpointslice-version:<default-endpointslice-resourceversion>` - The last reconciled resource version from the default EndpointSlice.
+
 
 ### Example
 
@@ -99,10 +102,11 @@ metadata:
   generateName: l3-network-sample-deployment-
   labels:
     endpointslice.kubernetes.io/managed-by: endpointslice-mirror-controller.k8s.ovn.org
-    k8s.ovn.org/endpointslice-network: l3-network
     k8s.ovn.org/service-name: sample-deployment
-    k8s.ovn.org/source-endpointslice: sample-deployment-rkk4n
     k8s.ovn.org/source-endpointslice-version: "31533"
+  annotations:
+    k8s.ovn.org/endpointslice-network: l3-network
+    k8s.ovn.org/source-endpointslice: sample-deployment-rkk4n
   namespace: nad-l3
   resourceVersion: "31535"
 addressType: IPv4

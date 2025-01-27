@@ -408,7 +408,8 @@ func podNeedsUpdate(oldObj, newObj *v1.Pod) bool {
 	}
 	// react to pod IP changes
 	return !reflect.DeepEqual(oldObj.Status, newObj.Status) ||
-		oldObj.Annotations[util.OvnPodAnnotationName] != newObj.Annotations[util.OvnPodAnnotationName]
+		oldObj.Annotations[util.OvnPodAnnotationName] != newObj.Annotations[util.OvnPodAnnotationName] ||
+		oldObj.Annotations[util.UDNOpenPortsAnnotationName] != newObj.Annotations[util.UDNOpenPortsAnnotationName]
 }
 
 func (m *UDNHostIsolationManager) reconcilePod(key string) error {

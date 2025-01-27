@@ -116,6 +116,9 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		}
 	)
 
+	// disable automatic namespace creation, we need to add the required UDN label
+	fr.SkipNamespaceCreation = true
+
 	type liveMigrationTestData struct {
 		mode                kubevirtv1.MigrationMode
 		numberOfVMs         int
@@ -971,7 +974,6 @@ passwd:
 		}
 	)
 	BeforeEach(func() {
-		namespace = fr.Namespace.Name
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
 		clientSet = fr.ClientSet
 
@@ -983,6 +985,11 @@ passwd:
 	Context("with default pod network", func() {
 
 		BeforeEach(func() {
+			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, map[string]string{
+				"e2e-framework": fr.BaseName,
+			})
+			fr.Namespace = ns
+			namespace = fr.Namespace.Name
 			workerNodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{LabelSelector: labels.FormatLabels(map[string]string{"node-role.kubernetes.io/worker": ""})})
 			Expect(err).ToNot(HaveOccurred())
 			nodesByOVNZone := map[string][]corev1.Node{}
@@ -1272,6 +1279,17 @@ passwd:
 			role        string
 		}
 		DescribeTable("should keep ip", func(td testData) {
+			l := map[string]string{
+				"e2e-framework": fr.BaseName,
+			}
+			if td.role == "primary" {
+				l[RequiredUDNNamespaceLabel] = ""
+			}
+			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, l)
+			Expect(err).NotTo(HaveOccurred())
+			fr.Namespace = ns
+			namespace = fr.Namespace.Name
+
 			netConfig := newNetworkAttachmentConfig(
 				networkAttachmentConfigParams{
 					namespace:          namespace,
@@ -1457,6 +1475,13 @@ passwd:
 			}
 		)
 		BeforeEach(func() {
+			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, map[string]string{
+				"e2e-framework":           fr.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			})
+			fr.Namespace = ns
+			namespace = fr.Namespace.Name
+
 			netConfig := newNetworkAttachmentConfig(
 				networkAttachmentConfigParams{
 					namespace: namespace,
@@ -1497,7 +1522,7 @@ passwd:
 				Should(Succeed())
 
 			By("Reconfigure primary UDN interface to use dhcp/nd for ipv4 and ipv6")
-			_, err := virtLauncherCommand(kubevirt.GenerateAddressDiscoveryConfigurationCommand("ovn-udn1"))
+			_, err = virtLauncherCommand(kubevirt.GenerateAddressDiscoveryConfigurationCommand("ovn-udn1"))
 			Expect(err).ToNot(HaveOccurred())
 
 		})

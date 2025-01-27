@@ -34,6 +34,8 @@ type SpecGetter interface {
 	GetLayer2() *userdefinednetworkv1.Layer2Config
 }
 
+// This function has a copy in go-controller/observability-lib/sampledecoder/sample_decoder.go
+// Please update together with this function.
 func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
 	parts := strings.Split(networkName, ".")
 	if len(parts) == 2 {
@@ -132,9 +134,18 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		netConfSpec.JoinSubnet = cidrString(renderJoinSubnets(cfg.Role, cfg.JoinSubnets))
 	case userdefinednetworkv1.NetworkTopologyLayer2:
 		cfg := spec.GetLayer2()
+		if err := validateIPAM(cfg.IPAM); err != nil {
+			return nil, err
+		}
 		netConfSpec.Role = strings.ToLower(string(cfg.Role))
 		netConfSpec.MTU = int(cfg.MTU)
-		netConfSpec.AllowPersistentIPs = cfg.IPAMLifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
+		netConfSpec.AllowPersistentIPs = cfg.IPAM != nil && cfg.IPAM.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
+		if ipamEnabled(cfg.IPAM) && len(cfg.Subnets) == 0 {
+			return nil, fmt.Errorf("subnets is required with ipam.mode is Enabled or unset")
+		}
+		if !ipamEnabled(cfg.IPAM) && len(cfg.Subnets) > 0 {
+			return nil, fmt.Errorf("subnets must be unset when ipam.mode is Disabled")
+		}
 		netConfSpec.Subnets = cidrString(cfg.Subnets)
 		netConfSpec.JoinSubnet = cidrString(renderJoinSubnets(cfg.Role, cfg.JoinSubnets))
 	}
@@ -174,6 +185,20 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 	}
 
 	return cniNetConf, nil
+}
+
+func ipamEnabled(ipam *userdefinednetworkv1.IPAMConfig) bool {
+	return ipam == nil || ipam.Mode == "" || ipam.Mode == userdefinednetworkv1.IPAMEnabled
+}
+
+func validateIPAM(ipam *userdefinednetworkv1.IPAMConfig) error {
+	if ipam == nil {
+		return nil
+	}
+	if ipam.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent && !ipamEnabled(ipam) {
+		return fmt.Errorf("lifecycle Persistent is only supported when ipam.mode is Enabled")
+	}
+	return nil
 }
 
 func renderJoinSubnets(role userdefinednetworkv1.NetworkRole, joinSubnetes []userdefinednetworkv1.CIDR) []userdefinednetworkv1.CIDR {

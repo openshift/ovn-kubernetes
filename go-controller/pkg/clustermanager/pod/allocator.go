@@ -204,9 +204,33 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 		return nil
 	}
 
-	activeNetwork, err := a.getActiveNetworkForPod(pod)
-	if err != nil {
-		return fmt.Errorf("failed looking for an active network: %w", err)
+	var activeNetwork util.NetInfo
+	var err error
+
+	if new != nil {
+		activeNetwork, err = a.getActiveNetworkForPod(pod)
+		if err != nil {
+			return fmt.Errorf("failed looking for an active network: %w", err)
+		}
+	} else if a.netInfo.IsPrimaryNetwork() {
+		// During pod deletion, the UDN might already be removed. To handle this, check if the activeNetwork
+		// is managed by the current allocator using pod annotations. If not, exit as there is nothing to do.
+		// There is no need to handle non-primary networks as they are already present in the network-selection
+		// annotations handled in GetPodNADToNetworkMappingWithActiveNetwork.
+		podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+		if err != nil {
+			return err
+		}
+		for nadName := range podNetworks {
+			if a.netInfo.HasNAD(nadName) {
+				activeNetwork = a.netInfo
+				break
+			}
+		}
+		if activeNetwork == nil {
+			klog.V(5).Infof("Skipping pod cleanup for %s/%s on network %s", pod.Namespace, pod.Name, a.netInfo.GetNetworkName())
+			return nil
+		}
 	}
 
 	onNetwork, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, a.netInfo, activeNetwork)

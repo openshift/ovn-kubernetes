@@ -1,9 +1,10 @@
 package testing
 
 import (
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/utils/ptr"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // USED ONLY FOR TESTING
@@ -55,9 +56,12 @@ func MirrorEndpointSlice(defaultEndpointSlice *discovery.EndpointSlice, network 
 	mirror := defaultEndpointSlice.DeepCopy()
 	mirror.Name = defaultEndpointSlice.Name + "-mirrored"
 	mirror.Labels[discovery.LabelManagedBy] = types.EndpointSliceMirrorControllerName
-	mirror.Labels[types.LabelSourceEndpointSlice] = defaultEndpointSlice.Name
-	mirror.Labels[types.LabelUserDefinedEndpointSliceNetwork] = network
 	mirror.Labels[types.LabelUserDefinedServiceName] = defaultEndpointSlice.Labels[discovery.LabelServiceName]
+	if mirror.Annotations == nil {
+		mirror.Annotations = make(map[string]string)
+	}
+	mirror.Annotations[types.SourceEndpointSliceAnnotation] = defaultEndpointSlice.Name
+	mirror.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation] = network
 
 	if !keepEndpoints {
 		mirror.Endpoints = nil

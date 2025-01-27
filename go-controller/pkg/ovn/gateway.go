@@ -787,7 +787,7 @@ func (gw *GatewayManager) GatewayInit(
 
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-	if !config.Gateway.DisableSNATMultipleGWs && !gw.isRoutingAdvertised(nodeName) {
+	if (!config.Gateway.DisableSNATMultipleGWs || gw.netInfo.IsPrimaryNetwork()) && !gw.isRoutingAdvertised(nodeName) {
 		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
 		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
 		for _, entry := range clusterIPSubnet {

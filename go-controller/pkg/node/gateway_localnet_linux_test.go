@@ -113,16 +113,16 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 	_, err := n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
-			n.AddService(svc)
+			Expect(n.AddService(svc)).To(Succeed())
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldSvc := old.(*kapi.Service)
 			newSvc := new.(*kapi.Service)
-			n.UpdateService(oldSvc, newSvc)
+			Expect(n.UpdateService(oldSvc, newSvc)).To(Succeed())
 		},
 		DeleteFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
-			n.DeleteService(svc)
+			Expect(n.DeleteService(svc)).To(Succeed())
 		},
 	}, n.SyncServices)
 
@@ -268,6 +268,8 @@ var _ = Describe("Node Operations", func() {
 		fNPW               *nodePortWatcher
 		fakeMgmtPortConfig managementPortConfig
 		netlinkMock        *mocks.NetLinkOps
+
+		nInitialFakeCommands int
 	)
 
 	origNetlinkInst := util.GetNetLinkOps()
@@ -286,6 +288,7 @@ var _ = Describe("Node Operations", func() {
 		fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 --no-heading --data=bare --format=csv --columns name list interface",
 		})
+		nInitialFakeCommands = 1
 
 		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
 		nft = nodenft.SetFakeNFTablesHelper()
@@ -318,14 +321,15 @@ var _ = Describe("Node Operations", func() {
 	Context("on startup", func() {
 		It("removes stale iptables/nftables rules while keeping remaining intact", func() {
 			app.Action = func(ctx *cli.Context) error {
+				// Depending on the order of informer event processing the initial
+				// Service might be "added" once or twice.  Take that into account.
+				minNFakeCommands := nInitialFakeCommands + 2
+				fakeOvnNode.fakeExec.AddRepeatedFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+				}, 3)
+
 				externalIP := "1.1.1.1"
 				externalIPPort := int32(8032)
-				for i := 0; i < 2; i++ {
-					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: "ovs-ofctl show ",
-					})
-				}
-
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -399,7 +403,9 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
+				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
 				Expect(setupManagementPortNFTables(&fakeMgmtPortConfig)).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
@@ -435,10 +441,7 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-				Expect(err).NotTo(HaveOccurred())
-
-				return nil
+				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
@@ -475,8 +478,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -507,13 +508,11 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-
-				return nil
+				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
@@ -552,8 +551,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -585,13 +582,11 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-
-				return nil
+				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
@@ -641,8 +636,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -675,7 +668,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
@@ -683,7 +676,7 @@ var _ = Describe("Node Operations", func() {
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
 				return nil
@@ -694,12 +687,14 @@ var _ = Describe("Node Operations", func() {
 
 		It("inits iptables rules with LoadBalancer", func() {
 			app.Action = func(ctx *cli.Context) error {
+				// Depending on the order of informer event processing the initial
+				// Service might be "added" once or twice.  Take that into account.
+				minNFakeCommands := nInitialFakeCommands + 2
+				fakeOvnNode.fakeExec.AddRepeatedFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+				}, 3)
+
 				externalIP := "1.1.1.1"
-				for i := 0; i < 3; i++ {
-					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: "ovs-ofctl show ",
-					})
-				}
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -736,9 +731,9 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
+				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -772,13 +767,11 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-
-				return nil
+				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
@@ -834,8 +827,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -879,7 +870,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
@@ -887,11 +878,11 @@ var _ = Describe("Node Operations", func() {
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
 				return nil
@@ -973,7 +964,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1024,8 +1014,8 @@ var _ = Describe("Node Operations", func() {
 				err := nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_80"]).To(Equal(expectedLBIngressFlows))
-				Expect(fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_80"]).To(Equal(expectedLBExternalIPFlows))
+				Expect(fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_80")).To(Equal(expectedLBIngressFlows))
+				Expect(fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_80")).To(Equal(expectedLBExternalIPFlows))
 				return nil
 			}
 			Expect(app.Run([]string{app.Name})).To(Succeed())
@@ -1081,8 +1071,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1123,17 +1111,17 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
 				return nil
@@ -1192,8 +1180,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1249,7 +1235,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
@@ -1257,11 +1243,11 @@ var _ = Describe("Node Operations", func() {
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedNodePortFlows))
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				flows = fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				flows = fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
 				return nil
@@ -1307,8 +1293,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -1340,7 +1324,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables4, nil)
+				err := f4.MatchState(expectedTables4, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1368,16 +1352,18 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules for ExternalIP with DualStack", func() {
 			app.Action = func(ctx *cli.Context) error {
 
+				// Depending on the order of informer event processing the initial
+				// Service might be "added" once or twice.  Take that into account.
+				minNFakeCommands := nInitialFakeCommands + 2
+				fakeOvnNode.fakeExec.AddRepeatedFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+				}, 3)
+
 				externalIPv4 := "10.10.10.1"
 				externalIPv6 := "fd00:96:1::1"
 				clusterIPv4 := "10.129.0.2"
 				clusterIPv6 := "fd00:10:96::10"
 				fNPW.gatewayIPv6 = v6localnetGatewayIP
-				for i := 0; i < 3; i++ {
-					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: "ovs-ofctl show ",
-					})
-				}
 
 				service := *newService("service1", "namespace1", clusterIPv4,
 					[]v1.ServicePort{
@@ -1402,9 +1388,9 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
+				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables4 := map[string]util.FakeTable{
 					"nat": {
@@ -1435,7 +1421,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables4, nil)
+				err := f4.MatchState(expectedTables4, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1453,9 +1439,7 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-
-				return nil
+				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
@@ -1465,12 +1449,14 @@ var _ = Describe("Node Operations", func() {
 	Context("on delete", func() {
 		It("deletes iptables rules with ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
+				// Depending on the order of informer event processing the initial
+				// Service might be "added" once or twice.  Take that into account.
+				minNFakeCommands := nInitialFakeCommands + 2
+				fakeOvnNode.fakeExec.AddRepeatedFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+				}, 3)
+
 				externalIP := "1.1.1.1"
-				for i := 0; i < 2; i++ {
-					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: "ovs-ofctl show ",
-					})
-				}
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1496,9 +1482,11 @@ var _ = Describe("Node Operations", func() {
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"1.1.1.1", 8032}, {"10.129.0.2", 8032}})
-				err := fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
+				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1526,21 +1514,25 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
 					"filter": {},
 					"mangle": {},
 				}
-				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f6 := iptV6.(*util.FakeIPTables)
+					return f6.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
 				return nil
 			}
@@ -1577,9 +1569,9 @@ var _ = Describe("Node Operations", func() {
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 0}, {"192.168.18.15", 31111}})
-				err := fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
+				Eventually(fakeOvnNode.fakeExec.CalledMatchesExpected, "2s").Should(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1607,9 +1599,10 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
@@ -1617,12 +1610,15 @@ var _ = Describe("Node Operations", func() {
 					"mangle": {},
 				}
 
-				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f6 := iptV6.(*util.FakeIPTables)
+					return f6.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
 				return nil
 			}
@@ -1634,12 +1630,14 @@ var _ = Describe("Node Operations", func() {
 	Context("on add and delete", func() {
 		It("manages iptables rules with ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
+				// Depending on the order of informer event processing the initial
+				// Service might be "added" once or twice.  Take that into account.
+				minNFakeCommands := nInitialFakeCommands + 2
+				fakeOvnNode.fakeExec.AddRepeatedFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+				}, 3)
+
 				externalIP := "10.10.10.1"
-				for i := 0; i < 3; i++ {
-					fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: "ovs-ofctl show ",
-					})
-				}
 				externalIPPort := int32(8034)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -1662,9 +1660,9 @@ var _ = Describe("Node Operations", func() {
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Eventually(func() bool {
+					return fakeOvnNode.fakeExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
+				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1696,16 +1694,19 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}).Should(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}).Should(Succeed())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034}, {"10.129.0.2", 8034}})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1733,18 +1734,20 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
 				return nil
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
-
 		})
 
 		It("check openflows for LoadBalancer and external ip are correctly added and removed where ETP=local, LGW mode", func() {
@@ -1802,8 +1805,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedLBIngressFlows := []string{
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
@@ -1815,15 +1816,18 @@ var _ = Describe("Node Operations", func() {
 					"cookie=0x77df6d2c74c0a658, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.2, actions=output:LOCAL",
 				}
 
-				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
-				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
-				Expect(flows).To(Equal(expectedLBExternalIPFlows1))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.2_8080"]
-				Expect(flows).To(Equal(expectedLBExternalIPFlows2))
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
+				}).Should(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+				}).Should(Equal(expectedLBIngressFlows))
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+				}).Should(Equal(expectedLBExternalIPFlows1))
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.2_8080")
+				}).Should(Equal(expectedLBExternalIPFlows2))
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{
 					{"1.1.1.1", 8080},
@@ -1832,16 +1836,22 @@ var _ = Describe("Node Operations", func() {
 					{"192.168.18.15", 31111},
 					{"10.129.0.2", 8080},
 				})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
-				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.2_8080"]
-				Expect(flows).To(BeNil())
+
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
+
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
+				}, "2s").Should(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("Ingress_namespace1_service1_5.5.5.5_8080")
+				}, "2s").Should(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.1_8080")
+				}, "2s").Should(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("External_namespace1_service1_1.1.1.2_8080")
+				}, "2s").Should(BeNil())
 
 				return nil
 			}
@@ -1986,9 +1996,7 @@ var _ = Describe("Node Operations", func() {
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				Eventually(fakeOvnNode.fakeExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2018,16 +2026,19 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}).Should(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}).Should(Succeed())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 38034}})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2055,12 +2066,15 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
 				return nil
 			}
@@ -2112,8 +2126,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2146,19 +2158,18 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
+				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-				Expect(err).NotTo(HaveOccurred())
+				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2186,15 +2197,19 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
+				}, "2s").Should(BeNil())
 
 				return nil
 			}
@@ -2247,8 +2262,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2285,20 +2298,18 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-				Expect(err).NotTo(HaveOccurred())
+				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2326,15 +2337,19 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 = iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
+				}, "2s").Should(BeNil())
 
 				return nil
 			}
@@ -2393,8 +2408,6 @@ var _ = Describe("Node Operations", func() {
 				// to ensure the endpoint is local-host-networked
 				res := fNPW.nodeIPManager.cidrs.Has(fmt.Sprintf("%s/32", ep1.Addresses[0]))
 				Expect(res).To(BeTrue())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2431,18 +2444,17 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2470,15 +2482,19 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 = iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
+				}, "2s").Should(BeNil())
 
 				return nil
 			}
@@ -2530,8 +2546,6 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2570,20 +2584,18 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-				Expect(err).NotTo(HaveOccurred())
+				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2611,15 +2623,19 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 = iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
+				}, "2s").Should(BeNil())
 
 				return nil
 			}
@@ -2676,8 +2692,6 @@ var _ = Describe("Node Operations", func() {
 				// to ensure the endpoint is local-host-networked
 				res := fNPW.nodeIPManager.cidrs.Has(fmt.Sprintf("%s/32", endpointSlice.Endpoints[0].Addresses[0]))
 				Expect(res).To(BeTrue())
-				err := fNPW.AddService(&service)
-				Expect(err).NotTo(HaveOccurred())
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
@@ -2715,18 +2729,16 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
 				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedFlows))
+				Expect(fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")).To(Equal(expectedFlows))
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
-				err = fNPW.DeleteService(&service)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
+					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2754,15 +2766,19 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 
-				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables, nil)
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() error {
+					f4 := iptV4.(*util.FakeIPTables)
+					return f4.MatchState(expectedTables, nil)
+				}, "2s").Should(Succeed())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Eventually(func() error {
+					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				}, "2s").Should(Succeed())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(BeNil())
+				Eventually(func() []string {
+					return fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
+				}, "2s").Should(BeNil())
 
 				return nil
 			}
