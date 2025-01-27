@@ -540,8 +540,7 @@ func getPortNetworkPolicy(policyName, namespace, labelName, labelVal string, tcp
 		},
 		[]knet.NetworkPolicyIngressRule{{
 			Ports: []knet.NetworkPolicyPort{{
-				Port:     &intstr.IntOrString{IntVal: tcpPort},
-				Protocol: &tcpProtocol,
+				Port: &intstr.IntOrString{IntVal: tcpPort},
 			}},
 		}},
 		[]knet.NetworkPolicyEgressRule{{
