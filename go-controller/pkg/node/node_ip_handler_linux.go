@@ -62,7 +62,34 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtConfig *ma
 		syncPeriod:     30 * time.Second,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
-	mgr.sync()
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		var ifAddrs []*net.IPNet
+
+		// update k8s.ovn.org/host-cidrs
+		node, err := watchFactory.GetNode(nodeName)
+		if err != nil {
+			klog.Errorf("Failed to get node %s: %v", nodeName, err)
+			return nil
+		}
+		if useNetlink {
+			// get updated interface IP addresses for the gateway bridge
+			ifAddrs, err = gwBridge.updateInterfaceIPAddresses(node)
+			if err != nil {
+				klog.Errorf("Failed to obtain interface IP addresses for node %s: %v", nodeName, err)
+				return nil
+			}
+		}
+		if err = mgr.updateHostCIDRs(node, ifAddrs); err != nil {
+			klog.Errorf("Failed to update host-cidrs annotations on node %s: %v", nodeName, err)
+			return nil
+		}
+		if err = mgr.nodeAnnotator.Run(); err != nil {
+			klog.Errorf("Failed to set host-cidrs annotations on node %s: %v", nodeName, err)
+			return nil
+		}
+	} else {
+		mgr.sync()
+	}
 
 	return mgr
 }

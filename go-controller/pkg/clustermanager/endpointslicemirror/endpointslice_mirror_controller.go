@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const maxRetries = 10
@@ -48,12 +49,12 @@ type Controller struct {
 }
 
 // getDefaultEndpointSliceKey returns the key for the default EndpointSlice associated with the given EndpointSlice.
-// For mirrored EndpointSlices it returns the key based on the value of the "k8s.ovn.org/source-endpointslice" label.
+// For mirrored EndpointSlices it returns the key based on the value of the "k8s.ovn.org/source-endpointslice" annotation.
 // For default EndpointSlices it returns the <namespace>/<name> key.
 // For other EndpointSlices it returns an empty value.
 func (c *Controller) getDefaultEndpointSliceKey(endpointSlice *v1.EndpointSlice) string {
 	if c.isManagedByController(endpointSlice) {
-		defaultEndpointSliceName, found := endpointSlice.Labels[types.LabelSourceEndpointSlice]
+		defaultEndpointSliceName, found := endpointSlice.Annotations[types.SourceEndpointSliceAnnotation]
 		if !found {
 			utilruntime.HandleError(fmt.Errorf("couldn't determine the source EndpointSlice for %s", cache.MetaObjectToName(endpointSlice)))
 			return ""
@@ -255,11 +256,6 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return nil
 	}
 
-	mirrorEndpointSliceSelector := labels.Set(map[string]string{
-		types.LabelSourceEndpointSlice: name,
-		v1.LabelManagedBy:              c.name,
-	}).AsSelectorPreValidated()
-
 	klog.Infof("Processing %s/%s EndpointSlice in %q primary network", namespace, name, namespacePrimaryNetwork.GetNetworkName())
 
 	defaultEndpointSlice, err := c.endpointSliceLister.EndpointSlices(namespace).Get(name)
@@ -269,7 +265,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 
 	var mirroredEndpointSlice *v1.EndpointSlice
 
-	slices, err := c.endpointSliceLister.EndpointSlices(namespace).List(mirrorEndpointSliceSelector)
+	slices, err := util.GetMirroredEndpointSlices(c.name, name, namespace, c.endpointSliceLister)
 	if err != nil {
 		return err
 	}
@@ -279,16 +275,23 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 	}
 	if len(slices) > 1 {
 		klog.Errorf("Found %d mirrored EndpointSlices for %s/%s, removing all of them", len(slices), namespace, name)
-		if err := c.kubeClient.DiscoveryV1().EndpointSlices(namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: mirrorEndpointSliceSelector.String()}); err != nil {
-			return err
+		var errorList []error
+		for _, endpointSlice := range slices {
+			if err := c.kubeClient.DiscoveryV1().EndpointSlices(namespace).Delete(ctx, endpointSlice.Name, metav1.DeleteOptions{}); err != nil {
+				errorList = append(errorList, err)
+			}
 		}
+		if len(errorList) != 0 {
+			return utilerrors.Join(errorList...)
+		}
+
 		// return an error so there is a retry that will recreate the correct mirrored EndpointSlice
 		return fmt.Errorf("found and removed %d mirrored EndpointSlices for %s/%s", len(slices), namespace, name)
 	}
 
 	if defaultEndpointSlice == nil {
 		if mirroredEndpointSlice != nil {
-			klog.Infof("The default EndpointSlice %s/%s no longer exists, removing the mirrored one: %s", namespace, mirroredEndpointSlice.Labels[types.LabelSourceEndpointSlice], cache.MetaObjectToName(mirroredEndpointSlice))
+			klog.Infof("The default EndpointSlice %s/%s no longer exists, removing the mirrored one: %s", namespace, mirroredEndpointSlice.Annotations[types.SourceEndpointSliceAnnotation], cache.MetaObjectToName(mirroredEndpointSlice))
 			return c.kubeClient.DiscoveryV1().EndpointSlices(namespace).Delete(ctx, mirroredEndpointSlice.Name, metav1.DeleteOptions{})
 		}
 		klog.Infof("The default EndpointSlice %s/%s no longer exists", namespace, name)
@@ -306,7 +309,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 
 	if mirroredEndpointSlice != nil {
 		// nothing to do if we already reconciled this exact EndpointSlice
-		if mirroredResourceVersion, ok := mirroredEndpointSlice.Labels[types.LabelSourceEndpointSliceVersion]; ok {
+		if mirroredResourceVersion, ok := mirroredEndpointSlice.Annotations[types.LabelSourceEndpointSliceVersion]; ok {
 			if mirroredResourceVersion == defaultEndpointSlice.ResourceVersion {
 				return nil
 			}
@@ -401,15 +404,18 @@ func (c *Controller) mirrorEndpointSlice(mirroredEndpointSlice, defaultEndpointS
 	if currentMirror.Labels == nil {
 		currentMirror.Labels = map[string]string{}
 	}
+	if currentMirror.Annotations == nil {
+		currentMirror.Annotations = make(map[string]string)
+	}
 	currentMirror.AddressType = defaultEndpointSlice.AddressType
 	currentMirror.Ports = defaultEndpointSlice.Ports
 
 	// set the custom labels, generateName and reset the endpoints
 	currentMirror.Labels[v1.LabelManagedBy] = c.name
-	currentMirror.Labels[types.LabelSourceEndpointSlice] = defaultEndpointSlice.Name
-	currentMirror.Labels[types.LabelSourceEndpointSliceVersion] = defaultEndpointSlice.ResourceVersion
-	currentMirror.Labels[types.LabelUserDefinedEndpointSliceNetwork] = network.GetNetworkName()
 	currentMirror.Labels[types.LabelUserDefinedServiceName] = defaultEndpointSlice.Labels[v1.LabelServiceName]
+	currentMirror.Annotations[types.SourceEndpointSliceAnnotation] = defaultEndpointSlice.Name
+	currentMirror.Annotations[types.LabelSourceEndpointSliceVersion] = defaultEndpointSlice.ResourceVersion
+	currentMirror.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation] = network.GetNetworkName()
 
 	// Set the GenerateName only for new objects
 	if len(currentMirror.Name) == 0 {
