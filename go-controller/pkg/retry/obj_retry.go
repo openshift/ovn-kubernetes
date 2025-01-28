@@ -7,16 +7,22 @@ import (
 	"sync"
 	"time"
 
+	kapi "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
 
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const RetryObjInterval = 30 * time.Second
@@ -754,4 +760,40 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 	}()
 
 	return handler, nil
+}
+
+// getPendingPods returns all pods that are in the Pending state
+func getPendingPods(kubeClient kube.InterfaceOVN) ([]*kapi.Pod, error) {
+	var allPods []*kapi.Pod
+
+	pods, err := kubeClient.GetPods(kapi.NamespaceAll, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("status.phase", string(kapi.PodPending)).String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	allPods = append(allPods, pods...)
+	return allPods, nil
+}
+
+// RequeuePendingPods enqueues all Pending pods into the retryPods associated with netInfo.
+func RequeuePendingPods(kubeClient kube.InterfaceOVN, netInfo util.NetInfo, retryPods *RetryFramework) error {
+	var errs []error
+
+	// NOTE: A pod may reference a NAD from a different namespace, so check all pending pods.
+	allPods, err := getPendingPods(kubeClient)
+	if err != nil {
+		return err
+	}
+
+	for _, pod := range allPods {
+		pod := *pod
+		klog.V(5).Infof("Adding pending pod %s/%s to retryPods for network %s", pod.Namespace, pod.Name, netInfo.GetNetworkName())
+		err := retryPods.AddRetryObjWithAddNoBackoff(&pod)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	retryPods.RequestRetryObjs()
+	return utilerrors.Join(errs...)
 }

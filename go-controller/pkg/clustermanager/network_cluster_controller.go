@@ -16,6 +16,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -438,10 +439,16 @@ func (ncc *networkClusterController) Cleanup() error {
 }
 
 func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
-	// update network informaiton, point of no return
+	reconcilePendingPods := !ncc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
+	// update network information, point of no return
 	err := util.ReconcileNetInfo(ncc.ReconcilableNetInfo, netInfo)
 	if err != nil {
 		klog.Errorf("Failed to reconcile network %s: %v", ncc.GetNetworkName(), err)
+	}
+	if reconcilePendingPods {
+		if err := objretry.RequeuePendingPods(ncc.kube, ncc.GetNetInfo(), ncc.retryPods); err != nil {
+			klog.Errorf("Failed to requeue pending pods for network %s: %v", ncc.GetNetworkName(), err)
+		}
 	}
 	return nil
 }

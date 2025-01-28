@@ -267,6 +267,75 @@ var _ = Describe("Multi Homing", func() {
 			staticServerIP    = "192.168.200.20/24"
 		)
 
+		ginkgo.It("eventually configures pods that were added to an already existing network before the nad", func() {
+			netConfig := newNetworkAttachmentConfig(networkAttachmentConfigParams{
+				name:      secondaryNetworkName,
+				namespace: f.Namespace.Name,
+				topology:  "layer2",
+				cidr:      secondaryNetworkCIDR,
+			})
+
+			By("creating the attachment configuration")
+			_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+				context.Background(),
+				generateNAD(netConfig),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating a new namespace")
+
+			createdNamespace, err := f.CreateNamespace(context.Background(), "multi-nad-namespace", nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating the pod in the new namespace")
+			pod, err := cs.CoreV1().Pods(createdNamespace.Name).Create(
+				context.Background(),
+				generatePodSpec(podConfiguration{
+					attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+					name:        clientPodName,
+				}),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pod).NotTo(BeNil())
+
+			By("asserting the pod is trying to start")
+			Eventually(func() bool {
+				updatedPod, err := cs.CoreV1().Pods(createdNamespace.Name).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return false
+				}
+				if updatedPod.Status.Phase == v1.PodPending {
+					for _, containerStatus := range updatedPod.Status.ContainerStatuses {
+						// ensure that the container is trying to start
+						if containerStatus.State.Waiting != nil {
+							return true
+						}
+					}
+				}
+				return false
+			}, 2*time.Minute, 6*time.Second).Should(BeTrue())
+
+			By("creating the attachment configuration in the new namespace")
+			netConfig.namespace = createdNamespace.Name
+			_, err = nadClient.NetworkAttachmentDefinitions(createdNamespace.Name).Create(
+				context.Background(),
+				generateNAD(netConfig),
+				metav1.CreateOptions{},
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("asserting the pod reaches the `Ready` state")
+			Eventually(func() v1.PodPhase {
+				updatedPod, err := cs.CoreV1().Pods(createdNamespace.Name).Get(context.Background(), pod.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return v1.PodFailed
+				}
+				return updatedPod.Status.Phase
+			}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+
+		})
 		ginkgo.DescribeTable(
 			"can communicate over the secondary network",
 			func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration, serverPodConfig podConfiguration) {
