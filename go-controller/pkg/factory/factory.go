@@ -194,7 +194,7 @@ const (
 var (
 	// Use a larger queue for incoming events to avoid bottlenecks
 	// due to handlers being slow.
-	eventQueueSize uint32 = 1000
+	eventQueueSize uint32 = 100
 )
 
 // Override default event queue configuration.  Used only for tests.
