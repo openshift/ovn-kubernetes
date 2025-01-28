@@ -156,6 +156,7 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		ipamClaimsFactory:    wf.ipamClaimsFactory,
 		nadFactory:           wf.nadFactory,
 		udnFactory:           wf.udnFactory,
+		raFactory:            wf.raFactory,
 		informers:            wf.informers,
 		stopChan:             wf.stopChan,
 
