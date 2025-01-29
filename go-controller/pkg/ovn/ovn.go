@@ -184,7 +184,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 		if err != nil {
 			return err
 		}
-		if networkRole != ovntypes.NetworkRolePrimary {
+		if networkRole == ovntypes.NetworkRoleInfrastructure {
 			// only update for non-default network pods
 			portName := oc.GetLogicalPortName(pod, oc.GetNetworkName())
 			err := oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, portName)

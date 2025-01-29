@@ -264,7 +264,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return err
 	}
-	if networkRole != ovntypes.NetworkRolePrimary && util.IsNetworkSegmentationSupportEnabled() {
+	if networkRole == ovntypes.NetworkRoleInfrastructure && util.IsNetworkSegmentationSupportEnabled() {
 		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
 			return err

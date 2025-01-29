@@ -228,10 +228,10 @@ const (
 	NetworkRolePrimary   = "primary"
 	NetworkRoleSecondary = "secondary"
 	NetworkRoleDefault   = "default"
-	// defined internally by ovnkube to recognize "default"
-	// network's role as a "infrastructure-locked" network
-	// when user defined network is the primary network for
-	// the pod which makes "default" network niether primary
+	// NetworkRoleInfrastructure is defined internally by ovnkube to recognize "default"
+	// network's role as an "infrastructure-locked" network
+	// when a user defined network is the primary network for
+	// the pod which makes "default" network neither primary
 	// nor secondary
 	NetworkRoleInfrastructure = "infrastructure-locked"
 	NetworkRoleNone           = "none"
