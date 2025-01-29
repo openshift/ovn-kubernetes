@@ -1394,3 +1394,22 @@ func GetNetworkVRFName(netInfo NetInfo) string {
 	}
 	return vrfDeviceName
 }
+
+// CanServeNamespace determines whether the given network can serve a specific namespace.
+//
+// For default and secondary networks it always returns true.
+// For primary networks, it checks if the namespace is explicitly listed in the network’s
+// associated namespaces.
+func CanServeNamespace(network NetInfo, namespace string) bool {
+	// Default network handles all namespaces
+	// Secondary networks can handle pods from different namespaces
+	if !network.IsPrimaryNetwork() {
+		return true
+	}
+	for _, ns := range network.GetNADNamespaces() {
+		if ns == namespace {
+			return true
+		}
+	}
+	return false
+}
