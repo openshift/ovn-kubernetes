@@ -318,7 +318,7 @@ func NewSecondaryLayer2NetworkController(
 		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.GetNetInfo(), oc.nbClient, oc.sbClient, oc.watchFactory)
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
 		var err error
 		oc.svcController, err = svccontroller.NewController(
 			cnci.client, cnci.nbClient,
