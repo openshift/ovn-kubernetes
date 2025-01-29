@@ -27,7 +27,7 @@ set_default_params() {
   export ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   export KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   export KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-  export OVN_IMAGE=${OVN_IMAGE:-'ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:helm'}
+  export OVN_IMAGE=${OVN_IMAGE:-'ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:helm'}
 
   # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}

@@ -144,7 +144,7 @@ global:
   noHostSubnetLabel: ""
   image:
     # -- Image repository for ovn-kubernetes components
-    repository: ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu
+    repository: ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu
     # -- Specify image tag to run
     tag: master
     # -- Image pull policy
@@ -152,7 +152,7 @@ global:
   # -- Image for DPUs
   dpuImage:
     # -- Image repository for ovn-kubernetes components
-    repository: ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu
+    repository: ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu
     # -- Specify image tag to run
     tag: master
     # -- Image pull policy

@@ -11,7 +11,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"golang.org/x/exp/maps"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	knet "k8s.io/utils/net"
@@ -50,6 +49,7 @@ type NetInfo interface {
 
 	// dynamic information, can change over time
 	GetNADs() []string
+	EqualNADs(nads ...string) bool
 	HasNAD(nadName string) bool
 	// GetPodNetworkAdvertisedVRFs returns the target VRFs where the pod network
 	// is advertised per node, through a map of node names to slice of VRFs.
@@ -68,7 +68,7 @@ type NetInfo interface {
 	GetEgressIPAdvertisedNodes() []string
 
 	// derived information.
-	GetNamespaces() []string
+	GetNADNamespaces() []string
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
 	GetNetworkScopedK8sMgmtIntfName(nodeName string) string
@@ -374,6 +374,17 @@ func (nInfo *mutableNetInfo) GetNADs() []string {
 	return nInfo.getNads().UnsortedList()
 }
 
+// EqualNADs checks if the NADs associated with nInfo are the same as the ones
+// passed in the nads slice.
+func (nInfo *mutableNetInfo) EqualNADs(nads ...string) bool {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	if nInfo.getNads().Len() != len(nads) {
+		return false
+	}
+	return nInfo.getNads().HasAll(nads...)
+}
+
 // HasNAD returns true if the given NAD exists, used
 // to check if the network needs to be plumbed over
 func (nInfo *mutableNetInfo) HasNAD(nadName string) bool {
@@ -440,7 +451,7 @@ func (nInfo *mutableNetInfo) getNamespaces() sets.Set[string] {
 	return nInfo.namespaces
 }
 
-func (nInfo *mutableNetInfo) GetNamespaces() []string {
+func (nInfo *mutableNetInfo) GetNADNamespaces() []string {
 	return nInfo.getNamespaces().UnsortedList()
 }
 

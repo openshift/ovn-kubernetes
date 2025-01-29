@@ -12,6 +12,18 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	kapi "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/sets"
+	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
+	ref "k8s.io/client-go/tools/reference"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -32,18 +44,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	kapi "k8s.io/api/core/v1"
-	knet "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/util/sets"
-	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/record"
-	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
@@ -197,7 +197,17 @@ type BaseSecondaryNetworkController struct {
 }
 
 func (oc *BaseSecondaryNetworkController) Reconcile(netInfo util.NetInfo) error {
-	return util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	reconcilePendingPods := !oc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		return err
+	}
+	if reconcilePendingPods {
+		if err := ovnretry.RequeuePendingPods(oc.kube, oc.GetNetInfo(), oc.retryPods); err != nil {
+			klog.Errorf("Failed to requeue pending pods for network %s: %v", oc.GetNetworkName(), err)
+		}
+	}
+	return nil
 }
 
 func getNetworkControllerName(netName string) string {
