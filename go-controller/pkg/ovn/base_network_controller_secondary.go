@@ -257,9 +257,12 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *co
 		return err
 	}
 
-	activeNetwork, err := bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
-	if err != nil {
-		return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+	var activeNetwork util.NetInfo
+	if bsnc.IsPrimaryNetwork() {
+		activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+		}
 	}
 
 	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.GetNetInfo(), activeNetwork)
@@ -581,9 +584,13 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
 
-		activeNetwork, err := bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
-		if err != nil {
-			return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+		var activeNetwork util.NetInfo
+		var err error
+		if bsnc.IsPrimaryNetwork() {
+			activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
+			if err != nil {
+				return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
+			}
 		}
 
 		on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(pod, bsnc.GetNetInfo(), activeNetwork)

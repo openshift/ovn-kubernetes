@@ -234,6 +234,7 @@ const (
 	// the pod which makes "default" network niether primary
 	// nor secondary
 	NetworkRoleInfrastructure = "infrastructure-locked"
+	NetworkRoleNone           = "none"
 
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
