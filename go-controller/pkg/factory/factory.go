@@ -156,6 +156,8 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		ipamClaimsFactory:    wf.ipamClaimsFactory,
 		nadFactory:           wf.nadFactory,
 		udnFactory:           wf.udnFactory,
+		raFactory:            wf.raFactory,
+		frrFactory:           wf.frrFactory,
 		informers:            wf.informers,
 		stopChan:             wf.stopChan,
 
@@ -193,7 +195,7 @@ const (
 var (
 	// Use a larger queue for incoming events to avoid bottlenecks
 	// due to handlers being slow.
-	eventQueueSize uint32 = 1000
+	eventQueueSize uint32 = 100
 )
 
 // Override default event queue configuration.  Used only for tests.

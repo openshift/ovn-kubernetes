@@ -48,11 +48,6 @@ CNI features, this can be done by editing `tags` section in values.yaml file.
 Run script `helm/basic-deploy.sh` to set up a basic OVN/Kubernetes cluster.
 
 ## Manual steps:
-- Disable IPv6 of `kind` docker network, otherwise ovnkube-node will fail to start
-```
-# docker network rm kind (delete `kind` network if it already exists)
-# docker network create kind -o "com.docker.network.bridge.enable_ip_masquerade"="true" -o "com.docker.network.driver.mtu"="1500"
-```
 
 - Launch a Kind cluster without CNI and kubeproxy (additional controle-plane or worker nodes can be added)
 ```
@@ -70,20 +65,30 @@ networking:
 ```
 # cd dist/images
 # make ubuntu
-# docker tag ovn-kube-ubuntu:latest ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:master
-# kind load docker-image ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu:master
+# docker tag ovn-kube-ubuntu:latest ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master
+# kind load docker-image ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master
 ```
+
+This chart does not use a `values.yaml` by default. You must specify a values file during installation.
 
 - Run `helm install` with propery `k8sAPIServer`, `ovnkube-identity.replicas`, image repo and tag
 ```
 # cd helm/ovn-kubernetes
-# helm install ovn-kubernetes . -f values.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set ovnkube-identity.replicas=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l) --set global.image.repository=ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
+# helm install ovn-kubernetes . -f values-no-ic.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set ovnkube-identity.replicas=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l) --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
 ```
 
-## Notes:
-- Only following scenarios were tested with Kind cluster
-  - ovs-node + ovnkube-node + ovnkube-db + ovnkube-master, with/without ovnkube-identity
-  - ovs-node + ovnkube-node + ovnkube-db-raft + ovnkube-master, with/without ovnkube-identity
+## Alternative Configurations
+
+To deploy ovn-kubernetes in interconnect mode, use `-f values-single-node-zone.yaml` instead of `-f values-no-ic.yaml`.
+Additionally, you must set the zone annotation on each node before deploying.
+
+Here is an example of how to set the annotation in a Kind cluster:
+
+```
+for n in $(kind get nodes --name "${kind_cluster_name}"); do
+  kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
+done
+```
 
 Following section describes the meaning of the values.
 
@@ -389,7 +394,7 @@ true
 			<td>global.image.repository</td>
 			<td>string</td>
 			<td><pre lang="json">
-"ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-ubuntu"
+"ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu"
 </pre>
 </td>
 			<td>Image repository for ovn-kubernetes components</td>
