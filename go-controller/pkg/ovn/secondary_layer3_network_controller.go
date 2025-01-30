@@ -579,7 +579,7 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 		return err
 	}
 
-	if util.IsMultiNetworkPoliciesSupportEnabled() {
+	if util.IsMultiNetworkPoliciesSupportEnabled() && !oc.IsPrimaryNetwork() {
 		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
 		if err := oc.WatchMultiNetworkPolicy(); err != nil {
 			return err
