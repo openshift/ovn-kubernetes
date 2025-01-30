@@ -69,7 +69,7 @@ type Layer3Config struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.hostSubnet) || !isCIDR(self.cidr) || self.hostSubnet > cidr(self.cidr).prefixLength()", message="HostSubnet must be smaller than CIDR subnet"
-// +kubebuilder:validation:XValidation:rule="!has(self.hostSubnet) || !isCIDR(self.cidr) || (cidr(self.cidr).ip().family() == 4 && self.hostSubnet < 32)", message="HostSubnet must < 32 for ipv4 CIDR"
+// +kubebuilder:validation:XValidation:rule="!has(self.hostSubnet) || !isCIDR(self.cidr) || (cidr(self.cidr).ip().family() != 4 || self.hostSubnet < 32)", message="HostSubnet must < 32 for ipv4 CIDR"
 type Layer3Subnet struct {
 	// CIDR specifies L3Subnet, which is split into smaller subnets for every node.
 	//
