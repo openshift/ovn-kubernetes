@@ -65,6 +65,7 @@ type EventHandler interface {
 	RecordDeleteEvent(obj interface{})
 	RecordSuccessEvent(obj interface{})
 	RecordErrorEvent(obj interface{}, reason string, err error)
+	FilterOutResource(obj interface{}) bool
 }
 
 // DefaultEventHandler has the default implementations for some EventHandler
@@ -498,6 +499,9 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 		labelSelectorForFilteredHandler, // filter out objects not matching these labels
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
+				if r.ResourceHandler.FilterOutResource(obj) {
+					return
+				}
 				r.ResourceHandler.RecordAddEvent(obj)
 
 				key, err := GetResourceKey(obj)
@@ -551,6 +555,9 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				})
 			},
 			UpdateFunc: func(old, newer interface{}) {
+				if r.ResourceHandler.FilterOutResource(old) && r.ResourceHandler.FilterOutResource(newer) {
+					return
+				}
 				// skip the whole update if old and newer are equal
 				areEqual, err := r.ResourceHandler.AreResourcesEqual(old, newer)
 				if err != nil {
@@ -710,6 +717,9 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				})
 			},
 			DeleteFunc: func(obj interface{}) {
+				if r.ResourceHandler.FilterOutResource(obj) {
+					return
+				}
 				r.ResourceHandler.RecordDeleteEvent(obj)
 				key, err := GetResourceKey(obj)
 				if err != nil {

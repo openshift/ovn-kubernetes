@@ -110,6 +110,11 @@ func (nc *SecondaryNodeNetworkController) Cleanup() error {
 func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
 	if oc.networkID == nil || *oc.networkID == util.InvalidID {
 		oc.networkID = ptr.To(util.InvalidID)
+		if netID := oc.GetNetworkID(); netID != util.InvalidID {
+			*oc.networkID = netID
+			return *oc.networkID, nil
+		}
+
 		nodes, err := oc.watchFactory.GetNodes()
 		if err != nil {
 			return util.InvalidID, err

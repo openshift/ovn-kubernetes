@@ -109,53 +109,17 @@ func (a *PodAllocator) getActiveNetworkForPod(pod *corev1.Pod) (util.NetInfo, er
 
 }
 
-// GetNetworkRole returns the role of this controller's
-// network for the given pod
-// Expected values are:
-// (1) "primary" if this network is the primary network of the pod.
-//
-//	The "default" network is the primary network of any pod usually
-//	unless user-defined-network-segmentation feature has been activated.
-//	If network segmentation feature is enabled then any user defined
-//	network can be the primary network of the pod.
-//
-// (2) "secondary" if this network is the secondary network of the pod.
-//
-//	Only user defined networks can be secondary networks for a pod.
-//
-// (3) "infrastructure-locked" is applicable only to "default" network if
-//
-//	a user defined network is the "primary" network for this pod. This
-//	signifies the "default" network is only used for probing and
-//	is otherwise locked for all intents and purposes.
-//
-// NOTE: Like in other places, expectation is this function is always called
-// from controller's that have some relation to the given pod, unrelated
-// networks are treated as secondary networks so caller has to be careful
+// GetNetworkRole returns the role of this controller's network for the given pod
 func (a *PodAllocator) GetNetworkRole(pod *corev1.Pod) (string, error) {
-	if !util.IsNetworkSegmentationSupportEnabled() {
-		// if user defined network segmentation is not enabled
-		// then we know pod's primary network is "default" and
-		// pod's secondary network is NOT its primary network
-		if a.netInfo.IsDefault() {
-			return types.NetworkRolePrimary, nil
-		}
-		return types.NetworkRoleSecondary, nil
-	}
-	activeNetwork, err := a.getActiveNetworkForPod(pod)
+	role, err := util.GetNetworkRole(a.netInfo, a.networkManager.GetActiveNetworkForNamespace, pod)
 	if err != nil {
+		if util.IsUnprocessedActiveNetworkError(err) {
+			a.recordPodErrorEvent(pod, err)
+		}
 		return "", err
 	}
-	if activeNetwork.GetNetworkName() == a.netInfo.GetNetworkName() {
-		return types.NetworkRolePrimary, nil
-	}
-	if a.netInfo.IsDefault() {
-		// if default network was not the primary network,
-		// then when UDN is turned on, default network is the
-		// infrastructure-locked network forthis pod
-		return types.NetworkRoleInfrastructure, nil
-	}
-	return types.NetworkRoleSecondary, nil
+
+	return role, nil
 }
 
 // Reconcile allocates or releases IPs for pods updating the pod annotation
@@ -208,9 +172,11 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 	var err error
 
 	if new != nil {
-		activeNetwork, err = a.getActiveNetworkForPod(pod)
-		if err != nil {
-			return fmt.Errorf("failed looking for an active network: %w", err)
+		if a.netInfo.IsPrimaryNetwork() {
+			activeNetwork, err = a.getActiveNetworkForPod(pod)
+			if err != nil {
+				return fmt.Errorf("failed looking for an active network: %w", err)
+			}
 		}
 	} else if a.netInfo.IsPrimaryNetwork() {
 		// During pod deletion, the UDN might already be removed. To handle this, check if the activeNetwork
@@ -363,12 +329,18 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 		idAllocator = a.idAllocator.ForName(name)
 	}
 
-	// don't reallocate to new IPs if currently annotated IPs fail to alloccate
+	// don't reallocate to new IPs if currently annotated IPs fail to allocate
 	reallocate := false
 	networkRole, err := a.GetNetworkRole(pod)
 	if err != nil {
 		return err
 	}
+
+	if networkRole == types.NetworkRoleNone {
+		// pod not on this controller, nothing to do
+		return nil
+	}
+
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
 		ipAllocator,
 		idAllocator,

@@ -544,6 +544,11 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		return nil, nil, nil, false, err
 	}
 
+	if networkRole == ovntypes.NetworkRoleNone {
+		// pod not on this controller, nothing to do
+		return nil, nil, nil, false, nil
+	}
+
 	// Although we have different code to allocate the pod annotation for the
 	// default network and secondary networks, at the time of this writing they
 	// are functionally equivalent and the only reason to keep them separated is
