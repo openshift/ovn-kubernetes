@@ -111,7 +111,7 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 		oldPod := oldObj.(*corev1.Pod)
 		newPod := newObj.(*corev1.Pod)
 
-		return bsnc.ensurePodForSecondaryNetwork(newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
+		return bsnc.ensurePodForSecondaryNetwork(newPod, shouldAddPort(oldPod, newPod, inRetryCache))
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*corev1.Namespace), newObj.(*corev1.Namespace)
@@ -941,4 +941,8 @@ func (bsnc *BaseSecondaryNetworkController) enableSourceLSPFailedLiveMigration(p
 	}
 
 	return nil
+}
+
+func shouldAddPort(oldPod, newPod *corev1.Pod, inRetryCache bool) bool {
+	return inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod)
 }
