@@ -67,7 +67,7 @@ func TestAlignCPUAffinity(t *testing.T) {
 	}
 
 	// Disable the feature by making the enabler file empty
-	os.WriteFile(featureEnablerFile, []byte(""), 0)
+	err = os.WriteFile(featureEnablerFile, []byte(""), 0)
 	assert.NoError(t, err)
 
 	var tmpCPUset unix.CPUSet
@@ -77,6 +77,33 @@ func TestAlignCPUAffinity(t *testing.T) {
 
 	assertNeverPIDHasSchedAffinity(t, ovsVSwitchdPid, tmpCPUset)
 	assertNeverPIDHasSchedAffinity(t, ovsDBPid, tmpCPUset)
+
+	// Enable the feature back by putting contents in the enabler file
+	err = os.WriteFile(featureEnablerFile, []byte("1"), 0)
+	assert.NoError(t, err)
+
+	assertPIDHasSchedAffinity(t, ovsVSwitchdPid, tmpCPUset)
+	assertPIDHasSchedAffinity(t, ovsDBPid, tmpCPUset)
+
+	// Disable the feature by deleting the enabler file
+	klog.Infof("Remove the enabler file to disable the feature")
+	err = os.Remove(featureEnablerFile)
+	assert.NoError(t, err)
+
+	tmpCPUset.Set(1)
+	err = unix.SchedSetaffinity(os.Getpid(), &tmpCPUset)
+	assert.NoError(t, err)
+
+	assertNeverPIDHasSchedAffinity(t, ovsVSwitchdPid, tmpCPUset)
+	assertNeverPIDHasSchedAffinity(t, ovsDBPid, tmpCPUset)
+
+	// Re-enable the feature back by recreating the enabler file
+	klog.Infof("Re-enable the feature")
+	err = os.WriteFile(featureEnablerFile, []byte("1"), 0)
+	assert.NoError(t, err)
+
+	assertPIDHasSchedAffinity(t, ovsVSwitchdPid, tmpCPUset)
+	assertPIDHasSchedAffinity(t, ovsDBPid, tmpCPUset)
 }
 
 func TestIsFileNotEmpty(t *testing.T) {
