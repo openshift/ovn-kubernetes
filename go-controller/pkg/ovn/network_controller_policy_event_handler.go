@@ -2,10 +2,11 @@ package ovn
 
 import (
 	"fmt"
+	"reflect"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"reflect"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -57,6 +58,10 @@ type networkControllerPolicyEventHandler struct {
 	bnc             *BaseNetworkController
 	extraParameters interface{}
 	syncFunc        func([]interface{}) error
+}
+
+func (h *networkControllerPolicyEventHandler) FilterOutResource(obj interface{}) bool {
+	return false
 }
 
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource

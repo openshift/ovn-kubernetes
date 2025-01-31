@@ -1,12 +1,14 @@
 package util
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -139,6 +141,20 @@ func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
 
+func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *v1.Node, netName string) bool {
+	var oldSubnets, newSubnets map[string]json.RawMessage
+
+	if err := json.Unmarshal([]byte(oldNode.Annotations[ovnNodeSubnets]), &oldSubnets); err != nil {
+		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
+		return false
+	}
+	if err := json.Unmarshal([]byte(newNode.Annotations[ovnNodeSubnets]), &newSubnets); err != nil {
+		klog.Errorf("Failed to unmarshal new node %s annotation: %v", newNode.Name, err)
+		return false
+	}
+	return !bytes.Equal(oldSubnets[netName], newSubnets[netName])
+}
+
 // UpdateNodeHostSubnetAnnotation updates a "k8s.ovn.org/node-subnets" annotation for network "netName",
 // with the specified network, suitable for passing to kube.SetAnnotationsOnNode. If hostSubnets is empty,
 // it deleted the "k8s.ovn.org/node-subnets" annotation for network "netName"
@@ -168,16 +184,45 @@ func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 // ParseNodeHostSubnetAnnotation parses the "k8s.ovn.org/node-subnets" annotation
 // on a node and returns the host subnet for the given network.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node, netName string) ([]*net.IPNet, error) {
-	subnetsMap, err := parseSubnetAnnotation(node.Annotations, ovnNodeSubnets)
-	if err != nil {
-		return nil, err
+	var nodeSubnetMap map[string]json.RawMessage
+	var ret []*net.IPNet
+	annotation, ok := node.Annotations[ovnNodeSubnets]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", ovnNodeSubnets)
 	}
-	subnets, ok := subnetsMap[netName]
+	if err := json.Unmarshal([]byte(annotation), &nodeSubnetMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %q annotation on node %s: %v", ovnNodeSubnets, node.Name, err)
+	}
+	val, ok := nodeSubnetMap[netName]
 	if !ok {
 		return nil, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNodeSubnets, netName)
 	}
 
-	return subnets, nil
+	var subnets, subnetsDual []string
+	if err := json.Unmarshal(val, &subnetsDual); err == nil {
+		subnets = subnetsDual
+	} else {
+		subnetsSingle := ""
+		if err := json.Unmarshal(val, &subnetsSingle); err != nil {
+			return nil, fmt.Errorf("could not parse %q annotation %q as either single-stack or dual-stack: %v",
+				ovnNodeSubnets, val, err)
+		}
+		subnets = append(subnets, subnetsSingle)
+	}
+
+	if len(subnets) == 0 {
+		return nil, fmt.Errorf("unexpected empty %s annotation for %s network", ovnNodeSubnets, netName)
+	}
+
+	for _, subnet := range subnets {
+		_, ipnet, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing %q value: %v", subnet, err)
+		}
+		ret = append(ret, ipnet)
+	}
+
+	return ret, nil
 }
 
 // GetNodeSubnetAnnotationNetworkNames parses the "k8s.ovn.org/node-subnets" annotation

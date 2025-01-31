@@ -749,6 +749,13 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 }
 
 func (zic *ZoneInterconnectHandler) getNetworkId() (int, error) {
+	if zic.networkId != util.InvalidID {
+		return zic.networkId, nil
+	}
+	if netID := zic.GetNetworkID(); netID != util.InvalidID {
+		zic.networkId = netID
+		return zic.networkId, nil
+	}
 	nodes, err := zic.watchFactory.GetNodes()
 	if err != nil {
 		return util.InvalidID, err

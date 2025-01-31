@@ -204,7 +204,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 		gomegaFormatMaxLength int
 		nadNamespacedName     string
-		nad                   *nettypes.NetworkAttachmentDefinition
+		nad, nad2             *nettypes.NetworkAttachmentDefinition
 		netInfo               util.NetInfo
 	)
 
@@ -256,6 +256,14 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		var err error
 		nad, err = newNetworkAttachmentDefinition(
 			namespaceName1,
+			nadName,
+			netconf,
+		)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		netconf.NADName = util.GetNADName(namespaceName2, nadName)
+		nad2, err = newNetworkAttachmentDefinition(
+			namespaceName2,
 			nadName,
 			netconf,
 		)
@@ -319,7 +327,6 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				Items: nads,
 			},
 		)
-
 		var err error
 		if watchNodes {
 			if config.OVNKubernetesFeature.EnableInterconnect {
@@ -419,7 +426,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				node := *newNode(nodeName, "192.168.126.202/24")
 
 				startOvn(initialDB, watchNodes, []v1.Node{node}, []v1.Namespace{namespace1, namespace2}, nil, nil,
-					[]nettypes.NetworkAttachmentDefinition{*nad}, nil, nil)
+					[]nettypes.NetworkAttachmentDefinition{*nad, *nad2}, nil, nil)
 
 				_, err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta1().MultiNetworkPolicies(mpolicy.Namespace).
 					Create(context.TODO(), mpolicy, metav1.CreateOptions{})
