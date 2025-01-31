@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -241,5 +242,41 @@ var _ = Describe("BaseSecondaryNetworkController", func() {
 			},
 		}),
 	)
+	It("should not fail to sync pods if namespace is gone", func() {
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		fakeOVN := NewFakeOVN(false)
+		fakeOVN.start(
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"other": "3"}`,
+					},
+				},
+			},
+		)
+		Expect(fakeOVN.NewSecondaryNetworkController(nad)).To(Succeed())
+		controller, ok := fakeOVN.secondaryControllers["bluenet"]
+		Expect(ok).To(BeTrue())
+		// inject a real networkManager instead of a fake one, so getActiveNetworkForNamespace will get called
+		nadController, err := networkmanager.NewForZone("dummyZone", nil, fakeOVN.watcher)
+		Expect(err).NotTo(HaveOccurred())
+		controller.bnc.networkManager = nadController.Interface()
+
+		// simulate that we listed the pod, but namespace was deleted after
+		podWithNoNamespace := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "doesnotexist",
+				Name:      "dummy",
+			},
+		}
+
+		var initialPodList []interface{}
+		initialPodList = append(initialPodList, podWithNoNamespace)
+
+		err = controller.bnc.syncPodsForSecondaryNetwork(initialPodList)
+		Expect(err).NotTo(HaveOccurred())
+	})
 
 })
