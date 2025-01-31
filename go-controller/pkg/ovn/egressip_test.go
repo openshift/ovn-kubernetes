@@ -286,6 +286,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				UUID: node1.Name + "-UUID",
 				Name: node1.Name,
 			}
+			dynamicNeighRouters := "true"
+			if config.OVNKubernetesFeature.EnableInterconnect {
+				dynamicNeighRouters = "false"
+			}
+
+			logicalRouterOptions := map[string]string{
+				"dynamic_neigh_routers": dynamicNeighRouters,
+			}
+
 			fakeOvn.startWithDBSetup(
 				libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -299,9 +308,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID: types.OVNClusterRouter + "-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -401,10 +411,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				},
 				&nbdb.LogicalRouter{
-					Name:  types.GWRouterPrefix + node1.Name,
-					UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-					Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
-					Nat:   []string{"egressip-nat-UUID"},
+					Name:    types.GWRouterPrefix + node1.Name,
+					UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+					Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+					Nat:     []string{"egressip-nat-UUID"},
+					Options: logicalRouterOptions,
 				},
 				&nbdb.LogicalRouter{
 					Name:     types.OVNClusterRouter,
@@ -486,6 +497,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				Name:  node1.Name,
 				Ports: []string{"k8s-" + node1.Name + "-UUID"},
 			}
+			dynamicNeighRouters := "true"
+			if config.OVNKubernetesFeature.EnableInterconnect {
+				dynamicNeighRouters = "false"
+			}
+
+			logicalRouterOptions := map[string]string{
+				"dynamic_neigh_routers": dynamicNeighRouters,
+			}
 			fakeOvn.startWithDBSetup(
 				libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -499,9 +518,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID: types.OVNClusterRouter + "-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -595,9 +615,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					UUID:     "no-reroute-node-UUID",
 				},
 				&nbdb.LogicalRouter{
-					Name:  types.GWRouterPrefix + node1.Name,
-					UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-					Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+					Name:    types.GWRouterPrefix + node1.Name,
+					UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+					Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+					Options: logicalRouterOptions,
 				},
 				&nbdb.LogicalRouter{
 					Name:     types.OVNClusterRouter,
@@ -698,6 +719,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: node2.Name + "-UUID",
 						Name: node2.Name,
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -716,14 +745,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1.Name,
-									UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1.Name,
+									UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2.Name,
-									UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node2.Name,
+									UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -862,15 +893,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							},
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name:     types.OVNClusterRouter,
@@ -999,6 +1032,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: node3.Name + "-UUID",
 						Name: node3.Name,
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					initialDB := libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -1021,19 +1062,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								UUID: types.OVNClusterRouter + "-UUID",
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node1.Name,
-								UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node1.Name,
+								UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node2.Name,
-								UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node2.Name,
+								UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node3.Name,
-								UUID:  types.GWRouterPrefix + node3.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node3.Name,
+								UUID:    types.GWRouterPrefix + node3.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalSwitchPort{
 								UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -1223,20 +1267,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							},
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node3.Name,
-							UUID:  types.GWRouterPrefix + node3.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node3.Name,
+							UUID:    types.GWRouterPrefix + node3.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name: types.OVNClusterRouter,
@@ -1394,6 +1441,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:  node3.Name,
 						Ports: []string{"k8s-" + node3.Name + "-UUID"},
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					initialDB := libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -1416,19 +1471,22 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								UUID: types.OVNClusterRouter + "-UUID",
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node1.Name,
-								UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node1.Name,
+								UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node2.Name,
-								UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node2.Name,
+								UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node3.Name,
-								UUID:  types.GWRouterPrefix + node3.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node3.Name,
+								UUID:    types.GWRouterPrefix + node3.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalSwitchPort{
 								UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -1621,20 +1679,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
-							Nat:   []string{},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Nat:     []string{},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node3.Name,
-							UUID:  types.GWRouterPrefix + node3.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node3.Name,
+							UUID:    types.GWRouterPrefix + node3.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name:     types.OVNClusterRouter,
@@ -1801,6 +1862,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:  node2.Name,
 						Ports: []string{"k8s-" + node2.Name + "-UUID"},
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
@@ -1820,15 +1889,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1.Name,
-									UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1.Name,
+									UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2.Name,
-									UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2.Name,
+									UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -1956,14 +2027,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name:     types.OVNClusterRouter,
@@ -2157,7 +2230,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:  node2.Name,
 						Ports: []string{"k8s-" + node2.Name + "-UUID"},
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
 
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -2176,15 +2256,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1.Name,
-									UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1.Name,
+									UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2.Name,
-									UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2.Name,
+									UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -2366,15 +2448,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-node-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
-							Nat:   []string{},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Nat:     []string{},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name:         types.OVNClusterRouter,
@@ -2571,6 +2655,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:  node2.Name,
 						Ports: []string{"k8s-" + node2.Name + "-UUID"},
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
+
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -2589,9 +2682,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1.Name,
-									UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1.Name,
+									UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitch{
 									UUID:  types.ExternalSwitchPrefix + node1.Name + "-UUID",
@@ -2599,9 +2693,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									Ports: []string{types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2.Name,
-									UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node2.Name,
+									UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitch{
 									UUID:  types.ExternalSwitchPrefix + node2.Name + "-UUID",
@@ -2718,16 +2813,18 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-service-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
-							Nat:   []string{"egressip-nat1-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Nat:     []string{"egressip-nat1-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
-							Nat:   []string{},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Nat:     []string{},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name:     types.OVNClusterRouter,
@@ -2865,9 +2962,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-service-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name:     types.OVNClusterRouter,
@@ -3002,7 +3100,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:  node2.Name,
 						Ports: []string{"k8s-" + node2.Name + "-UUID"},
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
 
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -3021,15 +3126,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1.Name,
-									UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1.Name,
+									UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2.Name,
-									UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2.Name,
+									UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -3160,14 +3267,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-service-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1.Name,
-							UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2.Name,
-							UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name: types.OVNClusterRouter,
@@ -3316,7 +3425,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						annotations["k8s.ovn.org/remote-zone-migrated"] = "remote" // used only for ic=true test
 					}
 					node2 := getNodeObj(node2Name, annotations, map[string]string{}) // add node to avoid errori-ing out on transit switch IP fetch
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
 
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -3335,15 +3451,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1Name,
-									UUID:  types.GWRouterPrefix + node1Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1Name,
+									UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2Name,
-									UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2Name,
+									UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID: "k8s-" + node1.Name + "-UUID",
@@ -3445,15 +3563,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6, node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1Name,
-							UUID:  types.GWRouterPrefix + node1Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID: "k8s-" + node1.Name + "-UUID",
@@ -3520,15 +3640,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6, node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1Name,
-							UUID:  types.GWRouterPrefix + node1Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   nil,
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     nil,
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID: "k8s-" + node1.Name + "-UUID",
@@ -3585,7 +3707,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					node2 := nodes[1]
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
 
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -3604,15 +3733,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1Name,
-									UUID:  types.GWRouterPrefix + node1Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1Name,
+									UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2Name,
-									UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2Name,
+									UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID:      "k8s-" + node1.Name + "-UUID",
@@ -3706,15 +3837,17 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node1Name,
-							UUID:  types.GWRouterPrefix + node1Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1.Name + "-UUID",
@@ -3802,7 +3935,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressNamespace := newNamespace(eipNamespace)
 				_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 				_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
+				dynamicNeighRouters := "true"
+				if config.OVNKubernetesFeature.EnableInterconnect {
+					dynamicNeighRouters = "false"
+				}
 
+				logicalRouterOptions := map[string]string{
+					"dynamic_neigh_routers": dynamicNeighRouters,
+				}
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -3816,13 +3956,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								UUID: types.OVNClusterRouter + "-UUID",
 							},
 							&nbdb.LogicalRouter{
-								Name: types.GWRouterPrefix + node1Name,
-								UUID: types.GWRouterPrefix + node1Name + "-UUID",
+								Name:    types.GWRouterPrefix + node1Name,
+								UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node2Name,
-								UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node2Name,
+								UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalSwitchPort{
 								UUID:      "k8s-" + node1Name + "-UUID",
@@ -3930,14 +4072,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + node1Name,
-						UUID: types.GWRouterPrefix + node1Name + "-UUID",
+						Name:    types.GWRouterPrefix + node1Name,
+						UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalRouter{
-						Name:  types.GWRouterPrefix + node2Name,
-						UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-						Nat:   []string{"egressip-nat-UUID"},
+						Name:    types.GWRouterPrefix + node2Name,
+						UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+						Nat:     []string{"egressip-nat-UUID"},
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID:      "k8s-" + node1Name + "-UUID",
@@ -4163,6 +4307,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					egressNamespace := newNamespace(eipNamespace)
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -4176,14 +4328,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name: types.GWRouterPrefix + node1Name,
-									UUID: types.GWRouterPrefix + node1Name + "-UUID",
+									Name:    types.GWRouterPrefix + node1Name,
+									UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2Name,
-									UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2Name,
+									UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID:      "k8s-" + node1Name + "-UUID",
@@ -4286,14 +4440,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1Name,
-							UUID: types.GWRouterPrefix + node1Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -4415,6 +4571,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -4428,14 +4592,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name: types.GWRouterPrefix + node1Name,
-									UUID: types.GWRouterPrefix + node1Name + "-UUID",
+									Name:    types.GWRouterPrefix + node1Name,
+									UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2Name,
-									UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2Name,
+									UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID:      "k8s-" + node1Name + "-UUID",
@@ -4524,14 +4690,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1Name,
-							UUID: types.GWRouterPrefix + node1Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -4581,14 +4749,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1Name,
-							UUID: types.GWRouterPrefix + node1Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   nil,
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     nil,
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -4641,6 +4811,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -4654,14 +4832,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name: types.GWRouterPrefix + node1Name,
-									UUID: types.GWRouterPrefix + node1Name + "-UUID",
+									Name:    types.GWRouterPrefix + node1Name,
+									UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2Name,
-									UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2Name,
+									UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID:      "k8s-" + node1Name + "-UUID",
@@ -4771,14 +4951,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{nodeLogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1Name,
-							UUID: types.GWRouterPrefix + node1Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -4826,14 +5008,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{nodeLogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1Name,
-							UUID: types.GWRouterPrefix + node1Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   nil,
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     nil,
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -4886,6 +5070,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
+					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil, types.DefaultNetworkName, DefaultNetworkControllerName)
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -4899,14 +5092,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name: types.GWRouterPrefix + node1Name,
-									UUID: types.GWRouterPrefix + node1Name + "-UUID",
+									Name:    types.GWRouterPrefix + node1Name,
+									UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2Name,
-									UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-									Nat:   nil,
+									Name:    types.GWRouterPrefix + node2Name,
+									UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+									Nat:     nil,
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID:      "k8s-" + node1Name + "-UUID",
@@ -5009,14 +5204,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							},
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1Name,
-							UUID: types.GWRouterPrefix + node1Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   []string{"egressip-nat-UUID"},
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     []string{"egressip-nat-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -5068,14 +5265,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							Networks: []string{node2LogicalRouterIfAddrV6},
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1Name,
-							UUID: types.GWRouterPrefix + node1Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1Name,
+							UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + node2Name,
-							UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-							Nat:   nil,
+							Name:    types.GWRouterPrefix + node2Name,
+							UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+							Nat:     nil,
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      "k8s-" + node1Name + "-UUID",
@@ -5245,6 +5444,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:  node2Name,
 						Ports: []string{"k8s-" + node2Name + "-UUID"},
 					}
+					dynamicNeighRouters := "true"
+					if config.OVNKubernetesFeature.EnableInterconnect {
+						dynamicNeighRouters = "false"
+					}
+
+					logicalRouterOptions := map[string]string{
+						"dynamic_neigh_routers": dynamicNeighRouters,
+					}
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -5263,14 +5470,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 									UUID: types.OVNClusterRouter + "-UUID",
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node1.Name,
-									UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node1.Name,
+									UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalRouter{
-									Name:  types.GWRouterPrefix + node2.Name,
-									UUID:  types.GWRouterPrefix + node2.Name + "-UUID",
-									Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Name:    types.GWRouterPrefix + node2.Name,
+									UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+									Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+									Options: logicalRouterOptions,
 								},
 								&nbdb.LogicalSwitchPort{
 									UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -5414,14 +5623,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-service-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + assignmentNode1,
-							UUID:  types.GWRouterPrefix + assignmentNode1 + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + assignmentNode1,
+							UUID:    types.GWRouterPrefix + assignmentNode1 + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + assignmentNode2,
-							UUID:  types.GWRouterPrefix + assignmentNode2 + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + assignmentNode2,
+							UUID:    types.GWRouterPrefix + assignmentNode2 + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name: types.OVNClusterRouter,
@@ -5573,14 +5784,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID:     "no-reroute-service-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + assignmentNode1,
-							UUID:  types.GWRouterPrefix + assignmentNode1 + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + assignmentNode1,
+							UUID:    types.GWRouterPrefix + assignmentNode1 + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name:  types.GWRouterPrefix + assignmentNode2,
-							UUID:  types.GWRouterPrefix + assignmentNode2 + "-UUID",
-							Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Name:    types.GWRouterPrefix + assignmentNode2,
+							UUID:    types.GWRouterPrefix + assignmentNode2 + "-UUID",
+							Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
 							Name: types.OVNClusterRouter,
@@ -5711,7 +5924,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 				_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 				_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
+				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil, types.DefaultNetworkName, DefaultNetworkControllerName)
+				dynamicNeighRouters := "true"
+				if config.OVNKubernetesFeature.EnableInterconnect {
+					dynamicNeighRouters = "false"
+				}
 
+				logicalRouterOptions := map[string]string{
+					"dynamic_neigh_routers": dynamicNeighRouters,
+				}
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -5725,14 +5946,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								UUID: types.OVNClusterRouter + "-UUID",
 							},
 							&nbdb.LogicalRouter{
-								Name: types.GWRouterPrefix + node1Name,
-								UUID: types.GWRouterPrefix + node1Name + "-UUID",
+								Name:    types.GWRouterPrefix + node1Name,
+								UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node2Name,
-								UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-								Nat:   nil,
+								Name:    types.GWRouterPrefix + node2Name,
+								UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+								Nat:     nil,
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalSwitchPort{
 								UUID:      "k8s-" + node1Name + "-UUID",
@@ -5841,14 +6064,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 					expectedNAT,
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + node1Name,
-						UUID: types.GWRouterPrefix + node1Name + "-UUID",
+						Name:    types.GWRouterPrefix + node1Name,
+						UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalRouter{
-						Name:  types.GWRouterPrefix + node2Name,
-						UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-						Nat:   []string{"egressip-nat-UUID"},
+						Name:    types.GWRouterPrefix + node2Name,
+						UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+						Nat:     []string{"egressip-nat-UUID"},
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID:      "k8s-" + node1Name + "-UUID",
@@ -5937,14 +6162,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Networks: []string{node2LogicalRouterIfAddrV6},
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + node1Name,
-						UUID: types.GWRouterPrefix + node1Name + "-UUID",
+						Name:    types.GWRouterPrefix + node1Name,
+						UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalRouter{
-						Name:  types.GWRouterPrefix + node2Name,
-						UUID:  types.GWRouterPrefix + node2Name + "-UUID",
-						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
-						Nat:   []string{},
+						Name:    types.GWRouterPrefix + node2Name,
+						UUID:    types.GWRouterPrefix + node2Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+						Nat:     []string{},
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID:      "k8s-" + node1Name + "-UUID",
@@ -6037,6 +6264,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Name:  node2Name,
 					Ports: []string{"k8s-" + node2Name + "-UUID"},
 				}
+				dynamicNeighRouters := "true"
+				if config.OVNKubernetesFeature.EnableInterconnect {
+					dynamicNeighRouters = "false"
+				}
+
+				logicalRouterOptions := map[string]string{
+					"dynamic_neigh_routers": dynamicNeighRouters,
+				}
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalRouter{
@@ -6044,12 +6279,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID: types.OVNClusterRouter + "-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node1.Name,
-							UUID: types.GWRouterPrefix + node1.Name + "-UUID",
+							Name:    types.GWRouterPrefix + node1.Name,
+							UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node2.Name,
-							UUID: types.GWRouterPrefix + node2.Name + "-UUID",
+							Name:    types.GWRouterPrefix + node2.Name,
+							UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -6159,12 +6396,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID:     "no-reroute-service-UUID",
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + node1.Name,
-						UUID: types.GWRouterPrefix + node1.Name + "-UUID",
+						Name:    types.GWRouterPrefix + node1.Name,
+						UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + node2.Name,
-						UUID: types.GWRouterPrefix + node2.Name + "-UUID",
+						Name:    types.GWRouterPrefix + node2.Name,
+						UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -6234,7 +6473,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4),
 				}
 				node := getNodeObj("node", annotations, map[string]string{})
+				dynamicNeighRouters := "true"
+				if config.OVNKubernetesFeature.EnableInterconnect {
+					dynamicNeighRouters = "false"
+				}
 
+				logicalRouterOptions := map[string]string{
+					"dynamic_neigh_routers": dynamicNeighRouters,
+				}
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalRouter{
@@ -6242,8 +6488,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID: types.OVNClusterRouter + "-UUID",
 						},
 						&nbdb.LogicalRouter{
-							Name: types.GWRouterPrefix + node.Name,
-							UUID: types.GWRouterPrefix + node.Name + "-UUID",
+							Name:    types.GWRouterPrefix + node.Name,
+							UUID:    types.GWRouterPrefix + node.Name + "-UUID",
+							Options: logicalRouterOptions,
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "UUID",
@@ -6333,8 +6580,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID:     "no-reroute-service-UUID",
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + node.Name,
-						UUID: types.GWRouterPrefix + node.Name + "-UUID",
+						Name:    types.GWRouterPrefix + node.Name,
+						UUID:    types.GWRouterPrefix + node.Name + "-UUID",
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "UUID",
@@ -6421,7 +6669,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Name:  node1.Name,
 					Ports: []string{"k8s-" + node1.Name + "-UUID"},
 				}
+				dynamicNeighRouters := "true"
+				if config.OVNKubernetesFeature.EnableInterconnect {
+					dynamicNeighRouters = "false"
+				}
 
+				logicalRouterOptions := map[string]string{
+					"dynamic_neigh_routers": dynamicNeighRouters,
+				}
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -6430,9 +6685,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								UUID: types.OVNClusterRouter + "-UUID",
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node1.Name,
-								UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node1.Name,
+								UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouterPort{
 								UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID",
@@ -6543,10 +6799,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							"default-no-reroute-node-UUID", "egressip-no-reroute-reply-traffic"},
 					},
 					&nbdb.LogicalRouter{
-						Name:  types.GWRouterPrefix + node1.Name,
-						UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
-						Nat:   []string{"egressip-nat-UUID1"},
+						Name:    types.GWRouterPrefix + node1.Name,
+						UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+						Nat:     []string{"egressip-nat-UUID1"},
+						Options: logicalRouterOptions,
 					},
 					&nbdb.NAT{
 						UUID:       "egressip-nat-UUID1",
@@ -6650,10 +6907,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Policies: []string{"no-reroute-UUID", "no-reroute-service-UUID", "default-no-reroute-node-UUID", "egressip-no-reroute-reply-traffic"},
 					},
 					&nbdb.LogicalRouter{
-						Name:  types.GWRouterPrefix + node1.Name,
-						UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
-						Nat:   []string{},
+						Name:    types.GWRouterPrefix + node1.Name,
+						UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+						Nat:     []string{},
+						Options: logicalRouterOptions,
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
@@ -6764,7 +7022,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Name:  node1.Name,
 					Ports: []string{"k8s-" + node1.Name + "-UUID"},
 				}
+				dynamicNeighRouters := "true"
+				if config.OVNKubernetesFeature.EnableInterconnect {
+					dynamicNeighRouters = "false"
+				}
 
+				logicalRouterOptions := map[string]string{
+					"dynamic_neigh_routers": dynamicNeighRouters,
+				}
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -6773,9 +7038,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 								UUID: types.OVNClusterRouter + "-UUID",
 							},
 							&nbdb.LogicalRouter{
-								Name:  types.GWRouterPrefix + node1.Name,
-								UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-								Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Name:    types.GWRouterPrefix + node1.Name,
+								UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+								Options: logicalRouterOptions,
 							},
 							&nbdb.LogicalRouterPort{
 								UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID",
@@ -6858,10 +7124,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					UUID: "reroute-UUID1",
 				}
 				node1GR := &nbdb.LogicalRouter{
-					Name:  types.GWRouterPrefix + node1.Name,
-					UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
-					Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
-					Nat:   []string{"egressip-nat-UUID1"},
+					Name:    types.GWRouterPrefix + node1.Name,
+					UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+					Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+					Nat:     []string{"egressip-nat-UUID1"},
+					Options: logicalRouterOptions,
 				}
 				nodeSwitch.QOSRules = []string{"egressip-QoS-UUID"}
 

@@ -248,6 +248,11 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 	}
 	testData = append(testData, copp)
 
+	dynamicNeighRouters := "true"
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		dynamicNeighRouters = "false"
+	}
+
 	testData = append(testData, &nbdb.LogicalRouter{
 		UUID: GRName + "-UUID",
 		Name: GRName,
@@ -255,7 +260,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			"lb_force_snat_ip":              "router_ip",
 			"snat-ct-zone":                  "0",
 			"always_learn_from_arp_request": "false",
-			"dynamic_neigh_routers":         "true",
+			"dynamic_neigh_routers":         dynamicNeighRouters,
 			"chassis":                       l3GatewayConfig.ChassisID,
 			"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 		},
@@ -464,6 +469,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
 			}
 			GRName := "GR_" + nodeName
+
+			dynamicNeighRouters := "true"
+
+			if config.OVNKubernetesFeature.EnableInterconnect {
+				dynamicNeighRouters = "false"
+			}
+
 			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
 				UUID: GRName + "-UUID",
 				Name: GRName,
@@ -471,7 +483,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					"lb_force_snat_ip":              "router_ip",
 					"snat-ct-zone":                  "0",
 					"always_learn_from_arp_request": "false",
-					"dynamic_neigh_routers":         "true",
+					"dynamic_neigh_routers":         dynamicNeighRouters,
 					"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 				},
 				StaticRoutes: []string{routeUUID},
@@ -572,6 +584,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
 			}
 			GRName := "GR_" + nodeName
+
+			dynamicNeighRouters := "true"
+			if config.OVNKubernetesFeature.EnableInterconnect {
+				dynamicNeighRouters = "false"
+			}
+
 			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
 				UUID: GRName + "-UUID",
 				Name: GRName,
@@ -579,7 +597,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					"lb_force_snat_ip":              "router_ip",
 					"snat-ct-zone":                  "0",
 					"always_learn_from_arp_request": "false",
-					"dynamic_neigh_routers":         "true",
+					"dynamic_neigh_routers":         dynamicNeighRouters,
 					"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 				},
 				StaticRoutes: []string{routeUUID},
