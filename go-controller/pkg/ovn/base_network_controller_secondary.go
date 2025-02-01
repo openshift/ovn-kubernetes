@@ -589,6 +589,13 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 		if bsnc.IsPrimaryNetwork() {
 			activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
 			if err != nil {
+				if apierrors.IsNotFound(err) {
+					// namespace is gone after we listed this pod, that means the pod no longer exists
+					// we don't need to preserve it's previously allocated IP address or logical switch port
+					klog.Infof("%s network controller pod sync: pod %s/%s namespace has been deleted, ignoring pod",
+						bsnc.GetNetworkName(), pod.Namespace, pod.Name)
+					continue
+				}
 				return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
 			}
 		}
