@@ -305,8 +305,8 @@ func (c *Controller) UpdateSubsystemCondition(
 	events ...*util.EventDetails,
 ) error {
 	// try to find udn using network name
-	udnNamespace, udnName := template.ParseNetworkName(networkName)
-	if udnName == "" {
+	udnNamespace, udnName := util.ParseNetworkName(networkName)
+	if udnName == "" || udnNamespace == "" {
 		return nil
 	}
 	udn, err := c.udnLister.UserDefinedNetworks(udnNamespace).Get(udnName)
