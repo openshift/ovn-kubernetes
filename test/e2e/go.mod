@@ -96,7 +96,6 @@ require (
 	github.com/openshift/api v0.0.0-20231120222239-b86761094ee3 // indirect
 	github.com/openshift/client-go v0.0.0-20231121143148-910ca30a1a9a // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
-	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.19.1 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
@@ -182,7 +181,7 @@ require (
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.65.0
 	k8s.io/kubectl v0.31.1
-	kubevirt.io/api v1.1.0
+	kubevirt.io/api v1.4.0
 	sigs.k8s.io/controller-runtime v0.19.0
 )
 
