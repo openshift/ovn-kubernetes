@@ -1379,8 +1379,12 @@ func GetNetworkVRFName(netInfo NetInfo) string {
 	if netInfo.GetNetworkName() == types.DefaultNetworkName {
 		return types.DefaultNetworkName
 	}
+	vrfDeviceName := netInfo.GetNetworkName()
 	// use the CUDN network name as the VRF name if possible
-	vrfDeviceName := strings.TrimPrefix(netInfo.GetNetworkName(), "cluster.udn.")
+	udnNamespace, udnName := ParseNetworkName(netInfo.GetNetworkName())
+	if udnName != "" && udnNamespace == "" {
+		vrfDeviceName = udnName
+	}
 	switch {
 	case len(vrfDeviceName) > 15:
 		// not possible if longer than the maximum device name length
@@ -1479,4 +1483,36 @@ func GetNetworkRole(controllerNetInfo NetInfo, getActiveNetworkForNamespace func
 
 	// must be secondary role
 	return types.NetworkRoleSecondary, nil
+}
+
+// (C)UDN network name generation functions must ensure the absence of name conflicts between all (C)UDNs.
+// We use underscore as a separator as it is not allowed in k8s namespaces and names.
+// Network name is then used by GetSecondaryNetworkPrefix function to generate db object names.
+// GetSecondaryNetworkPrefix replaces some characters in the network name to ensure correct db object names,
+// so the network name must be also unique after these replacements.
+
+func GenerateUDNNetworkName(namespace, name string) string {
+	return namespace + "_" + name
+}
+
+func GenerateCUDNNetworkName(name string) string {
+	return "cluster_udn_" + name
+}
+
+// ParseNetworkName parses the network name into UDN namespace and name OR CUDN name.
+// If udnName is empty, then given string is not a (C)UDN-generated network name.
+// If udnNamespace is empty, then udnName is a CUDN name.
+// As any (C)UDN network can also be just NAD-generated network, there is no guarantee that given network
+// is a (C)UDN network. It needs an additional check from the kapi-server.
+// This function has a copy in go-controller/observability-lib/sampledecoder/sample_decoder.go
+// Please update together with this function.
+func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
+	if strings.HasPrefix(networkName, "cluster_udn_") {
+		return "", networkName[len("cluster_udn_"):]
+	}
+	parts := strings.Split(networkName, "_")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
 }
