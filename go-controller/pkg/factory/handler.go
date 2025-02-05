@@ -430,12 +430,12 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 func (inf *informer) removeAllHandlers() {
 	for _, intInf := range inf.internalInformers {
 		intInf.Lock()
-		defer intInf.Unlock()
 		for _, handlers := range intInf.handlers {
 			for _, handler := range handlers {
 				inf.removeHandler(handler)
 			}
 		}
+		intInf.Unlock()
 	}
 }
 
