@@ -326,8 +326,8 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
 				return lastIperfLogLine, nil
 			}).
-				WithPolling(time.Second).
-				WithTimeout(30*time.Second).
+				WithPolling(50*time.Millisecond).
+				WithTimeout(2*time.Second).
 				Should(
 					SatisfyAll(
 						ContainSubstring(" sec "),
@@ -1532,11 +1532,13 @@ runcmd:
 			if td.topology == "localnet" {
 				By("setting up the localnet underlay")
 				nodes := ovsPods(clientSet)
-				Expect(nodes).ToNot(BeEmpty())
-				defer func() {
-					By("tearing down the localnet underlay")
-					Expect(teardownUnderlay(nodes)).To(Succeed())
-				}()
+				Expect(nodes).NotTo(BeEmpty())
+				DeferCleanup(func() {
+					if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
+						By("tearing down the localnet underlay")
+						Expect(teardownUnderlay(nodes)).To(Succeed())
+					}
+				})
 
 				const secondaryInterfaceName = "eth1"
 				Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
@@ -1704,7 +1706,7 @@ runcmd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachine,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1720,7 +1722,7 @@ runcmd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1741,6 +1743,11 @@ runcmd:
 				test:     liveMigrateFailed,
 				topology: "layer2",
 				role:     "primary",
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineInstance,
+				test:     liveMigrateFailed,
+				topology: "localnet",
 			}),
 		)
 	})
