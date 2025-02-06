@@ -111,6 +111,8 @@ type internalInformer struct {
 	handlers map[int]map[uint64]*Handler
 	// queueMap handles distributing events across a queued handler's queues
 	queueMap *queueMap
+	// hasHandlers is an atomic used to determine if this internal informer actually has handlers attached to it or not
+	hasHandlers uint32
 }
 
 type informer struct {
@@ -381,6 +383,10 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 	intInf := i.internalInformers[internalInformerIndex]
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			// do not enqueue events to internal informer that has no handlers for better performance
+			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
+				return
+			}
 			intInf.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
@@ -391,6 +397,10 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
+			// do not enqueue events to internal informer that has no handlers for better performance
+			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
+				return
+			}
 			intInf.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
@@ -413,6 +423,10 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			realObj, err := ensureObjectOnDelete(obj, i.oType)
 			if err != nil {
 				klog.Errorf(err.Error())
+				return
+			}
+			// do not enqueue events to internal informer that has no handlers for better performance
+			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
 				return
 			}
 			intInf.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
