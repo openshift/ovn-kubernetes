@@ -326,8 +326,8 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 				lastIperfLogLine := iperfLogLines[len(iperfLogLines)-1]
 				return lastIperfLogLine, nil
 			}).
-				WithPolling(time.Second).
-				WithTimeout(30*time.Second).
+				WithPolling(50*time.Millisecond).
+				WithTimeout(2*time.Second).
 				Should(
 					SatisfyAll(
 						ContainSubstring(" sec "),
@@ -1515,7 +1515,7 @@ runcmd:
 				l[RequiredUDNNamespaceLabel] = ""
 			}
 			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, l)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 			fr.Namespace = ns
 			namespace = fr.Namespace.Name
 
@@ -1533,10 +1533,12 @@ runcmd:
 				By("setting up the localnet underlay")
 				nodes := ovsPods(clientSet)
 				Expect(nodes).NotTo(BeEmpty())
-				defer func() {
-					By("tearing down the localnet underlay")
-					Expect(teardownUnderlay(nodes)).To(Succeed())
-				}()
+				DeferCleanup(func() {
+					if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
+						By("tearing down the localnet underlay")
+						Expect(teardownUnderlay(nodes)).To(Succeed())
+					}
+				})
 
 				const secondaryInterfaceName = "eth1"
 				Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
@@ -1662,6 +1664,24 @@ runcmd:
 				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
 				checkNorthSouthEgressICMPTraffic(vmi, []string{externalContainerIPV4Address, externalContainerIPV6Address}, step)
 			}
+
+			if td.role == "primary" && td.test.description == liveMigrate.description && isIPv4Supported() && isInterconnectEnabled() {
+				step = by(vm.Name, fmt.Sprintf("Checking IPv4 gateway cached mac after %s %s", td.resource.description, td.test.description))
+				Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
+
+				targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
+				Expect(err).ToNot(HaveOccurred(), step)
+
+				expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, netConfig.networkName)
+				Expect(err).ToNot(HaveOccurred(), step)
+
+				Expect(err).ToNot(HaveOccurred(), step)
+				Eventually(kubevirt.RetrieveCachedGatewayMAC).
+					WithArguments(vmi, "enp1s0", cidrIPv4).
+					WithTimeout(10*time.Second).
+					WithPolling(time.Second).
+					Should(Equal(expectedGatewayMAC), step)
+			}
 		},
 			func(td testData) string {
 				role := "secondary"
@@ -1686,7 +1706,7 @@ runcmd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachine,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1702,7 +1722,7 @@ runcmd:
 				topology: "layer2",
 				role:     "primary",
 			}),
-			XEntry(nil, Label("TODO", "SDN-5490"), testData{
+			Entry(nil, testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
 				topology: "localnet",
@@ -1723,6 +1743,11 @@ runcmd:
 				test:     liveMigrateFailed,
 				topology: "layer2",
 				role:     "primary",
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineInstance,
+				test:     liveMigrateFailed,
+				topology: "localnet",
 			}),
 		)
 	})
