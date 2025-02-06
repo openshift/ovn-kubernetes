@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/godbus/dbus/v5"
+
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -293,52 +295,77 @@ func (m *UDNHostIsolationManager) updateKubeletCgroup() error {
 // If a new cgroup is created, you load the filtering policy for the new cgroup and then add
 // processes to that cgroup. You only have to follow the right sequence to avoid problems.
 func (m *UDNHostIsolationManager) runKubeletRestartTracker(ctx context.Context) (err error) {
-	conn, err := dbus.NewSystemdConnectionContext(ctx)
+
+	conn, err := dbus.Dial("unix:path=/run/systemd/private", dbus.WithContext(ctx))
 	if err != nil {
-		return fmt.Errorf("failed to connect to systemd: %w", err)
+		return err
 	}
+
 	defer func() {
 		if err != nil {
-			conn.Close()
-		}
-	}()
-
-	err = conn.Subscribe()
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to systemd events: %w", err)
-	}
-	// interval is important here as we need to catch the restart state, before it is running again
-	events, errChan := conn.SubscribeUnitsCustom(50*time.Millisecond, 0, func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
-		func(s string) bool {
-			return s != "kubelet.service"
-		})
-	// run until context is cancelled
-	go func() {
-		waitingForActive := false
-		for {
-			select {
-			case <-ctx.Done():
-				conn.Close()
-				return
-			case event := <-events:
-				for _, status := range event {
-					if status.ActiveState != "active" {
-						waitingForActive = true
-					} else if waitingForActive {
-						klog.Infof("Kubelet was restarted, re-applying UDN host isolation")
-						err = m.updateKubeletCgroup()
-						if err != nil {
-							klog.Errorf("Failed to re-apply UDN host isolation: %v", err)
-						} else {
-							waitingForActive = false
-						}
-					}
-				}
-			case err := <-errChan:
-				klog.Errorf("Systemd listener error: %v", err)
+			if err := conn.Close(); err != nil {
+				klog.Errorf("Error closing dbus connection for UDN isolation: %v", err)
 			}
 		}
 	}()
+
+	// Only use EXTERNAL method, and hardcode the uid (not username)
+	// to avoid a username lookup (which requires a dynamically linked
+	// libc)
+	methods := []dbus.Auth{dbus.AuthExternal(strconv.Itoa(os.Getuid()))}
+
+	err = conn.Auth(methods)
+	if err != nil {
+		return err
+	}
+
+	signalChan := make(chan *dbus.Signal, 10)
+	conn.Signal(signalChan)
+
+	// run until context is cancelled
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				if err := conn.Close(); err != nil {
+					klog.Errorf("Error closing dbus connection for UDN isolation: %v", err)
+				}
+				return
+			case signal := <-signalChan:
+				klog.V(5).Infof("D-Bus event received: %#v", signal)
+				// Extract unit name from path
+				unitPath := signal.Path
+				parts := strings.Split(string(unitPath), "/")
+				if len(parts) < 6 || parts[4] != "unit" {
+					continue
+				}
+				escapedUnit := parts[5]
+				unitName := strings.ReplaceAll(escapedUnit, "_2e", ".")
+
+				if unitName == "kubelet.service" {
+					changes := signal.Body[1].(map[string]dbus.Variant)
+					if state, exists := changes["ActiveState"]; exists {
+						newState := state.Value().(string)
+						if newState == "active" {
+							klog.Info("Kubelet restarted, re-applying isolation")
+							if err := m.updateKubeletCgroup(); err != nil {
+								klog.Errorf("Failed to re-apply isolation: %v", err)
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0,
+		"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'")
+
+	sigObj := conn.Object("org.freedesktop.systemd1", dbus.ObjectPath("/org/freedesktop/systemd1"))
+	if err := sigObj.Call("org.freedesktop.systemd1.Manager.Subscribe", 0).Store(); err != nil {
+		return fmt.Errorf("failed to subscribe to systemd: %w", err)
+	}
+
 	return nil
 }
 
