@@ -30,6 +30,7 @@ require (
 	github.com/metallb/frr-k8s v0.0.15
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
+	github.com/moby/sys/userns v0.1.0
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
 	github.com/openshift/api v0.0.0-20231120222239-b86761094ee3
