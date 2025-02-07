@@ -145,8 +145,18 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		routeManager: routeManager,
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
-		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
-			cnnci.watchFactory.PodCoreInformer())
+		if hostIsolationSupported() {
+			c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
+				cnnci.watchFactory.PodCoreInformer())
+		} else {
+			message := fmt.Sprintf("Host isolation for UDN is not supported on the node %s as it uses cgroup v1.", cnnci.name)
+			klog.Warning(message)
+			nodeRef := &kapi.ObjectReference{
+				Kind: "Node",
+				Name: cnnci.name,
+			}
+			c.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "UDNHostIsolationNotSupported", message)
+		}
 	}
 	c.linkManager = linkmanager.NewController(cnnci.name, config.IPv4Mode, config.IPv6Mode, c.updateGatewayMAC)
 	return c

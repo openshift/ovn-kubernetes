@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
+	libcontainercgroups "github.com/opencontainers/runc/libcontainer/cgroups"
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -83,6 +84,15 @@ func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodIn
 	}
 	m.podController = controller.NewController[v1.Pod]("udn-host-isolation-manager", controllerConfig)
 	return m
+}
+
+// hostIsolationSupported returns true if host is using cgroup v2, because we use cgroup v2 match on kubelet cgroup path.
+// For cgroup v1, host isolation will be disabled with a warning.
+func hostIsolationSupported() bool {
+	if libcontainercgroups.IsCgroup2UnifiedMode() {
+		return true
+	}
+	return false
 }
 
 // Start must be called on node setup.
