@@ -127,11 +127,29 @@ func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
 	return *oc.networkID, nil
 }
 
+func (oc *SecondaryNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	wasUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, oc.name)
+	isUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
+	return wasUDNNetworkAdvertisedAtNode != isUDNNetworkAdvertisedAtNode
+}
+
+// Reconcile function reconciles three entities based on whether UDN network is advertised
+// and the gateway mode:
+// 1. IP rules
+// 2. OpenFlows on br-ex bridge to forward traffic to correct ofports
 func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
-	// reconcile network information, point of no return
+	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
+
 	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
 	if err != nil {
-		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+		klog.Errorf("Failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
+
+	if reconcilePodNetwork {
+		if oc.gateway != nil {
+			oc.gateway.Reconcile()
+		}
+	}
+
 	return nil
 }
