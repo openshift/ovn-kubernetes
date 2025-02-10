@@ -8,10 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/godbus/dbus/v5"
+	"github.com/moby/sys/userns"
+	"golang.org/x/sys/unix"
+
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -19,8 +24,10 @@ import (
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	kapi "k8s.io/kubernetes/pkg/apis/core"
 	"sigs.k8s.io/knftables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
@@ -50,6 +57,8 @@ type UDNHostIsolationManager struct {
 	podController     controller.Controller
 	podLister         corelisters.PodLister
 	kubeletCgroupPath string
+	nodeName          string
+	recorder          record.EventRecorder
 
 	udnPodIPsv4 *nftPodElementsSet
 	udnPodIPsv6 *nftPodElementsSet
@@ -61,11 +70,13 @@ type UDNHostIsolationManager struct {
 	udnOpenPortsICMPv6 *nftPodElementsSet
 }
 
-func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodInformer) *UDNHostIsolationManager {
+func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodInformer, nodeName string, recorder record.EventRecorder) *UDNHostIsolationManager {
 	m := &UDNHostIsolationManager{
 		podLister:          podInformer.Lister(),
 		ipv4:               ipv4,
 		ipv6:               ipv6,
+		nodeName:           nodeName,
+		recorder:           recorder,
 		udnPodIPsv4:        newNFTPodElementsSet(nftablesUDNPodIPsv4, false),
 		udnPodIPsv6:        newNFTPodElementsSet(nftablesUDNPodIPsv6, false),
 		udnOpenPortsv4:     newNFTPodElementsSet(nftablesUDNOpenPortsv4, true),
@@ -88,22 +99,34 @@ func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodIn
 // Start must be called on node setup.
 func (m *UDNHostIsolationManager) Start(ctx context.Context) error {
 	klog.Infof("Starting UDN host isolation manager")
-	// find kubelet cgroup path.
-	// kind cluster uses "kubelet.slice/kubelet.service", while OCP cluster uses "system.slice/kubelet.service".
-	// as long as ovn-k node is running as a privileged container, we can access the host cgroup directory.
-	err := filepath.WalkDir("/sys/fs/cgroup", func(path string, d os.DirEntry, err error) error {
-		if err != nil {
+	if hostUsesCgroupv2() {
+		// find kubelet cgroup path.
+		// kind cluster uses "kubelet.slice/kubelet.service", while OCP cluster uses "system.slice/kubelet.service".
+		// as long as ovn-k node is running as a privileged container, we can access the host cgroup directory.
+		err := filepath.WalkDir("/sys/fs/cgroup", func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.Name() == "kubelet.service" {
+				m.kubeletCgroupPath = strings.TrimPrefix(path, "/sys/fs/cgroup/")
+				klog.Infof("Found kubelet cgroup path: %s", m.kubeletCgroupPath)
+				return filepath.SkipAll
+			}
 			return nil
+		})
+		if err != nil || m.kubeletCgroupPath == "" {
+			return fmt.Errorf("failed to find kubelet cgroup path: %w", err)
 		}
-		if d.Name() == "kubelet.service" {
-			m.kubeletCgroupPath = strings.TrimPrefix(path, "/sys/fs/cgroup/")
-			klog.Infof("Found kubelet cgroup path: %s", m.kubeletCgroupPath)
-			return filepath.SkipAll
+	} else {
+		// We can't use cgroup v2 match, so m.kubeletCgroupPath will be empty.
+		// As a side effect, all kubelet probes will fail, but host isolation will still work.
+		message := fmt.Sprintf("Kubelet probes for UDN are not supported on the node %s as it uses cgroup v1.", m.nodeName)
+		klog.Warning(message)
+		nodeRef := &kapi.ObjectReference{
+			Kind: "Node",
+			Name: m.nodeName,
 		}
-		return nil
-	})
-	if err != nil || m.kubeletCgroupPath == "" {
-		return fmt.Errorf("failed to find kubelet cgroup path: %w", err)
+		m.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "UDNKubeletProbesNotSupported", message)
 	}
 	nft, err := nodenft.GetNFTablesHelper()
 	if err != nil {
@@ -229,12 +252,15 @@ func (m *UDNHostIsolationManager) addRules(tx *knftables.Transaction) {
 			),
 		})
 
-		tx.Add(&knftables.Rule{
-			Chain: UDNIsolationChain,
-			Rule: knftables.Concat(
-				"socket", "cgroupv2", "level 2", m.kubeletCgroupPath,
-				"ip", "daddr", "@", nftablesUDNPodIPsv4, "accept"),
-		})
+		if m.kubeletCgroupPath != "" {
+			tx.Add(&knftables.Rule{
+				Chain: UDNIsolationChain,
+				Rule: knftables.Concat(
+					"socket", "cgroupv2", "level 2", m.kubeletCgroupPath,
+					"ip", "daddr", "@", nftablesUDNPodIPsv4, "accept"),
+			})
+		}
+
 		tx.Add(&knftables.Rule{
 			Chain: UDNIsolationChain,
 			Rule: knftables.Concat(
@@ -256,12 +282,14 @@ func (m *UDNHostIsolationManager) addRules(tx *knftables.Transaction) {
 				"accept",
 			),
 		})
-		tx.Add(&knftables.Rule{
-			Chain: UDNIsolationChain,
-			Rule: knftables.Concat(
-				"socket", "cgroupv2", "level 2", m.kubeletCgroupPath,
-				"ip6", "daddr", "@", nftablesUDNPodIPsv6, "accept"),
-		})
+		if m.kubeletCgroupPath != "" {
+			tx.Add(&knftables.Rule{
+				Chain: UDNIsolationChain,
+				Rule: knftables.Concat(
+					"socket", "cgroupv2", "level 2", m.kubeletCgroupPath,
+					"ip6", "daddr", "@", nftablesUDNPodIPsv6, "accept"),
+			})
+		}
 		tx.Add(&knftables.Rule{
 			Chain: UDNIsolationChain,
 			Rule: knftables.Concat(
@@ -293,52 +321,77 @@ func (m *UDNHostIsolationManager) updateKubeletCgroup() error {
 // If a new cgroup is created, you load the filtering policy for the new cgroup and then add
 // processes to that cgroup. You only have to follow the right sequence to avoid problems.
 func (m *UDNHostIsolationManager) runKubeletRestartTracker(ctx context.Context) (err error) {
-	conn, err := dbus.NewSystemdConnectionContext(ctx)
+
+	conn, err := dbus.Dial("unix:path=/run/systemd/private", dbus.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to connect to systemd: %w", err)
 	}
+
 	defer func() {
 		if err != nil {
-			conn.Close()
-		}
-	}()
-
-	err = conn.Subscribe()
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to systemd events: %w", err)
-	}
-	// interval is important here as we need to catch the restart state, before it is running again
-	events, errChan := conn.SubscribeUnitsCustom(50*time.Millisecond, 0, func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
-		func(s string) bool {
-			return s != "kubelet.service"
-		})
-	// run until context is cancelled
-	go func() {
-		waitingForActive := false
-		for {
-			select {
-			case <-ctx.Done():
-				conn.Close()
-				return
-			case event := <-events:
-				for _, status := range event {
-					if status.ActiveState != "active" {
-						waitingForActive = true
-					} else if waitingForActive {
-						klog.Infof("Kubelet was restarted, re-applying UDN host isolation")
-						err = m.updateKubeletCgroup()
-						if err != nil {
-							klog.Errorf("Failed to re-apply UDN host isolation: %v", err)
-						} else {
-							waitingForActive = false
-						}
-					}
-				}
-			case err := <-errChan:
-				klog.Errorf("Systemd listener error: %v", err)
+			if err := conn.Close(); err != nil {
+				klog.Errorf("Error closing dbus connection for UDN isolation: %v", err)
 			}
 		}
 	}()
+
+	// Only use EXTERNAL method, and hardcode the uid (not username)
+	// to avoid a username lookup (which requires a dynamically linked
+	// libc)
+	methods := []dbus.Auth{dbus.AuthExternal(strconv.Itoa(os.Getuid()))}
+
+	err = conn.Auth(methods)
+	if err != nil {
+		return err
+	}
+
+	signalChan := make(chan *dbus.Signal, 100)
+	conn.Signal(signalChan)
+
+	// run until context is cancelled
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				if err := conn.Close(); err != nil {
+					klog.Errorf("Error closing dbus connection for UDN isolation: %v", err)
+				}
+				return
+			case signal := <-signalChan:
+				klog.V(5).Infof("D-Bus event received: %#v", signal)
+				// Extract unit name from path
+				unitPath := signal.Path
+				parts := strings.Split(string(unitPath), "/")
+				if len(parts) < 6 || parts[4] != "unit" {
+					continue
+				}
+				escapedUnit := parts[5]
+				unitName := strings.ReplaceAll(escapedUnit, "_2e", ".")
+
+				if unitName == "kubelet.service" {
+					changes := signal.Body[1].(map[string]dbus.Variant)
+					if state, exists := changes["ActiveState"]; exists {
+						newState := state.Value().(string)
+						if newState == "active" {
+							klog.Info("Kubelet restarted, re-applying isolation")
+							if err := m.updateKubeletCgroup(); err != nil {
+								klog.Errorf("Failed to re-apply isolation: %v", err)
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0,
+		"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'")
+
+	sigObj := conn.Object("org.freedesktop.systemd1", dbus.ObjectPath("/org/freedesktop/systemd1"))
+	if err := sigObj.Call("org.freedesktop.systemd1.Manager.Subscribe", 0).Store(); err != nil {
+		return fmt.Errorf("failed to subscribe to systemd: %w", err)
+	}
+
 	return nil
 }
 
@@ -681,4 +734,37 @@ func joinNFTSlice(k []string) string {
 // splitNFTSlice converts nftElementStorage key or value string representation back to slice.
 func splitNFTSlice(k string) []string {
 	return strings.Split(k, " . ")
+}
+
+// hostUsesCgroupv2 returns true if host is using cgroup v2, which means we can match on kubelet cgroup path.
+// For cgroup v1, kubelet rule will be broken, but host isolation will stay.
+func hostUsesCgroupv2() bool {
+	return IsCgroup2UnifiedMode()
+}
+
+var (
+	isUnifiedOnce sync.Once
+	isUnified     bool
+)
+
+const (
+	unifiedMountpoint = "/sys/fs/cgroup"
+)
+
+// this function is copied from github.com/opencontainers/runc/libcontainer/cgroups to avoid extra dependencies.
+func IsCgroup2UnifiedMode() bool {
+	isUnifiedOnce.Do(func() {
+		var st unix.Statfs_t
+		err := unix.Statfs(unifiedMountpoint, &st)
+		if err != nil {
+			if os.IsNotExist(err) && userns.RunningInUserNS() {
+				// ignore the "not found" error if running in userns
+				isUnified = false
+				return
+			}
+			panic(fmt.Sprintf("cannot statfs cgroup root: %s", err))
+		}
+		isUnified = st.Type == unix.CGROUP2_SUPER_MAGIC
+	})
+	return isUnified
 }
