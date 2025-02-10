@@ -468,6 +468,7 @@ type nodeSyncs struct {
 	syncGw                bool
 	syncHo                bool
 	syncZoneIC            bool
+	syncReroute           bool
 }
 
 func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -540,7 +541,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			}
 		}
 
-		// If we succcessfully discovered the host subnets then add the management port.
+		// If we successfully discovered the host subnets then add the management port.
 		if hostSubnets != nil {
 			if err = oc.syncNodeManagementPortDefault(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets); err != nil {
 				errs = append(errs, err)
