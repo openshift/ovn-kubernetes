@@ -121,7 +121,7 @@ func (m *UDNHostIsolationManager) Start(ctx context.Context) error {
 		// As a side effect, all kubelet probes will fail, but host isolation will still work.
 		message := fmt.Sprintf("Kubelet probes for UDN are not supported on the node %s as it uses cgroup v1.", m.nodeName)
 		klog.Warning(message)
-		nodeRef := &kapi.ObjectReference{
+		nodeRef := &v1.ObjectReference{
 			Kind: "Node",
 			Name: m.nodeName,
 		}
