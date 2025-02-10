@@ -113,9 +113,18 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 			if fromRetryLoop {
 				_, syncMgmtPort := h.oc.mgmtPortFailed.Load(node.Name)
 				_, syncGw := h.oc.gatewaysFailed.Load(node.Name)
-				nodeParams = &nodeSyncs{syncMgmtPort: syncMgmtPort, syncGw: syncGw}
+				_, syncReroute := h.oc.syncRerouteFailed.Load(node.Name)
+				nodeParams = &nodeSyncs{
+					syncMgmtPort: syncMgmtPort,
+					syncGw:       syncGw,
+					syncReroute:  syncReroute,
+				}
 			} else {
-				nodeParams = &nodeSyncs{syncMgmtPort: true, syncGw: true}
+				nodeParams = &nodeSyncs{
+					syncMgmtPort: true,
+					syncGw:       true,
+					syncReroute:  true,
+				}
 			}
 			return h.oc.addUpdateLocalNodeEvent(node, nodeParams)
 		}
@@ -171,13 +180,22 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					gatewayChanged(oldNode, newNode) ||
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
-
-				nodeSyncsParam = &nodeSyncs{syncMgmtPort: shouldSyncMgmtPort, syncGw: shouldSyncGW}
+				_, syncRerouteFailed := h.oc.syncRerouteFailed.Load(newNode.Name)
+				shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+				nodeSyncsParam = &nodeSyncs{
+					syncMgmtPort: shouldSyncMgmtPort,
+					syncGw:       shouldSyncGW,
+					syncReroute:  shouldSyncReroute,
+				}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node. Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{syncMgmtPort: true, syncGw: true}
+				nodeSyncsParam = &nodeSyncs{
+					syncMgmtPort: true,
+					syncGw:       true,
+					syncReroute:  true,
+				}
 			}
 
 			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
@@ -249,9 +267,10 @@ type SecondaryLayer2NetworkController struct {
 	BaseSecondaryLayer2NetworkController
 
 	// Node-specific syncMaps used by node event handler
-	mgmtPortFailed   sync.Map
-	gatewaysFailed   sync.Map
-	syncZoneICFailed sync.Map
+	mgmtPortFailed    sync.Map
+	gatewaysFailed    sync.Map
+	syncZoneICFailed  sync.Map
+	syncRerouteFailed sync.Map
 
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
@@ -591,12 +610,20 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 			}
 		}
 
-		if config.OVNKubernetesFeature.EnableEgressIP {
+		if config.OVNKubernetesFeature.EnableEgressIP && nSyncs.syncReroute {
+			rerouteFailed := false
 			if err := oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
 				errs = append(errs, fmt.Errorf("failed to ensure EgressIP router policies for network %s: %v", oc.GetNetworkName(), err))
+				rerouteFailed = true
 			}
 			if err := oc.eIPController.ensureSwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
 				errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies for network %s: %v", oc.GetNetworkName(), err))
+				rerouteFailed = true
+			}
+			if rerouteFailed {
+				oc.syncRerouteFailed.Store(node.Name, true)
+			} else {
+				oc.syncRerouteFailed.Delete(node.Name)
 			}
 		}
 	}
