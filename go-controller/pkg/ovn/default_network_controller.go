@@ -131,6 +131,7 @@ type DefaultNetworkController struct {
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
 	syncHostNetAddrSetFailed    sync.Map
+	syncEIPNodeRerouteFailed    sync.Map
 
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
@@ -843,14 +844,20 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 				_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
 				_, zoneICSync := h.oc.syncZoneICFailed.Load(node.Name)
 				nodeParams = &nodeSyncs{
-					nodeSync,
-					clusterRtrSync,
-					mgmtSync,
-					gwSync,
-					hoSync,
-					zoneICSync}
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          mgmtSync,
+					syncGw:                gwSync,
+					syncHo:                hoSync,
+					syncZoneIC:            zoneICSync}
 			} else {
-				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect}
+				nodeParams = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncGw:                true,
+					syncHo:                config.HybridOverlay.Enabled,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
@@ -898,17 +905,27 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
 		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
-		// add the 103 qos rule to new node's switch
-		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
-		if h.oc.isLocalZoneNode(node) {
-			if err := h.oc.eIPC.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+
+		shouldSyncReroute := true
+		if fromRetryLoop {
+			_, shouldSyncReroute = h.oc.syncEIPNodeRerouteFailed.Load(node.Name)
+		}
+
+		if shouldSyncReroute {
+			// add the 103 qos rule to new node's switch
+			// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+			if h.oc.isLocalZoneNode(node) {
+				if err := h.oc.eIPC.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+					h.oc.syncEIPNodeRerouteFailed.Store(node.Name, true)
+					return err
+				}
+			}
+			// add the nodeIP to the default LRP (102 priority) destination address-set
+			err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
+			if err != nil {
+				h.oc.syncEIPNodeRerouteFailed.Store(node.Name, true)
 				return err
 			}
-		}
-		// add the nodeIP to the default LRP (102 priority) destination address-set
-		err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
-		if err != nil {
-			return err
 		}
 		// Add routing specific to Egress IP NOTE: GARP configuration that
 		// Egress IP depends on is added from the gateway reconciliation logic
@@ -1001,17 +1018,24 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
 				nodeSyncsParam = &nodeSyncs{
-					nodeSync,
-					clusterRtrSync,
-					mgmtSync,
-					gwSync,
-					hoSync,
-					syncZoneIC}
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          mgmtSync,
+					syncGw:                gwSync,
+					syncHo:                hoSync,
+					syncZoneIC:            syncZoneIC,
+				}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node.  Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect}
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncGw:                true,
+					syncHo:                true,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			if err := h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam); err != nil {
@@ -1066,24 +1090,24 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		h.oc.eIPC.nodeZoneState.LockKey(newNode.Name)
 		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
 		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
-		// try to add the 103 qos rule to new node's switch if it doesn't exist
-		// The reason we call this from update is because in case the add node event
-		// did not succeed and we got an update node event which overrides the add event
-		// and removes the add event from retry cache, we'd need to ensure the qos rule exists
-		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
-		if h.oc.isLocalZoneNode(newNode) {
+
+		_, failed := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
+
+		// node moved from remote -> local or previously failed reroute config
+		if (!h.oc.isLocalZoneNode(oldNode) || failed) && h.oc.isLocalZoneNode(newNode) {
 			if err := h.oc.eIPC.ensureDefaultNoRerouteQoSRules(newNode.Name); err != nil {
 				return err
 			}
 		}
-		// update the nodeIP in the defalt-reRoute (102 priority) destination address-set
-		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+		// update the nodeIP in the default-reRoute (102 priority) destination address-set
+		if failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)
 			err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
 			if err != nil {
 				return err
 			}
 		}
+		h.oc.syncEIPNodeRerouteFailed.Delete(newNode.Name)
 		return h.oc.eIPC.addEgressNode(newNode)
 
 	case factory.NamespaceType:
@@ -1146,6 +1170,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
 		h.oc.eIPC.nodeZoneState.Delete(node.Name)
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		h.oc.syncEIPNodeRerouteFailed.Delete(node.Name)
 		return nil
 
 	case factory.NamespaceType:
