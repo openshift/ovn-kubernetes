@@ -279,7 +279,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
 
-		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -335,7 +335,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		var err error
 		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
-		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 		nft = nodenft.SetFakeNFTablesHelper()
 		manager.nft = nft
 
