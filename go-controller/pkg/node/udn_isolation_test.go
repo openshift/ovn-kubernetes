@@ -3,11 +3,12 @@ package node
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"net"
 	"sigs.k8s.io/yaml"
-	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -361,7 +362,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		var err error
 		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
-		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 		Expect(wf.Start()).To(Succeed())
 		Expect(manager.reconcilePod(notReadyPod.Namespace + "/" + notReadyPod.Name)).To(Succeed())
 	})
