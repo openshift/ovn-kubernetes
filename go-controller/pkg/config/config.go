@@ -1073,7 +1073,7 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Name:        "disable-udn-host-isolation",
 		Usage:       "Configure to disable UDN host isolation with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.DisableUDNHostIsolation,
-		Value:       OVNKubernetesFeature.DisableUDNHostIsolation,
+		Value:       true,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-network-segmentation",
