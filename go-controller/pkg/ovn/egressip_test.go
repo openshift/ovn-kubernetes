@@ -12058,16 +12058,16 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
 				gomega.Expect(nodes[1]).To(gomega.Equal(node3.Name))
 
-				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, *metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node3.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				status = []egressipv1.EgressIPStatusItem{
 					{
-						Node:     node2Name,
+						Node:     node1Name,
 						EgressIP: egressIP1,
 					},
 					{
-						Node:     node3Name,
+						Node:     node2Name,
 						EgressIP: egressIP2,
 					},
 				}
@@ -12077,10 +12077,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 
 				egressIPs, nodes = getEgressIPStatus(egressIPName)
-				gomega.Expect(nodes[0]).To(gomega.Equal(node2.Name))
-				gomega.Expect(nodes[1]).To(gomega.Equal(node3.Name))
+				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
+				gomega.Expect(nodes[1]).To(gomega.Equal(node2.Name))
 
-				egressNodeIPsASv4, egressNodeIPsASv6 = buildEgressIPNodeAddressSets([]string{node2IPv4, node3IPv4})
+				egressNodeIPsASv4, egressNodeIPsASv6 = buildEgressIPNodeAddressSets([]string{node1IPv4, node1IPv6, node2IPv4})
 				expectedNatLogicalPort2 := "k8s-node2"
 				expectedDatabaseState = []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
@@ -12135,7 +12135,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Priority: types.EgressIPReroutePriority,
 						Match:    fmt.Sprintf("ip4.src == %s", egressPod1.Status.PodIP),
 						Action:   nbdb.LogicalRouterPolicyActionReroute,
-						Nexthops: []string{"100.64.0.3", "100.64.0.4"},
+						Nexthops: []string{"100.64.0.2", "100.64.0.3"},
 						ExternalIDs: getEgressIPLRPReRouteDbIDs(egressIPName, egressPod1.Namespace, egressPod1.Name,
 							"ip4", types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs(),
 						UUID: "reroute-UUID1",
@@ -12143,7 +12143,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					&nbdb.NAT{
 						UUID:        "egressip-nat-UUID1",
 						LogicalIP:   podV4IP,
-						ExternalIP:  egressIPs[0],
+						ExternalIP:  egressIPs[1],
 						ExternalIDs: getEgressIPNATDbIDs(egressIPName, egressPod1.Namespace, egressPod1.Name, IPFamilyValueV4, fakeOvn.controller.controllerName).GetExternalIDs(),
 						Type:        nbdb.NATTypeSNAT,
 						LogicalPort: &expectedNatLogicalPort2,
@@ -12154,10 +12154,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					&nbdb.NAT{
 						UUID:        "egressip-nat-UUID2",
 						LogicalIP:   podV4IP,
-						ExternalIP:  egressIPs[1],
+						ExternalIP:  egressIPs[0],
 						ExternalIDs: getEgressIPNATDbIDs(egressIPName, egressPod1.Namespace, egressPod1.Name, IPFamilyValueV4, fakeOvn.controller.controllerName).GetExternalIDs(),
 						Type:        nbdb.NATTypeSNAT,
-						LogicalPort: &expectedNatLogicalPort3,
+						LogicalPort: &expectedNatLogicalPort1,
 						Options: map[string]string{
 							"stateless": "false",
 						},
@@ -12172,6 +12172,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name:  types.GWRouterPrefix + node1.Name,
 						UUID:  types.GWRouterPrefix + node1.Name + "-UUID",
 						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+						Nat:   []string{"egressip-nat-UUID2"},
 					},
 					&nbdb.LogicalRouter{
 						Name:  types.GWRouterPrefix + node2.Name,
@@ -12183,7 +12184,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name:  types.GWRouterPrefix + node3.Name,
 						UUID:  types.GWRouterPrefix + node3.Name + "-UUID",
 						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
-						Nat:   []string{"egressip-nat-UUID2"},
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
