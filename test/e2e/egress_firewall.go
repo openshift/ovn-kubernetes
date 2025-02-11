@@ -408,6 +408,27 @@ spec:
 				"by the external firewall policy", externalContainer1IP))
 			checkConnectivity(srcPodName, externalContainer1IP, externalContainerPort1, false)
 		})
+
+		ginkgo.It("Should validate that egressfirewall supports DNS name in caps", func() {
+			// egress firewall crd yaml configuration
+			var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Allow
+    to:
+      dnsName: WWW.TEST.COM
+  - type: Deny
+    to:
+      cidrSelector: %s
+`, f.Namespace.Name, denyAllCIDR)
+			applyEF(egressFirewallConfig, f.Namespace.Name)
+			framework.Logf("Deleting EgressFirewall in namespace %s", f.Namespace.Name)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "delete", "egressfirewall", "default")
+		})
 	})
 
 	table.DescribeTable("Should validate the egress firewall policy functionality against cluster nodes by using node selector",
