@@ -26,7 +26,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func newNetworkController(name, zone, node string, cm ControllerManager, wf watchFactory) *networkController {
+func newNetworkController(name, zone, node string, cm ControllerManager, wf watchFactory, threadiness int) *networkController {
 	nc := &networkController{
 		name:               fmt.Sprintf("[%s network controller]", name),
 		node:               node,
@@ -41,7 +41,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 	networkConfig := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.syncNetwork,
-		Threadiness: 1,
+		Threadiness: threadiness,
 	}
 	nc.networkReconciler = controller.NewReconciler(
 		nc.name,

@@ -84,13 +84,14 @@ func newController(
 	wf watchFactory,
 	ovnClient *util.OVNClusterManagerClientset,
 	recorder record.EventRecorder,
+	threadiness int,
 ) (*nadController, error) {
 	c := &nadController{
 		name:              fmt.Sprintf("[%s NAD controller]", name),
 		recorder:          recorder,
 		nadLister:         wf.NADInformer().Lister(),
 		nodeLister:        wf.NodeCoreInformer().Lister(),
-		networkController: newNetworkController(name, zone, node, cm, wf),
+		networkController: newNetworkController(name, zone, node, cm, wf, threadiness),
 		nads:              map[string]string{},
 		primaryNADs:       map[string]string{},
 	}

@@ -3,7 +3,6 @@ package networkmanager
 import (
 	"context"
 	"errors"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/tools/record"
@@ -61,6 +60,7 @@ func NewForCluster(
 		wf,
 		ovnClient,
 		recorder,
+		1,
 	)
 }
 
@@ -78,6 +78,7 @@ func NewForZone(
 		wf,
 		nil,
 		nil,
+		15,
 	)
 }
 
@@ -95,6 +96,7 @@ func NewForNode(
 		wf,
 		nil,
 		nil,
+		15,
 	)
 }
 
@@ -109,8 +111,9 @@ func new(
 	wf watchFactory,
 	ovnClient *util.OVNClusterManagerClientset,
 	recorder record.EventRecorder,
+	threadiness int,
 ) (Controller, error) {
-	return newController(name, zone, node, cm, wf, ovnClient, recorder)
+	return newController(name, zone, node, cm, wf, ovnClient, recorder, threadiness)
 }
 
 // ControllerManager manages controllers. Needs to be provided in order to build
