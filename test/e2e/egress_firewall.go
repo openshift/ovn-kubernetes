@@ -23,7 +23,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -171,12 +170,7 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 						return
 					}
 				}
-				err := e2epod.DeletePodWithWait(context.TODO(), f.ClientSet, &v1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: f.Namespace.Name,
-						Name:      podName,
-					},
-				})
+				err := deletePodWithWaitByName(context.TODO(), f.ClientSet, podName, f.Namespace.Name)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 			framework.Failf("Failed to create pod %s that can reach %s:%d after %d retries", podName, reachableDst, reachablePort, retries)
