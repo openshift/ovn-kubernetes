@@ -396,9 +396,6 @@ func newMultiHomedPod(namespace, name, node, podIP string, multiHomingConfigs ..
 	pod := newPod(namespace, name, node, podIP)
 	var secondaryNetworks []nadapi.NetworkSelectionElement
 	for _, multiHomingConf := range multiHomingConfigs {
-		if multiHomingConf.isPrimary {
-			continue // these will be automatically plugged in
-		}
 		nadNamePair := strings.Split(multiHomingConf.nadName, "/")
 		ns := pod.Namespace
 		attachmentName := multiHomingConf.nadName
@@ -445,9 +442,6 @@ func dummyOVNPodNetworkAnnotations(multiHomingConfigs []secondaryNetInfo) string
 
 func dummyOVNPodNetworkAnnotationForNetwork(netConfig secondaryNetInfo, tunnelID int) podAnnotation {
 	role := ovntypes.NetworkRoleSecondary
-	if netConfig.isPrimary {
-		role = ovntypes.NetworkRolePrimary
-	}
 	var (
 		gateways []string
 		ips      []string

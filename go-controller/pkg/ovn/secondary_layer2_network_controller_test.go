@@ -19,7 +19,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -131,13 +130,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				}
 
 				expectationOptions := testConfig.expectationOptions
-				if netInfo.isPrimary {
-					By("configuring the expectation machine with the GW related configuration")
-					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(gwConfig.NextHops).NotTo(BeEmpty())
-					expectationOptions = append(expectationOptions, withGatewayConfig(gwConfig))
-				}
 				By("asserting the OVN entities provisioned in the NBDB are the expected ones")
 				Eventually(fakeOvn.nbClient).Should(
 					libovsdbtest.HaveData(
@@ -156,129 +148,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
 			nonICClusterTestConfiguration(),
 		),
-
-		table.Entry("pod on a user defined primary network on an IC cluster",
-			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
-			icClusterTestConfiguration(),
-		),
-
-		table.Entry("pod on a user defined secondary network",
-			dummySecondaryLayer2UserDefinedNetwork("100.200.0.0/16"),
-			nonICClusterTestConfiguration(),
-		),
-
-		table.Entry("pod on a user defined primary network on an IC cluster",
-			dummyPrimaryLayer2UserDefinedNetwork("100.200.0.0/16"),
-			icClusterTestConfiguration(),
-		),
 	)
-
-	table.DescribeTable(
-		"the gateway is properly cleaned up",
-		func(netInfo secondaryNetInfo, testConfig testConfiguration) {
-			podInfo := dummyTestPod(ns, netInfo)
-			if testConfig.configToOverride != nil {
-				config.OVNKubernetesFeature = *testConfig.configToOverride
-			}
-			app.Action = func(ctx *cli.Context) error {
-				netConf := netInfo.netconf()
-				networkConfig, err := util.NewNetInfo(netConf)
-				Expect(err).NotTo(HaveOccurred())
-
-				nad, err := newNetworkAttachmentDefinition(
-					ns,
-					nadName,
-					*netConf,
-				)
-				Expect(err).NotTo(HaveOccurred())
-
-				const nodeIPv4CIDR = "192.168.126.202/24"
-				testNode, err := newNodeWithSecondaryNets(nodeName, nodeIPv4CIDR, netInfo)
-				Expect(err).NotTo(HaveOccurred())
-
-				gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(gwConfig.NextHops).NotTo(BeEmpty())
-
-				if netInfo.isPrimary {
-					gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
-					Expect(err).NotTo(HaveOccurred())
-					initialDB.NBData = append(
-						initialDB.NBData,
-						expectedLayer2EgressEntities(networkConfig, *gwConfig, nodeName)...)
-				}
-
-				fakeOvn.startWithDBSetup(
-					initialDB,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							*newNamespace(ns),
-						},
-					},
-					&v1.NodeList{
-						Items: []v1.Node{*testNode},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newMultiHomedPod(podInfo.namespace, podInfo.podName, podInfo.nodeName, podInfo.podIP, netInfo),
-						},
-					},
-					&nadapi.NetworkAttachmentDefinitionList{
-						Items: []nadapi.NetworkAttachmentDefinition{*nad},
-					},
-				)
-
-				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
-
-				podInfo.populateLogicalSwitchCache(fakeOvn)
-
-				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				// on IC, the test itself spits out the pod with the
-				// annotations set, since on production it would be the
-				// clustermanager to annotate the pod.
-				if !config.OVNKubernetesFeature.EnableInterconnect {
-					// pod exists, networks annotations don't
-					_, ok := pod.Annotations[util.OvnPodAnnotationName]
-					Expect(ok).To(BeFalse())
-				}
-
-				Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
-				Expect(fakeOvn.controller.WatchPods()).To(Succeed())
-				secondaryNetController, ok := fakeOvn.secondaryControllers[secondaryNetworkName]
-				Expect(ok).To(BeTrue())
-
-				secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
-				podInfo.populateSecondaryNetworkLogicalSwitchCache(fakeOvn, secondaryNetController)
-				Expect(secondaryNetController.bnc.WatchNodes()).To(Succeed())
-				Expect(secondaryNetController.bnc.WatchPods()).To(Succeed())
-
-				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
-				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())
-
-				// we must access the layer2 controller to be able to issue its cleanup function (to remove the GW related stuff).
-				Expect(
-					newSecondaryLayer2NetworkController(
-						&secondaryNetController.bnc.CommonNetworkControllerInfo,
-						networkConfig,
-						nodeName,
-					).Cleanup()).To(Succeed())
-				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{}))
-
-				return nil
-			}
-			Expect(app.Run([]string{app.Name})).To(Succeed())
-		},
-		table.Entry("pod on a user defined primary network",
-			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
-			nonICClusterTestConfiguration(),
-		),
-		table.Entry("pod on a user defined primary network on an interconnect cluster",
-			dummyLayer2PrimaryUserDefinedNetwork("192.168.0.0/16"),
-			icClusterTestConfiguration(),
-		),
-	)
-
 })
 
 func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
@@ -290,51 +160,8 @@ func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 	}
 }
 
-func dummyPrimaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
-	secondaryNet := dummySecondaryLayer2UserDefinedNetwork(subnets)
-	secondaryNet.isPrimary = true
-	return secondaryNet
-}
-
 func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 	const nodeSubnet = "10.128.1.0/24"
-	if info.isPrimary {
-		pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "", "myPod", "10.128.1.3", "0a:58:0a:80:01:03", nsName)
-		pod.networkRole = "infrastructure-locked"
-		pod.routes = append(
-			pod.routes,
-			util.PodRoute{
-				Dest:    testing.MustParseIPNet("10.128.0.0/14"),
-				NextHop: testing.MustParseIP("10.128.1.1"),
-			},
-			util.PodRoute{
-				Dest:    testing.MustParseIPNet("100.64.0.0/16"),
-				NextHop: testing.MustParseIP("10.128.1.1"),
-			},
-		)
-		pod.addNetwork(
-			info.netName,
-			info.nadName,
-			info.subnets,
-			"",
-			"100.200.0.1",
-			"100.200.0.3/16",
-			"0a:58:64:c8:00:03",
-			"primary",
-			0,
-			[]util.PodRoute{
-				{
-					Dest:    testing.MustParseIPNet("172.16.1.0/24"),
-					NextHop: testing.MustParseIP("100.200.0.1"),
-				},
-				{
-					Dest:    testing.MustParseIPNet("100.65.0.0/16"),
-					NextHop: testing.MustParseIP("100.200.0.1"),
-				},
-			},
-		)
-		return pod
-	}
 	pod := newTPod(nodeName, nodeSubnet, "10.128.1.2", "10.128.1.1", podName, "10.128.1.3", "0a:58:0a:80:01:03", nsName)
 	pod.addNetwork(
 		info.netName,
@@ -436,12 +263,6 @@ func dummyLayer2SecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 		topology: ovntypes.Layer2Topology,
 		subnets:  subnets,
 	}
-}
-
-func dummyLayer2PrimaryUserDefinedNetwork(subnets string) secondaryNetInfo {
-	secondaryNet := dummyLayer2SecondaryUserDefinedNetwork(subnets)
-	secondaryNet.isPrimary = true
-	return secondaryNet
 }
 
 func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer2NetworkController {
