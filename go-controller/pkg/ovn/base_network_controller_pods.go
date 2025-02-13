@@ -444,7 +444,7 @@ func (bnc *BaseNetworkController) ensurePodAnnotation(pod *kapi.Pod, nadName str
 }
 
 func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName string,
-	network *nadapi.NetworkSelectionElement) (ops []ovsdb.Operation,
+	network *nadapi.NetworkSelectionElement, enable *bool) (ops []ovsdb.Operation,
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
 
@@ -511,6 +511,8 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		}
 	}
 
+	var customFields []libovsdbops.ModelUpdateField
+
 	lsp.Options = make(map[string]string)
 	// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
 	// ovn-controller will claim the OVS interface only if external_ids:iface-id
@@ -556,14 +558,25 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		return nil, nil, nil, false, err
 	}
 
-	// set addresses on the port
-	// LSP addresses in OVN are a single space-separated value
+	lsp.Enabled = enable
+	if lsp.Enabled != nil {
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortEnabled)
+	}
+
 	addresses = []string{podAnnotation.MAC.String()}
 	for _, podIfAddr := range podAnnotation.IPs {
 		addresses[0] = addresses[0] + " " + podIfAddr.IP.String()
 	}
 
-	lsp.Addresses = addresses
+	// Skip address configuration if LSP is disabled since it will install
+	// l2 look up flows that harms some topologies
+	if lsp.Enabled == nil || *lsp.Enabled {
+		// set addresses on the port
+		// LSP addresses in OVN are a single space-separated value
+
+		lsp.Addresses = addresses
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortAddresses)
+	}
 
 	// add external ids
 	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
@@ -575,6 +588,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
+	customFields = append(customFields, libovsdbops.LogicalSwitchPortPortSecurity)
 
 	// On layer2 topology with interconnect, we need to add specific port config
 	if bnc.isLayer2Interconnect() {
@@ -583,9 +597,14 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		if err != nil {
 			return nil, nil, nil, false, err
 		}
+		if isRemotePort {
+			customFields = append(customFields, libovsdbops.LogicalSwitchPortType)
+		}
 	}
-
-	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, nil, ls, lsp)
+	if len(lsp.Options) != 0 {
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortOptions)
+	}
+	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps(bnc.nbClient, nil, ls, customFields, lsp)
 	if err != nil {
 		return nil, nil, nil, false,
 			fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
