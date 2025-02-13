@@ -278,17 +278,21 @@ func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handle
 
 	ncc.nodeErrorsLock.Lock()
 	defer ncc.nodeErrorsLock.Unlock()
+
 	if ncc.nodeErrors[nodeName] == errorMsg {
 		// error message didn't change for that node, no need to update
 		return nil
 	}
 
+	// identify current error node or set the currently reported error node as this node
 	reportedErrorNode := ncc.reportedErrorNode
 	if ncc.reportedErrorNode == "" && errorMsg != "" {
 		reportedErrorNode = nodeName
 	}
+
 	if ncc.reportedErrorNode == nodeName && errorMsg == "" {
-		// error for this node is fixed, report next error node
+		// error for this node is fixed, find next error node.
+		// used *only* for updating the condition.
 		reportedErrorNode = ""
 		for errorNode := range ncc.nodeErrors {
 			if errorNode != nodeName {
@@ -304,6 +308,9 @@ func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handle
 		// Otherwise, condition will stay nil and the error message will be reflected in an event.
 		condition = getNetworkAllocationUDNCondition(reportedErrorNode)
 	}
+
+	// Event update is only for original node if it had an error message.
+	// No event reported if this node has no error now.
 	events := make([]*util.EventDetails, 0, 1)
 	if errorMsg != "" {
 		events = append(events, &util.EventDetails{
@@ -317,7 +324,13 @@ func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handle
 	if err := ncc.statusReporter(netName, "NetworkClusterController", condition, events...); err != nil {
 		return fmt.Errorf("failed to report network status: %w", err)
 	}
-	ncc.nodeErrors[nodeName] = errorMsg
+
+	if errorMsg == "" {
+		delete(ncc.nodeErrors, nodeName)
+	} else {
+		ncc.nodeErrors[nodeName] = errorMsg
+
+	}
 	ncc.reportedErrorNode = reportedErrorNode
 
 	return nil
