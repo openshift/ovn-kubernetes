@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -37,6 +38,8 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+const migrationEnvVar = "NODE_CNI"
+
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
 type CommonNetworkControllerInfo struct {
 	client       clientset.Interface
@@ -65,6 +68,9 @@ type CommonNetworkControllerInfo struct {
 
 	// Northbound database zone name to which this Controller is connected to - aka local zone
 	zone string
+
+	// is running in SDN live migration mode
+	inMigrationMode bool
 }
 
 // BaseNetworkController structure holds per-network fields and network specific configuration
@@ -171,6 +177,7 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 	if err != nil {
 		return nil, fmt.Errorf("error getting NB zone name : err - %w", err)
 	}
+	_, inMigration := os.LookupEnv(migrationEnvVar)
 	return &CommonNetworkControllerInfo{
 		client:             client,
 		kube:               kube,
@@ -183,6 +190,7 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 		multicastSupport:   multicastSupport,
 		svcTemplateSupport: svcTemplateSupport,
 		zone:               zone,
+		inMigrationMode:    inMigration,
 	}, nil
 }
 
