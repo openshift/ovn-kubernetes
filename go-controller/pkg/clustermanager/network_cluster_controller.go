@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -357,21 +358,30 @@ func getNetworkAllocationUDNCondition(errorNode string) *metav1.Condition {
 //   - initializes the persistent ip allocator and starts listening to IPAMClaim events
 //   - initializes the pod ip allocator and starts listening to pod events
 func (ncc *networkClusterController) Start(ctx context.Context) error {
+	start := time.Now()
+	klog.Infof("Initializing cluster manager network controller %q ...", ncc.GetNetworkName())
 	err := ncc.init()
 	if err != nil {
 		return err
 	}
 
+	klog.Infof("Cluster manager network controller %q initialized. Took: %v", ncc.GetNetworkName(), time.Since(start))
+
 	if ncc.hasNodeAllocation() {
+		start = time.Now()
+		klog.Infof("Cluster manager network controller %q starting node watcher...", ncc.GetNetworkName())
 		nodeHandler, err := ncc.retryNodes.WatchResource()
 		if err != nil {
-			return fmt.Errorf("unable to watch pods: %w", err)
+			return fmt.Errorf("cluster manager network controller %q - unable to watch nodes: %w", ncc.GetNetworkName(), err)
 		}
+		klog.Infof("Cluster manager network controller %q completed watch nodes. Took: %v", ncc.GetNetworkName(), time.Since(start))
 		ncc.nodeHandler = nodeHandler
 	}
 
 	if ncc.hasPodAllocation() {
 		if ncc.allowPersistentIPs() {
+			start = time.Now()
+			klog.Infof("Cluster manager network controller %q starting IPAMClaim watcher...", ncc.GetNetworkName())
 			// we need to start listening to IPAMClaim events before pod events, to
 			// ensure we don't start processing pod allocations before having the
 			// existing IPAMClaim allocations reserved in the in-memory IP pool.
@@ -380,12 +390,17 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 				return fmt.Errorf("unable to watch IPAMClaims: %w", err)
 			}
 			ncc.ipamClaimHandler = ipamClaimHandler
+			klog.Infof("Cluster manager network controller %q completed watch IPAMClaims. Took: %v", ncc.GetNetworkName(), time.Since(start))
 		}
+
+		start = time.Now()
+		klog.Infof("Cluster manager network controller %q starting Pod watcher...", ncc.GetNetworkName())
 		podHandler, err := ncc.retryPods.WatchResource()
 		if err != nil {
 			return fmt.Errorf("unable to watch pods: %w", err)
 		}
 		ncc.podHandler = podHandler
+		klog.Infof("Cluster manager network controller %q completed watch Pods. Took: %v", ncc.GetNetworkName(), time.Since(start))
 	}
 
 	return nil
@@ -496,8 +511,8 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
 		joinedErr := errors.Join(err, statusErr)
 		if joinedErr != nil {
-			klog.Infof("Node add failed for %s, will try again later: %v",
-				node.Name, joinedErr)
+			klog.Infof("Cluster Manager Network Controller %q: Node add failed for %s, will try again later: %v",
+				h.ncc.GetNetworkName(), node.Name, joinedErr)
 			return joinedErr
 		}
 	case factory.IPAMClaimsType:
@@ -540,8 +555,8 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
 		joinedErr := errors.Join(err, statusErr)
 		if joinedErr != nil {
-			klog.Infof("Node update failed for %s, will try again later: %v",
-				node.Name, err)
+			klog.Infof("Cluster Manager Network Controller %q: Node update failed for %s, will try again later: %v",
+				h.ncc.GetNetworkName(), node.Name, err)
 			return err
 		}
 	case factory.IPAMClaimsType:
