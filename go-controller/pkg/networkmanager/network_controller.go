@@ -42,6 +42,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.syncNetwork,
 		Threadiness: threadiness,
+		MaxAttempts: controller.InfiniteAttempts,
 	}
 	nc.networkReconciler = controller.NewReconciler(
 		nc.name,
