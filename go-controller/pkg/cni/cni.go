@@ -101,7 +101,8 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 		pr.PodUID = string(pod.UID)
 	} else if string(pod.UID) != pr.PodUID {
 		// Exit early if the pod was deleted and recreated already
-		return fmt.Errorf("pod deleted before sandbox %v operation began", pr.Command)
+		return fmt.Errorf("pod deleted before sandbox %v operation began. Request Pod UID %s is different from "+
+			"the Pod UID (%s) retrieved from the informer/API", pr.Command, pr.PodUID, pod.UID)
 	}
 	return nil
 }

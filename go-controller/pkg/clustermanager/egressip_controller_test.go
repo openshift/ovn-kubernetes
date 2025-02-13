@@ -1256,7 +1256,39 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Expect(fakeClusterManagerOVN.eIPC.nodeAllocator.cache).To(gomega.HaveKey(node2.Name))
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
-				gomega.Eventually(fakeClusterManagerOVN.fakeRecorder.Events).Should(gomega.HaveLen(3))
+				// event1 triggered during node1 add for the existing EIP and event2 is triggered during node2 add for the existing EIP
+				/*I0212 20:22:37.636573 1837759 egressip_controller.go:723] Egress node: node1 about to be initialized
+				I0212 20:22:37.636670 1837759 obj_retry.go:512] Add event received for *factory.egressNode node2
+				I0212 20:22:37.636757 1837759 egressip_controller.go:723] Egress node: node2 about to be initialized
+				I0212 20:22:37.636855 1837759 egressip_controller.go:1173] Current assignments are: map[]
+				I0212 20:22:37.636865 1837759 egressip_controller.go:1175] Will attempt assignment for egress IP: 192.168.126.51
+				E0212 20:22:37.636909 1837759 egressip_controller.go:1190] Egress IP: 192.168.126.51 address is already assigned on an interface on node node2
+				I0212 20:22:37.636919 1837759 obj_retry.go:551] Creating *factory.egressNode node2 took: 217.968µs
+				I0212 20:22:37.638850 1837759 egressip_controller.go:1173] Current assignments are: map[]
+				I0212 20:22:37.639675 1837759 egressip_controller.go:1175] Will attempt assignment for egress IP: 192.168.126.51
+				E0212 20:22:37.639753 1837759 egressip_controller.go:1190] Egress IP: 192.168.126.51 address is already assigned on an interface on node node2
+				I0212 20:22:37.639776 1837759 obj_retry.go:551] Creating *factory.egressNode node1 took: 3.316342ms*/
+
+				// event3 trigged from syncEgressIPMarkAllocator called during WatchEgressIP starter syncFunc and
+				// event4 is triggered on the actual EIP add reconcile
+				/*I0212 20:22:37.639894 1837759 egressip_controller.go:1729] Patching status on EgressIP egressip: [{add /metadata/annotations map[k8s.ovn.org/egressip-mark:50000]}]
+				I0212 20:22:37.641594 1837759 obj_retry.go:512] Add event received for *v1.EgressIP egressip
+				I0212 20:22:37.641635 1837759 egressip_controller.go:1173] Current assignments are: map[]
+				I0212 20:22:37.641641 1837759 egressip_controller.go:1175] Will attempt assignment for egress IP: 192.168.126.51
+				E0212 20:22:37.641664 1837759 egressip_controller.go:1190] Egress IP: 192.168.126.51 address is already assigned on an interface on node node2
+				I0212 20:22:37.641670 1837759 obj_retry.go:551] Creating *v1.EgressIP egressip took: 53.241µs
+				I0212 20:22:37.643003 1837759 factory.go:1322] Added *v1.EgressIP event handler 2
+				I0212 20:22:37.643123 1837759 obj_retry.go:568] Update event received for resource *v1.EgressIP, old object is equal to new: false
+				I0212 20:22:37.643154 1837759 obj_retry.go:620] Update event received for *v1.EgressIP egressip
+				I0212 20:22:37.643187 1837759 egressip_controller.go:1173] Current assignments are: map[]
+				I0212 20:22:37.643205 1837759 egressip_controller.go:1175] Will attempt assignment for egress IP: 192.168.126.51
+				E0212 20:22:37.643254 1837759 egressip_controller.go:1190] Egress IP: 192.168.126.51 address is already assigned on an interface on node node2*/
+				gomega.Eventually(fakeClusterManagerOVN.fakeRecorder.Events).Should(gomega.HaveLen(4))
+				for i := 0; i < 4; i++ {
+					recordedEvent := <-fakeClusterManagerOVN.fakeRecorder.Events
+					gomega.Expect(recordedEvent).To(gomega.ContainSubstring(
+						"EgressIPConflict Egress IP egressip with IP 192.168.126.51 is conflicting with a host (node2) IP address and will not be assigned"))
+				}
 				return nil
 			}
 

@@ -122,7 +122,7 @@ func (m *UDNHostIsolationManager) Start(ctx context.Context) error {
 		// As a side effect, all kubelet probes will fail, but host isolation will still work.
 		message := fmt.Sprintf("Kubelet probes for UDN are not supported on the node %s as it uses cgroup v1.", m.nodeName)
 		klog.Warning(message)
-		nodeRef := &kapi.ObjectReference{
+		nodeRef := &v1.ObjectReference{
 			Kind: "Node",
 			Name: m.nodeName,
 		}
@@ -517,6 +517,10 @@ func (m *UDNHostIsolationManager) getPodInfo(podKey string, pod *v1.Pod) (*podIn
 	// only add pods with primary UDN
 	primaryUDN, err := m.isPodPrimaryUDN(pod)
 	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// pod IPs were not assigned yet, expecting an update event
+			return nil, nil, nil
+		}
 		return nil, nil, fmt.Errorf("failed to check if pod %s is in primary UDN: %w", podKey, err)
 	}
 	if !primaryUDN {
