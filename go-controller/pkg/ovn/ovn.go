@@ -416,6 +416,10 @@ func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
 }
 
 func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
+	if !util.NodeSubnetAnnotationChanged(oldNode, node) {
+		return false
+	}
+
 	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, node, netName)
 }
 

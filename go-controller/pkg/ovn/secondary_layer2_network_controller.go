@@ -157,13 +157,13 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
+		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update and combine that with what failed previously
 				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
-				shouldSyncMgmtPort := mgmtUpdateFailed || nodeSubnetChanged
+				shouldSyncMgmtPort := mgmtUpdateFailed || nodeSubnetChange
 				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
 				shouldSyncGW := gwUpdateFailed ||
 					gatewayChanged(oldNode, newNode) ||
