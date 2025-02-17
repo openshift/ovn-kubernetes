@@ -152,10 +152,11 @@ const (
 	// }",
 	ovnUDNLayer2NodeGRLRPTunnelIDs = "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids"
 
-	// InvalidID signifies its an invalid network id or invalid tunnel id
+	// InvalidID signifies an invalid ID. Currently used for network and tunnel IDs.
 	InvalidID = -1
 
-	// NoID signifies its an empty tunnel id (its reserved as un-usable when the allocator is created)
+	// NoID signifies an empty/unset ID. Currently used for tunnel ID (reserved as un-usable when the allocator is created)
+	// and network ID.
 	NoID = 0
 )
 
