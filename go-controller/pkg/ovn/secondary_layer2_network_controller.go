@@ -163,9 +163,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update and combine that with what failed previously
 				_, mgmtUpdateFailed := h.oc.mgmtPortFailed.Load(newNode.Name)
-				shouldSyncMgmtPort := mgmtUpdateFailed ||
-					macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) ||
-					nodeSubnetChanged
+				shouldSyncMgmtPort := mgmtUpdateFailed || nodeSubnetChanged
 				_, gwUpdateFailed := h.oc.gatewaysFailed.Load(newNode.Name)
 				shouldSyncGW := gwUpdateFailed ||
 					gatewayChanged(oldNode, newNode) ||

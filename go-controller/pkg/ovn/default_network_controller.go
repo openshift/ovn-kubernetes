@@ -992,7 +992,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-				mgmtSync := failed || macAddressChanged(oldNode, newNode, types.DefaultNetworkName) || nodeSubnetChanged
+				mgmtSync := failed || nodeSubnetChanged
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
 					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||

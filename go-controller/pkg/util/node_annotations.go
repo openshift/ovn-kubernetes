@@ -13,8 +13,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/util/retry"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -436,84 +434,6 @@ func ParseNodeManagementPortAnnotation(node *kapi.Node) (int, int, error) {
 	return cfg.PfId, cfg.FuncId, nil
 }
 
-// UpdateNodeManagementPortMACAddressesWithRetry will update the node's mac address annotation for the provided netName, macAddress values
-// Retry if it fails because of potential conflict which is transient. This function is called from both default network's controller and
-// user defined network's controller as it attempts to add mac addresses of management ports belonging to different networks.
-// Return error in the case of other errors (say temporary API server down), and it will be taken care of by the retry mechanism.
-func UpdateNodeManagementPortMACAddressesWithRetry(node *kapi.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, macAddress net.HardwareAddr, netName string) error {
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		// Informer cache should not be mutated, so get a copy of the object
-		node, err := nodeLister.Get(node.Name)
-		if err != nil {
-			return err
-		}
-
-		cnode := node.DeepCopy()
-
-		cnode.Annotations, err = UpdateManagementPortMACAddressesAnnotation(cnode.Annotations, netName, macAddress)
-		if err != nil {
-			return fmt.Errorf("failed to update node %q management port mac address annotation %s for network %s",
-				node.Name, macAddress.String(), netName)
-		}
-		// It is possible to update the node annotations using status subresource
-		// because changes to metadata via status subresource are not restricted for nodes.
-		return kubeInterface.UpdateNodeStatus(cnode)
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation: %w", node.Name, resultErr)
-	}
-	return nil
-}
-
-// UpdateManagementPortMACAddressesAnnotation updates the OvnNodeManagementPortMacAddresses annotation for the network name 'netName'
-// with the provided MAC Address
-func UpdateManagementPortMACAddressesAnnotation(annotations map[string]string, netName string, macAddress net.HardwareAddr) (map[string]string, error) {
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
-	err := updateNodeManagementPortMACAddressesAnnotation(annotations, netName, macAddress)
-	if err != nil {
-		return nil, err
-	}
-	return annotations, nil
-}
-
-// updateNodeManagementPortMACAddressesAnnotation updates the OvnNodeManagementPortMacAddresses annotation in
-// the 'annotations' map with the provided macAddress for the given netName.
-func updateNodeManagementPortMACAddressesAnnotation(annotations map[string]string, netName string, macAddress net.HardwareAddr) error {
-	var bytes []byte
-
-	// First get the all mac addresses for all existing networks
-	macAddressMap, err := parseNetworkMapAnnotation(annotations, OvnNodeManagementPortMacAddresses)
-	if err != nil {
-		if !IsAnnotationNotSetError(err) {
-			return fmt.Errorf("failed to parse node network management port annotation %q: %v",
-				annotations, err)
-		}
-		// in the case that the annotation does not exist
-		macAddressMap = map[string]string{}
-	}
-	if len(macAddress.String()) != 0 {
-		macAddressMap[netName] = macAddress.String()
-	} else {
-		delete(macAddressMap, netName)
-	}
-
-	// if no networks left, just delete the network ids annotation from node annotations.
-	if len(macAddressMap) == 0 {
-		delete(annotations, OvnNodeManagementPortMacAddresses)
-		return nil
-	}
-
-	// Marshal all network ids back to annotations.
-	bytes, err = json.Marshal(macAddressMap)
-	if err != nil {
-		return err
-	}
-	annotations[OvnNodeManagementPortMacAddresses] = string(bytes)
-	return nil
-}
-
 // UpdateNodeManagementPortMACAddresses used only from unit tests
 func UpdateNodeManagementPortMACAddresses(node *kapi.Node, nodeAnnotator kube.Annotator, macAddress net.HardwareAddr, netName string) error {
 	macAddressMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNodeManagementPortMacAddresses)
@@ -531,6 +451,7 @@ func UpdateNodeManagementPortMACAddresses(node *kapi.Node, nodeAnnotator kube.An
 
 // ParseNodeManagementPortMACAddresses parses the 'OvnNodeManagementPortMacAddresses' annotation
 // for the specified network in 'netName' and returns the mac address.
+// Only used by default network for legacy compatibility. Nothing sets this annotation anymore.
 func ParseNodeManagementPortMACAddresses(node *kapi.Node, netName string) (net.HardwareAddr, error) {
 	macAddressMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNodeManagementPortMacAddresses)
 	if err != nil {
