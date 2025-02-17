@@ -151,7 +151,7 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(
 
 	primaryUDN := udn.NewPrimaryNetwork(networkManager)
 	if util.IsNetworkSegmentationSupportEnabled() {
-		annotCondFn = primaryUDN.WaitForPrimaryAnnotationFn(namespace, annotCondFn)
+		annotCondFn = primaryUDN.WaitForPrimaryAnnotationFn(podName, namespace, annotCondFn)
 	}
 	pod, annotations, podNADAnnotation, err := GetPodWithAnnotations(pr.ctx, clientset, namespace, podName, pr.nadName, annotCondFn)
 	if err != nil {

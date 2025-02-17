@@ -204,7 +204,8 @@ func TestWaitForPrimaryAnnotationFn(t *testing.T) {
 			}
 
 			userDefinedPrimaryNetwork := NewPrimaryNetwork(fakeNetworkManager)
-			obtainedAnnotation, obtainedIsReady := userDefinedPrimaryNetwork.WaitForPrimaryAnnotationFn(tt.namespace, waitCond)(tt.annotations, tt.nadName)
+			obtainedAnnotation, obtainedIsReady := userDefinedPrimaryNetwork.WaitForPrimaryAnnotationFn(
+				"testPod", tt.namespace, waitCond)(tt.annotations, tt.nadName)
 			obtainedFound := userDefinedPrimaryNetwork.Found()
 			obtainedNetworkName := userDefinedPrimaryNetwork.NetworkName()
 			obtainedNADName := userDefinedPrimaryNetwork.NADName()
