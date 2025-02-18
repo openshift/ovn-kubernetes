@@ -14,7 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	utilnet "k8s.io/utils/net"
 )
@@ -103,7 +103,7 @@ func (gp *gressPolicy) addPeerAddressSets(asHashNameV4, asHashNameV6 string) {
 // If the port is not specified, it implies all ports for that protocol
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
 	var pp *libovsdbutil.NetworkPolicyPort
-	protocol := v1.ProtocolTCP
+	protocol := corev1.ProtocolTCP
 	if portJSON.Protocol != nil {
 		protocol = *portJSON.Protocol
 	}

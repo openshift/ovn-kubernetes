@@ -23,7 +23,7 @@ import (
 	current "github.com/containernetworking/cni/pkg/types/100"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -174,7 +174,7 @@ type shimClientset struct {
 	kclient kubernetes.Interface
 }
 
-func (c *shimClientset) getPod(namespace, name string) (*kapi.Pod, error) {
+func (c *shimClientset) getPod(namespace, name string) (*corev1.Pod, error) {
 	return c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"golang.org/x/exp/maps"
-	kapi "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -952,7 +952,7 @@ func deleteStaleMasqueradeResources(nbClient libovsdbclient.Client, routerName, 
 
 	node, err := wf.GetNode(nodeName)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// node doesn't exist for some reason, assume we should still try to clean up with auto-detection
 			if err := deleteStaleMasqueradeRouteAndMACBinding(nbClient, routerName, nextHops); err != nil {
 				return fmt.Errorf("failed to remove stale MAC binding and static route for logical port %s: %w", logicalport, err)
@@ -1274,7 +1274,7 @@ func (gw *GatewayManager) isRoutingAdvertised(node string) bool {
 }
 
 func (gw *GatewayManager) syncGatewayLogicalNetwork(
-	node *kapi.Node,
+	node *corev1.Node,
 	l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,
@@ -1333,7 +1333,7 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 
 // syncNodeGateway ensures a node's gateway router is configured according to the L3 config and host subnets
 func (gw *GatewayManager) syncNodeGateway(
-	node *kapi.Node,
+	node *corev1.Node,
 	l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,

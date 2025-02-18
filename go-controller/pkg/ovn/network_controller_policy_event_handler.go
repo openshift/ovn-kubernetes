@@ -8,7 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -235,7 +235,7 @@ func (h *networkControllerPolicyEventHandler) IsObjectInTerminalState(obj interf
 	switch h.objType {
 	case factory.AddressSetPodSelectorType,
 		factory.LocalPodSelectorType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		return util.PodCompleted(pod)
 
 	default:

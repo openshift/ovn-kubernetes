@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -135,7 +135,7 @@ func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
-func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
+func getNodePortIPTRules(svcPort corev1.ServicePort, targetIP string, targetPort int32, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
 	chainName := iptableNodePortChain
 	if !svcHasLocalHostNetEndPnt && isETPLocal {
 		// DNAT it to the masqueradeIP:nodePort instead of clusterIP:targetPort
@@ -164,7 +164,7 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort i
 // `clusterIP` is clusterIP is the VIP of the service to match on
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // NOTE: Currently invoked only for Internal Traffic Policy
-func getITPLocalIPTRules(svcPort kapi.ServicePort, clusterIP string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
+func getITPLocalIPTRules(svcPort corev1.ServicePort, clusterIP string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
 	if svcHasLocalHostNetEndPnt {
 		return []nodeipt.Rule{
 			{
@@ -201,7 +201,7 @@ func computeProbability(n, i int) string {
 	return fmt.Sprintf("%0.10f", 1.0/float64(n-i+1))
 }
 
-func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
+func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort corev1.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
 	iptRules := make([]nodeipt.Rule, 0, len(localEndpoints))
 	if len(localEndpoints) == 0 {
 		// either its smart nic mode; etp&itp not implemented, OR
@@ -241,7 +241,7 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 //
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
-func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
+func getExternalIPTRules(svcPort corev1.ServicePort, externalIP, dstIP string, svcHasLocalHostNetEndPnt, isETPLocal bool) []nodeipt.Rule {
 	targetPort := svcPort.Port
 	chainName := iptableExternalIPChain
 	if !svcHasLocalHostNetEndPnt && isETPLocal {
@@ -626,7 +626,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []nodeipt.Rule) error {
 // case3: if svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that redirects clusterIP traffic to host targetPort is added.
 //
 //	if !svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that marks clusterIP traffic to steer it to ovn-k8s-mp0 is added.
-func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
+func getGatewayIPTRules(service *corev1.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []nodeipt.Rule {
 	rules := make([]nodeipt.Rule, 0)
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	kapi "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -307,7 +307,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			// if it doesn't exist we are not going to create the new object.
 			kObj, err := r.ResourceHandler.GetResourceFromInformerCache(objKey)
 			if err != nil {
-				if kerrors.IsNotFound(err) {
+				if apierrors.IsNotFound(err) {
 					klog.Infof("%s %s not found in the informers cache,"+
 						" not going to retry object create", r.ResourceHandler.ObjType, objKey)
 					kObj = nil
@@ -597,7 +597,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					// When processing an object in terminal state there is a chance that it was already removed from
 					// the API server. Since delete events for objects in terminal state are skipped delete it here.
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods).
-					if kerrors.IsNotFound(err) {
+					if apierrors.IsNotFound(err) {
 						if r.ResourceHandler.IsObjectInTerminalState(newer) {
 							klog.V(5).Infof("%s %s is in terminal state but no longer exists in informer cache, removing",
 								r.ResourceHandler.ObjType, newKey)
@@ -773,11 +773,11 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 }
 
 // getPendingPods returns all pods that are in the Pending state
-func getPendingPods(kubeClient kube.InterfaceOVN) ([]*kapi.Pod, error) {
-	var allPods []*kapi.Pod
+func getPendingPods(kubeClient kube.InterfaceOVN) ([]*corev1.Pod, error) {
+	var allPods []*corev1.Pod
 
-	pods, err := kubeClient.GetPods(kapi.NamespaceAll, metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("status.phase", string(kapi.PodPending)).String(),
+	pods, err := kubeClient.GetPods(corev1.NamespaceAll, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("status.phase", string(corev1.PodPending)).String(),
 	})
 	if err != nil {
 		return nil, err

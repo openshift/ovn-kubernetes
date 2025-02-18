@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -246,7 +246,7 @@ func clearOVSFlowTargets() error {
 
 // collectorsString joins all HostPort entry into a string that is acceptable as
 // target by the ovs-vsctl command. If an entry has an empty host, it uses the Node IP
-func collectorsString(node *kapi.Node, targets []config.HostPort) (string, error) {
+func collectorsString(node *corev1.Node, targets []config.HostPort) (string, error) {
 	if len(targets) == 0 {
 		return "", errors.New("collector targets can't be empty")
 	}
@@ -272,7 +272,7 @@ func collectorsString(node *kapi.Node, targets []config.HostPort) (string, error
 	return joined.String(), nil
 }
 
-func setOVSFlowTargets(node *kapi.Node) error {
+func setOVSFlowTargets(node *corev1.Node) error {
 	if len(config.Monitoring.NetFlowTargets) != 0 {
 		collectors, err := collectorsString(node, config.Monitoring.NetFlowTargets)
 		if err != nil {
@@ -362,7 +362,7 @@ func validateEncapIP(encapIP string) (bool, error) {
 	return false, nil
 }
 
-func setupOVNNode(node *kapi.Node) error {
+func setupOVNNode(node *corev1.Node) error {
 	var err error
 
 	nodePrimaryIP, err := util.GetNodePrimaryIP(node)
@@ -611,7 +611,7 @@ func exportManagementPortAnnotation(netdevName string, nodeAnnotator kube.Annota
 	return util.SetNodeManagementPortAnnotation(nodeAnnotator, pfindex, vfindex)
 }
 
-func importManagementPortAnnotation(node *kapi.Node) (string, error) {
+func importManagementPortAnnotation(node *corev1.Node) (string, error) {
 	klog.Infof("Import management port annotation on node '%v'", node.Name)
 	pfId, vfId, err := util.ParseNodeManagementPortAnnotation(node)
 
@@ -667,7 +667,7 @@ func getMgmtPortAndRepNameModeFull() (string, string, error) {
 
 // In DPU mode, read the annotation from the host side which should have been
 // exported by ovn-k running in DPU host mode.
-func getMgmtPortAndRepNameModeDPU(node *kapi.Node) (string, string, error) {
+func getMgmtPortAndRepNameModeDPU(node *corev1.Node) (string, string, error) {
 	rep, err := importManagementPortAnnotation(node)
 	if err != nil {
 		return "", "", err
@@ -683,7 +683,7 @@ func getMgmtPortAndRepNameModeDPUHost() (string, string, error) {
 	return netdevName, "", nil
 }
 
-func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
+func getMgmtPortAndRepName(node *corev1.Node) (string, string, error) {
 	switch config.OvnKubeNode.Mode {
 	case types.NodeModeFull:
 		return getMgmtPortAndRepNameModeFull()
@@ -696,7 +696,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 	}
 }
 
-func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
+func createNodeManagementPorts(node *corev1.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
 	subnets []*net.IPNet, routeManager *routemanager.Controller, isRoutingAdvertised bool) ([]*managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
@@ -806,7 +806,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	klog.Infof("PreStarting the default node network controller")
 
 	var err error
-	var node *kapi.Node
+	var node *corev1.Node
 	var subnets []*net.IPNet
 	var cniServer *cni.Server
 
@@ -988,7 +988,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting the default node network controller")
 
 	var err error
-	var node *kapi.Node
+	var node *corev1.Node
 
 	if nc.gatewaySetup == nil {
 		return fmt.Errorf("default node network controller hasn't been pre-started")
@@ -1386,12 +1386,12 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 		return fmt.Errorf("cannot reconcile conntrack: %v", err)
 	}
 	svc, err := nc.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-	if err != nil && !kerrors.IsNotFound(err) {
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("error while retrieving service for endpointslice %s/%s when reconciling conntrack: %v",
 			newEndpointSlice.Namespace, newEndpointSlice.Name, err)
 	}
 	for _, oldPort := range oldEndpointSlice.Ports {
-		if *oldPort.Protocol != kapi.ProtocolUDP { // flush conntrack only for UDP
+		if *oldPort.Protocol != corev1.ProtocolUDP { // flush conntrack only for UDP
 			continue
 		}
 		for _, oldEndpoint := range oldEndpointSlice.Endpoints {
@@ -1428,7 +1428,7 @@ func (nc *DefaultNodeNetworkController) WatchEndpointSlices() error {
 	return err
 }
 
-func exGatewayPodsAnnotationsChanged(oldNs, newNs *kapi.Namespace) bool {
+func exGatewayPodsAnnotationsChanged(oldNs, newNs *corev1.Namespace) bool {
 	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
 	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
 	// the logic for checking if we need to delete any conntrack entries
@@ -1458,7 +1458,7 @@ func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 	}
 }
 
-func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *kapi.Namespace) error {
+func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *corev1.Namespace) error {
 	gatewayIPs, err := nc.apbExternalRouteNodeController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(newNs.Name)
 	if err != nil {
 		return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
@@ -1467,7 +1467,7 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
 
-	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*kapi.Pod, error) {
+	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*corev1.Pod, error) {
 		return nc.watchFactory.GetPods(newNs.Name)
 	})
 }

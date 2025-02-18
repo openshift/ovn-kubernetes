@@ -24,7 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -622,19 +622,19 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 	var tcpString string
 	var sctpString string
 	for _, port := range ports {
-		if kapi.Protocol(port.Protocol) == kapi.ProtocolUDP && udpString != "udp" {
+		if corev1.Protocol(port.Protocol) == corev1.ProtocolUDP && udpString != "udp" {
 			if port.Port == 0 {
 				udpString = "udp"
 			} else {
 				udpString = fmt.Sprintf("%s udp.dst == %d ||", udpString, port.Port)
 			}
-		} else if kapi.Protocol(port.Protocol) == kapi.ProtocolTCP && tcpString != "tcp" {
+		} else if corev1.Protocol(port.Protocol) == corev1.ProtocolTCP && tcpString != "tcp" {
 			if port.Port == 0 {
 				tcpString = "tcp"
 			} else {
 				tcpString = fmt.Sprintf("%s tcp.dst == %d ||", tcpString, port.Port)
 			}
-		} else if kapi.Protocol(port.Protocol) == kapi.ProtocolSCTP && sctpString != "sctp" {
+		} else if corev1.Protocol(port.Protocol) == corev1.ProtocolSCTP && sctpString != "sctp" {
 			if port.Port == 0 {
 				sctpString = "sctp"
 			} else {
@@ -745,7 +745,7 @@ func (oc *DefaultNetworkController) getEgressFirewallACLDbIDs(namespace string, 
 }
 
 func (oc *DefaultNetworkController) newEFNodeController(nodeInformer coreinformers.NodeInformer) controller.Controller {
-	controllerConfig := &controller.ControllerConfig[kapi.Node]{
+	controllerConfig := &controller.ControllerConfig[corev1.Node]{
 		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       nodeInformer.Informer(),
 		Lister:         nodeInformer.Lister().List,
@@ -753,10 +753,10 @@ func (oc *DefaultNetworkController) newEFNodeController(nodeInformer coreinforme
 		Reconcile:      oc.updateEgressFirewallForNode,
 		Threadiness:    1,
 	}
-	return controller.NewController[kapi.Node]("ef_node_controller", controllerConfig)
+	return controller.NewController[corev1.Node]("ef_node_controller", controllerConfig)
 }
 
-func (oc *DefaultNetworkController) efNodeNeedsUpdate(oldNode, newNode *kapi.Node) bool {
+func (oc *DefaultNetworkController) efNodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 	if oldNode == nil || newNode == nil {
 		return true
 	}

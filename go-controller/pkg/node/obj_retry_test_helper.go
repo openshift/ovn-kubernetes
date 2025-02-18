@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"sync"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -84,7 +84,7 @@ func (h *nodePortWatcherEventHandler) GetResourceFromInformerCache(key string) (
 func (h *nodePortWatcherEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.ServiceForFakeNodePortWatcherType:
-		svc := obj.(*kapi.Service)
+		svc := obj.(*corev1.Service)
 		return h.n.AddService(svc)
 
 	default:
@@ -98,8 +98,8 @@ func (h *nodePortWatcherEventHandler) AddResource(obj interface{}, _ bool) error
 func (h *nodePortWatcherEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.ServiceForFakeNodePortWatcherType:
-		oldSvc := oldObj.(*kapi.Service)
-		newSvc := newObj.(*kapi.Service)
+		oldSvc := oldObj.(*corev1.Service)
+		newSvc := newObj.(*corev1.Service)
 		return h.n.UpdateService(oldSvc, newSvc)
 
 	default:
@@ -113,7 +113,7 @@ func (h *nodePortWatcherEventHandler) UpdateResource(oldObj, newObj interface{},
 func (h *nodePortWatcherEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
 	case factory.ServiceForFakeNodePortWatcherType:
-		svc := obj.(*kapi.Service)
+		svc := obj.(*corev1.Service)
 		return h.n.DeleteService(svc)
 
 	default:

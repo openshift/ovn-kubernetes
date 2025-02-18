@@ -20,7 +20,7 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -76,7 +76,7 @@ func newOVNNodeController(
 }
 
 // AddPod handles the pod add event
-func (n *NodeController) AddPod(pod *kapi.Pod) error {
+func (n *NodeController) AddPod(pod *corev1.Pod) error {
 	// nothing to do for hostnetworked pod
 	if util.PodWantsHostNetwork(pod) {
 		return nil
@@ -121,7 +121,7 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 }
 
 // DeletePod handles the pod delete event
-func (n *NodeController) DeletePod(pod *kapi.Pod) error {
+func (n *NodeController) DeletePod(pod *corev1.Pod) error {
 	// nothing to do for hostnetworked pods
 	if util.PodWantsHostNetwork(pod) {
 		return nil
@@ -141,7 +141,7 @@ func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 }
 
 // Sync is not needed but must be implemented to fulfill the interface
-func (n *NodeController) Sync(_ []*kapi.Node) {}
+func (n *NodeController) Sync(_ []*corev1.Node) {}
 
 func nameToCookie(nodeName string) string {
 	hash := sha256.Sum256([]byte(nodeName))
@@ -150,7 +150,7 @@ func nameToCookie(nodeName string) string {
 
 // hybridOverlayNodeUpdate sets up or tears down VXLAN tunnels to hybrid overlay
 // nodes in the cluster
-func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
+func (n *NodeController) hybridOverlayNodeUpdate(node *corev1.Node) error {
 	if !util.NoHostSubnet(node) {
 		// remove possible hybrid overlay remaining
 		return n.DeleteNode(node)
@@ -229,7 +229,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 }
 
 // AddNode handles node additions and updates
-func (n *NodeController) AddNode(node *kapi.Node) error {
+func (n *NodeController) AddNode(node *corev1.Node) error {
 	klog.Info("Add Node ", node.Name)
 	var err error
 	if node.Name == n.nodeName {
@@ -288,7 +288,7 @@ func (n *NodeController) deleteFlowsByCookie(cookie string) {
 }
 
 // DeleteNode handles node deletions
-func (n *NodeController) DeleteNode(node *kapi.Node) error {
+func (n *NodeController) DeleteNode(node *corev1.Node) error {
 	if node.Name == n.nodeName {
 		return nil
 	}
@@ -447,7 +447,7 @@ func (n *NodeController) createOrReplaceRoutes(mgmtPortLink netlink.Link, oldDRI
 }
 
 // handleHybridOverlayMACIPChange make the required changes if the nodes HybridOverlayDRIP or HybridOverlayMAC changes
-func (n *NodeController) handleHybridOverlayMACIPChange(node *kapi.Node) error {
+func (n *NodeController) handleHybridOverlayMACIPChange(node *corev1.Node) error {
 	var oldDRIP net.IP
 	var oldMAC net.HardwareAddr
 
@@ -486,7 +486,7 @@ func (n *NodeController) handleHybridOverlayMACIPChange(node *kapi.Node) error {
 }
 
 // EnsureHybridOverlayBridge sets up the hybrid overlay bridge
-func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
+func (n *NodeController) EnsureHybridOverlayBridge(node *corev1.Node) error {
 	n.Lock()
 	defer n.Unlock()
 	if atomic.LoadUint32(n.initState) >= hotypes.DistributedRouterInitialized {

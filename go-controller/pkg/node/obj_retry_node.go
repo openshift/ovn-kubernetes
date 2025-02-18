@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	cache "k8s.io/client-go/tools/cache"
 
@@ -94,11 +94,11 @@ func (h *nodeEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, erro
 	// switch based on type
 	switch h.objType {
 	case factory.NamespaceExGwType:
-		ns1, ok := obj1.(*kapi.Namespace)
+		ns1, ok := obj1.(*corev1.Namespace)
 		if !ok {
 			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Namespace", obj1)
 		}
-		ns2, ok := obj2.(*kapi.Namespace)
+		ns2, ok := obj2.(*corev1.Namespace)
 		if !ok {
 			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Namespace", obj2)
 		}
@@ -176,7 +176,7 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 			return fmt.Errorf("error retrieving node %s: %v", h.nc.name, err)
 		}
 		if !config.OVNKubernetesFeature.EnableInterconnect || util.GetNodeZone(node) == types.OvnDefaultZone {
-			newNs := newObj.(*kapi.Namespace)
+			newNs := newObj.(*corev1.Namespace)
 			return h.nc.syncConntrackForExternalGateways(newNs)
 		}
 		return nil

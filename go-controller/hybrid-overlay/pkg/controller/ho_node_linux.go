@@ -9,7 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -36,7 +36,7 @@ func newHONodeController(
 }
 
 // AddNode set annotations about its VTEP and gateway MAC address to its own node object
-func (n *HONodeController) AddNode(node *kapi.Node) error {
+func (n *HONodeController) AddNode(node *corev1.Node) error {
 	if node.Name != n.nodeName {
 		return nil
 	}
@@ -75,12 +75,12 @@ func (n *HONodeController) AddNode(node *kapi.Node) error {
 }
 
 // Delete handles node deletions
-func (n *HONodeController) DeleteNode(_ *kapi.Node) error {
+func (n *HONodeController) DeleteNode(_ *corev1.Node) error {
 	return nil
 }
 
 // AddPod remove the ovnkube annotation from the pods running on its own node
-func (n *HONodeController) AddPod(pod *kapi.Pod) error {
+func (n *HONodeController) AddPod(pod *corev1.Pod) error {
 	if pod.Spec.NodeName != n.nodeName {
 		return nil
 	}
@@ -97,13 +97,13 @@ func (n *HONodeController) AddPod(pod *kapi.Pod) error {
 	return nil
 }
 
-func (n *HONodeController) DeletePod(_ *kapi.Pod) error {
+func (n *HONodeController) DeletePod(_ *corev1.Pod) error {
 	return nil
 }
 
 func (n *HONodeController) RunFlowSync(_ <-chan struct{}) {}
 
-func (n *HONodeController) EnsureHybridOverlayBridge(_ *kapi.Node) error {
+func (n *HONodeController) EnsureHybridOverlayBridge(_ *corev1.Node) error {
 	return nil
 }
 

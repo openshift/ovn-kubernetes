@@ -16,7 +16,7 @@ import (
 
 	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -161,7 +161,7 @@ func execInPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, n
 	)
 
 	scheme := runtime.NewScheme()
-	if err := kapi.AddToScheme(scheme); err != nil {
+	if err := corev1.AddToScheme(scheme); err != nil {
 		klog.Exitf("Error adding to scheme: %v", err)
 	}
 	parameterCodec := runtime.NewParameterCodec(scheme)
@@ -178,7 +178,7 @@ func execInPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, n
 		Resource("pods").
 		Name(podName).
 		SubResource("exec").
-		VersionedParams(&kapi.PodExecOptions{
+		VersionedParams(&corev1.PodExecOptions{
 			Container: containerName,
 			Command:   []string{"bash", "-c", cmd},
 			Stdin:     useStdin,
@@ -255,7 +255,7 @@ func isRoutingViaHost(coreclient *corev1client.CoreV1Client, nodeName string) (b
 }
 
 // getPodMAC returns the pod's MAC address.
-func getPodMAC(pod *kapi.Pod) (podMAC string, err error) {
+func getPodMAC(pod *corev1.Pod) (podMAC string, err error) {
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.ObjectMeta.Annotations, types.DefaultNetworkName)
 	if err != nil {
 		return "", err
@@ -275,7 +275,7 @@ func getOvnKubePodOnNode(coreclient *corev1client.CoreV1Client, ovnNamespace str
 		klog.Infof("Cannot find pods in %s namespace, err: %v", ovnNamespace, errOvn)
 		return "", errOvn
 	}
-	var ovnkubePod *kapi.Pod
+	var ovnkubePod *corev1.Pod
 	// Find ovnkube-node-xxx pod running on the same node as Pod
 	for _, podOvn := range podsOvn.Items {
 		podOvn := podOvn
@@ -379,7 +379,7 @@ func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 
 // extractSubsetInfo copies information from the endpoint subsets into the SvcInfo object.
 // Modifies the svcInfo object the pointer of which is passed to it.
-func extractSubsetInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, subsets []kapi.EndpointSubset, svcInfo *SvcInfo, ovnNamespace, addressFamily string) error {
+func extractSubsetInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, subsets []corev1.EndpointSubset, svcInfo *SvcInfo, ovnNamespace, addressFamily string) error {
 	for _, subset := range subsets {
 		klog.V(5).Infof("==> Trying to extract information for service %s in namespace %s from subset %v",
 			svcInfo.SvcName, svcInfo.SvcNamespace, subset)
@@ -1129,7 +1129,7 @@ func displayNodeInfo(coreclient *corev1client.CoreV1Client) {
 	}
 }
 
-func getDesiredPodIP(pod *kapi.Pod, addressFamily string) (string, error) {
+func getDesiredPodIP(pod *corev1.Pod, addressFamily string) (string, error) {
 	for _, podIP := range pod.Status.PodIPs {
 		ip := utilnet.ParseIPSloppy(podIP.IP)
 		if getIPVer(ip) == addressFamily {

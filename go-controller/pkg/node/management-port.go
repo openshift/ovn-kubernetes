@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
@@ -23,7 +23,7 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *corev1.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
 	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error
@@ -78,7 +78,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node,
+func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *corev1.Node,
 	_ listers.NodeLister, _ kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mgmtPortName, true); err != nil {

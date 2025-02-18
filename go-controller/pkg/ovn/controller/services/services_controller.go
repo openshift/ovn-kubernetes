@@ -21,7 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,8 +77,8 @@ func NewController(client clientset.Interface,
 		),
 		workerLoopPeriod:      time.Second,
 		alreadyApplied:        map[string][]LB{},
-		nodeIPv4Templates:     NewNodeIPsTemplates(v1.IPv4Protocol),
-		nodeIPv6Templates:     NewNodeIPsTemplates(v1.IPv6Protocol),
+		nodeIPv4Templates:     NewNodeIPsTemplates(corev1.IPv4Protocol),
+		nodeIPv6Templates:     NewNodeIPsTemplates(corev1.IPv6Protocol),
 		serviceInformer:       serviceInformer,
 		serviceLister:         serviceInformer.Lister(),
 		endpointSliceInformer: endpointSliceInformer,
@@ -393,7 +393,7 @@ func (c *Controller) syncService(key string) error {
 	// - the Service was deleted from the cache (doesn't exist in Kubernetes anymore)
 	// - the Service mutated to a new service Type that we don't handle (ExternalName, Headless)
 	if err != nil || service == nil || !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		service = &v1.Service{
+		service = &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: namespace,
 				Name:      name,
@@ -498,8 +498,8 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 	}
 
 	// Compute the nodeIP template values.
-	c.nodeIPv4Templates = NewNodeIPsTemplates(v1.IPv4Protocol)
-	c.nodeIPv6Templates = NewNodeIPsTemplates(v1.IPv6Protocol)
+	c.nodeIPv4Templates = NewNodeIPsTemplates(corev1.IPv4Protocol)
+	c.nodeIPv6Templates = NewNodeIPsTemplates(corev1.IPv6Protocol)
 
 	for _, nodeInfo := range c.nodeInfos {
 		if nodeInfo.chassisID == "" {
@@ -606,7 +606,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 		return
 	}
 
-	service := obj.(*v1.Service)
+	service := obj.(*corev1.Service)
 	if c.skipService(service.Name, service.Namespace) {
 		return
 	}
@@ -617,8 +617,8 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 
 // onServiceUpdate updates the Service Selector in the cache and queues the Service for processing.
 func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
-	oldService := oldObj.(*v1.Service)
-	newService := newObj.(*v1.Service)
+	oldService := oldObj.(*corev1.Service)
+	newService := newObj.(*corev1.Service)
 
 	// don't process resync or objects that are marked for deletion
 	if oldService.ResourceVersion == newService.ResourceVersion ||
@@ -644,7 +644,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	service := obj.(*v1.Service)
+	service := obj.(*corev1.Service)
 
 	if c.skipService(service.Name, service.Namespace) {
 		return
@@ -769,7 +769,7 @@ func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
 	return err
 }
 
-func (c *Controller) configureUDNEnabledServiceRoute(service *v1.Service) error {
+func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) error {
 	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, c.netInfo.GetNetworkName())
 
 	extIDs := map[string]string{

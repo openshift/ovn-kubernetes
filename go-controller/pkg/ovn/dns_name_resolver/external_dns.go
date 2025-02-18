@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -102,7 +102,7 @@ func (extEgDNS *ExternalEgressDNS) reconcileDNSNameResolver(key string) error {
 	// Fetch the dns name resolver object using the name and namespace.
 	obj, err := extEgDNS.dnsLister.DNSNameResolvers(namespace).Get(name)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// DNSNameResolver object was deleted.
 
 			// Get the corresponding DNS name, if avialable.

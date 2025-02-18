@@ -86,7 +86,7 @@ import (
 	frrinformerfactory "github.com/metallb/frr-k8s/pkg/client/informers/externalversions"
 	frrinformer "github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -227,12 +227,12 @@ type serviceForFakeNodePortWatcher struct{} // only for unit tests
 
 var (
 	// Resource types used in ovnk master
-	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	ServiceType                           reflect.Type = reflect.TypeOf(&kapi.Service{})
+	PodType                               reflect.Type = reflect.TypeOf(&corev1.Pod{})
+	ServiceType                           reflect.Type = reflect.TypeOf(&corev1.Service{})
 	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
 	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	NamespaceType                         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	NodeType                              reflect.Type = reflect.TypeOf(&kapi.Node{})
+	NamespaceType                         reflect.Type = reflect.TypeOf(&corev1.Namespace{})
+	NodeType                              reflect.Type = reflect.TypeOf(&corev1.Node{})
 	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
@@ -288,8 +288,8 @@ func informerObjectTrim(obj interface{}) (interface{}, error) {
 	if accessor, err := meta.Accessor(obj); err == nil {
 		accessor.SetManagedFields(nil)
 	}
-	if pod, ok := obj.(*kapi.Pod); ok {
-		pod.Spec.Volumes = []kapi.Volume{}
+	if pod, ok := obj.(*corev1.Pod); ok {
+		pod.Spec.Volumes = []corev1.Volume{}
 		for i := range pod.Spec.Containers {
 			pod.Spec.Containers[i].Command = nil
 			pod.Spec.Containers[i].Args = nil
@@ -366,10 +366,10 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
-	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredServiceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noAlternateProxySelector())
@@ -378,7 +378,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			getEndpointSliceSelector())
@@ -740,20 +740,20 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
-	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredServiceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noAlternateProxySelector())
 	})
 
 	// For Pods, only select pods scheduled to this node
-	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			func(opts *metav1.ListOptions) {
@@ -762,7 +762,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	})
 
 	// For namespaces
-	wf.iFactory.InformerFor(&kapi.Namespace{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Namespace{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewNamespaceInformer(
 			c,
 			resyncPeriod,
@@ -772,7 +772,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			getEndpointSliceSelector())
@@ -917,10 +917,10 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
-	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredServiceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noAlternateProxySelector())
@@ -929,7 +929,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			getEndpointSliceSelector())
@@ -1083,11 +1083,11 @@ func (wf *WatchFactory) Shutdown() {
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
 	switch objType {
 	case PodType:
-		if pod, ok := obj.(*kapi.Pod); ok {
+		if pod, ok := obj.(*corev1.Pod); ok {
 			return &pod.ObjectMeta, nil
 		}
 	case ServiceType:
-		if service, ok := obj.(*kapi.Service); ok {
+		if service, ok := obj.(*corev1.Service); ok {
 			return &service.ObjectMeta, nil
 		}
 	case PolicyType:
@@ -1103,11 +1103,11 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 			return &baselineAdminNetworkPolicy.ObjectMeta, nil
 		}
 	case NamespaceType:
-		if namespace, ok := obj.(*kapi.Namespace); ok {
+		if namespace, ok := obj.(*corev1.Namespace); ok {
 			return &namespace.ObjectMeta, nil
 		}
 	case NodeType:
-		if node, ok := obj.(*kapi.Node); ok {
+		if node, ok := obj.(*corev1.Node); ok {
 			return &node.ObjectMeta, nil
 		}
 	case EgressFirewallType:
@@ -1491,25 +1491,25 @@ func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) {
 }
 
 // GetPod returns the pod spec given the namespace and pod name
-func (wf *WatchFactory) GetPod(namespace, name string) (*kapi.Pod, error) {
+func (wf *WatchFactory) GetPod(namespace, name string) (*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).Get(name)
 }
 
 // GetAllPods returns all the pods in the cluster
-func (wf *WatchFactory) GetAllPods() ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetAllPods() ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.List(labels.Everything())
 }
 
 // GetPods returns all the pods in a given namespace
-func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetPods(namespace string) ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).List(labels.Everything())
 }
 
 // GetPodsBySelector returns all the pods in a given namespace by the label selector
-func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
@@ -1519,7 +1519,7 @@ func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1
 }
 
 // GetAllPodsBySelector returns all the pods in all namespace by the label selector
-func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector) ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
@@ -1529,24 +1529,24 @@ func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector)
 }
 
 // GetNodes returns the node specs of all the nodes
-func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
+func (wf *WatchFactory) GetNodes() ([]*corev1.Node, error) {
 	return wf.ListNodes(labels.Everything())
 }
 
 // ListNodes returns nodes that match a selector
-func (wf *WatchFactory) ListNodes(selector labels.Selector) ([]*kapi.Node, error) {
+func (wf *WatchFactory) ListNodes(selector labels.Selector) ([]*corev1.Node, error) {
 	nodeLister := wf.informers[NodeType].lister.(listers.NodeLister)
 	return nodeLister.List(selector)
 }
 
 // GetNode returns the node spec of a given node by name
-func (wf *WatchFactory) GetNode(name string) (*kapi.Node, error) {
+func (wf *WatchFactory) GetNode(name string) (*corev1.Node, error) {
 	nodeLister := wf.informers[NodeType].lister.(listers.NodeLister)
 	return nodeLister.Get(name)
 }
 
 // GetNodesByLabelSelector returns all the nodes selected by the label selector
-func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelector) ([]*kapi.Node, error) {
+func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelector) ([]*corev1.Node, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
 		return nil, err
@@ -1555,18 +1555,18 @@ func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelect
 }
 
 // GetNodesBySelector returns all the nodes selected by the selector
-func (wf *WatchFactory) GetNodesBySelector(selector labels.Selector) ([]*kapi.Node, error) {
+func (wf *WatchFactory) GetNodesBySelector(selector labels.Selector) ([]*corev1.Node, error) {
 	return wf.ListNodes(selector)
 }
 
 // GetService returns the service spec of a service in a given namespace
-func (wf *WatchFactory) GetService(namespace, name string) (*kapi.Service, error) {
+func (wf *WatchFactory) GetService(namespace, name string) (*corev1.Service, error) {
 	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
 	return serviceLister.Services(namespace).Get(name)
 }
 
 // GetServices returns all services
-func (wf *WatchFactory) GetServices() ([]*kapi.Service, error) {
+func (wf *WatchFactory) GetServices() ([]*corev1.Service, error) {
 	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
 	return serviceLister.List(labels.Everything())
 }
@@ -1587,7 +1587,7 @@ func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
 }
 
 // GetNamespace returns a specific namespace
-func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
+func (wf *WatchFactory) GetNamespace(name string) (*corev1.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.Get(name)
 }
@@ -1611,13 +1611,13 @@ func (wf *WatchFactory) GetServiceEndpointSlices(namespace, svcName, network str
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
-func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
+func (wf *WatchFactory) GetNamespaces() ([]*corev1.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
 }
 
 // GetNamespacesBySelector returns a list of namespaces in the cluster by the label selector
-func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Namespace, error) {
+func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelector) ([]*corev1.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
@@ -1785,7 +1785,7 @@ func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOpti
 		panic(err)
 	}
 	// headless service label must not be there
-	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	noHeadlessService, err := labels.NewRequirement(corev1.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
 		// cannot occur
 		panic(err)
@@ -1803,7 +1803,7 @@ func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOpti
 // label.
 func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 	// headless service label must not be there
-	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	noHeadlessService, err := labels.NewRequirement(corev1.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
 		// cannot occur
 		panic(err)

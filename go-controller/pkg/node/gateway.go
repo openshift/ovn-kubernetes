@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/safchain/ethtool"
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/klog/v2"
 
@@ -61,7 +61,7 @@ type gateway struct {
 	isPodNetworkAdvertised     bool
 }
 
-func (g *gateway) AddService(svc *kapi.Service) error {
+func (g *gateway) AddService(svc *corev1.Service) error {
 	var err error
 	var errors []error
 
@@ -88,7 +88,7 @@ func (g *gateway) AddService(svc *kapi.Service) error {
 	return utilerrors.Join(errors...)
 }
 
-func (g *gateway) UpdateService(old, new *kapi.Service) error {
+func (g *gateway) UpdateService(old, new *corev1.Service) error {
 	var err error
 	var errors []error
 
@@ -115,7 +115,7 @@ func (g *gateway) UpdateService(old, new *kapi.Service) error {
 	return utilerrors.Join(errors...)
 }
 
-func (g *gateway) DeleteService(svc *kapi.Service) error {
+func (g *gateway) DeleteService(svc *corev1.Service) error {
 	var err error
 	var errors []error
 
@@ -556,7 +556,7 @@ type bridgeConfiguration struct {
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
-func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*net.IPNet, error) {
+func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *corev1.Node) ([]*net.IPNet, error) {
 	b.Lock()
 	defer b.Unlock()
 	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)

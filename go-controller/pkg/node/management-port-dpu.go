@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
@@ -31,7 +31,7 @@ func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet, rep
 	}
 }
 
-func (mp *managementPortRepresentor) Create(isPodNetworkAdvertised bool, _ *routemanager.Controller, _ *v1.Node,
+func (mp *managementPortRepresentor) Create(isPodNetworkAdvertised bool, _ *routemanager.Controller, _ *corev1.Node,
 	_ listers.NodeLister, _ kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	k8sMgmtIntfName := types.K8sMgmtIntfName
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
@@ -173,7 +173,7 @@ func newManagementPortNetdev(hostSubnets []*net.IPNet, netdevName string) Manage
 	}
 }
 
-func (mp *managementPortNetdev) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, _ *v1.Node,
+func (mp *managementPortNetdev) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, _ *corev1.Node,
 	_ listers.NodeLister, _ kube.Interface, _ *startupWaiter) (*managementPortConfig, error) {
 	klog.Infof("Lookup netdevice link and existing management port using '%v'", mp.netdevName)
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)

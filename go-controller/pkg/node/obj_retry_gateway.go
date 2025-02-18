@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -111,7 +111,7 @@ func (h *gwEventHandler) GetResourceFromInformerCache(key string) (interface{}, 
 func (h *gwEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.ServiceForGatewayType:
-		svc := obj.(*kapi.Service)
+		svc := obj.(*corev1.Service)
 		return h.g.AddService(svc)
 
 	case factory.EndpointSliceForGatewayType:
@@ -134,8 +134,8 @@ func (h *gwEventHandler) AddResource(obj interface{}, _ bool) error {
 func (h *gwEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.ServiceForGatewayType:
-		oldSvc := oldObj.(*kapi.Service)
-		newSvc := newObj.(*kapi.Service)
+		oldSvc := oldObj.(*corev1.Service)
+		newSvc := newObj.(*corev1.Service)
 		return h.g.UpdateService(oldSvc, newSvc)
 
 	case factory.EndpointSliceForGatewayType:
@@ -160,7 +160,7 @@ func (h *gwEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) erro
 func (h *gwEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
 	case factory.ServiceForGatewayType:
-		svc := obj.(*kapi.Service)
+		svc := obj.(*corev1.Service)
 		return h.g.DeleteService(svc)
 
 	case factory.EndpointSliceForGatewayType:

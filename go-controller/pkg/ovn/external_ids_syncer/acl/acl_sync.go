@@ -16,7 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -62,7 +62,7 @@ func NewACLSyncer(nbClient libovsdbclient.Client, controllerName string) *ACLSyn
 	}
 }
 
-func (syncer *ACLSyncer) SyncACLs(existingNodes []*v1.Node) error {
+func (syncer *ACLSyncer) SyncACLs(existingNodes []*corev1.Node) error {
 	// stale acls don't have controller ID
 	legacyAclPred := libovsdbops.GetNoOwnerPredicate[*nbdb.ACL]()
 	legacyACLs, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, legacyAclPred)
@@ -279,7 +279,7 @@ func (syncer *ACLSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *
 // updateStaleNetpolNodeACLs updates allow from node ACLs, that don't have new ExternalIDs based
 // on DbObjectIDs set. Allow from node acls are applied on the node switch, therefore the cleanup for deleted is not needed,
 // since acl will be deleted toegther with the node switch.
-func (syncer *ACLSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*v1.Node) []*nbdb.ACL {
+func (syncer *ACLSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*corev1.Node) []*nbdb.ACL {
 	// ACL to allow traffic from host via management port has no name or ExternalIDs
 	// The only way to find it is by exact match
 	type aclInfo struct {

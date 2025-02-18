@@ -24,7 +24,7 @@ import (
 	"crypto/rand"
 
 	"github.com/urfave/cli/v2"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 
@@ -169,10 +169,10 @@ func GetPatchPortName(bridgeID, nodeName string) string {
 // the list of node IPs as an InternalIP address, we don't want to create the
 // default allow logical router policies for that IP. Node IPs are ordered,
 // meaning the egress IP will never be first in this list.
-func GetNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
+func GetNodeInternalAddrs(node *corev1.Node) (net.IP, net.IP) {
 	var v4Addr, v6Addr net.IP
 	for _, nodeAddr := range node.Status.Addresses {
-		if nodeAddr.Type == v1.NodeInternalIP {
+		if nodeAddr.Type == corev1.NodeInternalIP {
 			ip := utilnet.ParseIPSloppy(nodeAddr.Address)
 			if !utilnet.IsIPv6(ip) && v4Addr == nil {
 				v4Addr = ip
@@ -186,7 +186,7 @@ func GetNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 
 // GetNodeAddresses returns all of the node's IPv4 and/or IPv6 annotated
 // addresses as requested. Note that nodes not annotated will be ignored.
-func GetNodeAddresses(ipv4, ipv6 bool, nodes ...*v1.Node) (ipsv4 []net.IP, ipsv6 []net.IP, err error) {
+func GetNodeAddresses(ipv4, ipv6 bool, nodes ...*corev1.Node) (ipsv4 []net.IP, ipsv6 []net.IP, err error) {
 	allCIDRs := sets.Set[string]{}
 	for _, node := range nodes {
 		ips, err := ParseNodeHostCIDRs(node)

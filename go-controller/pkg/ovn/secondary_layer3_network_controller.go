@@ -29,7 +29,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
@@ -102,7 +102,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) IsResourceScheduled(obj i
 func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
 	case factory.NodeType:
-		node, ok := obj.(*kapi.Node)
+		node, ok := obj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
@@ -157,11 +157,11 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.NodeType:
-		newNode, ok := newObj.(*kapi.Node)
+		newNode, ok := newObj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast newObj of type %T to *kapi.Node", newObj)
 		}
-		oldNode, ok := oldObj.(*kapi.Node)
+		oldNode, ok := oldObj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
@@ -233,7 +233,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	switch h.objType {
 	case factory.NodeType:
-		node, ok := obj.(*kapi.Node)
+		node, ok := obj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
@@ -667,7 +667,7 @@ func (oc *SecondaryLayer3NetworkController) init() error {
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
@@ -806,7 +806,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	return err
 }
 
-func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIc bool) error {
+func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIc bool) error {
 	_, present := oc.localZoneNodes.Load(node.Name)
 
 	if present {
@@ -837,7 +837,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *kapi.
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L3 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *kapi.Node) error {
+func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node) error {
 	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
 	if err != nil {
@@ -857,7 +857,7 @@ func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodS
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
+func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.IPNet, error) {
 	// Node subnet for the secondary layer3 network is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
 	// to create OVN Northbound resources.
@@ -878,7 +878,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPN
 	return hostSubnets, nil
 }
 
-func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) error {
+func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *corev1.Node) error {
 	klog.V(5).Infof("Deleting Node %q for network %s. Removing the node from "+
 		"various caches", node.Name, oc.GetNetworkName())
 
@@ -921,7 +921,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
 func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error {
 	foundNodes := sets.New[string]()
 	for _, tmp := range nodes {
-		node, ok := tmp.(*kapi.Node)
+		node, ok := tmp.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
@@ -982,7 +982,7 @@ type SecondaryL3GatewayConfig struct {
 	externalIPs    []net.IP
 }
 
-func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *kapi.Node) (*SecondaryL3GatewayConfig, error) {
+func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL3GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)

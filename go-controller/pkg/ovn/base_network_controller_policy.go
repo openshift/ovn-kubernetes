@@ -19,7 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -574,7 +574,7 @@ func (bnc *BaseNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 	errs = []error{}
 
 	for _, obj := range objs {
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		if pod.Spec.NodeName == "" {
 			// pod is not yet scheduled, will receive update event for it
 			continue
@@ -637,7 +637,7 @@ func (bnc *BaseNetworkController) getExistingLocalPolicyPorts(np *networkPolicy,
 	policyPortUUIDs = []string{}
 	policyPortsToUUIDs = map[string]string{}
 	for _, obj := range objs {
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 
 		nadNames := bnc.getPodNADNames(pod)
 		for _, nadName := range nadNames {
@@ -1392,7 +1392,7 @@ func (bnc *BaseNetworkController) handlePeerNamespaceSelectorAdd(np *networkPoli
 	updated := false
 	var errors []error
 	for _, obj := range objs {
-		namespace := obj.(*kapi.Namespace)
+		namespace := obj.(*corev1.Namespace)
 		// addNamespaceAddressSet is safe for concurrent use, doesn't require additional synchronization
 		nsUpdated, err := gp.addNamespaceAddressSet(namespace.Name, bnc.addressSetFactory)
 		if err != nil {
@@ -1428,7 +1428,7 @@ func (bnc *BaseNetworkController) handlePeerNamespaceSelectorDel(np *networkPoli
 	}
 	updated := false
 	for _, obj := range objs {
-		namespace := obj.(*kapi.Namespace)
+		namespace := obj.(*corev1.Namespace)
 		// delNamespaceAddressSet is safe for concurrent use, doesn't require additional synchronization
 		if gp.delNamespaceAddressSet(namespace.Name) {
 			updated = true

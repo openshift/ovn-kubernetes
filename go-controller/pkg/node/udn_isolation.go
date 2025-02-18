@@ -17,8 +17,8 @@ import (
 	"github.com/moby/sys/userns"
 	"golang.org/x/sys/unix"
 
-	v1 "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -84,7 +84,7 @@ func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodIn
 		udnOpenPortsICMPv4: newNFTPodElementsSet(nftablesUDNOpenPortsICMPv4, false),
 		udnOpenPortsICMPv6: newNFTPodElementsSet(nftablesUDNOpenPortsICMPv6, false),
 	}
-	controllerConfig := &controller.ControllerConfig[v1.Pod]{
+	controllerConfig := &controller.ControllerConfig[corev1.Pod]{
 		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       podInformer.Informer(),
 		Lister:         podInformer.Lister().List,
@@ -92,7 +92,7 @@ func NewUDNHostIsolationManager(ipv4, ipv6 bool, podInformer coreinformers.PodIn
 		Reconcile:      m.reconcilePod,
 		Threadiness:    1,
 	}
-	m.podController = controller.NewController[v1.Pod]("udn-host-isolation-manager", controllerConfig)
+	m.podController = controller.NewController[corev1.Pod]("udn-host-isolation-manager", controllerConfig)
 	return m
 }
 
@@ -122,7 +122,7 @@ func (m *UDNHostIsolationManager) Start(ctx context.Context) error {
 		// As a side effect, all kubelet probes will fail, but host isolation will still work.
 		message := fmt.Sprintf("Kubelet probes for UDN are not supported on the node %s as it uses cgroup v1.", m.nodeName)
 		klog.Warning(message)
-		nodeRef := &v1.ObjectReference{
+		nodeRef := &corev1.ObjectReference{
 			Kind: "Node",
 			Name: m.nodeName,
 		}
@@ -455,7 +455,7 @@ func (m *UDNHostIsolationManager) podInitialSync() error {
 	return nil
 }
 
-func podNeedsUpdate(oldObj, newObj *v1.Pod) bool {
+func podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 	if oldObj == nil || newObj == nil {
 		return true
 	}
@@ -473,7 +473,7 @@ func (m *UDNHostIsolationManager) reconcilePod(key string) error {
 	}
 	pod, err := m.podLister.Pods(namespace).Get(name)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// Pod was deleted, clean up.
 			return m.updateWithPodInfo(key, &podInfo{})
 		}
@@ -505,7 +505,7 @@ type podInfo struct {
 // empty podInfo will delete the pod from all sets and is returned when nil pod is passed.
 // first error is for parsing openPorts annotation, second error is for fetching pod IPs.
 // parsing error should not stop the update, as we need to cleanup potentially present rules from the previous config.
-func (m *UDNHostIsolationManager) getPodInfo(podKey string, pod *v1.Pod) (*podInfo, error, error) {
+func (m *UDNHostIsolationManager) getPodInfo(podKey string, pod *corev1.Pod) (*podInfo, error, error) {
 	pi := &podInfo{}
 	if pod == nil {
 		return pi, nil, nil
@@ -568,7 +568,7 @@ func (m *UDNHostIsolationManager) updateWithPodInfo(podKey string, pi *podInfo) 
 	return nil
 }
 
-func (m *UDNHostIsolationManager) isPodPrimaryUDN(pod *v1.Pod) (bool, error) {
+func (m *UDNHostIsolationManager) isPodPrimaryUDN(pod *corev1.Pod) (bool, error) {
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 	if err != nil {
 		// pod IPs were not assigned yet, should be retried later

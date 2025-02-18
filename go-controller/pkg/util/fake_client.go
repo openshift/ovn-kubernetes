@@ -26,7 +26,7 @@ import (
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -142,10 +142,10 @@ func NewObjectMetaWithLabels(name, namespace string, labels map[string]string) m
 	}
 }
 
-func NewNamespace(namespace string) *v1.Namespace {
-	return &v1.Namespace{
+func NewNamespace(namespace string) *corev1.Namespace {
+	return &corev1.Namespace{
 		ObjectMeta: NewObjectMetaWithLabels(namespace, "", map[string]string{"name": namespace}),
-		Spec:       v1.NamespaceSpec{},
-		Status:     v1.NamespaceStatus{},
+		Spec:       corev1.NamespaceSpec{},
+		Status:     corev1.NamespaceStatus{},
 	}
 }

@@ -23,7 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/prometheus/client_golang/prometheus"
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	kapimtypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
@@ -539,7 +539,7 @@ func RunTimestamp(stopChan <-chan struct{}, sbClient, nbClient libovsdbclient.Cl
 
 // RecordPodCreated extracts the scheduled timestamp and records how long it took
 // us to notice this and set up the pod's scheduling.
-func RecordPodCreated(pod *kapi.Pod, netInfo util.NetInfo) {
+func RecordPodCreated(pod *corev1.Pod, netInfo util.NetInfo) {
 	if netInfo.IsSecondary() {
 		// TBD: no op for secondary network for now, TBD
 		return
@@ -548,10 +548,10 @@ func RecordPodCreated(pod *kapi.Pod, netInfo util.NetInfo) {
 
 	// Find the scheduled timestamp
 	for _, cond := range pod.Status.Conditions {
-		if cond.Type != kapi.PodScheduled {
+		if cond.Type != corev1.PodScheduled {
 			continue
 		}
-		if cond.Status != kapi.ConditionTrue {
+		if cond.Status != corev1.ConditionTrue {
 			return
 		}
 		creationLatency := t.Sub(cond.LastTransitionTime.Time).Seconds()

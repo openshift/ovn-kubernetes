@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -57,11 +57,11 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 		return reflect.DeepEqual(np1, np2), nil
 
 	case factory.NodeType:
-		node1, ok := obj1.(*kapi.Node)
+		node1, ok := obj1.(*corev1.Node)
 		if !ok {
 			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Node", obj1)
 		}
-		node2, ok := obj2.(*kapi.Node)
+		node2, ok := obj2.(*corev1.Node)
 		if !ok {
 			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Node", obj2)
 		}
@@ -179,7 +179,7 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 func (h *baseNetworkControllerEventHandler) isResourceScheduled(objType reflect.Type, obj interface{}) bool {
 	switch objType {
 	case factory.PodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		return util.PodScheduled(pod)
 	}
 	return true
@@ -203,7 +203,7 @@ func (h *baseNetworkControllerEventHandler) isObjectInTerminalState(objType refl
 	switch objType {
 	case factory.PodType,
 		factory.EgressIPPodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		return util.PodCompleted(pod)
 
 	default:

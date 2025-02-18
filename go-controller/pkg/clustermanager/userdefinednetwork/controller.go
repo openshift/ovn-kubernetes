@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -214,7 +214,7 @@ func (c *Controller) ReconcileNetAttachDef(key string) error {
 	}
 	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to get NetworkAttachmentDefinition %q from cache: %v", key, err)
@@ -256,7 +256,7 @@ func (c *Controller) ReconcileNamespace(key string) error {
 	namespace, err := c.namespaceInformer.Lister().Get(key)
 	if err != nil {
 		// Ignore removed namespaces
-		if kerrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to get namespace %q from cache: %w", key, err)
@@ -343,7 +343,7 @@ func (c *Controller) UpdateSubsystemCondition(
 	}
 	_, err = c.udnClient.K8sV1().UserDefinedNetworks(udnNamespace).ApplyStatus(context.Background(), applyUDN, opts)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to update UserDefinedNetwork %s/%s status: %w", udnNamespace, udnName, err)
@@ -366,7 +366,7 @@ func (c *Controller) reconcileUDN(key string) error {
 	}
 
 	udn, err := c.udnLister.UserDefinedNetworks(namespace).Get(name)
-	if err != nil && !kerrors.IsNotFound(err) {
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get UserDefinedNetwork %q from cache: %v", key, err)
 	}
 
@@ -445,7 +445,7 @@ func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.Us
 		opts := metav1.ApplyOptions{FieldManager: "user-defined-network-controller"}
 		udn, err = c.udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).ApplyStatus(context.Background(), udnApplyConf, opts)
 		if err != nil {
-			if kerrors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				return nil
 			}
 			return fmt.Errorf("failed to update UserDefinedNetwork status: %w", err)
@@ -510,7 +510,7 @@ func (c *Controller) reconcileCUDN(key string) error {
 	}
 
 	cudn, err := c.cudnLister.Get(name)
-	if err != nil && !kerrors.IsNotFound(err) {
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ClusterUserDefinedNetwork %q from cache: %v", key, err)
 	}
 
@@ -665,7 +665,7 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 	cudnName := cudn.Name
 	cudn, err = c.udnClient.K8sV1().ClusterUserDefinedNetworks().ApplyStatus(context.Background(), applyConf, opts)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to update ClusterUserDefinedNetwork status %q: %w", cudnName, err)

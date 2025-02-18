@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
@@ -35,7 +35,7 @@ func (h *egressIPClusterControllerEventHandler) FilterOutResource(_ interface{})
 func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EgressNodeType:
-		node := obj.(*v1.Node)
+		node := obj.(*corev1.Node)
 		// EgressIP is not supported on hybrid overlay nodes
 		if util.NoHostSubnet(node) {
 			return nil
@@ -88,8 +88,8 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		newEIP := newObj.(*egressipv1.EgressIP)
 		return h.eIPC.reconcileEgressIP(oldEIP, newEIP)
 	case factory.EgressNodeType:
-		oldNode := oldObj.(*v1.Node)
-		newNode := newObj.(*v1.Node)
+		oldNode := oldObj.(*corev1.Node)
+		newNode := newObj.(*corev1.Node)
 
 		// EgressIP is not supported on hybrid overlay nodes
 		if util.NoHostSubnet(newNode) {
@@ -177,7 +177,7 @@ func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, _ interface{
 		eIP := obj.(*egressipv1.EgressIP)
 		return h.eIPC.reconcileEgressIP(eIP, nil)
 	case factory.EgressNodeType:
-		node := obj.(*v1.Node)
+		node := obj.(*corev1.Node)
 		// EgressIP is not supported on hybrid overlay nodes
 		if util.NoHostSubnet(node) {
 			return nil

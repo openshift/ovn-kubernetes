@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -347,7 +347,7 @@ func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations
 	return clusterRouteCache, nil
 }
 
-func populateManagedGWIPsCacheForPods(gwInfo *gateway_info.GatewayInfo, cache map[string]*managedGWIPs, podList []*v1.Pod) {
+func populateManagedGWIPsCacheForPods(gwInfo *gateway_info.GatewayInfo, cache map[string]*managedGWIPs, podList []*corev1.Pod) {
 	for gwIP := range gwInfo.Gateways {
 		for _, pod := range podList {
 			// ignore completed pods, host networked pods, pods not scheduled

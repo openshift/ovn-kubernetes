@@ -16,7 +16,7 @@ import (
 	frrtypes "github.com/metallb/frr-k8s/api/v1beta1"
 	frrclientset "github.com/metallb/frr-k8s/pkg/client/clientset/versioned"
 	frrlisters "github.com/metallb/frr-k8s/pkg/client/listers/api/v1beta1"
-	core "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -140,7 +140,7 @@ func NewController(
 	}
 	c.nadController = controllerutil.NewController("clustermanager routeadvertisements nad controller", nadConfig)
 
-	nodeConfig := &controllerutil.ControllerConfig[core.Node]{
+	nodeConfig := &controllerutil.ControllerConfig[corev1.Node]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:      func(_ string) error { c.raController.ReconcileAll(); return nil },
 		Threadiness:    1,
@@ -1034,7 +1034,7 @@ func nadNeedsUpdate(oldObj, newObj *nadtypes.NetworkAttachmentDefinition) bool {
 		oldObj.Annotations[types.OvnRouteAdvertisementsKey] != newObj.Annotations[types.OvnRouteAdvertisementsKey]
 }
 
-func nodeNeedsUpdate(oldObj, newObj *core.Node) bool {
+func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
 	return oldObj == nil || newObj == nil ||
 		!reflect.DeepEqual(oldObj.Labels, newObj.Labels) ||
 		util.NodeSubnetAnnotationChanged(oldObj, newObj)

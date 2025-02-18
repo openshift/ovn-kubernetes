@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -17,7 +17,7 @@ import (
 // NetAttachDefNotInUse checks no pod is attached to given NAD.
 // Pod considered not attached to network in case its OVN pod annotation doesn't specify
 // the given NAD key.
-func NetAttachDefNotInUse(nad *netv1.NetworkAttachmentDefinition, pods []*v1.Pod) error {
+func NetAttachDefNotInUse(nad *netv1.NetworkAttachmentDefinition, pods []*corev1.Pod) error {
 	nadName := util.GetNADName(nad.Namespace, nad.Name)
 	var connectedPods []string
 	for _, pod := range pods {
