@@ -4,6 +4,8 @@
 #
 # The standard name for this image is ovn-kubernetes-base
 
+# asjkfhjkhfjkasfa
+
 # build base image shared by both OpenShift and MicroShift
 FROM registry.ci.openshift.org/ocp/4.16:base-rhel9
 
