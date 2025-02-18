@@ -110,7 +110,7 @@ func (icr *IPAMClaimReconciler) Reconcile(
 	}
 
 	var newIPs []string
-	if newIPAMClaim != nil && len(newIPAMClaim.Status.IPs) > 0 {
+	if len(newIPAMClaim.Status.IPs) > 0 {
 		newIPs = newIPAMClaim.Status.IPs
 	}
 

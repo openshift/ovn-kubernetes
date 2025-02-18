@@ -718,9 +718,7 @@ func (oc *DefaultNetworkController) updateACLLoggingForEgressFirewall(egressFire
 
 	ef, ok := obj.(*egressFirewall)
 	if !ok {
-		return false, fmt.Errorf("updateACLLoggingForEgressFirewall failed: type assertion to *egressFirewall"+
-			" failed for EgressFirewall of type %T in namespace %s",
-			obj, ef.namespace)
+		return false, fmt.Errorf("failed type assertion to *egressFirewall with object of type %T", obj)
 	}
 
 	ef.Lock()

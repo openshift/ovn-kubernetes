@@ -62,9 +62,7 @@ func (c *ExternalGatewayMasterController) Repair() error {
 	if len(ovnRouteCache) == 0 {
 		// Even if no ECMP routes exist, we should ensure no 501 LRPs exist either
 		if err := c.nbClient.delAllHybridRoutePolicies(); err != nil {
-			if err != nil {
-				return fmt.Errorf("error while removing hybrid policies: %w", err)
-			}
+			return fmt.Errorf("error while removing hybrid policies: %w", err)
 		}
 		// nothing in OVN, so no reason to search for stale routes
 		return nil

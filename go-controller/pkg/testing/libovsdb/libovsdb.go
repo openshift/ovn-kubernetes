@@ -158,9 +158,6 @@ func NewOVSTestHarness(setup TestSetup) (libovsdbclient.Client, *Context, error)
 		server.Close()
 	}()
 
-	if err != nil {
-		return nil, nil, err
-	}
 	testCtx.OVSServer = server
 
 	return client, testCtx, err

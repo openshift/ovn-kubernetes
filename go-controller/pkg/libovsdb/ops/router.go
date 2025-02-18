@@ -681,7 +681,7 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 // If policy is nil, OVN considers that as dst-ip
 func PolicyEqualPredicate(p1, p2 *nbdb.LogicalRouterStaticRoutePolicy) bool {
 	if p1 == nil {
-		return p2 == nil || (p2 != nil && *p2 == nbdb.LogicalRouterStaticRoutePolicyDstIP)
+		return p2 == nil || *p2 == nbdb.LogicalRouterStaticRoutePolicyDstIP
 	}
 
 	if p2 == nil {

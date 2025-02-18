@@ -19,3 +19,10 @@ linters:
     - staticcheck
     - typecheck
     - unused
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
