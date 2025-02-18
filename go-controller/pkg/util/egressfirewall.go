@@ -11,8 +11,7 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -23,7 +22,7 @@ const (
 
 // ValidateAndGetEgressFirewallDestination validates an egress firewall rule destination and returns
 // the parsed contents of the destination.
-func ValidateAndGetEgressFirewallDestination(egressFirewallDestination egressfirewallapi.EgressFirewallDestination) (
+func ValidateAndGetEgressFirewallDestination(egressFirewallDestination egressfirewallv1.EgressFirewallDestination) (
 	cidrSelector string,
 	dnsName string,
 	clusterSubnetIntersection bool,
@@ -87,7 +86,7 @@ func LowerCaseFQDN(dnsName string) string {
 
 // GetDNSNames iterates through the egress firewall rules and returns the DNS
 // names present in them after validating the rules.
-func GetDNSNames(ef *egressfirewall.EgressFirewall) []string {
+func GetDNSNames(ef *egressfirewallv1.EgressFirewall) []string {
 	var dnsNameSlice []string
 	for i, egressFirewallRule := range ef.Spec.Egress {
 		if i > types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority {

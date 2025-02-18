@@ -21,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -93,7 +92,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		if kubevirt.IsPodLiveMigratable(pod) && !zoneContainsPodSubnetOrUntracked {
 			continue
 		}
-		annotatedLocalPods[pod] = map[string]*util.PodAnnotation{ovntypes.DefaultNetworkName: annotations}
+		annotatedLocalPods[pod] = map[string]*util.PodAnnotation{types.DefaultNetworkName: annotations}
 
 		if expectedLogicalPortName != "" {
 			expectedLogicalPorts[expectedLogicalPortName] = true
@@ -130,7 +129,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 				}
 			}
 			if syncPodAnnotations {
-				err = oc.updatePodAnnotationWithRetry(pod, annotations, ovntypes.DefaultNetworkName)
+				err = oc.updatePodAnnotationWithRetry(pod, annotations, types.DefaultNetworkName)
 				if err != nil {
 					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 				}
@@ -180,7 +179,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return nil
 	}
 
-	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, ovntypes.DefaultNetworkName)
+	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, types.DefaultNetworkName)
 	if err != nil {
 		return err
 	}
@@ -253,7 +252,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime)
 	}()
 
-	nadName := ovntypes.DefaultNetworkName
+	nadName := types.DefaultNetworkName
 	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network, nil)
 	if err != nil {
 		return err
@@ -264,7 +263,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return err
 	}
-	if networkRole == ovntypes.NetworkRoleInfrastructure && util.IsNetworkSegmentationSupportEnabled() {
+	if networkRole == types.NetworkRoleInfrastructure && util.IsNetworkSegmentationSupportEnabled() {
 		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
 			return err
@@ -346,7 +345,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	_ = oc.logicalPortCache.add(pod, switchName, ovntypes.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+	_ = oc.logicalPortCache.add(pod, switchName, types.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 
 	if kubevirt.IsPodLiveMigratable(pod) {
 		if err := kubevirt.EnsureDHCPOptionsForMigratablePod(oc.controllerName, oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs, lsp); err != nil {
@@ -362,7 +361,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 }
 
 func (oc *DefaultNetworkController) allocateSyncPodsIPs(pod *kapi.Pod) (string, *util.PodAnnotation, error) {
-	annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+	annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 	if err != nil {
 		return "", nil, nil
 	}

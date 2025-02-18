@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -207,7 +206,7 @@ func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
 		cidr = cidrs[0]
 	} else {
 		// Otherwise parse the hybrid overlay node subnet annotation
-		subnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
+		subnet, ok := node.Annotations[hotypes.HybridOverlayNodeSubnet]
 		if !ok {
 
 			klog.V(5).Infof("Missing node %q node subnet annotation", node.Name)
@@ -239,7 +238,7 @@ func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr, erro
 		return nil, nil, nil, fmt.Errorf("missing node subnet and/or node IP")
 	}
 
-	drMACString, ok := node.Annotations[types.HybridOverlayDRMAC]
+	drMACString, ok := node.Annotations[hotypes.HybridOverlayDRMAC]
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("missing distributed router MAC annotation")
 	}

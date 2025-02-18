@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -44,7 +43,7 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 	portName := util.GetHybridOverlayPortName(node.Name)
 
 	// retrieve mac annotation
-	am, annotationOK := node.Annotations[types.HybridOverlayDRMAC]
+	am, annotationOK := node.Annotations[hotypes.HybridOverlayDRMAC]
 	if annotationOK {
 		annotationMAC, err = net.ParseMAC(am)
 		if err != nil {
@@ -62,7 +61,7 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 			if err := oc.deleteHybridOverlayPort(node); err != nil {
 				return err
 			}
-			annotator.Delete(types.HybridOverlayDRMAC)
+			annotator.Delete(hotypes.HybridOverlayDRMAC)
 		}
 		return nil
 	}
@@ -129,7 +128,7 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 
 	if !annotationOK {
 		klog.Infof("Setting node %s hybrid overlay mac annotation to %s", node.Name, annotationMAC.String())
-		if err := annotator.Set(types.HybridOverlayDRMAC, portMAC.String()); err != nil {
+		if err := annotator.Set(hotypes.HybridOverlayDRMAC, portMAC.String()); err != nil {
 			return fmt.Errorf("failed to set node %s hybrid overlay DRMAC annotation: %v", node.Name, err)
 		}
 	}

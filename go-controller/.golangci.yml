@@ -31,4 +31,5 @@ linters-settings:
   revive:
     rules:
       # TODO: enable recommended (default) revive rules
+      - name: duplicated-imports
       - name: unused-parameter

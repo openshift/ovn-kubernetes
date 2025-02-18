@@ -25,7 +25,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 
@@ -597,11 +596,11 @@ func GetEndpointSlicesBySelector(namespace string, labelSelector metav1.LabelSel
 // GetServiceEndpointSlices returns the endpointSlices associated with a service for the specified network
 // if network is DefaultNetworkName the default endpointSlices are returned, otherwise the function looks for mirror endpointslices
 // for the specified network.
-func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceLister discoverylisters.EndpointSliceLister) ([]*discovery.EndpointSlice, error) {
+func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceLister discoverylisters.EndpointSliceLister) ([]*discoveryv1.EndpointSlice, error) {
 	var selector metav1.LabelSelector
 	if network == types.DefaultNetworkName {
 		selector = metav1.LabelSelector{MatchLabels: map[string]string{
-			discovery.LabelServiceName: svcName,
+			discoveryv1.LabelServiceName: svcName,
 		}}
 		return GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
 	}
@@ -613,7 +612,7 @@ func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceL
 	if err != nil {
 		return nil, fmt.Errorf("failed to list endpoint slices for service %s/%s: %w", namespace, svcName, err)
 	}
-	networkEndpointSlices := make([]*discovery.EndpointSlice, 0, len(endpointSlices))
+	networkEndpointSlices := make([]*discoveryv1.EndpointSlice, 0, len(endpointSlices))
 	for _, endpointSlice := range endpointSlices {
 		if endpointSlice.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation] == network {
 			networkEndpointSlices = append(networkEndpointSlices, endpointSlice)
@@ -635,8 +634,8 @@ func IsUDNEnabledService(key string) bool {
 
 // ServiceFromEndpointSlice returns the namespaced name of the service that corresponds to the given endpointSlice
 // in the given network. If the service label is missing the returned namespaced name and the error are nil.
-func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netName string) (*k8stypes.NamespacedName, error) {
-	labelKey := discovery.LabelServiceName
+func ServiceFromEndpointSlice(eps *discoveryv1.EndpointSlice, netName string) (*k8stypes.NamespacedName, error) {
+	labelKey := discoveryv1.LabelServiceName
 	if netName != types.DefaultNetworkName {
 		if eps.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation] != netName {
 			return nil, fmt.Errorf("endpointslice %s/%s does not belong to %s network", eps.Namespace, eps.Name, netName)
@@ -658,16 +657,16 @@ func ServiceFromEndpointSlice(eps *discovery.EndpointSlice, netName string) (*k8
 
 // GetMirroredEndpointSlices retrieves all EndpointSlices in the given namespace that are managed
 // by the controller and are mirrored from the sourceName EndpointSlice.
-func GetMirroredEndpointSlices(controller, sourceName, namespace string, endpointSliceLister discoverylisters.EndpointSliceLister) (ret []*discovery.EndpointSlice, err error) {
+func GetMirroredEndpointSlices(controller, sourceName, namespace string, endpointSliceLister discoverylisters.EndpointSliceLister) (ret []*discoveryv1.EndpointSlice, err error) {
 	mirrorEndpointSliceSelector := labels.Set(map[string]string{
-		discovery.LabelManagedBy: controller,
+		discoveryv1.LabelManagedBy: controller,
 	}).AsSelectorPreValidated()
 	allMirroredEndpointSlices, err := endpointSliceLister.EndpointSlices(namespace).List(mirrorEndpointSliceSelector)
 	if err != nil {
 		return nil, err
 	}
 
-	var mirroredEndpointSlices []*discovery.EndpointSlice
+	var mirroredEndpointSlices []*discoveryv1.EndpointSlice
 	for _, endpointSlice := range allMirroredEndpointSlices {
 		if val, exists := endpointSlice.Annotations[types.SourceEndpointSliceAnnotation]; exists && val == sourceName {
 			mirroredEndpointSlices = append(mirroredEndpointSlices, endpointSlice)
