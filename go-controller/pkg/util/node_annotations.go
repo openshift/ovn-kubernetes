@@ -464,6 +464,22 @@ func ParseNodeManagementPortMACAddresses(node *corev1.Node, netName string) (net
 	return net.ParseMAC(macAddress)
 }
 
+func HasUDNLayer2NodeGRLRPTunnelID(node *corev1.Node, netName string) bool {
+	var nodeTunMap map[string]json.RawMessage
+	annotation, ok := node.Annotations[ovnUDNLayer2NodeGRLRPTunnelIDs]
+	if !ok {
+		return false
+	}
+	if err := json.Unmarshal([]byte(annotation), &nodeTunMap); err != nil {
+		return false
+	}
+	if _, ok := nodeTunMap[netName]; ok {
+		return true
+	}
+
+	return false
+}
+
 // ParseUDNLayer2NodeGRLRPTunnelIDs parses the 'ovnUDNLayer2NodeGRLRPTunnelIDs' annotation
 // for the specified network in 'netName' and returns the tunnelID.
 func ParseUDNLayer2NodeGRLRPTunnelIDs(node *corev1.Node, netName string) (int, error) {
@@ -792,6 +808,22 @@ func convertPrimaryIfAddrAnnotationToIPNet(ifAddr primaryIfAddrAnnotation) ([]*n
 // stored in the 'ovnNodeGRLRPAddr' annotation
 func ParseNodeGatewayRouterLRPAddrs(node *corev1.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnNodeGRLRPAddr)
+}
+
+func HasNodeGatewayRouterJoinNetwork(node *corev1.Node, netName string) bool {
+	var joinSubnetMap map[string]json.RawMessage
+	annotation, ok := node.Annotations[OVNNodeGRLRPAddrs]
+	if !ok {
+		return false
+	}
+	if err := json.Unmarshal([]byte(annotation), &joinSubnetMap); err != nil {
+		return false
+	}
+	if _, ok := joinSubnetMap[netName]; ok {
+		return true
+	}
+
+	return false
 }
 
 func ParseNodeGatewayRouterJoinNetwork(node *corev1.Node, netName string) (primaryIfAddrAnnotation, error) {
