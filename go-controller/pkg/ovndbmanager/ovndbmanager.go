@@ -26,7 +26,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-var DBError = errors.New("error interacting with OVN database")
+var errDB = errors.New("error interacting with OVN database")
 
 const (
 	maxDBRetry     = 10
@@ -95,7 +95,7 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 			klog.V(5).Infof("Ensure routines for Raft db: %s kicked off by ticker", db)
 			if err := ensureLocalRaftServerID(dbProperties); err != nil {
 				klog.Error(err)
-				if errors.Is(err, DBError) {
+				if errors.Is(err, errDB) {
 					updateDBRetryCounter(&dbRetry, dbProperties)
 				}
 			} else {
@@ -103,7 +103,7 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 			}
 			if err := ensureClusterRaftMembership(dbProperties, kclient); err != nil {
 				klog.Error(err)
-				if errors.Is(err, DBError) {
+				if errors.Is(err, errDB) {
 					updateDBRetryCounter(&dbRetry, dbProperties)
 				}
 			} else {
@@ -112,7 +112,7 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 			if dbProperties.ElectionTimer != 0 {
 				if err := ensureElectionTimeout(dbProperties); err != nil {
 					klog.Error(err)
-					if errors.Is(err, DBError) {
+					if errors.Is(err, errDB) {
 						updateDBRetryCounter(&dbRetry, dbProperties)
 					}
 				} else {
@@ -144,16 +144,16 @@ func updateDBRetryCounter(retryCounter *int32, db *util.OvsDbProperties) {
 func ensureLocalRaftServerID(db *util.OvsDbProperties) error {
 	out, stderr, err := db.AppCtl(5, "cluster/sid", db.DbName)
 	if err != nil {
-		return fmt.Errorf("%w: unable to get db server ID for: %s, stderr: %v, err: %v", DBError, db.DbAlias, stderr, err)
+		return fmt.Errorf("%w: unable to get db server ID for: %s, stderr: %v, err: %v", errDB, db.DbAlias, stderr, err)
 	}
 	if len(out) < 4 {
-		return fmt.Errorf("%w: invalid db id found: %s for db: %s", DBError, out, db.DbAlias)
+		return fmt.Errorf("%w: invalid db id found: %s for db: %s", errDB, out, db.DbAlias)
 	}
 	// server ID in raft membership is only first 4 char prefix
 	serverID := out[:4]
 	out, stderr, err = db.AppCtl(5, "cluster/status", db.DbName)
 	if err != nil {
-		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.DbAlias, stderr, err)
+		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", errDB, db.DbAlias, stderr, err)
 	}
 
 	r := regexp.MustCompile(`Address: *((ssl|tcp):[?[a-z0-9\-.:]+]?)`)
@@ -219,7 +219,7 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 	}
 	out, stderr, err := db.AppCtl(5, "cluster/status", db.DbName)
 	if err != nil {
-		return fmt.Errorf("%w: Unable to get cluster status for: %s, stderr: %s, err: %v", DBError, db.DbAlias, stderr, err)
+		return fmt.Errorf("%w: Unable to get cluster status for: %s, stderr: %s, err: %v", errDB, db.DbAlias, stderr, err)
 	}
 
 	r = regexp.MustCompile(`([a-z0-9]{4}) at ` + dbServerRegexp)
@@ -280,7 +280,7 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 func ensureElectionTimeout(db *util.OvsDbProperties) error {
 	out, stderr, err := db.AppCtl(5, "cluster/status", db.DbName)
 	if err != nil {
-		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.DbName, stderr, err)
+		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", errDB, db.DbName, stderr, err)
 	}
 
 	if !strings.Contains(out, "Role: leader") { // we only update on the leader

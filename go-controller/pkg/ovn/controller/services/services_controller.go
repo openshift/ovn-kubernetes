@@ -55,7 +55,7 @@ const (
 	nodeControllerName = "node-tracker-controller"
 )
 
-var NoServiceLabelError = fmt.Errorf("endpointSlice missing the service name label")
+var ErrMissingServiceLabel = fmt.Errorf("endpointSlice missing the service name label")
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
@@ -710,7 +710,7 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		// Do not log endpointsSlices missing service labels as errors.
 		// Once the service label is eventually added, we will get this event
 		// and re-process.
-		if errors.Is(err, NoServiceLabelError) {
+		if errors.Is(err, ErrMissingServiceLabel) {
 			klog.V(5).Infof("network=%s, error=%s", c.netInfo.GetNetworkName(), err.Error())
 		} else {
 			utilruntime.HandleError(fmt.Errorf("network=%s, couldn't get key for EndpointSlice %+v: %v", c.netInfo.GetNetworkName(), endpointSlice, err))
@@ -824,7 +824,7 @@ func _getServiceNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice, in
 	}
 
 	label := discovery.LabelServiceName
-	errTemplate := NoServiceLabelError
+	errTemplate := ErrMissingServiceLabel
 	if !inDefaultNetwork {
 		label = types.LabelUserDefinedServiceName
 	}

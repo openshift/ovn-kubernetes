@@ -42,7 +42,7 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *corev1.Pod,
 	return bnc.allocatePodIPsOnSwitch(pod, annotations, nadName, switchName)
 }
 
-var nodeNotFoundError = errors.New("node not found")
+var errNodeNotFound = errors.New("node not found")
 
 // allocatePodIPsForSwitch will allocate the the ip from pod annotation at
 // a specified switch, this switch can be different than the one the pod is
@@ -381,7 +381,7 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitchSubnetsInCache(switchN
 		subnets = bnc.lsManager.GetSwitchSubnets(switchName)
 		return subnets != nil, nil
 	}); err != nil {
-		return fmt.Errorf("timed out waiting for logical switch %q subnet: %w", switchName, nodeNotFoundError)
+		return fmt.Errorf("timed out waiting for logical switch %q subnet: %w", switchName, errNodeNotFound)
 	}
 	return nil
 }

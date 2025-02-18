@@ -67,7 +67,7 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		// Do not log endpointsSlices missing service labels as errors.
 		// Once the service label is eventually added, we will get this event
 		// and re-process.
-		if errors.Is(err, services.NoServiceLabelError) {
+		if errors.Is(err, services.ErrMissingServiceLabel) {
 			klog.V(5).Infof("EgressService endpoint slice missing service label: %v", err)
 		} else {
 			utilruntime.HandleError(fmt.Errorf("couldn't get key for EndpointSlice %+v: %v", endpointSlice, err))

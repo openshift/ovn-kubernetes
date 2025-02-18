@@ -50,4 +50,5 @@ linters-settings:
     rules:
       # TODO: enable recommended (default) revive rules
       - name: duplicated-imports
+      - name: error-naming
       - name: unused-parameter

@@ -57,7 +57,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			}
 			expectedLogicalPortName, annotations, err = oc.allocateSyncPodsIPs(pod)
 
-			if errors.Is(err, nodeNotFoundError) {
+			if errors.Is(err, errNodeNotFound) {
 				klog.Warningf("Cannot allocate IPs for %s/%s, node was not found after 30 seconds", pod.Namespace, pod.Name)
 				switchesNotFound[pod.Spec.NodeName] = true
 				continue
