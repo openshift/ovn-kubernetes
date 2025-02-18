@@ -9,7 +9,6 @@ run:
 linters:
   disable-all: true
   enable:
-    - gofmt
     - errcheck
     - gofmt
     - gosimple
@@ -19,4 +18,3 @@ linters:
     - staticcheck
     - typecheck
     - unused
-    - exportloopref
