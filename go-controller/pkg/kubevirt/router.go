@@ -165,7 +165,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 // port of the node where the pod is running:
 //   - A dst-ip with live migrated pod ip as prefix and nexthop the pod's
 //     current node transit switch port.
-func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client, lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, nadName string) error {
+func EnsureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client, pod *corev1.Pod, nadName string) error {
 	vmReady, err := virtualMachineReady(watchFactory, pod)
 	if err != nil {
 		return err

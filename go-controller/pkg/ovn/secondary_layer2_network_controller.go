@@ -89,7 +89,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) RecordSuccessEvent(obj in
 }
 
 // RecordErrorEvent records the error event on this given object.
-func (h *secondaryLayer2NetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
+func (h *secondaryLayer2NetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
@@ -390,7 +390,7 @@ func NewSecondaryLayer2NetworkController(
 }
 
 // Start starts the secondary layer2 controller, handles all events and creates all needed logical entities
-func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
+func (oc *SecondaryLayer2NetworkController) Start(_ context.Context) error {
 	klog.Infof("Starting controller for secondary network %s", oc.GetNetworkName())
 
 	start := time.Now()
@@ -398,7 +398,7 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 		klog.Infof("Starting controller for secondary network %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
-	if err := oc.Init(); err != nil {
+	if err := oc.init(); err != nil {
 		return err
 	}
 
@@ -460,7 +460,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) Init() error {
+func (oc *SecondaryLayer2NetworkController) init() error {
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
@@ -573,8 +573,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					nil,
 					gwConfig.hostSubnets,
 					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
-					oc.SCTPSupport,
-					nil, // no need for ovnClusterLRPToJoinIfAddrs
+					nil,                   // no need for ovnClusterLRPToJoinIfAddrs
 					gwConfig.externalIPs,
 				); err != nil {
 					errs = append(errs, err)

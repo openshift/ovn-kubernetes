@@ -82,7 +82,7 @@ func (phu *proxierHealthUpdater) isOvnkNodePodHealthy() bool {
 	return phu.healthy
 }
 
-func (phu *proxierHealthUpdater) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+func (phu *proxierHealthUpdater) ServeHTTP(resp http.ResponseWriter, _ *http.Request) {
 	resp.Header().Set("Content-Type", "application/json")
 	resp.Header().Set("X-Content-Type-Options", "nosniff")
 	if phu.isOvnkNodePodHealthy() {

@@ -311,7 +311,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 	}
 
 	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
-		func(ctx context.Context) (done bool, err error) {
+		func(_ context.Context) (done bool, err error) {
 			if err := c.migrateFromAddrLabelToAnnotation(); err != nil {
 				klog.Errorf("Failed to migrate from managing EgressIP addresses using address labels to a node annotation - Retrying: %v", err)
 				return false, err
@@ -323,7 +323,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 	}
 
 	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
-		func(ctx context.Context) (done bool, err error) {
+		func(_ context.Context) (done bool, err error) {
 			if err := c.repairNode(); err != nil {
 				klog.Errorf("Failed to repair node: '%v' - Retrying", err)
 				return false, err

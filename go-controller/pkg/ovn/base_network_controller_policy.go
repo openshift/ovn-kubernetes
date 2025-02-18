@@ -531,7 +531,7 @@ func (bnc *BaseNetworkController) handleNetPolNamespaceUpdate(namespace string, 
 	// now update network policy specific ACLs
 	klog.V(5).Infof("Setting network policy ACLs for ns: %s", namespace)
 	for npKey := range nsInfo.relatedNetworkPolicies {
-		err := bnc.networkPolicies.DoWithLock(npKey, func(key string) error {
+		err := bnc.networkPolicies.DoWithLock(npKey, func(_ string) error {
 			np, found := bnc.networkPolicies.Load(npKey)
 			if !found {
 				klog.Errorf("Netpol was deleted from cache, but not from namespace related objects")

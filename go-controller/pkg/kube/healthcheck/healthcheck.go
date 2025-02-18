@@ -191,7 +191,7 @@ type hcHandler struct {
 
 var _ http.Handler = hcHandler{}
 
-func (h hcHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+func (h hcHandler) ServeHTTP(resp http.ResponseWriter, _ *http.Request) {
 	h.hcs.lock.RLock()
 	svc, ok := h.hcs.services[h.name]
 	if !ok || svc == nil {

@@ -17,7 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -79,7 +78,7 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtConfig *ma
 				return nil
 			}
 		}
-		if err = mgr.updateHostCIDRs(node, ifAddrs); err != nil {
+		if err = mgr.updateHostCIDRs(ifAddrs); err != nil {
 			klog.Errorf("Failed to update host-cidrs annotations on node %s: %v", nodeName, err)
 			return nil
 		}
@@ -237,7 +236,7 @@ func (c *addressManager) addHandlerForPrimaryAddrChange() {
 	// IP address inside the node's status field).
 	nodeInformer := c.watchFactory.NodeInformer()
 	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
+		UpdateFunc: func(_, _ interface{}) {
 			c.handleNodePrimaryAddrChange()
 		},
 	})
@@ -282,7 +281,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	}
 
 	// update k8s.ovn.org/host-cidrs
-	if err = c.updateHostCIDRs(node, ifAddrs); err != nil {
+	if err = c.updateHostCIDRs(ifAddrs); err != nil {
 		return err
 	}
 
@@ -312,7 +311,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	return nil
 }
 
-func (c *addressManager) updateHostCIDRs(node *kapi.Node, ifAddrs []*net.IPNet) error {
+func (c *addressManager) updateHostCIDRs(ifAddrs []*net.IPNet) error {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
 		// host internal IP address instead.

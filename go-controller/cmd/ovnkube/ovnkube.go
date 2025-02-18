@@ -456,7 +456,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				ovnClientset.GetClusterManagerClientset(),
 				watchFactory,
 				runMode.identity,
-				wg,
 				eventRecorder)
 			if err != nil {
 				managerErr = fmt.Errorf("failed to create new cluster manager: %w", err)

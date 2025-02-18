@@ -430,7 +430,7 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8
 // the latest certificate (due to cert rotation on cert expiry)
 func getTLSServer(addr, certFile, privKeyFile string, handler http.Handler) *http.Server {
 	tlsConfig := &tls.Config{
-		GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
 			if err != nil {
 				return nil, fmt.Errorf("error generating x509 certs for metrics TLS endpoint: %v", err)

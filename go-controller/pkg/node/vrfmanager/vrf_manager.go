@@ -85,7 +85,7 @@ func (vrfm *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitG
 	doneWg.Add(1)
 	go func() {
 		defer doneWg.Done()
-		err = currentNs.Do(func(netNS ns.NetNS) error {
+		err = currentNs.Do(func(_ ns.NetNS) error {
 			linkSyncTimer := time.NewTicker(reconcilePeriod)
 			defer linkSyncTimer.Stop()
 

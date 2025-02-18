@@ -95,7 +95,7 @@ func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) error {
 	return nil
 }
 
-func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
+func (l *loadBalancerHealthChecker) SyncServices(_ []interface{}) error {
 	return nil
 }
 
@@ -134,7 +134,7 @@ func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.Endpoint
 	return nil
 }
 
-func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
+func (l *loadBalancerHealthChecker) UpdateEndpointSlice(_, newEpSlice *discovery.EndpointSlice) error {
 	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(newEpSlice)
 	if err != nil {
 		return fmt.Errorf("cannot update %s/%s in loadBalancerHealthChecker: %v",

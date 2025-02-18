@@ -76,7 +76,7 @@ func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			Dial: func(proto, addr string) (net.Conn, error) {
+			Dial: func(_, _ string) (net.Conn, error) {
 				return net.Dial("unix", p.socketPath)
 			},
 		},
@@ -326,7 +326,7 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 }
 
 // CmdCheck is the callback for 'checking' container's networking is as expected.
-func (p *Plugin) CmdCheck(args *skel.CmdArgs) error {
+func (p *Plugin) CmdCheck(_ *skel.CmdArgs) error {
 	// noop...CMD check is not considered useful, and has a considerable performance impact
 	// to pod bring up times with CRIO. This is due to the fact that CRIO currently calls check
 	// after CNI ADD before it finishes bringing the container up

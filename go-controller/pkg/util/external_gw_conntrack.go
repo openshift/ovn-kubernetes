@@ -236,7 +236,7 @@ func getIPv4Macs(resolveIPs ...string) ([]net.HardwareAddr, error) {
 	}
 	wg.Wait()
 	validNextHopMACs := []net.HardwareAddr{}
-	validMACs.Range(func(key interface{}, value interface{}) bool {
+	validMACs.Range(func(_ interface{}, value interface{}) bool {
 		validNextHopMACs = append(validNextHopMACs, value.(net.HardwareAddr))
 		return true
 	})

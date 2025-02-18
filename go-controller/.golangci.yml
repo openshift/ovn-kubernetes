@@ -4,6 +4,7 @@ run:
     - pkg/crd
 
   skip-files:
+    # TODO: lint test files as well
     - ".*\\_test.go$"
 
 linters:
@@ -16,6 +17,7 @@ linters:
     - govet
     - ineffassign
     - nosprintfhostport
+    - revive
     - staticcheck
     - typecheck
     - unused
@@ -26,3 +28,7 @@ linters-settings:
     disable:
       - fieldalignment
       - shadow
+  revive:
+    rules:
+      # TODO: enable recommended (default) revive rules
+      - name: unused-parameter

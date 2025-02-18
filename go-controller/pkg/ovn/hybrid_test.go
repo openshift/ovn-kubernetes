@@ -228,7 +228,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -404,7 +404,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
@@ -716,7 +716,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
@@ -896,7 +896,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
@@ -1191,7 +1191,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = clusterManager.Start(c)
@@ -1404,7 +1404,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = clusterManager.Start(c)

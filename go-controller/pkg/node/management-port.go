@@ -79,9 +79,9 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 }
 
 func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *v1.Node,
-	nodeLister listers.NodeLister, kubeInterface kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
+	_ listers.NodeLister, _ kube.Interface, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
-		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
+		if err := syncMgmtPortInterface(mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
 		}
 	}

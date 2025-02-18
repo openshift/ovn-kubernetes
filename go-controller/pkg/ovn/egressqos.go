@@ -230,7 +230,7 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 	_, err = nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSNodeAdd,    // we only care about new logical switches being added
 		UpdateFunc: oc.onEgressQoSNodeUpdate, // we care about node's zone changes so that if add event didn't do anything update can take care of it
-		DeleteFunc: func(obj interface{}) {},
+		DeleteFunc: func(_ interface{}) {},
 	})
 	if err != nil {
 		return fmt.Errorf("could not add Event Handler for nodeInformer during egressqosController initialization, %w", err)

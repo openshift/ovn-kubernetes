@@ -494,7 +494,7 @@ func (eIPC *egressIPClusterController) getSortedEgressData() ([]*egressNode, map
 	return assignableNodes, allAllocations
 }
 
-func (eIPC *egressIPClusterController) initEgressNodeReachability(nodes []interface{}) error {
+func (eIPC *egressIPClusterController) initEgressNodeReachability(_ []interface{}) error {
 	go eIPC.checkEgressNodesReachability()
 	return nil
 }

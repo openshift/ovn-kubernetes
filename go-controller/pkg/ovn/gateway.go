@@ -249,7 +249,6 @@ func (gw *GatewayManager) GatewayInit(
 	clusterIPSubnet []*net.IPNet,
 	hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig,
-	sctpSupport bool,
 	gwLRPJoinIPs, drLRPIfAddrs []*net.IPNet,
 	externalIPs []net.IP,
 	enableGatewayMTU bool,
@@ -506,7 +505,6 @@ func (gw *GatewayManager) GatewayInit(
 
 	if err := gw.addExternalSwitch("",
 		l3GatewayConfig.InterfaceID,
-		nodeName,
 		gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
 		physNetName(gw.netInfo),
@@ -518,7 +516,6 @@ func (gw *GatewayManager) GatewayInit(
 	if l3GatewayConfig.EgressGWInterfaceID != "" {
 		if err := gw.addExternalSwitch(types.EgressGWSwitchPrefix,
 			l3GatewayConfig.EgressGWInterfaceID,
-			nodeName,
 			gatewayRouter,
 			l3GatewayConfig.EgressGWMACAddress.String(),
 			types.PhysicalNetworkExGwName,
@@ -833,7 +830,7 @@ func (gw *GatewayManager) GatewayInit(
 
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
 // the gateway router
-func (gw *GatewayManager) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string, ipAddresses []*net.IPNet, vlanID *uint) error {
+func (gw *GatewayManager) addExternalSwitch(prefix, interfaceID, gatewayRouter, macAddress, physNetworkName string, ipAddresses []*net.IPNet, vlanID *uint) error {
 	// Create the GR port that connects to external_switch with mac address of
 	// external interface and that IP address. In the case of `local` gateway
 	// mode, whenever ovnkube-node container restarts a new br-local bridge will
@@ -1283,7 +1280,6 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 	hostAddrs []string,
 	clusterSubnets []*net.IPNet,
 	grLRPJoinIPs []*net.IPNet,
-	isSCTPSupported bool,
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet,
 	externalIPs []net.IP,
 ) error {
@@ -1294,7 +1290,6 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 		clusterSubnets,
 		hostSubnets,
 		l3GatewayConfig,
-		isSCTPSupported,
 		grLRPJoinIPs, // the joinIP allocated to this node's GR for this controller's network
 		ovnClusterLRPToJoinIfAddrs,
 		externalIPs,
@@ -1343,7 +1338,6 @@ func (gw *GatewayManager) syncNodeGateway(
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,
 	clusterSubnets, grLRPJoinIPs []*net.IPNet,
-	isSCTPSupported bool,
 	joinSwitchIPs []*net.IPNet,
 	externalIPs []net.IP,
 ) error {
@@ -1358,8 +1352,7 @@ func (gw *GatewayManager) syncNodeGateway(
 			hostSubnets,
 			hostAddrs,
 			clusterSubnets,
-			grLRPJoinIPs, // the joinIP allocated to this node for this controller's network
-			isSCTPSupported,
+			grLRPJoinIPs,  // the joinIP allocated to this node for this controller's network
 			joinSwitchIPs, // the .1 of this controller's global joinSubnet
 			externalIPs,
 		); err != nil {

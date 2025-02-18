@@ -68,7 +68,7 @@ func NewSecondaryNodeNetworkController(
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
-func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
+func (nc *SecondaryNodeNetworkController) Start(_ context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
 
 	// enable adding ovs ports for dpu pods in both primary and secondary user defined networks

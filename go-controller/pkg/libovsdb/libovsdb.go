@@ -308,7 +308,7 @@ func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Confi
 				if ok && event.Op&(fsnotify.Write|fsnotify.Remove) != 0 {
 					if event.Op&fsnotify.Remove != 0 {
 						// cert/key file removed, need wait for the file to be created again.
-						if err := wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+						if err := wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, 5*time.Second, true, func(_ context.Context) (bool, error) {
 							if _, err := os.Stat(event.Name); os.IsNotExist(err) {
 								return false, nil
 							}

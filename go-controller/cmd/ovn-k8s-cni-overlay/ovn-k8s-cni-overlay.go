@@ -18,7 +18,7 @@ func main() {
 	c.Version = "0.0.2"
 
 	p := cni.NewCNIPlugin("")
-	c.Action = func(ctx *cli.Context) error {
+	c.Action = func(_ *cli.Context) error {
 		skel.PluginMain(
 			p.CmdAdd,
 			p.CmdCheck,

@@ -182,7 +182,7 @@ func (p *portClaimWatcher) DeleteService(svc *kapi.Service) error {
 	return nil
 }
 
-func (p *portClaimWatcher) SyncServices(objs []interface{}) error {
+func (p *portClaimWatcher) SyncServices(_ []interface{}) error {
 	return nil
 }
 

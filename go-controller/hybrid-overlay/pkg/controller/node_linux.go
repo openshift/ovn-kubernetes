@@ -56,7 +56,7 @@ func newNodeController(
 	isHONode bool,
 ) (nodeController, error) {
 	if isHONode {
-		return newHONodeController(kube, nodeName, nodeLister, localPodLister)
+		return newHONodeController(kube, nodeName)
 	}
 	return newOVNNodeController(kube, nodeName, nodeLister, localPodLister)
 }

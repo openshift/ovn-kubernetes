@@ -184,7 +184,7 @@ func (nm defaultNetworkManager) DoWithLock(f func(network util.NetInfo) error) e
 	return f(&util.DefaultNetInfo{})
 }
 
-func (nm defaultNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+func (nm defaultNetworkManager) GetActiveNetworkNamespaces(_ string) ([]string, error) {
 	return []string{"default"}, nil
 }
 

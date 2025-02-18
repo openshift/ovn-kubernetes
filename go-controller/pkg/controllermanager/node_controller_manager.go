@@ -375,6 +375,6 @@ func checkForStaleOVSInternalPorts() {
 	}
 }
 
-func (ncm *NodeControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+func (ncm *NodeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }

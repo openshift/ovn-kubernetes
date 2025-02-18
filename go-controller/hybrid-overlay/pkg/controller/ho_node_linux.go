@@ -10,7 +10,6 @@ import (
 
 	"github.com/vishvananda/netlink"
 	kapi "k8s.io/api/core/v1"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -26,10 +25,9 @@ type HONodeController struct {
 
 // newHONodeController returns a node handler that listens for node events
 // so that Add/Update/Delete events are appropriately handled.
-func newHONodeController(kube kube.Interface,
+func newHONodeController(
+	kube kube.Interface,
 	nodeName string,
-	nodeLister listers.NodeLister,
-	podLister listers.PodLister,
 ) (nodeController, error) {
 	return &HONodeController{
 		kube:     kube,
@@ -77,7 +75,7 @@ func (n *HONodeController) AddNode(node *kapi.Node) error {
 }
 
 // Delete handles node deletions
-func (n *HONodeController) DeleteNode(node *kapi.Node) error {
+func (n *HONodeController) DeleteNode(_ *kapi.Node) error {
 	return nil
 }
 
@@ -99,13 +97,13 @@ func (n *HONodeController) AddPod(pod *kapi.Pod) error {
 	return nil
 }
 
-func (n *HONodeController) DeletePod(pod *kapi.Pod) error {
+func (n *HONodeController) DeletePod(_ *kapi.Pod) error {
 	return nil
 }
 
-func (n *HONodeController) RunFlowSync(stopCh <-chan struct{}) {}
+func (n *HONodeController) RunFlowSync(_ <-chan struct{}) {}
 
-func (n *HONodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
+func (n *HONodeController) EnsureHybridOverlayBridge(_ *kapi.Node) error {
 	return nil
 }
 

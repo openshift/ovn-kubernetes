@@ -338,7 +338,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	start := time.Now()
 	var zone string
 	var err1 error
-	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(_ context.Context) (bool, error) {
 		zone, err1 = libovsdbutil.GetNBZone(cm.nbClient)
 		if err1 != nil {
 			return false, nil
@@ -367,7 +367,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	// appears will convert it to local, which may or may not clean up DB resources correctly.
 	klog.Infof("Waiting up to %s for a node to have %q zone", maxTimeout, config.Default.Zone)
 	start = time.Now()
-	err = wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(_ context.Context) (bool, error) {
 		nodes, err := cm.watchFactory.GetNodes()
 		if err != nil {
 			klog.Errorf("Unable to get nodes from informer while waiting for node zone sync")
@@ -490,6 +490,6 @@ func (cm *ControllerManager) Stop() {
 	}
 }
 
-func (cm *ControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }

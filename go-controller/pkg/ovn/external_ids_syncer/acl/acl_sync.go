@@ -144,7 +144,7 @@ func (syncer *ACLSyncer) SyncACLs(existingNodes []*v1.Node) error {
 		if err != nil {
 			return fmt.Errorf("unable to find leftover ACLs, cannot update stale data: %v", err)
 		}
-		p := func(item *nbdb.LogicalSwitch) bool { return true }
+		p := func(_ *nbdb.LogicalSwitch) bool { return true }
 		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(syncer.nbClient, p, leftoverACLs...)
 		if err != nil {
 			return fmt.Errorf("unable delete leftover ACLs from switches: %v", err)

@@ -234,7 +234,7 @@ func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...opera
 		}
 		return
 	}
-	doWhenNotFound := func(model interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
+	doWhenNotFound := func(_ interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
 		if !hasGuardOp {
 			// for the first insert of certain models, build a wait operation
 			// that checks for duplicates as a guard op to prevent against
@@ -285,7 +285,7 @@ func (m *modelClient) DeleteOps(ops []ovsdb.Operation, opModels ...operationMode
 		if opModel.OnModelMutations != nil {
 			return m.mutate(model, opModel, ovsdb.MutateOperationDelete)
 		} else {
-			return m.delete(model, opModel)
+			return m.delete(model)
 		}
 	}
 	_, ops, err := m.buildOps(ops, doWhenFound, nil, opModels...)
@@ -399,7 +399,7 @@ func (m *modelClient) mutate(lookUpModel interface{}, opModel *operationModel, m
 	return o, nil
 }
 
-func (m *modelClient) delete(lookUpModel interface{}, opModel *operationModel) (o []ovsdb.Operation, err error) {
+func (m *modelClient) delete(lookUpModel interface{}) (o []ovsdb.Operation, err error) {
 	o, err = m.client.Where(lookUpModel).Delete()
 	if err != nil {
 		return nil, fmt.Errorf("unable to delete model, err: %w", err)

@@ -24,7 +24,7 @@ type egressIPClusterControllerEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
-func (h *egressIPClusterControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *egressIPClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
 	return false
 }
 
@@ -32,7 +32,7 @@ func (h *egressIPClusterControllerEventHandler) FilterOutResource(obj interface{
 
 // AddResource adds the specified object to the cluster according to its type and
 // returns the error, if any, yielded during object creation.
-func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EgressNodeType:
 		node := obj.(*v1.Node)
@@ -81,7 +81,7 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, fro
 // UpdateResource updates the specified object in the cluster to its version in newObj according
 // to its type and returns the error, if any, yielded during the object update.
 // The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -171,7 +171,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network policies.
-func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)

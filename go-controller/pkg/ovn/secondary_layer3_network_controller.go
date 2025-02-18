@@ -87,7 +87,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) RecordSuccessEvent(obj in
 }
 
 // RecordErrorEvent records the error event on this given object.
-func (h *secondaryLayer3NetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
+func (h *secondaryLayer3NetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
@@ -448,17 +448,17 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 }
 
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
-func (oc *SecondaryLayer3NetworkController) Start(ctx context.Context) error {
+func (oc *SecondaryLayer3NetworkController) Start(_ context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
 	_, err := oc.getNetworkID()
 	if err != nil {
 		return fmt.Errorf("unable to set networkID on secondary L3 controller for network %s, err: %w", oc.GetNetworkName(), err)
 	}
-	if err = oc.Init(ctx); err != nil {
+	if err = oc.init(); err != nil {
 		return err
 	}
 
-	return oc.Run()
+	return oc.run()
 }
 
 // Stop gracefully stops the controller, and delete all logical entities for this network if requested
@@ -557,7 +557,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) Run() error {
+func (oc *SecondaryLayer3NetworkController) run() error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
 	start := time.Now()
 
@@ -619,7 +619,7 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 	return err
 }
 
-func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
+func (oc *SecondaryLayer3NetworkController) init() error {
 	if err := oc.gatherJoinSwitchIPs(); err != nil {
 		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", oc.GetNetworkName(), err)
 	}
@@ -747,8 +747,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 					gwConfig.hostSubnets,
 					gwConfig.hostAddrs,
 					gwConfig.clusterSubnets,
-					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
-					oc.SCTPSupport,
+					gwConfig.gwLRPJoinIPs,         // the joinIP allocated to this node for this controller's network
 					oc.ovnClusterLRPToJoinIfAddrs, // the .1 of this controller's global joinSubnet
 					gwConfig.externalIPs,
 				); err != nil {

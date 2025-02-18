@@ -359,7 +359,7 @@ func getOvnDbVersionInfo() {
 }
 
 func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string, stopChan <-chan struct{}) {
-	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, []string{"ovn-db-pod=true"}, k8sNodeName, false)
 	})
 	if err != nil {

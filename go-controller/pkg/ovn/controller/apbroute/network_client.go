@@ -674,6 +674,6 @@ func (c *conntrackClient) deleteGatewayIPs(podNsName ktypes.NamespacedName, _, t
 }
 
 // addGatewayIPs is a NOP (no operation) in the conntrack client as it does not add any entry to the conntrack table.
-func (c *conntrackClient) addGatewayIPs(pod *v1.Pod, egress *gateway_info.GatewayInfoList) (bool, error) {
+func (c *conntrackClient) addGatewayIPs(_ *v1.Pod, _ *gateway_info.GatewayInfoList) (bool, error) {
 	return true, nil
 }

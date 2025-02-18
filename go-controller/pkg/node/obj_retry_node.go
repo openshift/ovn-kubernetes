@@ -23,7 +23,7 @@ type nodeEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
-func (h *nodeEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *nodeEventHandler) FilterOutResource(_ interface{}) bool {
 	return false
 }
 
@@ -147,7 +147,7 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 // the function was executed from iterateRetryResources, AddResource adds the
 // specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
-func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *nodeEventHandler) AddResource(_ interface{}, _ bool) error {
 	switch h.objType {
 	case factory.NamespaceExGwType,
 		factory.EndpointSliceForStaleConntrackRemovalType:
@@ -163,7 +163,7 @@ func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) erro
 // the specified object in the cluster to its version in newObj according to its type
 // and returns the error, if any, yielded during the object update. The inRetryCache
 // boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.NamespaceExGwType:
 		// If interconnect is disabled OR interconnect is running in single-zone-mode,
@@ -196,7 +196,7 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCac
 // deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network
 // policies.
-func (h *nodeEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
 	case factory.NamespaceExGwType:
 		// no action needed upon delete event

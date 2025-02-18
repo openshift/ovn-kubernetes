@@ -46,7 +46,7 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 	// add all empty lb backend events to a channel
 	sbClient.Cache().AddEventHandler(
 		&libovsdbcache.EventHandlerFuncs{
-			AddFunc: func(table string, m model.Model) {
+			AddFunc: func(_ string, m model.Model) {
 				if event, ok := m.(*sbdb.ControllerEvent); ok {
 					if event.EventType == sbdb.ControllerEventEventTypeEmptyLbBackends {
 						uc.eventQueue <- *event

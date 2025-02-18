@@ -353,11 +353,11 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = oc.Init(ctx); err != nil {
+	if err = oc.init(); err != nil {
 		return err
 	}
 
-	return oc.Run(ctx)
+	return oc.run(ctx)
 }
 
 // Stop gracefully stops the controller
@@ -377,7 +377,7 @@ func (oc *DefaultNetworkController) Stop() {
 	oc.wg.Wait()
 }
 
-// Init runs a subnet IPAM and a controller that watches arrival/departure
+// init runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
 // to creation of a logical switch (done by the node, but could be created here at the master process too)
@@ -386,7 +386,7 @@ func (oc *DefaultNetworkController) Stop() {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //
 //	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (oc *DefaultNetworkController) Init(ctx context.Context) error {
+func (oc *DefaultNetworkController) init() error {
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -408,18 +408,7 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
 
-	networkID := util.InvalidID
-	nodeNames := []string{}
-	for _, node := range existingNodes {
-		node := *node
-		nodeNames = append(nodeNames, node.Name)
-
-		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidID {
-			// get networkID from any node in the cluster
-			networkID, _ = util.ParseNetworkIDAnnotation(&node, oc.zoneICHandler.GetNetworkName())
-		}
-	}
-	if err := oc.SetupMaster(nodeNames); err != nil {
+	if err := oc.SetupMaster(); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -441,8 +430,8 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	return nil
 }
 
-// Run starts the actual watching.
-func (oc *DefaultNetworkController) Run(ctx context.Context) error {
+// run starts the actual watching.
+func (oc *DefaultNetworkController) run(_ context.Context) error {
 	oc.syncPeriodic()
 	klog.Info("Starting all the Watchers...")
 	start := time.Now()
@@ -615,7 +604,7 @@ func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
 	// gather some information first
 	var err error
 	var retryNodes []*kapi.Node
-	oc.localZoneNodes.Range(func(key, value any) bool {
+	oc.localZoneNodes.Range(func(key, _ any) bool {
 		nodeName := key.(string)
 		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
 		isAdvertised := util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)
@@ -695,7 +684,7 @@ type defaultNetworkControllerEventHandler struct {
 	syncFunc        func([]interface{}) error
 }
 
-func (h *defaultNetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *defaultNetworkControllerEventHandler) FilterOutResource(_ interface{}) bool {
 	return false
 }
 

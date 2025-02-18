@@ -255,7 +255,7 @@ func DeleteACLsFromAllPortGroups(nbClient libovsdbclient.Client, acls ...*nbdb.A
 
 	opModel := operationModel{
 		Model:            &pg,
-		ModelPredicate:   func(item *nbdb.PortGroup) bool { return true },
+		ModelPredicate:   func(_ *nbdb.PortGroup) bool { return true },
 		OnModelMutations: []interface{}{&pg.ACLs},
 		ErrNotFound:      false,
 		BulkOp:           true,

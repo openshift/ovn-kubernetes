@@ -1195,74 +1195,62 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
 	case NamespaceType, NamespaceExGwType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNamespaceHandler(funcs, processExisting)
 		}, nil
 
 	case PolicyType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddPolicyHandler(funcs, processExisting)
 		}, nil
 
 	case MultiNetworkPolicyType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddMultiNetworkPolicyHandler(funcs, processExisting)
 		}, nil
 
 	case NodeType, EgressNodeType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNodeHandler(funcs, processExisting, priority)
 		}, nil
 
 	case ServiceForGatewayType, ServiceForFakeNodePortWatcherType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
 		}, nil
 
 	case AddressSetPodSelectorType, LocalPodSelectorType, PodType, EgressIPPodType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
 	case AddressSetNamespaceAndPodSelectorType, PeerNamespaceSelectorType, EgressIPNamespaceType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
 	case EgressFirewallType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddEgressFirewallHandler(funcs, processExisting)
 		}, nil
 
 	case EgressIPType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddEgressIPHandler(funcs, processExisting)
 		}, nil
 
 	case CloudPrivateIPConfigType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddCloudPrivateIPConfigHandler(funcs, processExisting)
 		}, nil
 
 	case EndpointSliceForStaleConntrackRemovalType, EndpointSliceForGatewayType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredEndpointSliceHandler(namespace, sel, funcs, processExisting)
 		}, nil
 
 	case IPAMClaimsType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddIPAMClaimsHandler(funcs, processExisting)
 		}, nil
 	}
@@ -1315,7 +1303,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		// Process existing items as a set so the caller can clean up
 		// after a restart or whatever. We will wrap it with retries to ensure it succeeds.
 		// Being so, processExisting is expected to be idem-potent!
-		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(_ context.Context) (bool, error) {
 			if err := processExisting(items); err != nil {
 				klog.Errorf("Failed (will retry) while processing existing %v items: %v", objType, err)
 				return false, nil

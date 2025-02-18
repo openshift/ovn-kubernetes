@@ -475,7 +475,7 @@ func setEncapPort(ctx context.Context) error {
 	}
 	var uuid string
 	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true,
-		func(ctx context.Context) (bool, error) {
+		func(_ context.Context) (bool, error) {
 			uuid, _, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
 				fmt.Sprintf("chassis_name=%s", systemID))
 			return len(uuid) != 0, err
@@ -854,7 +854,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		// There is no SBDB to connect to in DPU Host mode, so we will just take the default input config zone
 		sbZone = config.Default.Zone
 	} else {
-		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 			sbZone, err = getOVNSBZone()
 			if err != nil {
 				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
@@ -896,7 +896,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 		if node, err = nc.Kube.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
 			return false, nil
@@ -1078,7 +1078,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Info("Upgrade Hack: Interconnect is enabled")
 		var err1 error
 		start := time.Now()
-		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 			// we loop through all the nodes in the cluster and ensure ovnkube-controller has finished creating the LRSR required for pod2pod overlay communication
 			if !syncNodes {
 				nodes, err := nc.Kube.GetNodes()

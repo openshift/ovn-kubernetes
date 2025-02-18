@@ -141,7 +141,7 @@ func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 }
 
 // Sync is not needed but must be implemented to fulfill the interface
-func (n *NodeController) Sync(objs []*kapi.Node) {}
+func (n *NodeController) Sync(_ []*kapi.Node) {}
 
 func nameToCookie(nodeName string) string {
 	hash := sha256.Sum256([]byte(nodeName))
@@ -325,7 +325,7 @@ func getLocalNodeSubnet(nodeName string) (*net.IPNet, error) {
 	var err error
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
 			return false, nil
 		}

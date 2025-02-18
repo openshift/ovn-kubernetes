@@ -142,7 +142,7 @@ func NewController(
 
 	nodeConfig := &controllerutil.ControllerConfig[core.Node]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:      func(key string) error { c.raController.ReconcileAll(); return nil },
+		Reconcile:      func(_ string) error { c.raController.ReconcileAll(); return nil },
 		Threadiness:    1,
 		Informer:       wf.NodeCoreInformer().Informer(),
 		Lister:         wf.NodeCoreInformer().Lister().List,
@@ -185,7 +185,7 @@ func (c *Controller) Stop() {
 	klog.Infof("Cluster manager routeadvertisements stoppedu")
 }
 
-func (c *Controller) ReconcileNetwork(name string, old, new util.NetInfo) {
+func (c *Controller) ReconcileNetwork(_ string, old, new util.NetInfo) {
 	// This controller already listens on NAD events however we skip NADs
 	// pointing to networks that network manager is still not aware of; so we
 	// only need to signal the reconciliation of new networks. Reconcile one of
@@ -1115,7 +1115,7 @@ func (c *Controller) reconcileNAD(key string) error {
 	return nil
 }
 
-func (c *Controller) reconcileEgressIP(eipName string) error {
+func (c *Controller) reconcileEgressIP(_ string) error {
 	// reconcile RAs that advertise EIPs
 	ras, err := c.raLister.List(labels.Everything())
 	if err != nil {

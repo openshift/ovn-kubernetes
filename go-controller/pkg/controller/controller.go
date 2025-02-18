@@ -116,7 +116,7 @@ func NewController[T any](name string, config *ControllerConfig[T]) Controller {
 		c.config.MaxAttempts = DefaultMaxAttempts
 	}
 	if c.config.HandleError == nil {
-		c.config.HandleError = func(key string, err error) error {
+		c.config.HandleError = func(_ string, err error) error {
 			utilruntime.HandleError(err)
 			return nil
 		}

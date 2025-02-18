@@ -716,7 +716,7 @@ func (c *Controller) syncEgressService(key string) error {
 	}
 
 	if lbsChanged {
-		err := c.clearServiceSNATRules(key, cachedState)
+		err := c.clearServiceSNATRules(cachedState)
 		if err != nil {
 			return err
 		}
@@ -960,7 +960,7 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service, localOnly bool) (sets.
 }
 
 // Clears all of the SNAT rules of the service.
-func (c *Controller) clearServiceSNATRules(key string, state *svcState) error {
+func (c *Controller) clearServiceSNATRules(state *svcState) error {
 	nft, err := nodenft.GetNFTablesHelper()
 	if err != nil {
 		return err
@@ -1034,7 +1034,7 @@ func (c *Controller) clearServiceIPRules(state *svcState) error {
 func (c *Controller) clearServiceRulesAndRequeue(key string, state *svcState) error {
 	state.stale = true
 
-	err := c.clearServiceSNATRules(key, state)
+	err := c.clearServiceSNATRules(state)
 	if err != nil {
 		return err
 	}

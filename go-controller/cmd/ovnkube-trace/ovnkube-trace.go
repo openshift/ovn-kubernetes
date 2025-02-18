@@ -219,7 +219,7 @@ func execInPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, n
 // In order to do so, it looks for annotation 'k8s.ovn.org/l3-gateway-config' on the provided node.
 // That annotation should contain a JSON string like: '{"default":{"mode":"shared", ...}}'.
 // It will then determine the routing mode from that annotation if it is valid or return error otherwise.
-func isRoutingViaHost(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace, ovnKubePodName, nodeName string) (bool, error) {
+func isRoutingViaHost(coreclient *corev1client.CoreV1Client, nodeName string) (bool, error) {
 	node, err := coreclient.Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	if err != nil {
 		return false, err
@@ -465,7 +465,7 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	}
 
 	// Get the node's gateway mode
-	podInfo.RoutingViaHost, err = isRoutingViaHost(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, podInfo.NodeName)
+	podInfo.RoutingViaHost, err = isRoutingViaHost(coreclient, podInfo.NodeName)
 	if err != nil {
 		return nil, err
 	}

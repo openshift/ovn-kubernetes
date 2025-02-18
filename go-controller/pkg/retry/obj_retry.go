@@ -74,25 +74,25 @@ type DefaultEventHandler struct{}
 
 func (h *DefaultEventHandler) SyncFunc([]interface{}) error { return nil }
 
-func (h *DefaultEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
+func (h *DefaultEventHandler) AreResourcesEqual(_, _ interface{}) (bool, error) {
 	return false, nil
 }
 
-func (h *DefaultEventHandler) GetInternalCacheEntry(obj interface{}) interface{} { return nil }
+func (h *DefaultEventHandler) GetInternalCacheEntry(_ interface{}) interface{} { return nil }
 
-func (h *DefaultEventHandler) IsResourceScheduled(obj interface{}) bool { return true }
+func (h *DefaultEventHandler) IsResourceScheduled(_ interface{}) bool { return true }
 
-func (h *DefaultEventHandler) IsObjectInTerminalState(obj interface{}) bool { return false }
+func (h *DefaultEventHandler) IsObjectInTerminalState(_ interface{}) bool { return false }
 
-func (h *DefaultEventHandler) RecordAddEvent(obj interface{}) {}
+func (h *DefaultEventHandler) RecordAddEvent(_ interface{}) {}
 
-func (h *DefaultEventHandler) RecordUpdateEvent(obj interface{}) {}
+func (h *DefaultEventHandler) RecordUpdateEvent(_ interface{}) {}
 
-func (h *DefaultEventHandler) RecordDeleteEvent(obj interface{}) {}
+func (h *DefaultEventHandler) RecordDeleteEvent(_ interface{}) {}
 
-func (h *DefaultEventHandler) RecordSuccessEvent(obj interface{}) {}
+func (h *DefaultEventHandler) RecordSuccessEvent(_ interface{}) {}
 
-func (h *DefaultEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}
+func (h *DefaultEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {}
 
 type ResourceHandler struct {
 	// HasUpdateFunc is true if an update event for this resource type is implemented as an
@@ -601,7 +601,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						if r.ResourceHandler.IsObjectInTerminalState(newer) {
 							klog.V(5).Infof("%s %s is in terminal state but no longer exists in informer cache, removing",
 								r.ResourceHandler.ObjType, newKey)
-							r.DoWithLock(newKey, func(key string) {
+							r.DoWithLock(newKey, func(_ string) {
 								r.processObjectInTerminalState(newer, newKey, resourceEventUpdate)
 							})
 						} else {

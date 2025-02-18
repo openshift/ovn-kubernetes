@@ -511,7 +511,6 @@ var _ = Describe("Management Port Operations", func() {
 		mgmtPortName := types.K8sMgmtIntfName
 		netlinkMockErr := fmt.Errorf("netlink mock error")
 		fakeExecErr := fmt.Errorf("face exec error")
-		hostSubnets := []*net.IPNet{}
 		linkMock := &mocks.Link{}
 
 		BeforeEach(func() {
@@ -540,7 +539,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
 				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -552,7 +551,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, netlinkMockErr)
 				linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: netdevName})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -565,7 +564,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("RouteList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Route{}, nil)
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -583,7 +582,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, netdevName).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 			It("Unconfigures old management port netdevice", func() {
@@ -600,7 +599,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, netdevName).Return(nil)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -612,7 +611,7 @@ var _ = Describe("Management Port Operations", func() {
 					Output: "internal," + mgmtPortName,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, true)
+				err := syncMgmtPortInterface(mgmtPortName, true)
 				Expect(err).ToNot(HaveOccurred())
 			})
 			It("Fails to remove port from the bridge", func() {
@@ -625,7 +624,7 @@ var _ = Describe("Management Port Operations", func() {
 					Err: fakeExecErr,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -638,7 +637,7 @@ var _ = Describe("Management Port Operations", func() {
 					"ovs-vsctl --timeout=15 del-port br-int " + mgmtPortName,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -657,7 +656,7 @@ var _ = Describe("Management Port Operations", func() {
 					Err: fakeExecErr,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -676,7 +675,7 @@ var _ = Describe("Management Port Operations", func() {
 
 				// Return error here, so we know that function didn't returned earlier
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -691,7 +690,7 @@ var _ = Describe("Management Port Operations", func() {
 				})
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -707,7 +706,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -727,7 +726,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -747,7 +746,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(nil)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).ToNot(HaveOccurred())
 			})
 

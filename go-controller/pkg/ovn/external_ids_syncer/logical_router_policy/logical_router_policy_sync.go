@@ -84,7 +84,7 @@ func (syncer *LRPSyncer) syncEgressIPReRoutes() error {
 		return fmt.Errorf("failed to find Logical Router Policies for %s: %v", ovntypes.OVNClusterRouter, err)
 	}
 
-	err = batching.Batch[*nbdb.LogicalRouterPolicy](50, lrpList, func(batchLRPs []*nbdb.LogicalRouterPolicy) error {
+	err = batching.Batch[*nbdb.LogicalRouterPolicy](50, lrpList, func(_ []*nbdb.LogicalRouterPolicy) error {
 		var ops []libovsdb.Operation
 		for _, lrp := range lrpList {
 			eipName := lrp.ExternalIDs["name"]

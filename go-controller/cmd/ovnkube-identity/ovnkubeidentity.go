@@ -395,7 +395,7 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 	}
 
 	l := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
+		Control: func(_, _ string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
 				// Enable SO_REUSEPORT
 				err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)

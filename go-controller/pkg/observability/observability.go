@@ -172,14 +172,14 @@ func (m *Manager) deleteStaleCollectors() error {
 // This is expected, and Cleanup may be retried on the next restart.
 func Cleanup(nbClient libovsdbclient.Client) error {
 	// Do the opposite of init
-	err := libovsdbops.DeleteSamplingAppsWithPredicate(nbClient, func(app *nbdb.SamplingApp) bool {
+	err := libovsdbops.DeleteSamplingAppsWithPredicate(nbClient, func(_ *nbdb.SamplingApp) bool {
 		return true
 	})
 	if err != nil {
 		return fmt.Errorf("error deleting sampling apps: %w", err)
 	}
 
-	err = libovsdbops.DeleteSampleCollectorWithPredicate(nbClient, func(collector *nbdb.SampleCollector) bool {
+	err = libovsdbops.DeleteSampleCollectorWithPredicate(nbClient, func(_ *nbdb.SampleCollector) bool {
 		return true
 	})
 	if err != nil {

@@ -436,7 +436,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 
 				fullSecondaryController, ok := fakeOvn.fullSecondaryL2Controllers[secondaryNetworkName]
 				Expect(ok).To(BeTrue())
-				err = fullSecondaryController.Init()
+				err = fullSecondaryController.init()
 				Expect(err).NotTo(HaveOccurred())
 
 				secondaryNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()

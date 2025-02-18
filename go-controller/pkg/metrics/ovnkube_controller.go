@@ -766,7 +766,7 @@ func (pr *PodRecorder) Run(sbClient libovsdbclient.Client, stop <-chan struct{})
 				}
 			}
 		},
-		DeleteFunc: func(table string, model model.Model) {
+		DeleteFunc: func(_ string, _ model.Model) {
 		},
 	})
 

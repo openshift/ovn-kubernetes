@@ -26,7 +26,7 @@ func newAPBRouteManager(lister adminpolicybasedroutelisters.AdminPolicyBasedExte
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives https://github.com/dominikh/go-tools/issues/1440
-func (m *apbRouteManager) get(namespace, name string) (*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, error) {
+func (m *apbRouteManager) get(_, name string) (*adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, error) {
 	return m.lister.Get(name)
 }
 

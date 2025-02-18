@@ -34,7 +34,7 @@ const (
 )
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
+func (oc *DefaultNetworkController) SetupMaster() error {
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
@@ -118,7 +118,6 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
 		hostAddrs,
 		clusterSubnets,
 		gwLRPIPs,
-		oc.SCTPSupport,
 		oc.ovnClusterLRPToJoinIfAddrs,
 		externalIPs,
 	)

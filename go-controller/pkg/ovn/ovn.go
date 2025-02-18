@@ -244,7 +244,7 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, a
 		}
 	}
 	if kubevirt.IsPodLiveMigratable(pod) {
-		return kubevirt.EnsureRemoteZonePodAddressesToNodeRoute(oc.controllerName, oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName)
+		return kubevirt.EnsureRemoteZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, pod, ovntypes.DefaultNetworkName)
 	}
 	return nil
 }
@@ -481,16 +481,14 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssvc_zone.Controller, error) {
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
-	initClusterEgressPolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory, ni util.NetInfo,
-		clusterSubnets []*net.IPNet, controllerName, routerName string) error {
+	initClusterEgressPolicies := func(_ libovsdbclient.Client, _ addressset.AddressSetFactory, _ util.NetInfo, _ []*net.IPNet, _, _ string) error {
 		return nil
 	}
-	ensureNodeNoReroutePolicies := func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-		network, router, controller string, nodeLister listers.NodeLister, v4, v6 bool) error {
+	ensureNodeNoReroutePolicies := func(_ libovsdbclient.Client, _ addressset.AddressSetFactory, _, _, _ string, _ listers.NodeLister, _, _ bool) error {
 		return nil
 	}
 	// used only when IC=true
-	createDefaultNodeRouteToExternal := func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error {
+	createDefaultNodeRouteToExternal := func(_ libovsdbclient.Client, _, _ string, _ []config.CIDRNetworkEntry) error {
 		return nil
 	}
 
