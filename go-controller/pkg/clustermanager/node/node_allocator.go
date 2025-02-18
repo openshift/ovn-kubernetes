@@ -175,6 +175,43 @@ func (na *NodeAllocator) releaseHybridOverlayNodeSubnet(nodeName string) {
 	klog.Infof("Deleted hybrid overlay HostSubnets for node %s", nodeName)
 }
 
+// NeedsNodeAllocation determines if the annotations that are assigned by NodeAllocator are missing on a node
+func (na *NodeAllocator) NeedsNodeAllocation(node *corev1.Node) bool {
+	// hybrid overlay check
+	if util.NoHostSubnet(node) {
+		if na.hasHybridOverlayAllocation() {
+			if _, ok := node.Annotations[hotypes.HybridOverlayNodeSubnet]; !ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	// ovn node check
+	// allocation is all or nothing, so if one field was allocated from:
+	// nodeSubnets, joinSubnet, layer 2 tunnel id, then all of them were
+	if na.hasNodeSubnetAllocation() {
+		if util.HasNodeHostSubnetAnnotation(node, na.netInfo.GetNetworkName()) {
+			return false
+		}
+	}
+
+	if na.hasJoinSubnetAllocation() {
+		if util.HasNodeGatewayRouterJoinNetwork(node, na.netInfo.GetNetworkName()) {
+			return false
+		}
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		if util.HasUDNLayer2NodeGRLRPTunnelID(node, na.netInfo.GetNetworkName()) {
+			return false
+		}
+	}
+
+	return true
+
+}
+
 // HandleAddUpdateNodeEvent handles the add or update node event
 func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 	defer na.recordSubnetUsage()
