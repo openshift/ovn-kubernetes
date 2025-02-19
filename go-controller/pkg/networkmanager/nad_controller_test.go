@@ -487,7 +487,7 @@ func TestNADController(t *testing.T) {
 			nadController := &nadController{
 				nads:               map[string]string{},
 				primaryNADs:        map[string]string{},
-				networkController:  newNetworkController("", "", "", tcm, nil),
+				networkController:  newNetworkController("", "", "", tcm, nil, 1),
 				networkIDAllocator: id.NewIDAllocator("NetworkIDs", MaxNetworks),
 				nadClient:          fakeClient.NetworkAttchDefClient,
 				namespaceLister:    &fakeNamespaceLister{},

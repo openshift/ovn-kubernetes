@@ -180,7 +180,7 @@ func TestSetAdvertisements(t *testing.T) {
 					ReconcilableNetInfo: &util.DefaultNetInfo{},
 				},
 			}
-			nm := newNetworkController("", testZoneName, testNodeName, tcm, wf)
+			nm := newNetworkController("", testZoneName, testNodeName, tcm, wf, 1)
 
 			namespace, name, err := cache.SplitMetaNamespaceKey(testNADName)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
