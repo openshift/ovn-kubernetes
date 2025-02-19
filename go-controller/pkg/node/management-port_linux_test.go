@@ -304,8 +304,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 			configs[0].isRoutingAdvertised,
 			rm,
 			&existingNode,
-			watchFactory.NodeCoreInformer().Lister(),
-			kubeInterface,
 			waiter,
 		)
 		Expect(err).NotTo(HaveOccurred())
@@ -404,7 +402,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		netdevName, rep := "pf0vf0", "pf0vf0"
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(false, rm, &existingNode, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
+		_, err = mgmtPorts[0].Create(false, rm, &existingNode, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		// make sure interface was renamed and mtu was set
 		l, err := netlink.LinkByName(mgtPort)
@@ -479,7 +477,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		netdevName, rep := "pf0vf0", ""
 
 		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(configs[0].isRoutingAdvertised, rm, nil, nil, nil, nil)
+		_, err = mgmtPorts[0].Create(configs[0].isRoutingAdvertised, rm, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		// check mgmt port MAC, mtu and link state

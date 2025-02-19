@@ -22,7 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -695,7 +694,7 @@ func getMgmtPortAndRepName(node *corev1.Node) (string, string, error) {
 	}
 }
 
-func createNodeManagementPorts(node *corev1.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
+func createNodeManagementPorts(node *corev1.Node, nodeAnnotator kube.Annotator, waiter *startupWaiter,
 	subnets []*net.IPNet, routeManager *routemanager.Controller, isRoutingAdvertised bool) ([]*managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
@@ -713,7 +712,7 @@ func createNodeManagementPorts(node *corev1.Node, nodeLister listers.NodeLister,
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]*managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(isRoutingAdvertised, routeManager, node, nodeLister, kubeInterface, waiter)
+		config, err := port.Create(isRoutingAdvertised, routeManager, node, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -931,9 +930,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	// Setup management ports
 	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(
 		node,
-		nc.watchFactory.NodeCoreInformer().Lister(),
 		nodeAnnotator,
-		nc.Kube,
 		waiter,
 		subnets,
 		nc.routeManager,
