@@ -1015,12 +1015,18 @@ func gwRouterJoinIPAddress() *net.IPNet {
 }
 
 func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
+
+	dynamicNeighRouters := "true"
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		dynamicNeighRouters = "false"
+	}
+
 	return map[string]string{
 		"lb_force_snat_ip":              "router_ip",
 		"mac_binding_age_threshold":     "300",
 		"chassis":                       gwConfig.ChassisID,
 		"always_learn_from_arp_request": "false",
-		"dynamic_neigh_routers":         "true",
+		"dynamic_neigh_routers":         dynamicNeighRouters,
 	}
 }
 
