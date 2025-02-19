@@ -170,11 +170,8 @@ type EgressIPController struct {
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 	// used as a locking mechanism to serialize egress IP processing on a per egress IP basis
+	// the order of locking should always be egressIPCache, then podAssignment, then nodeZoneState
 	egressIPCache *syncmap.SyncMap[bool]
-	// podAssignmentMutex is used to ensure safe access to podAssignment.
-	// Currently WatchEgressIP, WatchEgressNamespace and WatchEgressPod could
-	// all access that map simultaneously, hence why this guard is needed.
-	podAssignmentMutex *sync.Mutex
 	// nodeUpdateMutex is used for two reasons:
 	// (1) to ensure safe handling of node ip address updates. VIP addresses are
 	// dynamic and might move across nodes.
@@ -184,8 +181,8 @@ type EgressIPController struct {
 	// QoS rules in database due to libovsdb cache race
 	nodeUpdateMutex *sync.Mutex
 	// podAssignment is a cache used for keeping track of which egressIP status
-	// has been setup for each pod. The key is defined by getPodKey
-	podAssignment map[string]*podAssignmentState
+	// has been set up for each pod. The key is defined by getPodKey
+	podAssignment *syncmap.SyncMap[*podAssignmentState]
 	// logicalPortCache allows access to pod IPs for all networks
 	logicalPortCache *PortCache
 	// A cache that maintains all nodes in the cluster,
@@ -217,22 +214,21 @@ func NewEIPController(
 	controllerName string,
 ) *EgressIPController {
 	e := &EgressIPController{
-		nbClient:           nbClient,
-		kube:               kube,
-		watchFactory:       watchFactory,
-		recorder:           recorder,
-		egressIPCache:      syncmap.NewSyncMap[bool](),
-		podAssignmentMutex: &sync.Mutex{},
-		nodeUpdateMutex:    &sync.Mutex{},
-		podAssignment:      map[string]*podAssignmentState{},
-		logicalPortCache:   portCache,
-		nodeZoneState:      syncmap.NewSyncMap[bool](),
-		controllerName:     controllerName,
-		networkManager:     networkmanager,
-		addressSetFactory:  addressSetFactor,
-		zone:               zone,
-		v4:                 v4,
-		v6:                 v6,
+		nbClient:          nbClient,
+		kube:              kube,
+		watchFactory:      watchFactory,
+		recorder:          recorder,
+		egressIPCache:     syncmap.NewSyncMap[bool](),
+		nodeUpdateMutex:   &sync.Mutex{},
+		podAssignment:     syncmap.NewSyncMap[*podAssignmentState](),
+		logicalPortCache:  portCache,
+		nodeZoneState:     syncmap.NewSyncMap[bool](),
+		controllerName:    controllerName,
+		networkManager:    networkmanager,
+		addressSetFactory: addressSetFactor,
+		zone:              zone,
+		v4:                v4,
+		v6:                v6,
 	}
 	return e
 }
@@ -767,9 +763,9 @@ func (e *EgressIPController) addNamespaceEgressIPAssignments(ni util.NetInfo, na
 }
 
 func (e *EgressIPController) addPodEgressIPAssignmentsWithLock(ni util.NetInfo, name string, statusAssignments []egressipv1.EgressIPStatusItem, mark util.EgressIPMark, pod *corev1.Pod) error {
+	e.podAssignment.LockKey(getPodKey(pod))
+	defer e.podAssignment.UnlockKey(getPodKey(pod))
 	e.deletePreviousNetworkPodEgressIPAssignments(ni, name, statusAssignments, pod)
-	e.podAssignmentMutex.Lock()
-	defer e.podAssignmentMutex.Unlock()
 	return e.addPodEgressIPAssignments(ni, name, statusAssignments, mark, pod)
 }
 
@@ -829,7 +825,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 	for _, ipNet := range podIPNets {
 		podIPs = append(podIPs, ipNet.IP)
 	}
-	podState, exists := e.podAssignment[podKey]
+	podState, exists := e.podAssignment.Load(podKey)
 	if !exists {
 		remainingAssignments = statusAssignments
 		podState = &podAssignmentState{
@@ -839,7 +835,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 			podIPs:               podIPs,
 			network:              ni,
 		}
-		e.podAssignment[podKey] = podState
+		e.podAssignment.Store(podKey, podState)
 	} else if podState.egressIPName == name || podState.egressIPName == "" {
 		// We do the setup only if this egressIP object is the one serving this pod OR
 		// podState.egressIPName can be empty if no re-routes were found in
@@ -907,75 +903,86 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 // status. We also need to update the podAssignment cache and finally re-add the
 // external GW setup in case the pod still exists.
 func (e *EgressIPController) deleteEgressIPAssignments(name string, statusesToRemove []egressipv1.EgressIPStatusItem) error {
-	e.podAssignmentMutex.Lock()
-	defer e.podAssignmentMutex.Unlock()
+
+	podAssignments := e.podAssignment.GetKeys()
 
 	for _, statusToRemove := range statusesToRemove {
 		processedNetworks := make(map[string]struct{})
-		for podKey, podStatus := range e.podAssignment {
-			if podStatus.egressIPName != name {
-				// we can continue here since this pod was not managed by this EIP object
-				podStatus.standbyEgressIPNames.Delete(name)
-				continue
-			}
-			if ok := podStatus.egressStatuses.contains(statusToRemove); !ok {
-				// we can continue here since this pod was not managed by this statusToRemove
-				continue
-			}
-			podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-			cachedNetwork := e.getNetworkFromPodAssignment(podKey)
-			if cachedNetwork == nil {
-				panic(fmt.Sprintf("cached network is missing for egress IP pod assignment: %q. This should never happen!", podKey))
-			}
 
-			err := e.nodeZoneState.DoWithLock(statusToRemove.Node, func(_ string) error {
-				// this statusToRemove was managing at least one pod, hence let's tear down the setup for this status
-				if _, ok := processedNetworks[cachedNetwork.GetNetworkName()]; !ok {
-					klog.V(2).Infof("Deleting pod egress IP status: %v for EgressIP: %s", statusToRemove, name)
-					if err := e.deleteEgressIPStatusSetup(cachedNetwork, name, statusToRemove); err != nil {
-						return fmt.Errorf("failed to delete EgressIP %s status setup for network %s: %v", name, cachedNetwork.GetNetworkName(), err)
-					}
-					if cachedNetwork != nil {
-						if err := e.deleteEgressIPStatusSetup(cachedNetwork, name, statusToRemove); err != nil {
-							klog.Errorf("Failed to delete EgressIP %s status setup for network %s: %v", name, cachedNetwork.GetNetworkName(), err)
-						}
-					}
-				}
-				processedNetworks[cachedNetwork.GetNetworkName()] = struct{}{}
-				// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
-				if err := e.addExternalGWPodSNAT(cachedNetwork, podNamespace, podName, statusToRemove); err != nil {
-					return err
-				}
-				podStatus.egressStatuses.delete(statusToRemove)
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if len(podStatus.egressStatuses.statusMap) == 0 && len(podStatus.standbyEgressIPNames) == 0 {
-				// pod could be managed by more than one egressIP
-				// so remove the podKey from cache only if we are sure
-				// there are no more egressStatuses managing this pod
-				klog.V(5).Infof("Deleting pod key %s from assignment cache", podKey)
-				// delete the podIP from the global egressIP address set since its no longer managed by egressIPs
-				// NOTE(tssurya): There is no way to infer if pod was local to this zone or not,
-				// so we try to nuke the IP from address-set anyways - it will be a no-op for remote pods
-				if err := e.deletePodIPsFromAddressSet(cachedNetwork.GetNetworkName(), e.controllerName, podStatus.podIPs...); err != nil {
-					return fmt.Errorf("cannot delete egressPodIPs for the pod %s from the address set: err: %v", podKey, err)
-				}
-				delete(e.podAssignment, podKey)
-			} else if len(podStatus.egressStatuses.statusMap) == 0 && len(podStatus.standbyEgressIPNames) > 0 {
-				klog.V(2).Infof("Pod %s has standby egress IP %+v", podKey, podStatus.standbyEgressIPNames.UnsortedList())
-				podStatus.egressIPName = "" // we have deleted the current egressIP that was managing the pod
-				if err := e.addStandByEgressIPAssignment(cachedNetwork, podKey, podStatus); err != nil {
-					klog.Errorf("Adding standby egressIPs for pod %s with status %v failed: %v", podKey, podStatus, err)
-					// We are not returning the error on purpose, this will be best effort without any retries because
-					// retrying deleteEgressIPAssignments for original EIP because addStandByEgressIPAssignment failed is useless.
-					// Since we delete statusToRemove from podstatus.egressStatuses the first time we call this function,
-					// later when the operation is retried we will never continue down the loop
-					// since we add SNAT to node only if this pod was managed by statusToRemove
+		for _, podKey := range podAssignments {
+			if err := e.podAssignment.DoWithLock(podKey, func(_ string) error {
+				podStatus, exists := e.podAssignment.Load(podKey)
+				if !exists {
 					return nil
 				}
+				if podStatus.egressIPName != name {
+					// we can continue here since this pod was not managed by this EIP object
+					podStatus.standbyEgressIPNames.Delete(name)
+					return nil
+				}
+				if ok := podStatus.egressStatuses.contains(statusToRemove); !ok {
+					// we can continue here since this pod was not managed by this statusToRemove
+					return nil
+				}
+				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
+				cachedNetwork := e.getNetworkFromPodAssignment(podKey)
+				if cachedNetwork == nil {
+					panic(fmt.Sprintf("cached network is missing for egress IP pod assignment: %q. This should never happen!", podKey))
+				}
+
+				err := e.nodeZoneState.DoWithLock(statusToRemove.Node, func(_ string) error {
+					// this statusToRemove was managing at least one pod, hence let's tear down the setup for this status
+					if _, ok := processedNetworks[cachedNetwork.GetNetworkName()]; !ok {
+						klog.V(2).Infof("Deleting pod egress IP status: %v for EgressIP: %s", statusToRemove, name)
+						if err := e.deleteEgressIPStatusSetup(cachedNetwork, name, statusToRemove); err != nil {
+							return fmt.Errorf("failed to delete EgressIP %s status setup for network %s: %v", name, cachedNetwork.GetNetworkName(), err)
+						}
+						if cachedNetwork != nil {
+							if err := e.deleteEgressIPStatusSetup(cachedNetwork, name, statusToRemove); err != nil {
+								klog.Errorf("Failed to delete EgressIP %s status setup for network %s: %v", name, cachedNetwork.GetNetworkName(), err)
+							}
+						}
+					}
+					processedNetworks[cachedNetwork.GetNetworkName()] = struct{}{}
+					// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
+					if err := e.addExternalGWPodSNAT(cachedNetwork, podNamespace, podName, statusToRemove); err != nil {
+						return err
+					}
+					podStatus.egressStatuses.delete(statusToRemove)
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+				if len(podStatus.egressStatuses.statusMap) == 0 && len(podStatus.standbyEgressIPNames) == 0 {
+					// pod could be managed by more than one egressIP
+					// so remove the podKey from cache only if we are sure
+					// there are no more egressStatuses managing this pod
+					klog.V(5).Infof("Deleting pod key %s from assignment cache", podKey)
+					// delete the podIP from the global egressIP address set since its no longer managed by egressIPs
+					// NOTE(tssurya): There is no way to infer if pod was local to this zone or not,
+					// so we try to nuke the IP from address-set anyways - it will be a no-op for remote pods
+					if err := e.deletePodIPsFromAddressSet(cachedNetwork.GetNetworkName(), e.controllerName, podStatus.podIPs...); err != nil {
+						return fmt.Errorf("cannot delete egressPodIPs for the pod %s from the address set: err: %v", podKey, err)
+					}
+					e.podAssignment.Delete(podKey)
+				} else if len(podStatus.egressStatuses.statusMap) == 0 && len(podStatus.standbyEgressIPNames) > 0 {
+					klog.V(2).Infof("Pod %s has standby egress IP %+v", podKey, podStatus.standbyEgressIPNames.UnsortedList())
+					podStatus.egressIPName = "" // we have deleted the current egressIP that was managing the pod
+					if err := e.addStandByEgressIPAssignment(cachedNetwork, podKey, podStatus); err != nil {
+						klog.Errorf("Adding standby egressIPs for pod %s with status %v failed: %v", podKey, podStatus, err)
+						// We are not returning the error on purpose, this will be best effort without any retries because
+						// retrying deleteEgressIPAssignments for original EIP because addStandByEgressIPAssignment failed is useless.
+						// Since we delete statusToRemove from podstatus.egressStatuses the first time we call this function,
+						// later when the operation is retried we will never continue down the loop
+						// since we add SNAT to node only if this pod was managed by statusToRemove
+						return nil
+					}
+				}
+				return nil
+
+			}); err != nil {
+				return err
 			}
 		}
 	}
@@ -1010,15 +1017,16 @@ func (e *EgressIPController) deleteNamespaceEgressIPAssignment(ni util.NetInfo, 
 }
 
 func (e *EgressIPController) deletePodEgressIPAssignmentsWithCleanup(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod) error {
+	e.podAssignment.LockKey(getPodKey(pod))
+	defer e.podAssignment.UnlockKey(getPodKey(pod))
 	e.deletePreviousNetworkPodEgressIPAssignments(ni, name, statusesToRemove, pod)
 	return e.deletePodEgressIPAssignments(ni, name, statusesToRemove, pod)
 }
 
+// deletePodEgressIPAssignments *must* be called with podAssignment lock on pod
 func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod) error {
-	e.podAssignmentMutex.Lock()
-	defer e.podAssignmentMutex.Unlock()
 	podKey := getPodKey(pod)
-	podStatus, exists := e.podAssignment[podKey]
+	podStatus, exists := e.podAssignment.Load(podKey)
 	if !exists {
 		return nil
 	} else if podStatus.egressIPName != name {
@@ -1065,14 +1073,15 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 				return fmt.Errorf("cannot delete egressPodIPs for the pod %s from the address set: err: %v", podKey, err)
 			}
 		}
-		delete(e.podAssignment, podKey)
+		e.podAssignment.Delete(podKey)
 	}
 	return nil
 }
 
 // deletePreviousNetworkPodEgressIPAssignments checks if the network changed and remove any stale config on the previous network.
+// must be called with podAssignment lock on pod
 func (e *EgressIPController) deletePreviousNetworkPodEgressIPAssignments(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod) {
-	cachedNetwork := e.getNetworkFromPodAssignmentWithLock(getPodKey(pod))
+	cachedNetwork := e.getNetworkFromPodAssignment(getPodKey(pod))
 	if cachedNetwork != nil {
 		if util.AreNetworksCompatible(cachedNetwork, ni) {
 			if err := e.deletePodEgressIPAssignments(cachedNetwork, name, statusesToRemove, pod); err != nil {
@@ -1482,8 +1491,6 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 // since internal cache based logic will be different for different ovnkube-controllers
 // zone can think objA is active while zoneb can think objB is active if both have multiple choice options
 func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache) error {
-	e.podAssignmentMutex.Lock()
-	defer e.podAssignmentMutex.Unlock()
 	for egressIPName, networkPods := range egressIPCache.egressIPNameToPods {
 		for networkName, podCache := range networkPods {
 			p1 := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -1536,46 +1543,51 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 				for _, podIP := range podIPsSet.UnsortedList() {
 					podIPs = append(podIPs, net.ParseIP(podIP))
 				}
-				podState, ok := e.podAssignment[podKey]
-				if !ok {
-					podState = &podAssignmentState{
-						egressStatuses:       egressStatuses{make(map[egressipv1.EgressIPStatusItem]string)},
-						standbyEgressIPNames: sets.New[string](),
-						podIPs:               podIPs,
-						network:              ni,
-					}
-				}
-
-				podState.standbyEgressIPNames.Insert(egressIPName)
-				for _, policy := range reRoutePolicies {
-					splitMatch := strings.Split(policy.Match, " ")
-					if len(splitMatch) <= 0 {
-						continue
-					}
-					logicalIP := splitMatch[len(splitMatch)-1]
-					parsedLogicalIP := net.ParseIP(logicalIP)
-					if parsedLogicalIP == nil {
-						continue
+				if err := e.podAssignment.DoWithLock(podKey, func(podKey string) error {
+					podState, ok := e.podAssignment.Load(podKey)
+					if !ok {
+						podState = &podAssignmentState{
+							egressStatuses:       egressStatuses{make(map[egressipv1.EgressIPStatusItem]string)},
+							standbyEgressIPNames: sets.New[string](),
+							podIPs:               podIPs,
+							network:              ni,
+						}
 					}
 
-					if podIPsSet.Has(parsedLogicalIP.String()) { // should match for only one egressIP object
-						podState.egressIPName = egressIPName
-						podState.standbyEgressIPNames.Delete(egressIPName)
-						klog.Infof("EgressIP %s is managing pod %s for network %s", egressIPName, podKey, networkName)
-					}
-				}
-				// process SNAT only for CDN
-				if networkName == types.DefaultNetworkName {
-					for _, snat := range egressIPSNATs {
-						if podIPsSet.Has(snat.LogicalIP) { // should match for only one egressIP object
+					podState.standbyEgressIPNames.Insert(egressIPName)
+					for _, policy := range reRoutePolicies {
+						splitMatch := strings.Split(policy.Match, " ")
+						if len(splitMatch) <= 0 {
+							continue
+						}
+						logicalIP := splitMatch[len(splitMatch)-1]
+						parsedLogicalIP := net.ParseIP(logicalIP)
+						if parsedLogicalIP == nil {
+							continue
+						}
+
+						if podIPsSet.Has(parsedLogicalIP.String()) { // should match for only one egressIP object
 							podState.egressIPName = egressIPName
 							podState.standbyEgressIPNames.Delete(egressIPName)
 							klog.Infof("EgressIP %s is managing pod %s for network %s", egressIPName, podKey, networkName)
 						}
 					}
-				}
+					// process SNAT only for CDN
+					if networkName == types.DefaultNetworkName {
+						for _, snat := range egressIPSNATs {
+							if podIPsSet.Has(snat.LogicalIP) { // should match for only one egressIP object
+								podState.egressIPName = egressIPName
+								podState.standbyEgressIPNames.Delete(egressIPName)
+								klog.Infof("EgressIP %s is managing pod %s for network %s", egressIPName, podKey, networkName)
+							}
+						}
+					}
 
-				e.podAssignment[podKey] = podState
+					e.podAssignment.Store(podKey, podState)
+					return nil
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -2238,7 +2250,8 @@ func (pas *podAssignmentState) Clone() *podAssignmentState {
 // addStandByEgressIPAssignment does the same setup that is done by addPodEgressIPAssignments but for
 // the standby egressIP. This must always be called with a lock on podAssignmentState mutex
 // This is special case function called only from deleteEgressIPAssignments, don't use this for normal setup
-// Any failure from here will not be retried, its a corner case undefined behaviour
+// Any failure from here will not be retried, it's a corner case undefined behaviour
+// must be called with podAssignment lock on podKey
 func (e *EgressIPController) addStandByEgressIPAssignment(ni util.NetInfo, podKey string, podStatus *podAssignmentState) error {
 	podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
 	pod, err := e.watchFactory.GetPod(podNamespace, podName)
@@ -2293,7 +2306,7 @@ func (e *EgressIPController) addStandByEgressIPAssignment(ni util.NetInfo, podKe
 		podIPs:               podIPs,
 		network:              ni,
 	}
-	e.podAssignment[podKey] = podState
+	e.podAssignment.Store(podKey, podState)
 	// NOTE: We let addPodEgressIPAssignments take care of setting egressIPName and egressStatuses and removing it from standBy
 	err = e.addPodEgressIPAssignments(ni, eipToAssign, eip.Status.Items, mark, pod)
 	if err != nil {
@@ -3609,18 +3622,11 @@ func (e *EgressIPController) deleteNATRuleOps(ni util.NetInfo, ops []ovsdb.Opera
 	return ops, nil
 }
 
-// getNetworkFromPodAssignmentWithLock attempts to find a pods network from the pod assignment cache. If pod is not found
+// getNetworkFromPodAssignment attempts to find a pods network from the pod assignment cache. If pod is not found
 // in cache or no network set, nil network is return.
-func (e *EgressIPController) getNetworkFromPodAssignmentWithLock(podKey string) util.NetInfo {
-	e.podAssignmentMutex.Lock()
-	defer e.podAssignmentMutex.Unlock()
-	return e.getNetworkFromPodAssignment(podKey)
-}
-
-// getNetworkFromPodAssignmentWithLock attempts to find a pods network from the pod assignment cache. If pod is not found
-// in cache or no network set, nil network is return.
+// must be called with podAssignment lock on podKey
 func (e *EgressIPController) getNetworkFromPodAssignment(podKey string) util.NetInfo {
-	podAssignment, ok := e.podAssignment[podKey]
+	podAssignment, ok := e.podAssignment.Load(podKey)
 	if !ok {
 		return nil
 	}
