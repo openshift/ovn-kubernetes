@@ -7,7 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kubevirtv1 "kubevirt.io/api/core/v1"
+
 	admv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,8 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	listersv1 "k8s.io/client-go/listers/core/v1"
-	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type fakeNodeLister struct {

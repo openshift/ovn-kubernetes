@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/Microsoft/hcsshim/hcn"
 	ps "github.com/bhendo/go-powershell"
 	psBackend "github.com/bhendo/go-powershell/backend"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	iputils "github.com/containernetworking/plugins/pkg/ip"
+
 	corev1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
-	"github.com/Microsoft/hcsshim/hcn"
-	iputils "github.com/containernetworking/plugins/pkg/ip"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 )
 
 const (

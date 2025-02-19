@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vishvananda/netlink"
+
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 

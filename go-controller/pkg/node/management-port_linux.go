@@ -11,16 +11,17 @@ import (
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/knftables"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (

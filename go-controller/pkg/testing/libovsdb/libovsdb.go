@@ -17,6 +17,10 @@ import (
 	"github.com/alexflint/go-filemutex"
 	guuid "github.com/google/uuid"
 	"github.com/mitchellh/copystructure"
+	"github.com/prometheus/client_golang/prometheus"
+
+	"k8s.io/apimachinery/pkg/util/wait"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/database"
 	"github.com/ovn-org/libovsdb/database/inmemory"
@@ -25,8 +29,6 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
 	"github.com/ovn-org/libovsdb/server"
-	"github.com/prometheus/client_golang/prometheus"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"

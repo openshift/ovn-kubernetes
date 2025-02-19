@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovnkubeutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	corev1 "k8s.io/api/core/v1"
-	knet "k8s.io/api/networking/v1"
 )
 
 // aclPipelineType defines when ACLs will be applied (direction and pipeline stage).

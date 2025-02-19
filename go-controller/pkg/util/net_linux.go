@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"github.com/mdlayher/arp"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 type NetLinkOps interface {

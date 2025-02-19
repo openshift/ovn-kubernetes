@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/coreos/go-iptables/iptables"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-
-	"github.com/coreos/go-iptables/iptables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"

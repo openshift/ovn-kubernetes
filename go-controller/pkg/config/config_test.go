@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
+
 	kexec "k8s.io/utils/exec"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 )
 
 func TestConfig(t *testing.T) {

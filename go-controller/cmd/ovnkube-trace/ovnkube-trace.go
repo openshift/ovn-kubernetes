@@ -14,8 +14,6 @@ import (
 	"strconv"
 	"strings"
 
-	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -26,6 +24,9 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/strings/slices"
+
+	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (

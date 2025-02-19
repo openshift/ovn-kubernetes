@@ -3,10 +3,10 @@ package kubevirt
 import (
 	"fmt"
 
+	kubevirtv1 "kubevirt.io/api/core/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
-
-	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 

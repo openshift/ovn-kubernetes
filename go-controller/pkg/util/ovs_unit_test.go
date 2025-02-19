@@ -6,14 +6,15 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-
-	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
+
 	kexec "k8s.io/utils/exec"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 )
 
 func TestRunningPlatform(t *testing.T) {

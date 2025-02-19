@@ -1,6 +1,7 @@
 package util
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -11,27 +12,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urfave/cli/v2"
 	"golang.org/x/exp/constraints"
+
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	"k8s.io/client-go/tools/cache"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
-	"crypto/rand"
-
-	"github.com/urfave/cli/v2"
-	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
-	discoverylisters "k8s.io/client-go/listers/discovery/v1"
-
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 // OvnConflictBackoff is the backoff used for pod annotation update conflict

@@ -11,6 +11,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
+
 	utilsnet "k8s.io/utils/net"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"

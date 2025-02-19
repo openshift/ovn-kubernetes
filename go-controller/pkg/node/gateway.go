@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/safchain/ethtool"
+
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/klog/v2"

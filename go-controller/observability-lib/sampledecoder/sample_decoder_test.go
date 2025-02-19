@@ -3,10 +3,11 @@ package sampledecoder
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestCreateOrUpdateACL(t *testing.T) {

@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"sync"
 
+	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/klog/v2"
-	"k8s.io/utils/ptr"
 )
 
 // SecondaryNodeNetworkController structure is the object which holds the controls for starting

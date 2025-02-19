@@ -4,11 +4,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	discovery "k8s.io/api/discovery/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 )
 
 /*

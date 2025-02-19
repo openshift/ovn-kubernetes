@@ -5,9 +5,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
+
 	kexec "k8s.io/utils/exec"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type readinessFunc func(string) error

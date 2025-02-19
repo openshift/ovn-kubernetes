@@ -3,13 +3,12 @@ package controller
 import (
 	"net"
 	"sync"
-
 	"time"
+
+	listers "k8s.io/client-go/listers/core/v1"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-
-	listers "k8s.io/client-go/listers/core/v1"
 )
 
 // NodeController is the node hybrid overlay controller.

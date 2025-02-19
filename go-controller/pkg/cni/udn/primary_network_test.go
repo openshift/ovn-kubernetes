@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	. "github.com/onsi/gomega"
+
 	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -13,6 +13,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	. "github.com/onsi/gomega"
 )
 
 func TestWaitForPrimaryAnnotationFn(t *testing.T) {

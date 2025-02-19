@@ -11,8 +11,8 @@ linters:
   disable-all: true
   enable:
     - errcheck
+    - gci
     - gofmt
-    - goimports
     - gosimple
     - govet
     - importas
@@ -24,6 +24,19 @@ linters:
     - unused
 
 linters-settings:
+  gci:
+    # default ordering except:
+    # - prefix sections ordered as stated
+    # - dot section at the very end
+    custom-order: true
+    sections:
+      - standard
+      - default
+      - prefix(k8s.io,sigs.k8s.io)
+      - prefix(github.com/ovn-org)
+      - localmodule
+      - dot
+
   govet:
     enable-all: true
     disable:

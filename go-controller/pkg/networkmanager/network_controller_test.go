@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/onsi/gomega"
 
-	cnitypes "github.com/containernetworking/cni/pkg/types"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"

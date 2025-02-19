@@ -10,6 +10,13 @@ import (
 	"time"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/scheme"
+	listers "k8s.io/client-go/listers/core/v1"
+	ref "k8s.io/client-go/tools/reference"
+	"k8s.io/klog/v2"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -21,12 +28,6 @@ import (
 	egresssvc_zone "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes/scheme"
-	listers "k8s.io/client-go/listers/core/v1"
-	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/klog/v2"
 )
 
 const egressFirewallDNSDefaultDuration = 30 * time.Minute

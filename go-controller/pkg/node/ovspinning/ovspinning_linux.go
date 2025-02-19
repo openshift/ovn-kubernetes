@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/sys/unix"
+
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // These variables are meant to be used in unit tests

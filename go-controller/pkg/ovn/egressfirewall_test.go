@@ -10,12 +10,16 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/onsi/ginkgo/v2"
-
 	"github.com/onsi/gomega"
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 
-	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	utilnet "k8s.io/utils/net"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -31,11 +35,6 @@ import (
 	t "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	utilnet "k8s.io/utils/net"
 )
 
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {

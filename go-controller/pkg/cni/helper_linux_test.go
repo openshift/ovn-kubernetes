@@ -13,6 +13,14 @@ import (
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/k8snetworkplumbingwg/sriovnet"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/vishvananda/netlink"
+
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	kexec "k8s.io/utils/exec"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -24,12 +32,6 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/vishvananda/netlink"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	kexec "k8s.io/utils/exec"
 )
 
 func TestRenameLink(t *testing.T) {
