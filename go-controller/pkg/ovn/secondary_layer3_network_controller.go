@@ -115,12 +115,14 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 				_, syncMgmtPort := h.oc.mgmtPortFailed.Load(node.Name)
 				_, syncGw := h.oc.gatewaysFailed.Load(node.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(node.Name)
+				_, syncReRoute := h.oc.syncRerouteFailed.Load(node.Name)
 				nodeParams = &nodeSyncs{
 					syncNode:              nodeSync,
 					syncClusterRouterPort: clusterRtrSync,
 					syncMgmtPort:          syncMgmtPort,
 					syncZoneIC:            syncZoneIC,
 					syncGw:                syncGw,
+					syncReroute:           syncReRoute,
 				}
 			} else {
 				nodeParams = &nodeSyncs{
@@ -129,6 +131,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 					syncMgmtPort:          true,
 					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
 					syncGw:                true,
+					syncReroute:           true,
 				}
 			}
 			if err := h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
@@ -182,12 +185,15 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					nodeSubnetChanged ||
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
+				_, failed = h.oc.syncRerouteFailed.Load(newNode.Name)
+				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 				nodeSyncsParam = &nodeSyncs{
 					syncNode:              nodeSync,
 					syncClusterRouterPort: clusterRtrSync,
 					syncMgmtPort:          syncMgmtPort,
 					syncZoneIC:            syncZoneIC,
 					syncGw:                syncGw,
+					syncReroute:           syncReroute,
 				}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
@@ -199,6 +205,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					syncMgmtPort:          true,
 					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
 					syncGw:                true,
+					syncReroute:           true,
 				}
 			}
 
@@ -287,6 +294,7 @@ type SecondaryLayer3NetworkController struct {
 	nodeClusterRouterPortFailed sync.Map
 	syncZoneICFailed            sync.Map
 	gatewaysFailed              sync.Map
+	syncRerouteFailed           sync.Map
 
 	gatewayManagers        sync.Map
 	gatewayTopologyFactory *topology.GatewayTopologyFactory
@@ -682,6 +690,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.syncZoneICFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
+			oc.syncRerouteFailed.Store(node.Name, true)
 			err = fmt.Errorf("nodeAdd: error adding node %q for network %s: %w", node.Name, oc.GetNetworkName(), err)
 			oc.recordNodeErrorEvent(node, err)
 			return err
@@ -774,12 +783,20 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() && nSyncs.syncReroute {
+		rerouteFailed := false
 		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
 			errs = append(errs, fmt.Errorf("failed to ensure EgressIP router polices for network %s: %v", oc.GetNetworkName(), err))
+			rerouteFailed = true
 		}
 		if err = oc.eIPController.ensureSwitchPoliciesForNode(oc.GetNetInfo(), node.Name); err != nil {
 			errs = append(errs, fmt.Errorf("failed to ensure EgressIP switch policies for network %s: %v", oc.GetNetworkName(), err))
+			rerouteFailed = true
+		}
+		if rerouteFailed {
+			oc.syncRerouteFailed.Store(node.Name, true)
+		} else {
+			oc.syncRerouteFailed.Delete(node.Name)
 		}
 	}
 
