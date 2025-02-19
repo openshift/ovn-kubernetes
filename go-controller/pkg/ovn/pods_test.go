@@ -200,7 +200,6 @@ type secondaryPodInfo struct {
 	nodeSubnet  string
 	nodeMgtIP   string
 	nodeGWIP    string
-	role        string
 	routes      []util.PodRoute
 	allportInfo map[string]portInfo
 }
