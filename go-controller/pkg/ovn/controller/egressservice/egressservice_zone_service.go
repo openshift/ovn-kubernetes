@@ -13,7 +13,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -197,8 +197,8 @@ func createIPAddressStringSlice(v4ips, v6ips []string) []string {
 	return append(v4ips, v6ips...)
 }
 
-func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []string) ([]libovsdb.Operation, error) {
-	var ops []libovsdb.Operation
+func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []string) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {
@@ -210,8 +210,8 @@ func (c *Controller) addPodIPsToAddressSetOps(addrSetIPs []string) ([]libovsdb.O
 	return ops, nil
 }
 
-func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []string) ([]libovsdb.Operation, error) {
-	var ops []libovsdb.Operation
+func (c *Controller) deletePodIPsFromAddressSetOps(addrSetIPs []string) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
 	dbIDs := GetEgressServiceAddrSetDbIDs(c.controllerName)
 	as, err := c.addressSetFactory.GetAddressSet(dbIDs)
 	if err != nil {
@@ -234,8 +234,8 @@ func (c *Controller) setPodIPsInAddressSet(addrSetIPs []string) error {
 
 // Returns the libovsdb operations to create or updates the logical router policies for the service,
 // given its key, the nexthops (mgmt ips) and endpoints to add.
-func (c *Controller) createOrUpdateLogicalRouterPoliciesOps(key, v4MgmtIP, v6MgmtIP string, v4Endpoints, v6Endpoints []string) ([]libovsdb.Operation, error) {
-	allOps := []libovsdb.Operation{}
+func (c *Controller) createOrUpdateLogicalRouterPoliciesOps(key, v4MgmtIP, v6MgmtIP string, v4Endpoints, v6Endpoints []string) ([]ovsdb.Operation, error) {
+	allOps := []ovsdb.Operation{}
 	var err error
 
 	for _, addr := range v4Endpoints {
@@ -283,8 +283,8 @@ func (c *Controller) createOrUpdateLogicalRouterPoliciesOps(key, v4MgmtIP, v6Mgm
 
 // Returns the libovsdb operations to delete the logical router policies for the service,
 // given its key and endpoints to delete.
-func (c *Controller) deleteLogicalRouterPoliciesOps(key string, v4Endpoints, v6Endpoints []string) ([]libovsdb.Operation, error) {
-	allOps := []libovsdb.Operation{}
+func (c *Controller) deleteLogicalRouterPoliciesOps(key string, v4Endpoints, v6Endpoints []string) ([]ovsdb.Operation, error) {
+	allOps := []ovsdb.Operation{}
 	var err error
 
 	for _, addr := range v4Endpoints {

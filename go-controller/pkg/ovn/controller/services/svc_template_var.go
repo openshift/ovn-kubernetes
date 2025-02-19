@@ -9,7 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -116,7 +116,7 @@ func getLoadBalancerTemplates(lb *nbdb.LoadBalancer, allTemplates TemplateMap) T
 }
 
 // listSvcTemplates looks up all chassis template variables. It returns
-// libovsdb.Templates values indexed by template name.
+// ovsdb.Templates values indexed by template name.
 func listSvcTemplates(nbClient libovsdbclient.Client) (templatesByName TemplateMap, err error) {
 	templatesByName = TemplateMap{}
 
@@ -139,7 +139,7 @@ func listSvcTemplates(nbClient libovsdbclient.Client) (templatesByName TemplateM
 }
 
 func svcCreateOrUpdateTemplateVarOps(nbClient libovsdbclient.Client,
-	ops []libovsdb.Operation, templateVars []TemplateMap) ([]libovsdb.Operation, error) {
+	ops []ovsdb.Operation, templateVars []TemplateMap) ([]ovsdb.Operation, error) {
 
 	var err error
 
@@ -154,7 +154,7 @@ func svcCreateOrUpdateTemplateVarOps(nbClient libovsdbclient.Client,
 }
 
 func svcDeleteTemplateVarOps(nbClient libovsdbclient.Client,
-	ops []libovsdb.Operation, templateVars []TemplateMap) ([]libovsdb.Operation, error) {
+	ops []ovsdb.Operation, templateVars []TemplateMap) ([]ovsdb.Operation, error) {
 	var err error
 
 	forEachNBTemplateInMaps(templateVars, func(nbTemplate *nbdb.ChassisTemplateVar) bool {

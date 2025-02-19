@@ -20,7 +20,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
@@ -162,7 +162,7 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 	}
 
 	err = batching.BatchMap[*nbdb.ACL](aclChangePGBatchSize, deletedNSACLs, func(batchNsACLs map[string][]*nbdb.ACL) error {
-		var ops []libovsdb.Operation
+		var ops []ovsdb.Operation
 		var err error
 		for namespace, acls := range batchNsACLs {
 			pgName := oc.getNamespacePortGroupName(namespace)
@@ -259,7 +259,7 @@ func (oc *DefaultNetworkController) moveACLsToNamespacedPortGroups(existingEFNam
 	}
 
 	err = batching.BatchMap[*nbdb.ACL](aclChangePGBatchSize, staleNamespaces, func(batchNsACLs map[string][]*nbdb.ACL) error {
-		var ops []libovsdb.Operation
+		var ops []ovsdb.Operation
 		var err error
 		for namespace, acls := range batchNsACLs {
 			if namespace != "" && existingEFNamespaces[namespace] {
@@ -372,7 +372,7 @@ func (oc *DefaultNetworkController) deleteEgressFirewall(egressFirewallObj *egre
 
 func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, pgName string,
 	aclLogging *libovsdbutil.ACLLoggingLevels, ruleIDs ...int) error {
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	var err error
 	for _, rule := range ef.egressRules {
 		// check if only specific rule ids are requested to be added
@@ -464,7 +464,7 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, p
 
 // createEgressFirewallACLOps uses the previously generated elements and creates the
 // acls for all node switches
-func (oc *DefaultNetworkController) createEgressFirewallACLOps(ops []libovsdb.Operation, ruleIdx int, match, action, namespace, pgName string, aclLogging *libovsdbutil.ACLLoggingLevels) ([]libovsdb.Operation, error) {
+func (oc *DefaultNetworkController) createEgressFirewallACLOps(ops []ovsdb.Operation, ruleIdx int, match, action, namespace, pgName string, aclLogging *libovsdbutil.ACLLoggingLevels) ([]ovsdb.Operation, error) {
 	aclIDs := oc.getEgressFirewallACLDbIDs(namespace, ruleIdx)
 	priority := types.EgressFirewallStartPriority - ruleIdx
 	egressFirewallACL := libovsdbutil.BuildACL(

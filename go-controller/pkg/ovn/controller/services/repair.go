@@ -12,7 +12,7 @@ import (
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -173,7 +173,7 @@ func (r *repair) runBeforeSync(useTemplates bool, netInfo util.NetInfo, nodes ma
 	}
 
 	if netInfo.IsPrimaryNetwork() {
-		var ops []libovsdb.Operation
+		var ops []ovsdb.Operation
 		if netInfo.TopologyType() == types.Layer2Topology {
 			for _, node := range nodes {
 				if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(r.nbClient, ops, netInfo.GetNetworkScopedGWRouterName(node.name), udnDelPredicate); err != nil {

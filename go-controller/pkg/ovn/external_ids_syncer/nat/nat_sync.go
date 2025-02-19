@@ -8,7 +8,7 @@ import (
 	utilsnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -79,7 +79,7 @@ func (n *NATSyncer) syncEgressIPNATs() error {
 	if err != nil {
 		return fmt.Errorf("failed to retrieve OVN NATs: %v", err)
 	}
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	for _, nat := range nats {
 		eIPName := nat.ExternalIDs[legacyEIPNameExtIDKey]
 		if eIPName == "" {

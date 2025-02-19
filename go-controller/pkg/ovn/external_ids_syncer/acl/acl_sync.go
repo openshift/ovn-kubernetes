@@ -14,7 +14,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -416,7 +416,7 @@ func (syncer *ACLSyncer) getDefaultDenyPolicyACLIDs(ns, policyType, defaultACLTy
 }
 
 func (syncer *ACLSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
-	deleteOps []libovsdb.Operation, err error) {
+	deleteOps []ovsdb.Operation, err error) {
 	for _, acl := range legacyACLs {
 		// sync default Deny policies
 		// defaultDenyPolicyTypeACLExtIdKey ExternalID was used by default deny and multicast acls,

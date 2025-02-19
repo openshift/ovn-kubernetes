@@ -29,7 +29,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -751,7 +751,7 @@ func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
 			route.ExternalIDs[types.UDNEnabledServiceExternalID] == key
 	}
 
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	var err error
 	if c.netInfo.TopologyType() == types.Layer2Topology {
 		for _, node := range c.nodeInfos {
@@ -785,7 +785,7 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 			a.Nexthop == b.Nexthop
 
 	}
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	for _, nodeInfo := range c.nodeInfos {
 		var mgmtPortIPs []net.IP
 		for _, subnet := range nodeInfo.podSubnets {

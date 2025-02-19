@@ -11,7 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -190,7 +190,7 @@ func Cleanup(nbClient libovsdbclient.Client) error {
 }
 
 func (m *Manager) setSamplingAppIDs() error {
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	var err error
 	for _, appConfig := range []struct {
 		id      int

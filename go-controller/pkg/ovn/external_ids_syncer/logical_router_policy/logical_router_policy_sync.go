@@ -10,7 +10,7 @@ import (
 	utilsnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -86,7 +86,7 @@ func (syncer *LRPSyncer) syncEgressIPReRoutes() error {
 	}
 
 	err = batching.Batch[*nbdb.LogicalRouterPolicy](50, lrpList, func(_ []*nbdb.LogicalRouterPolicy) error {
-		var ops []libovsdb.Operation
+		var ops []ovsdb.Operation
 		for _, lrp := range lrpList {
 			eipName := lrp.ExternalIDs["name"]
 			podIP := extractIPFromEIPReRouteMatch(lrp.Match)
@@ -236,7 +236,7 @@ func (syncer *LRPSyncer) syncEgressIPNoReroutePodToJoin(v4ClusterSubnets, v6Clus
 		}
 		return fmt.Errorf("failed to find Logical Router Policies for %s: %v", ovntypes.OVNClusterRouter, err)
 	}
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	for _, lrp := range lrpList {
 		ipNets := extractCIDRs(lrp.Match)
 		if len(ipNets) != 2 {
@@ -280,7 +280,7 @@ func (syncer *LRPSyncer) syncEgressIPNoReroutePodToPod(v4ClusterSubnets, v6Clust
 		}
 		return err
 	}
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	for _, lrp := range lrpList {
 		ipNets := extractCIDRs(lrp.Match)
 		if len(ipNets) != 2 {
@@ -329,7 +329,7 @@ func (syncer *LRPSyncer) syncEgressIPNoReroutePodToNode() error {
 		}
 		return err
 	}
-	var ops []libovsdb.Operation
+	var ops []ovsdb.Operation
 	for _, lrp := range lrpList {
 		isIPV6 := strings.Contains(lrp.Match, string(v6IPFamilyValue))
 		ipFamily := getIPFamily(isIPV6)
