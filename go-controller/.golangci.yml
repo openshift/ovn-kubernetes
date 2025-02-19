@@ -1,9 +1,9 @@
-run:
-  skip-dirs:
+issues:
+  exclude-dirs:
     - vendor
     - pkg/crd
 
-  skip-files:
+  exclude-files:
     # TODO: lint test files as well
     - ".*\\_test.go$"
 
