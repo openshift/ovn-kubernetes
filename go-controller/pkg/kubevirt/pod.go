@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
@@ -483,36 +484,44 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 }
 
 func ReconcileIPv4DefaultGatewayAfterLiveMigration(watchFactory *factory.WatchFactory, netInfo util.NetInfo, liveMigrationStatus *LiveMigrationStatus, interfaceName string) error {
+	klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration")
 	if liveMigrationStatus.State != LiveMigrationTargetDomainReady {
+		klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, target domain not ready")
 		return nil
 	}
-
+	klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, 1")
 	targetNode, err := watchFactory.GetNode(liveMigrationStatus.TargetPod.Spec.NodeName)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed reconciling virtual machine ipv4 gateway when retrieving node %q: %w", liveMigrationStatus.TargetPod.Spec.NodeName, err)
 	}
 
+	klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, 2")
 	lrpJoinAddress, err := util.ParseNodeGatewayRouterJoinNetwork(targetNode, netInfo.GetNetworkName())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed reconciling virtual machine ipv4 gateway when parsing node join network to compute mac, node %q, network %q: %w", targetNode, netInfo.GetNetworkName(), err)
 	}
 
+	klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, 3")
 	lrpJoinIPv4, _, err := net.ParseCIDR(lrpJoinAddress.IPv4)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed reconciling virtual machine ipv4 gateway when parsing join ipv4 address: %w", err)
 	}
 
+	klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, 4")
 	lrpMAC := util.IPAddrToHWAddr(lrpJoinIPv4)
 	for _, subnet := range netInfo.Subnets() {
 		gwIP := util.GetNodeGatewayIfAddr(subnet.CIDR).IP.To4()
+		klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, gwIP: %+v, 5", gwIP)
 		if gwIP == nil {
 			continue
 		}
 		garp := util.GARP{IP: gwIP, MAC: &lrpMAC}
+		klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, gwIP: %+v, 6", gwIP)
 		if err := util.BroadcastGARP(interfaceName, garp); err != nil {
-			return err
+			return fmt.Errorf("failed reconciling virtual machine ipv4 gateway when broadcasting GARP %+v to %q: %w", garp, interfaceName, err)
 		}
 	}
+	klog.Infof("DELETEME, ReconcileIPv4DefaultGatewayAfterLiveMigration, gwIP: %+v, 7")
 
 	return nil
 }

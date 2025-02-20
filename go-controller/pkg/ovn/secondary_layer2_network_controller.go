@@ -188,11 +188,13 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 	case factory.PodType:
 		newPod := newObj.(*corev1.Pod)
 		oldPod := oldObj.(*corev1.Pod)
+		klog.Infof("DELETEME, UpdateResource, pod: %s/%s", newPod.Namespace, newPod.Name)
 		if err := h.oc.ensurePodForSecondaryNetwork(newPod, shouldAddPort(oldPod, newPod, inRetryCache)); err != nil {
-			return err
+			return fmt.Errorf("failed reconciling pod '%s/%s' at layer2 controller for network %q: %w", newPod.Namespace, newPod.Name, h.oc.GetNetworkName(), err)
 		}
 
 		if h.oc.isPodScheduledinLocalZone(newPod) {
+			klog.Infof("DELETEME, UpdateResource, pod: %s/%s, isPodScheduledinLocalZone", newPod.Namespace, newPod.Name)
 			return h.oc.updateLocalPodEvent(newPod)
 		}
 		return nil
@@ -838,11 +840,14 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 }
 
 func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod) error {
+	klog.Infof("DELETEME, updateLocalPodEvent, pod: %s/%s", pod.Namespace, pod.Name)
 	if kubevirt.IsPodAllowedForMigration(pod, oc.GetNetInfo()) {
+		klog.Infof("DELETEME, updateLocalPodEvent, pod: %s/%s, IsPodAllowedForMigration", pod.Namespace, pod.Name)
 		kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(oc.watchFactory, pod)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed discovering live migration status during local pod '%s/%s' update: %w", pod.Namespace, pod.Name, err)
 		}
+		klog.Infof("DELETEME, updateLocalPodEvent, pod: %s/%s, kubevirtLiveMigrationStatus: %+v", pod.Namespace, pod.Name, kubevirtLiveMigrationStatus)
 		if kubevirtLiveMigrationStatus != nil && kubevirtLiveMigrationStatus.TargetPod.Name == pod.Name {
 			if err := oc.reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus); err != nil {
 				return err
@@ -853,15 +858,17 @@ func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod)
 }
 
 func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
+	klog.Infof("DELETEME, reconcileLiveMigrationTargetZone, kubevirtLiveMigrationStatus: %+v", kubevirtLiveMigrationStatus)
 	// Only primary networks has a gateway to reconcile
 	if !oc.IsPrimaryNetwork() {
 		return nil
 	}
 	mgmtInterfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID()))
+	klog.Infof("DELETEME, reconcileLiveMigrationTargetZone, kubevirtLiveMigrationStatus: %+v, IsPrimaryNetwork, mgmtInterfaceName: %s", kubevirtLiveMigrationStatus, mgmtInterfaceName)
 
 	if hasIPv4Subnet, _ := oc.IPMode(); hasIPv4Subnet {
 		if err := kubevirt.ReconcileIPv4DefaultGatewayAfterLiveMigration(oc.watchFactory, oc.GetNetInfo(), kubevirtLiveMigrationStatus, mgmtInterfaceName); err != nil {
-			return err
+			return fmt.Errorf("failed reconciling live migration target zone: %w", err)
 		}
 	}
 	return nil
