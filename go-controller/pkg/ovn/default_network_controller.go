@@ -999,7 +999,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		// |--------------------+-------------------+-------------------------------------------------+
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, types.DefaultNetworkName)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, types.DefaultNetworkName)
+		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, types.DefaultNetworkName)
 		var aggregatedErrors []error
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
@@ -1007,13 +1007,12 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				// determine what actually changed in this update
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChange
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-				mgmtSync := failed || macAddressChanged(oldNode, newNode, types.DefaultNetworkName) || nodeSubnetChanged
+				mgmtSync := failed || nodeSubnetChange
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
-				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
-					nodeGatewayMTUSupportChanged(oldNode, newNode))
+				gwSync := failed || gatewayChanged(oldNode, newNode) || nodeSubnetChange ||
+					hostCIDRsChanged(oldNode, newNode) || nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
@@ -1047,7 +1046,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
 			// Also check if the node is used to be a hybrid overlay node
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged || primaryAddrChanged(oldNode, newNode) || switchToOvnNode
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChange || zoneClusterChanged || primaryAddrChanged(oldNode, newNode) || switchToOvnNode
 			if syncZoneIC {
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)

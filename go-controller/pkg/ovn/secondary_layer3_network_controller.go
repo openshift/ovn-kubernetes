@@ -167,22 +167,22 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.GetNetworkName())
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
+		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChange
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-				syncMgmtPort := failed || macAddressChanged(oldNode, newNode, h.oc.GetNetworkName()) || nodeSubnetChanged
+				syncMgmtPort := failed || nodeSubnetChange
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 				syncGw := failed ||
 					gatewayChanged(oldNode, newNode) ||
-					nodeSubnetChanged ||
+					nodeSubnetChange ||
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, failed = h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
@@ -215,7 +215,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChange || zoneClusterChanged
 			if syncZoneIC {
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)

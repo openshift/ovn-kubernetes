@@ -415,22 +415,11 @@ func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
 	return util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 }
 
-// macAddressChanged() compares old annotations to new and returns true if something has changed.
-func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
-	var oldMacAddress, newMacAddress map[string]json.RawMessage
-
-	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OvnNodeManagementPortMacAddresses]), &oldMacAddress); err != nil {
-		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
-		return false
-	}
-	if err := json.Unmarshal([]byte(node.Annotations[util.OvnNodeManagementPortMacAddresses]), &newMacAddress); err != nil {
-		klog.Errorf("Failed to unmarshal new node %s annotation: %v", node.Name, err)
-		return false
-	}
-	return !bytes.Equal(oldMacAddress[netName], newMacAddress[netName])
-}
-
 func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
+	if !util.NodeSubnetAnnotationChanged(oldNode, node) {
+		return false
+	}
+
 	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, node, netName)
 }
 
