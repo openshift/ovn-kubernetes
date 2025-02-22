@@ -13,7 +13,7 @@ RUN dnf install -y --nodocs \
 	dnf clean all
 
 ARG ovsver=3.4.0-18.el9fdp
-ARG ovnver=24.03.2-32.el9fdp
+ARG ovnver=24.03.4-53.el9fdp
 # NOTE: Ensure that the versions of OVS and OVN are overriden for OKD in each of the subsequent layers.
 ARG ovsver_okd=3.4.0-0.8.el9s
 ARG ovnver_okd=24.03.1-5.el9s
