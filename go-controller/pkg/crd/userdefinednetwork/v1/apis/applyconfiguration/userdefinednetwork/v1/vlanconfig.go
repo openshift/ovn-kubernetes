@@ -17,10 +17,14 @@ limitations under the License.
 
 package v1
 
+import (
+	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+)
+
 // VLANConfigApplyConfiguration represents a declarative configuration of the VLANConfig type for use
 // with apply.
 type VLANConfigApplyConfiguration struct {
-	Mode   *string                             `json:"mode,omitempty"`
+	Mode   *userdefinednetworkv1.VLANMode      `json:"mode,omitempty"`
 	Access *AccessVLANConfigApplyConfiguration `json:"access,omitempty"`
 }
 
@@ -33,7 +37,7 @@ func VLANConfig() *VLANConfigApplyConfiguration {
 // WithMode sets the Mode field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Mode field is set to the value of the last call.
-func (b *VLANConfigApplyConfiguration) WithMode(value string) *VLANConfigApplyConfiguration {
+func (b *VLANConfigApplyConfiguration) WithMode(value userdefinednetworkv1.VLANMode) *VLANConfigApplyConfiguration {
 	b.Mode = &value
 	return b
 }
