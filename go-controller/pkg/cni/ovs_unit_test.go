@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
+	kexec "k8s.io/utils/exec"
+
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
-	"github.com/stretchr/testify/assert"
-	kexec "k8s.io/utils/exec"
 )
 
 func TestSetExec(t *testing.T) {

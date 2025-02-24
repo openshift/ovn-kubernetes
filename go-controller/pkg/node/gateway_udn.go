@@ -6,14 +6,14 @@ import (
 	"net"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"github.com/vishvananda/netlink"
+
+	corev1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/knftables"
-
-	"github.com/vishvananda/netlink"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
@@ -50,7 +50,7 @@ type UserDefinedNetworkGateway struct {
 	// stores the networkID of this network
 	networkID int
 	// node that its programming things on
-	node          *v1.Node
+	node          *corev1.Node
 	nodeLister    listers.NodeLister
 	kubeInterface kube.Interface
 	// vrf manager that creates and manages vrfs for all UDNs
@@ -190,7 +190,7 @@ func setBridgeNetworkOfPorts(bridge *bridgeConfiguration, netName string) error 
 	return netConfig.setBridgeNetworkOfPortsInternal()
 }
 
-func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *v1.Node, nodeLister listers.NodeLister,
+func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *corev1.Node, nodeLister listers.NodeLister,
 	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller, ruleManager *iprulemanager.Controller,
 	defaultNetworkGateway Gateway) (*UserDefinedNetworkGateway, error) {
 	// Generate a per network conntrack mark and masquerade IPs to be used for egress traffic.

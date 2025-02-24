@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
@@ -19,27 +21,23 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	cm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
-	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
-
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
@@ -228,7 +226,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -404,7 +402,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
@@ -716,7 +714,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
@@ -896,7 +894,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			err = clusterManager.Start(c)
@@ -1191,7 +1189,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = clusterManager.Start(c)
@@ -1404,7 +1402,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			c, cancel := context.WithCancel(ctx.Context)
 			defer cancel()
-			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", wg, nil)
+			clusterManager, err := cm.NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", nil)
 			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = clusterManager.Start(c)

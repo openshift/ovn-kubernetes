@@ -7,10 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-
 	"github.com/stretchr/testify/assert"
+
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -19,6 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
 var (

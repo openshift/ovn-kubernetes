@@ -189,7 +189,7 @@ func (zic *ZoneInterconnectHandler) ensureTransitSwitch(nodes []*corev1.Node) er
 	// if not set yet, let's retry for a bit
 	if util.IsAnnotationNotSetError(err) {
 		maxTimeout := 2 * time.Minute
-		err = wait.PollUntilContextTimeout(context.Background(), 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(context.Background(), 250*time.Millisecond, maxTimeout, true, func(_ context.Context) (bool, error) {
 			var err error
 			networkID, err = zic.getNetworkId()
 			if util.IsAnnotationNotSetError(err) {
@@ -245,13 +245,7 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
 	}
 
-	// Get the chassis id.
-	chassisId, err := util.ParseNodeChassisIDAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w", node.Name, types.NewSuppressedError(err))
-	}
-
-	if err := zic.createRemoteZoneNodeResources(node, nodeID, chassisId); err != nil {
+	if err := zic.createRemoteZoneNodeResources(node, nodeID); err != nil {
 		return fmt.Errorf("creating interconnect resources for remote zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
 	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
@@ -444,7 +438,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 //     if the node name is ovn-worker and the network name is blue, the logical port name would be - blue.tstor.ovn-worker
 //   - binds the remote port to the node remote chassis in SBDB
 //   - adds static routes for the remote node via the remote port ip in the ovn_cluster_router
-func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int, chassisId string) error {
+func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int) error {
 	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
 	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
 		err = fmt.Errorf("failed to get the node transit switch port IP addresses : %w", err)

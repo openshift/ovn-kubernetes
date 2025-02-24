@@ -52,9 +52,9 @@ jobs:
       id: go
 
     - name: Verify
-      uses: golangci/golangci-lint-action@v4
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.56.1
+        version: v1.59.1
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 

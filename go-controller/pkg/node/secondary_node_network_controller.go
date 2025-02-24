@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"sync"
 
+	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/klog/v2"
-	"k8s.io/utils/ptr"
 )
 
 // SecondaryNodeNetworkController structure is the object which holds the controls for starting
@@ -68,7 +68,7 @@ func NewSecondaryNodeNetworkController(
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
-func (nc *SecondaryNodeNetworkController) Start(ctx context.Context) error {
+func (nc *SecondaryNodeNetworkController) Start(_ context.Context) error {
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
 
 	// enable adding ovs ports for dpu pods in both primary and secondary user defined networks

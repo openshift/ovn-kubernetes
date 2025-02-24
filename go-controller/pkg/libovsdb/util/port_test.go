@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/stretchr/testify/assert"
+
 	utilpointer "k8s.io/utils/pointer"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
 const (

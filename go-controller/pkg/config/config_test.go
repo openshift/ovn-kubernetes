@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
+
 	kexec "k8s.io/utils/exec"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 )
 
 func TestConfig(t *testing.T) {
@@ -1933,7 +1934,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					Mode: types.NodeModeDPU,
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			err := buildOvnKubeNodeConfig(&cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
 		})
@@ -1946,7 +1947,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPUHost))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
@@ -1959,7 +1960,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					Mode: "invalid",
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("unexpected ovnkube-node-mode"))
 		})
@@ -1971,7 +1972,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					Mode: types.NodeModeDPU,
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring(
 				"hybrid overlay is not supported with ovnkube-node mode"))
@@ -1984,7 +1985,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					MgmtPortNetdev: "enp1s0f0v0",
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided"))
 		})
@@ -1995,7 +1996,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					Mode: types.NodeModeDPUHost,
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
 		})
@@ -2012,7 +2013,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					Mode: types.NodeModeFull,
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			err := buildOvnKubeNodeConfig(&cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
 
@@ -2028,7 +2029,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 					Mode: types.NodeModeFull,
 				},
 			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			err := buildOvnKubeNodeConfig(&cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
 	})

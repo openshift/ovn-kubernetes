@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/mocks"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/mocks"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 type clientOutput struct {

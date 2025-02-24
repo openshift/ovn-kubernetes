@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
-
-	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -370,7 +370,7 @@ func getNetworkAllocationUDNCondition(errorNode string) *metav1.Condition {
 //   - initializes the node allocator and starts listening to node events
 //   - initializes the persistent ip allocator and starts listening to IPAMClaim events
 //   - initializes the pod ip allocator and starts listening to pod events
-func (ncc *networkClusterController) Start(ctx context.Context) error {
+func (ncc *networkClusterController) Start(_ context.Context) error {
 	start := time.Now()
 	klog.Infof("Initializing cluster manager network controller %q ...", ncc.GetNetworkName())
 	err := ncc.init()
@@ -491,7 +491,7 @@ type networkClusterControllerEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
-func (h *networkClusterControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *networkClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
 	return false
 }
 
@@ -499,7 +499,7 @@ func (h *networkClusterControllerEventHandler) FilterOutResource(obj interface{}
 
 // AddResource adds the specified object to the cluster according to its type and
 // returns the error, if any, yielded during object creation.
-func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, _ bool) error {
 	var err error
 
 	switch h.objType {
@@ -539,7 +539,7 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, from
 // UpdateResource updates the specified object in the cluster to its version in newObj according
 // to its type and returns the error, if any, yielded during the object update.
 // The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	var err error
 
 	switch h.objType {
@@ -582,7 +582,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network policies.
-func (h *networkClusterControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *networkClusterControllerEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
 	case factory.PodType:
 		pod, ok := obj.(*corev1.Pod)

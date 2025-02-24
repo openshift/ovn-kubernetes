@@ -5,8 +5,9 @@ import (
 	"net"
 	"testing"
 
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	utilnet "k8s.io/utils/net"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
 const testNodeName string = "test"

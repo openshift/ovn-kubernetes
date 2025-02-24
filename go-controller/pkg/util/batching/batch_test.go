@@ -2,11 +2,10 @@ package batching
 
 import (
 	"fmt"
-
-	"github.com/onsi/gomega"
-
 	"strings"
 	"testing"
+
+	"github.com/onsi/gomega"
 )
 
 type batchTestData struct {

@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -29,9 +32,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 )
 
 // method/structure shared by all layer 2 network controller, including localnet and layer2 network controllres.
@@ -89,7 +89,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) RecordSuccessEvent(obj in
 }
 
 // RecordErrorEvent records the error event on this given object.
-func (h *secondaryLayer2NetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
+func (h *secondaryLayer2NetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
@@ -390,7 +390,7 @@ func NewSecondaryLayer2NetworkController(
 }
 
 // Start starts the secondary layer2 controller, handles all events and creates all needed logical entities
-func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
+func (oc *SecondaryLayer2NetworkController) Start(_ context.Context) error {
 	klog.Infof("Starting controller for secondary network %s", oc.GetNetworkName())
 
 	start := time.Now()
@@ -398,7 +398,7 @@ func (oc *SecondaryLayer2NetworkController) Start(ctx context.Context) error {
 		klog.Infof("Starting controller for secondary network %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
-	if err := oc.Init(); err != nil {
+	if err := oc.init(); err != nil {
 		return err
 	}
 
@@ -460,7 +460,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) Init() error {
+func (oc *SecondaryLayer2NetworkController) init() error {
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
@@ -573,14 +573,13 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 					nil,
 					gwConfig.hostSubnets,
 					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
-					oc.SCTPSupport,
-					nil, // no need for ovnClusterLRPToJoinIfAddrs
+					nil,                   // no need for ovnClusterLRPToJoinIfAddrs
 					gwConfig.externalIPs,
 				); err != nil {
 					errs = append(errs, err)
 					oc.gatewaysFailed.Store(node.Name, true)
 				} else {
-					if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, node); err != nil {
+					if err := oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName); err != nil {
 						errs = append(errs, err)
 						oc.gatewaysFailed.Store(node.Name, true)
 					} else {
@@ -733,9 +732,9 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string, node *corev1.Node) error {
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
 	if err != nil {
 		return err
 	}

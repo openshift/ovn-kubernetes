@@ -16,7 +16,8 @@ import (
 	frrtypes "github.com/metallb/frr-k8s/api/v1beta1"
 	frrclientset "github.com/metallb/frr-k8s/pkg/client/clientset/versioned"
 	frrlisters "github.com/metallb/frr-k8s/pkg/client/listers/api/v1beta1"
-	core "k8s.io/api/core/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -140,9 +141,9 @@ func NewController(
 	}
 	c.nadController = controllerutil.NewController("clustermanager routeadvertisements nad controller", nadConfig)
 
-	nodeConfig := &controllerutil.ControllerConfig[core.Node]{
+	nodeConfig := &controllerutil.ControllerConfig[corev1.Node]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile:      func(key string) error { c.raController.ReconcileAll(); return nil },
+		Reconcile:      func(_ string) error { c.raController.ReconcileAll(); return nil },
 		Threadiness:    1,
 		Informer:       wf.NodeCoreInformer().Informer(),
 		Lister:         wf.NodeCoreInformer().Lister().List,
@@ -185,7 +186,7 @@ func (c *Controller) Stop() {
 	klog.Infof("Cluster manager routeadvertisements stoppedu")
 }
 
-func (c *Controller) ReconcileNetwork(name string, old, new util.NetInfo) {
+func (c *Controller) ReconcileNetwork(_ string, old, new util.NetInfo) {
 	// This controller already listens on NAD events however we skip NADs
 	// pointing to networks that network manager is still not aware of; so we
 	// only need to signal the reconciliation of new networks. Reconcile one of
@@ -1034,7 +1035,7 @@ func nadNeedsUpdate(oldObj, newObj *nadtypes.NetworkAttachmentDefinition) bool {
 		oldObj.Annotations[types.OvnRouteAdvertisementsKey] != newObj.Annotations[types.OvnRouteAdvertisementsKey]
 }
 
-func nodeNeedsUpdate(oldObj, newObj *core.Node) bool {
+func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
 	return oldObj == nil || newObj == nil ||
 		!reflect.DeepEqual(oldObj.Labels, newObj.Labels) ||
 		util.NodeSubnetAnnotationChanged(oldObj, newObj)
@@ -1115,7 +1116,7 @@ func (c *Controller) reconcileNAD(key string) error {
 	return nil
 }
 
-func (c *Controller) reconcileEgressIP(eipName string) error {
+func (c *Controller) reconcileEgressIP(_ string) error {
 	// reconcile RAs that advertise EIPs
 	ras, err := c.raLister.List(labels.Everything())
 	if err != nil {
