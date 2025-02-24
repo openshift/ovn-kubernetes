@@ -59,6 +59,8 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:EgressFirewall] Status manager validation Should validate the egress firewall status when adding an unknown zone": "[Disabled:Unimplemented]",
 
+	"[ovn-kubernetes][Feature:EgressFirewall] policy validation with external containers Should validate that egressfirewall supports DNS name in caps": "[Disabled:Unimplemented]",
+
 	"[ovn-kubernetes][Feature:EgressFirewall] policy validation with external containers Should validate the egress firewall allows inbound connections": "[Disabled:Unimplemented]",
 
 	"[ovn-kubernetes][Feature:EgressFirewall] policy validation with external containers Should validate the egress firewall doesn't affect internal connections": "[Disabled:Unimplemented]",
@@ -67,73 +69,185 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:EgressFirewall] policy validation with external containers Should validate the egress firewall policy functionality for allowed IP": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [OVN network] multiple namespaces sharing a primary networks": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 CDN of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Cluster Default Network of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [OVN network] multiple namespaces sharing a primary networks": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:EgressIP] L3 UDN role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:EgressIP] Network Segmentation: IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
 	"[ovn-kubernetes][Feature:EgressQos] Should deny resources with bad values": "[Disabled:Unimplemented]",
 
@@ -355,129 +469,105 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:Interconnect] Multi node zones Pod interconnectivity": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with default pod network when live migration with pre-copy fails, should keep connectivity": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network featuring `excludeCIDR`s": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with default pod network when live migration with pre-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with a dual stack configuration": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with an IPv6 subnet": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network without IPAM": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/localnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network with IPv6 network": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an Localnet - switched - network featuring `excludeCIDR`s": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/localnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network with an IPv6 subnet": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network without IPAM": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:KubeVirt] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/localnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network with `excludeCIDR`s": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network without IPAM": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network when the pods are scheduled in different nodes": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with a dual stack configuration": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with an IPv6 subnet when pods are scheduled in different nodes": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network without IPAM, with static IPs configured via network selection elements": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with IPv6 subnet": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with a dual stack configuration": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network when the pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network eventually configures pods that were added to an already existing network before the nad": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay can communicate over a localnet secondary network from pod to the underlay service": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress allow all": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress deny all": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, egress allow all, ingress policy should have no impact on egress": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, ingress policy should have no impact on egress": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay with multi network policy blocking the traffic can not communicate over a localnet secondary network from pod to the underlay service": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a trunked configuration the same bridge mapping can be shared by a separate VLAN by using the physical network name attribute": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, ingress allow-all": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, should not affect ingress": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is ingress allow-all": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress deny all policies for a localnet topology when the multi-net policy is ingress deny-all": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for an IPAMless pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
 
 	"[ovn-kubernetes][Feature:Multicast] when multicast enabled for namespace should be able to receive multicast IGMP query": "[Disabled:Unimplemented]",
 
 	"[ovn-kubernetes][Feature:Multicast] when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network featuring `excludeCIDR`s": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with a dual stack configuration": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with an IPv6 subnet": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network without IPAM": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network with IPv6 network": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an Localnet - switched - network featuring `excludeCIDR`s": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network with an IPv6 subnet": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network without IPAM": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network with `excludeCIDR`s": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network without IPAM": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network when the pods are scheduled in different nodes": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with a dual stack configuration": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with an IPv6 subnet when pods are scheduled in different nodes": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network without IPAM, with static IPs configured via network selection elements": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with IPv6 subnet": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with a dual stack configuration": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network when the pods are scheduled on different nodes": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on different nodes": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay can communicate over a localnet secondary network from pod to the underlay service": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress allow all": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress deny all": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, egress allow all, ingress policy should have no impact on egress": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, ingress policy should have no impact on egress": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay with multi network policy blocking the traffic can not communicate over a localnet secondary network from pod to the underlay service": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a trunked configuration the same bridge mapping can be shared by a separate VLAN by using the physical network name attribute": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, ingress allow-all": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, should not affect ingress": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is ingress allow-all": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress deny all policies for a localnet topology when the multi-net policy is ingress deny-all": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
-
-	"[ovn-kubernetes][Feature:NetworkAttachmentDefinition] Multi Homing multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for an IPAMless pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
 
 	"[ovn-kubernetes][Feature:NetworkPolicy] ACL Logging the logs have the expected log level": "[Disabled:Unimplemented]",
 
@@ -499,9 +589,9 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller when namespace-selector is mutated should delete managed NAD in namespaces that no longer apply to namespace-selector": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L2 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L2 secondary UDN": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L3 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L3 secondary UDN": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
 
@@ -511,9 +601,9 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L2 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L2 secondary UDN": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L3 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L3 secondary UDN": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
 
@@ -531,6 +621,10 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] Network Policies on a user defined primary network pods within namespace should be isolated when deny policy is present in L3 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
 
+	"[ovn-kubernetes][Feature:NetworkSegmentation] Sync perform east/west traffic between nodes following OVN Kube node pod restart L2": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation] Sync perform east/west traffic between nodes following OVN Kube node pod restart L3": "[Suite:openshift/conformance/parallel]",
+
 	"[ovn-kubernetes][Feature:NetworkSegmentation] UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
@@ -538,6 +632,12 @@ var Annotations = map[string]string{
 	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network should create NetworkAttachmentDefinition according to spec": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network should delete NetworkAttachmentDefinition when UserDefinedNetwork is deleted": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should be able to create pod and it will attach to the cluster default network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and add the UDN label": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller should correctly report subsystem error on node subnet allocation": "[Suite:openshift/conformance/parallel]",
 
@@ -589,6 +689,8 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
 
+	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network doesn't cause network name conflict": "[Suite:openshift/conformance/parallel]",
+
 	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer2 UDN": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer3 UDN": "[Suite:openshift/conformance/parallel]",
@@ -609,9 +711,9 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] pod2Egress on a user defined primary network created using UserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] services on a user defined primary network should be reachable through their cluster IP and node port L2 primary UDN, cluster-networked pods, NodePort service": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation] services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN, cluster-networked pods, NodePort service": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] services on a user defined primary network should be reachable through their cluster IP and node port L3 primary UDN, cluster-networked pods, NodePort service": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation] services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L3 primary UDN, cluster-networked pods, NodePort service": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] when primary network exist, ClusterUserDefinedNetwork status should report not-ready": "[Suite:openshift/conformance/parallel]",
 
@@ -702,6 +804,36 @@ var Annotations = map[string]string{
 	"[ovn-kubernetes][Feature:Unidle] With non annotated service Should not generate a NeedPods event when backends were added and then removed": "[Disabled:Unimplemented]",
 
 	"[ovn-kubernetes][Feature:Unidle] With non annotated service Should not generate a NeedPods event when has backend": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with pre-copy fails, should keep connectivity": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with pre-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with secondary/localnet": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/layer2": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/localnet": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/layer2": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/localnet": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/layer2": "[Disabled:Unimplemented]",
+
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/localnet": "[Disabled:Unimplemented]",
 
 	"e2e br-int flow monitoring export validation Should validate flow data of br-int is sent to an external gateway with netflow v5": "[Suite:openshift/conformance/parallel]",
 

@@ -675,6 +675,8 @@ github.com/mailru/easyjson v0.7.6/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJ
 github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0=
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
 github.com/marstr/guid v1.1.0/go.mod h1:74gB1z2wpxxInTG6yaqA7KrtM0NZ+RbrcqDvYHefzho=
+github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250225174021-505c2e7f57d8 h1:GdXiMYMiRTRGneHk37FI8n/ccqxTQyrA/fq1PwZoB1E=
+github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250225174021-505c2e7f57d8/go.mod h1:U/pmOEEHWgg7/ykGiCw24ZcqlU4aVOSjC7yCWOPGIho=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-isatty v0.0.4/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
 github.com/mattn/go-runewidth v0.0.2/go.mod h1:LwmH8dsx7+W8Uxz3IHJYH5QSwggIsqBzpuz5H//U1FU=
@@ -818,8 +820,6 @@ github.com/openshift/onsi-ginkgo/v2 v2.6.1-0.20241205171354-8006f302fd12 h1:AKx/
 github.com/openshift/onsi-ginkgo/v2 v2.6.1-0.20241205171354-8006f302fd12/go.mod h1:7Du3c42kxCUegi0IImZ1wUQzMBVecgIHjR1C+NkhLQo=
 github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20241008155748-956f8fa6b868 h1:mBnSZD1o4Kz2nB6WoktSsLVOdcrSdOH/mgWPVxfEykk=
 github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20241008155748-956f8fa6b868/go.mod h1:5oVtJoJgxCHohAghvIMkdQZ40XueMQeQwu+6Rk+U1Oc=
-github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250213041128-6a64865ff9b2 h1:f5vGYg4b0FrnEmIAr070/kZK/awWcxjP8zcmi6yBn4I=
-github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250213041128-6a64865ff9b2/go.mod h1:U/pmOEEHWgg7/ykGiCw24ZcqlU4aVOSjC7yCWOPGIho=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/pelletier/go-toml v1.8.1/go.mod h1:T2/BmBdy8dvIRq1a/8aqjN41wvWlN4lrapLU/GW4pbc=
 github.com/peterbourgon/diskv v2.0.1+incompatible h1:UBdAOUP5p4RWqPBg048CAvpKN+vxiaj6gdUUzhl4XmI=

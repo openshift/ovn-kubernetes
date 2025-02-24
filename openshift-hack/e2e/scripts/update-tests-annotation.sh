@@ -9,4 +9,4 @@ ROOT="$(readlink --canonicalize "$HERE/..")"
 # Update e2e test annotations that indicate openshift compatibility
 pushd "$ROOT"
 trap popd EXIT
-go generate "$ROOT/e2e_test.go"
+go generate -mod=vendor "$ROOT/e2e_test.go"

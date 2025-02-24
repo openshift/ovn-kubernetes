@@ -17,4 +17,5 @@ trap popd EXIT
 echo "Building OVN-Kubernetes tests extension binary"
 go build -v \
     -o "${OUTPUT}" \
+    -mod=vendor \
     "$ROOT/cmd/ovnk-tests-ext/"
