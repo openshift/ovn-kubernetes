@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -155,7 +156,7 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 	case userdefinednetworkv1.NetworkTopologyLocalnet:
 		cfg := spec.GetLocalnet()
 		netConfSpec.Role = strings.ToLower(string(cfg.Role))
-		netConfSpec.MTU = int(cfg.MTU)
+		netConfSpec.MTU = localnetMTU(cfg.MTU)
 		netConfSpec.AllowPersistentIPs = cfg.IPAM != nil && cfg.IPAM.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
 		netConfSpec.Subnets = cidrString(cfg.Subnets)
 		netConfSpec.ExcludeSubnets = cidrString(cfg.ExcludeSubnets)
@@ -209,6 +210,17 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		cniNetConf["vlanID"] = netConfSpec.VLANID
 	}
 	return cniNetConf, nil
+}
+
+func localnetMTU(desiredMTU int32) int {
+	// The MTU for localnet topology should be as the default MTU (1500) because the underlay
+	// is not part of the SDN and compensating for the SDN overhead (100) is not required.
+	mtu := config.Default.MTU + 100
+	if desiredMTU > 0 {
+		mtu = int(desiredMTU)
+	}
+
+	return mtu
 }
 
 func ipamEnabled(ipam *userdefinednetworkv1.IPAMConfig) bool {
