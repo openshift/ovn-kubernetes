@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/vishvananda/netlink"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
@@ -76,24 +79,32 @@ type UserDefinedNetworkGateway struct {
 	// iprules manager that creates and manages iprules for
 	// all UDNs. Must be accessed with a lock
 	ruleManager *iprulemanager.Controller
+
+	// reconcile channel to signal reconciliation of the gateway on network
+	// configuration changes
+	reconcile chan struct{}
 }
 
 // UTILS Needed for UDN (also leveraged for default netInfo) in bridgeConfiguration
 
 // getBridgePortConfigurations returns a slice of Network port configurations along with the
 // uplinkName and physical port's ofport value
-func (b *bridgeConfiguration) getBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string) {
+func (b *bridgeConfiguration) getBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string) {
 	b.Lock()
 	defer b.Unlock()
-	netConfigs := make([]bridgeUDNConfiguration, len(b.netConfig))
+	var netConfigs []*bridgeUDNConfiguration
 	for _, netConfig := range b.netConfig {
-		netConfigs = append(netConfigs, *netConfig)
+		netConfigs = append(netConfigs, netConfig.shallowCopy())
 	}
 	return netConfigs, b.uplinkName, b.ofPortPhys
 }
 
 // addNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
-func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) {
+func (b *bridgeConfiguration) addNetworkBridgeConfig(
+	nInfo util.NetInfo,
+	nodeSubnets []*net.IPNet,
+	masqCTMark, pktMark uint,
+	v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
 	b.Lock()
 	defer b.Unlock()
 
@@ -103,18 +114,22 @@ func (b *bridgeConfiguration) addNetworkBridgeConfig(nInfo util.NetInfo, masqCTM
 	_, found := b.netConfig[netName]
 	if !found {
 		netConfig := &bridgeUDNConfiguration{
-			patchPort:  patchPort,
-			masqCTMark: fmt.Sprintf("0x%x", masqCTMark),
-			pktMark:    fmt.Sprintf("0x%x", pktMark),
-			v4MasqIPs:  v4MasqIPs,
-			v6MasqIPs:  v6MasqIPs,
+			patchPort:   patchPort,
+			masqCTMark:  fmt.Sprintf("0x%x", masqCTMark),
+			pktMark:     fmt.Sprintf("0x%x", pktMark),
+			v4MasqIPs:   v4MasqIPs,
+			v6MasqIPs:   v6MasqIPs,
+			subnets:     nInfo.Subnets(),
+			nodeSubnets: nodeSubnets,
 		}
+		netConfig.advertised.Store(util.IsPodNetworkAdvertisedAtNode(nInfo, b.nodeName))
 
 		b.netConfig[netName] = netConfig
 	} else {
 		klog.Warningf("Trying to update bridge config for network %s which already"+
 			"exists in cache...networks are not mutable...ignoring update", nInfo.GetNetworkName())
 	}
+	return nil
 }
 
 // delNetworkBridgeConfig deletes the provided netInfo from the bridge configuration cache
@@ -125,7 +140,7 @@ func (b *bridgeConfiguration) delNetworkBridgeConfig(nInfo util.NetInfo) {
 	delete(b.netConfig, nInfo.GetNetworkName())
 }
 
-// getActiveNetworkBridgeConfig returns a copy of the network configuration corresponding to the
+// getActiveNetworkBridgeConfig returns a shallow copy of the network configuration corresponding to the
 // provided netInfo.
 //
 // NOTE: if the network configuration can't be found or if the network is not patched by OVN
@@ -135,8 +150,7 @@ func (b *bridgeConfiguration) getActiveNetworkBridgeConfig(networkName string) *
 	defer b.Unlock()
 
 	if netConfig, found := b.netConfig[networkName]; found && netConfig.ofPortPatch != "" {
-		result := *netConfig
-		return &result
+		return netConfig.shallowCopy()
 	}
 	return nil
 }
@@ -163,6 +177,24 @@ type bridgeUDNConfiguration struct {
 	pktMark     string
 	v4MasqIPs   *udn.MasqueradeIPs
 	v6MasqIPs   *udn.MasqueradeIPs
+	subnets     []config.CIDRNetworkEntry
+	nodeSubnets []*net.IPNet
+	advertised  atomic.Bool
+}
+
+func (netConfig *bridgeUDNConfiguration) shallowCopy() *bridgeUDNConfiguration {
+	copy := &bridgeUDNConfiguration{
+		patchPort:   netConfig.patchPort,
+		ofPortPatch: netConfig.ofPortPatch,
+		masqCTMark:  netConfig.masqCTMark,
+		pktMark:     netConfig.pktMark,
+		v4MasqIPs:   netConfig.v4MasqIPs,
+		v6MasqIPs:   netConfig.v6MasqIPs,
+		subnets:     netConfig.subnets,
+		nodeSubnets: netConfig.nodeSubnets,
+	}
+	netConfig.advertised.Store(netConfig.advertised.Load())
+	return copy
 }
 
 func (netConfig *bridgeUDNConfiguration) isDefaultNetwork() bool {
@@ -232,6 +264,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, networkID int, node *cor
 		v6MasqIPs:     v6MasqIPs,
 		gateway:       gw,
 		ruleManager:   ruleManager,
+		reconcile:     make(chan struct{}, 1),
 	}, nil
 }
 
@@ -309,14 +342,9 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
 	}
 	// create the iprules for this network
-	udnReplyIPRules, err := udng.constructUDNVRFIPRules(vrfTableId)
+	err = udng.updateUDNVRFIPRule()
 	if err != nil {
-		return fmt.Errorf("unable to get iprules for network %s, err: %v", udng.GetNetworkName(), err)
-	}
-	for _, rule := range udnReplyIPRules {
-		if err = udng.ruleManager.AddWithMetadata(rule, udng.GetNetworkRuleMetadata()); err != nil {
-			return fmt.Errorf("unable to create iprule %v for network %s, err: %v", rule, udng.GetNetworkName(), err)
-		}
+		return fmt.Errorf("failed to update IP rules for network %s: %w", udng.GetNetworkName(), err)
 	}
 	// add loose mode for rp filter on management port
 	mgmtPortName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
@@ -324,7 +352,13 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 		return fmt.Errorf("could not set loose mode for reverse path filtering on management port %s: %v", mgmtPortName, err)
 	}
 	if udng.openflowManager != nil {
-		udng.openflowManager.addNetwork(udng.NetInfo, udng.masqCTMark, udng.pktMark, udng.v6MasqIPs, udng.v4MasqIPs)
+		nodeSubnets, err := udng.getLocalSubnets()
+		if err != nil {
+			return fmt.Errorf("failed to get node subnets for network %s: %w", udng.GetNetworkName(), err)
+		}
+		if err = udng.openflowManager.addNetwork(udng.NetInfo, nodeSubnets, udng.masqCTMark, udng.pktMark, udng.v6MasqIPs, udng.v4MasqIPs); err != nil {
+			return fmt.Errorf("could not add network %s: %v", udng.GetNetworkName(), err)
+		}
 
 		waiter := newStartupWaiterWithTimeout(waitForPatchPortTimeout)
 		readyFunc := func() (bool, error) {
@@ -341,7 +375,7 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return true, nil
 		}
 		postFunc := func() error {
-			if err := udng.Reconcile(); err != nil {
+			if err := udng.gateway.Reconcile(); err != nil {
 				return fmt.Errorf("failed to reconcile flows on bridge for network %s; error: %v", udng.GetNetworkName(), err)
 			}
 			return nil
@@ -357,6 +391,10 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err := udng.addMarkChain(); err != nil {
 		return fmt.Errorf("failed to add the service masquerade chain: %w", err)
 	}
+
+	// run gateway reconciliation loop on network configuration changes
+	udng.run()
+
 	return nil
 }
 
@@ -367,6 +405,8 @@ func (udng *UserDefinedNetworkGateway) GetNetworkRuleMetadata() string {
 // DelNetwork will be responsible to remove all plumbings
 // used by this UDN on the gateway side
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
+	close(udng.reconcile)
+
 	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
 	// delete the iprules for this network
 	if err := udng.ruleManager.DeleteWithMetadata(udng.GetNetworkRuleMetadata()); err != nil {
@@ -379,7 +419,7 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	// delete the openflows for this network
 	if udng.openflowManager != nil {
 		udng.openflowManager.delNetwork(udng.NetInfo)
-		if err := udng.Reconcile(); err != nil {
+		if err := udng.gateway.Reconcile(); err != nil {
 			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
 		}
 	}
@@ -654,30 +694,59 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 
 // constructUDNVRFIPRules constructs rules that redirect matching packets
 // into the corresponding UDN VRF routing table.
-// Example:
+// If the network is not advertised, an example of the rules we set for a
+// network is:
 // 2000:   from all fwmark 0x1001 lookup 1007
 // 2000:   from all to 169.254.0.12 lookup 1007
 // 2000:   from all fwmark 0x1002 lookup 1009
 // 2000:   from all to 169.254.0.14 lookup 1009
-func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(vrfTableId int) ([]netlink.Rule, error) {
-	var ipRules []netlink.Rule
+// If the network is advertised, an example of the rules we set for a network is:
+// 2000:	from all fwmark 0x1001 lookup 1007
+// 2000:	from all to 10.132.0.0/14 lookup 1007
+// 2000:	from all fwmark 0x1001 lookup 1009
+// 2000:	from all to 10.134.0.0/14 lookup 1009
+func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(vrfTableId int) ([]netlink.Rule, []netlink.Rule, error) {
+	var addIPRules []netlink.Rule
+	var delIPRules []netlink.Rule
+	var masqIPRules []netlink.Rule
+	var subnetIPRules []netlink.Rule
+	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
 	masqIPv4, err := udng.getV4MasqueradeIP()
 	if err != nil {
-		return nil, err
-	}
-	if masqIPv4 != nil {
-		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, false, uint(vrfTableId)))
-		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
+		return nil, nil, err
 	}
 	masqIPv6, err := udng.getV6MasqueradeIP()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	if masqIPv4 != nil {
+		addIPRules = append(addIPRules, generateIPRuleForPacketMark(udng.pktMark, false, uint(vrfTableId)))
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv4.IP, false, uint(vrfTableId)))
+		for _, subnet := range udng.Subnets() {
+			if utilnet.IsIPv4CIDR(subnet.CIDR) {
+				subnetIPRules = append(subnetIPRules, generateIPRuleForUDNSubnet(subnet.CIDR, false, uint(vrfTableId)))
+			}
+		}
 	}
 	if masqIPv6 != nil {
-		ipRules = append(ipRules, generateIPRuleForPacketMark(udng.pktMark, true, uint(vrfTableId)))
-		ipRules = append(ipRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
+		addIPRules = append(addIPRules, generateIPRuleForPacketMark(udng.pktMark, true, uint(vrfTableId)))
+		masqIPRules = append(masqIPRules, generateIPRuleForMasqIP(masqIPv6.IP, true, uint(vrfTableId)))
+		for _, subnet := range udng.Subnets() {
+			if utilnet.IsIPv6CIDR(subnet.CIDR) {
+				subnetIPRules = append(subnetIPRules, generateIPRuleForUDNSubnet(subnet.CIDR, true, uint(vrfTableId)))
+			}
+		}
 	}
-	return ipRules, nil
+	switch {
+	case !isNetworkAdvertised:
+		addIPRules = append(addIPRules, masqIPRules...)
+		delIPRules = append(delIPRules, subnetIPRules...)
+	default:
+		addIPRules = append(addIPRules, subnetIPRules...)
+		delIPRules = append(delIPRules, masqIPRules...)
+	}
+	return addIPRules, delIPRules, nil
 }
 
 func generateIPRuleForPacketMark(mark uint, isIPv6 bool, vrfTableId uint) netlink.Rule {
@@ -703,6 +772,18 @@ func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlin
 	return r
 }
 
+func generateIPRuleForUDNSubnet(udnIP *net.IPNet, isIPv6 bool, vrfTableId uint) netlink.Rule {
+	r := *netlink.NewRule()
+	r.Table = int(vrfTableId)
+	r.Priority = UDNMasqueradeIPRulePriority
+	r.Family = netlink.FAMILY_V4
+	if isIPv6 {
+		r.Family = netlink.FAMILY_V6
+	}
+	r.Dst = udnIP
+	return r
+}
+
 func addRPFilterLooseModeForManagementPort(mgmtPortName string) error {
 	// update the reverse path filtering options for ovn-k8s-mpX interface to avoid dropping packets with masqueradeIP
 	// coming out of managementport interface
@@ -714,6 +795,87 @@ func addRPFilterLooseModeForManagementPort(mgmtPortName string) error {
 	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", mgmtPortName, rpFilterLooseMode) {
 		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
 			mgmtPortName, stdout, stderr, err)
+	}
+	return nil
+}
+
+func (udng *UserDefinedNetworkGateway) run() {
+	go func() {
+		for range udng.reconcile {
+			err := retry.OnError(
+				wait.Backoff{
+					Duration: 10 * time.Millisecond,
+					Steps:    4,
+					Factor:   5.0,
+				},
+				func(error) bool {
+					select {
+					case _, open := <-udng.reconcile:
+						return open
+					default:
+						return true
+					}
+				},
+				udng.doReconcile,
+			)
+			if err != nil {
+				klog.Errorf("Failed to reconcile gateway for network %s: %v", udng.GetNetworkName(), err)
+			}
+		}
+	}()
+}
+
+func (udng *UserDefinedNetworkGateway) Reconcile() {
+	select {
+	case udng.reconcile <- struct{}{}:
+	default:
+	}
+}
+
+func (udng *UserDefinedNetworkGateway) doReconcile() error {
+	klog.Infof("Reconciling gateway with updates for UDN %s", udng.GetNetworkName())
+
+	// update bridge configuration
+	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
+	udng.openflowManager.defaultBridge.netConfig[udng.GetNetworkName()].advertised.Store(isNetworkAdvertised)
+
+	if err := udng.updateUDNVRFIPRule(); err != nil {
+		return fmt.Errorf("error while updating ip rule for UDN %s: %s", udng.GetNetworkName(), err)
+	}
+
+	// add below OpenFlows based on the gateway mode and whether the network is advertised or not:
+	// table=1, n_packets=0, n_bytes=0, priority=16,ip,nw_dst=128.192.0.2 actions=LOCAL (Both gateway modes)
+	// table=1, n_packets=0, n_bytes=0, priority=15,ip,nw_dst=128.192.0.0/14 actions=output:3 (shared gateway mode)
+	if err := udng.openflowManager.updateBridgeFlowCache(udng.nodeIPManager.ListAddresses()); err != nil {
+		return fmt.Errorf("error while updating logical flow for UDN %s: %s", udng.GetNetworkName(), err)
+	}
+
+	return nil
+}
+
+// updateUDNVRFIPRule updates IP rules for a network depending on whether the
+// network is advertised or not
+func (udng *UserDefinedNetworkGateway) updateUDNVRFIPRule() error {
+	interfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.networkID))
+	mplink, err := util.LinkByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s, error: %v", interfaceName, err)
+	}
+	vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
+	addIPRules, deleteIPRules, err := udng.constructUDNVRFIPRules(vrfTableId)
+	if err != nil {
+		return fmt.Errorf("unable to get iprules for network %s, err: %v", udng.GetNetworkName(), err)
+	}
+
+	for _, rule := range addIPRules {
+		if err = udng.ruleManager.AddWithMetadata(rule, udng.GetNetworkRuleMetadata()); err != nil {
+			return fmt.Errorf("unable to create iprule %v for network %s, err: %v", rule, udng.GetNetworkName(), err)
+		}
+	}
+	for _, rule := range deleteIPRules {
+		if err = udng.ruleManager.Delete(rule); err != nil {
+			return fmt.Errorf("unable to delete iprule for network %s, err: %v", udng.GetNetworkName(), err)
+		}
 	}
 	return nil
 }

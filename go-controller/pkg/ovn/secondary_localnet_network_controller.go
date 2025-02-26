@@ -312,6 +312,13 @@ func (oc *SecondaryLocalnetNetworkController) Stop() {
 	oc.BaseSecondaryLayer2NetworkController.stop()
 }
 
+func (oc *SecondaryLocalnetNetworkController) Reconcile(netInfo util.NetInfo) error {
+	return oc.BaseNetworkController.reconcile(
+		netInfo,
+		func(_ string) {},
+	)
+}
+
 func (oc *SecondaryLocalnetNetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)

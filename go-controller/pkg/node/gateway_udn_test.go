@@ -1123,6 +1123,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 		v4mode        bool
 		v6mode        bool
 		expectedRules []testRule
+		deleteRules   []testRule
 	}
 
 	tests := []testConfig{
@@ -1148,6 +1149,14 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
 				},
 			},
+			deleteRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+				},
+			},
 			v4mode: true,
 		},
 		{
@@ -1160,6 +1169,183 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					table:    1009,
 					mark:     0x1003,
 				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+				},
+			},
+			deleteRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+				},
+			},
+			v6mode: true,
+		},
+		{
+			desc:       "dualstack rule test",
+			vrftableID: 1010,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+				},
+			},
+			deleteRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+				},
+			},
+			v4mode: true,
+			v6mode: true,
+		},
+	}
+	config.Gateway.V6MasqueradeSubnet = "fd69::/112"
+	config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := NewWithT(t)
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			}
+			config.IPv4Mode = test.v4mode
+			config.IPv6Mode = test.v6mode
+			cidr := ""
+			if config.IPv4Mode {
+				cidr = "100.128.0.0/16/24"
+
+			}
+			if config.IPv4Mode && config.IPv6Mode {
+				cidr += ",ae70::/60/64"
+			} else if config.IPv6Mode {
+				cidr = "ae70::/60/64"
+			}
+			nad := ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
+				types.Layer3Topology, cidr, types.NetworkRolePrimary)
+			netInfo, err := util.ParseNADInfo(nad)
+			g.Expect(err).NotTo(HaveOccurred())
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, nil, nil, &gateway{})
+			g.Expect(err).NotTo(HaveOccurred())
+			rules, delRules, err := udnGateway.constructUDNVRFIPRules(test.vrftableID)
+			g.Expect(err).To(BeNil())
+			for i, rule := range rules {
+				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
+				g.Expect(rule.Table).To(Equal(test.expectedRules[i].table))
+				g.Expect(rule.Family).To(Equal(test.expectedRules[i].family))
+				if rule.Dst != nil {
+					g.Expect(*rule.Dst).To(Equal(test.expectedRules[i].dst))
+				} else {
+					g.Expect(rule.Mark).To(Equal(test.expectedRules[i].mark))
+				}
+			}
+			for i, rule := range delRules {
+				g.Expect(rule.Priority).To(Equal(test.deleteRules[i].priority))
+				g.Expect(rule.Table).To(Equal(test.deleteRules[i].table))
+				g.Expect(rule.Family).To(Equal(test.deleteRules[i].family))
+				g.Expect(*rule.Dst).To(Equal(test.deleteRules[i].dst))
+			}
+		})
+	}
+}
+
+func TestConstructUDNVRFIPRulesPodNetworkAdvertised(t *testing.T) {
+	type testRule struct {
+		priority int
+		family   int
+		table    int
+		mark     int
+		dst      net.IPNet
+	}
+	type testConfig struct {
+		desc          string
+		vrftableID    int
+		v4mode        bool
+		v6mode        bool
+		expectedRules []testRule
+		deleteRules   []testRule
+	}
+
+	tests := []testConfig{
+		{
+			desc:       "v4 rule test",
+			vrftableID: 1007,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+				},
+			},
+			deleteRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1007,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+				},
+			},
+			v4mode: true,
+		},
+		{
+			desc:       "v6 rule test",
+			vrftableID: 1009,
+			expectedRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1009,
+					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+				},
+			},
+			deleteRules: []testRule{
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
@@ -1181,15 +1367,29 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V6,
+					table:    1010,
+					mark:     0x1003,
+				},
+				{
+					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1010,
-					mark:     0x1003,
+					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+				},
+			},
+			deleteRules: []testRule{
+				{
+					priority: UDNMasqueradeIPRulePriority,
+					family:   netlink.FAMILY_V4,
+					table:    1010,
+					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
@@ -1207,25 +1407,30 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			g := NewWithT(t)
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			}
 			config.IPv4Mode = test.v4mode
 			config.IPv6Mode = test.v6mode
 			cidr := ""
 			if config.IPv4Mode {
 				cidr = "100.128.0.0/16/24"
-
 			}
 			if config.IPv4Mode && config.IPv6Mode {
-				cidr += ",ae70::/60/64"
+				cidr += ",ae70::/60"
 			} else if config.IPv6Mode {
-				cidr = "ae70::/60/64"
+				cidr = "ae70::/60"
 			}
 			nad := ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 				types.Layer3Topology, cidr, types.NetworkRolePrimary)
 			netInfo, err := util.ParseNADInfo(nad)
+			mutableNetInfo := util.NewMutableNetInfo(netInfo)
+			mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{node.Name: {"bluenet"}})
+			udnGateway, err := NewUserDefinedNetworkGateway(mutableNetInfo, 3, node, nil, nil, nil, nil, &gateway{})
 			g.Expect(err).NotTo(HaveOccurred())
-			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, nil, nil, nil, nil, nil, &gateway{})
-			g.Expect(err).NotTo(HaveOccurred())
-			rules, err := udnGateway.constructUDNVRFIPRules(test.vrftableID)
+			rules, delRules, err := udnGateway.constructUDNVRFIPRules(test.vrftableID)
 			g.Expect(err).To(BeNil())
 			for i, rule := range rules {
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
@@ -1236,6 +1441,12 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 				} else {
 					g.Expect(rule.Mark).To(Equal(test.expectedRules[i].mark))
 				}
+			}
+			for i, rule := range delRules {
+				g.Expect(rule.Priority).To(Equal(test.deleteRules[i].priority))
+				g.Expect(rule.Table).To(Equal(test.deleteRules[i].table))
+				g.Expect(rule.Family).To(Equal(test.deleteRules[i].family))
+				g.Expect(*rule.Dst).To(Equal(test.deleteRules[i].dst))
 			}
 		})
 	}
