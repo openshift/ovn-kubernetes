@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sync"
 
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -64,8 +63,12 @@ type ClusterManager struct {
 }
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
-func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory,
-	identity string, wg *sync.WaitGroup, recorder record.EventRecorder) (*ClusterManager, error) {
+func NewClusterManager(
+	ovnClient *util.OVNClusterManagerClientset,
+	wf *factory.WatchFactory,
+	identity string,
+	recorder record.EventRecorder,
+) (*ClusterManager, error) {
 
 	wf = wf.ShallowClone()
 	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf, recorder)
@@ -99,7 +102,7 @@ func NewClusterManager(ovnClient *util.OVNClusterManagerClientset, wf *factory.W
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		cm.eIPC = newEgressIPController(ovnClient, wf, recorder)
+		cm.eIPC = newEgressIPController(ovnClient, wf, cm.networkManager.Interface(), recorder)
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
@@ -273,6 +276,9 @@ func (cm *ClusterManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) er
 func (cm *ClusterManager) Reconcile(name string, old, new util.NetInfo) error {
 	if cm.raController != nil {
 		cm.raController.ReconcileNetwork(name, old, new)
+	}
+	if cm.eIPC != nil {
+		cm.eIPC.ReconcileNetwork(name, old, new)
 	}
 	return nil
 }

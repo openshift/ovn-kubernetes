@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"k8s.io/client-go/tools/record"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/client-go/tools/record"
 )
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
@@ -22,7 +23,21 @@ const (
 // Interface is the main package entrypoint and provides network related
 // information to the rest of the project.
 type Interface interface {
+	// GetActiveNetworkForNamespace returns a copy of the primary network for
+	// the namespace if any or the default network otherwise. If there is a
+	// primary UDN defined but the NAD has not been processed yet, returns
+	// ErrNetworkControllerTopologyNotManaged. Used for controllers that are not
+	// capable of reconciling primary network changes. If unsure, use this one
+	// and not GetActiveNetworkForNamespaceFast.
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
+
+	// GetActiveNetworkForNamespaceFast return the primary network for the
+	// namespace if any or the default network otherwise. It is faster than
+	// GetActiveNetworkForNamespace because it does not copy the network and it
+	// does not verify against UDNs. However, it is recommended to be used only
+	// by controllers capable of reconciling primary network changes. If unsure,
+	// use GetActiveNetworkForNamespace.
+	GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo
 
 	// GetNetwork returns the network of the given name or nil if unknown
 	GetNetwork(name string) util.NetInfo
@@ -173,6 +188,10 @@ func (nm defaultNetworkManager) GetActiveNetworkForNamespace(string) (util.NetIn
 	return &util.DefaultNetInfo{}, nil
 }
 
+func (nm defaultNetworkManager) GetActiveNetworkForNamespaceFast(string) util.NetInfo {
+	return &util.DefaultNetInfo{}
+}
+
 func (nm defaultNetworkManager) GetNetwork(name string) util.NetInfo {
 	if name != types.DefaultNetworkName {
 		return nil
@@ -184,7 +203,7 @@ func (nm defaultNetworkManager) DoWithLock(f func(network util.NetInfo) error) e
 	return f(&util.DefaultNetInfo{})
 }
 
-func (nm defaultNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+func (nm defaultNetworkManager) GetActiveNetworkNamespaces(_ string) ([]string, error) {
 	return []string{"default"}, nil
 }
 

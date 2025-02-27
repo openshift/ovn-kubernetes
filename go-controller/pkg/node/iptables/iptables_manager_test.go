@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
-
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
+	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )

@@ -5,14 +5,15 @@ import (
 	"net"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/vishvananda/netlink"
+
 	kapi "k8s.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/stretchr/testify/assert"
-	"github.com/vishvananda/netlink"
 )
 
 func TestGetFamily(t *testing.T) {

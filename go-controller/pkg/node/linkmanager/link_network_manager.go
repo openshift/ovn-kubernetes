@@ -5,12 +5,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/vishvananda/netlink"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Gather all suitable interface address + network mask and offer this as a service.

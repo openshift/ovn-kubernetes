@@ -3,9 +3,10 @@ package gateway
 import (
 	"testing"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func TestGetOvnGateways(t *testing.T) {

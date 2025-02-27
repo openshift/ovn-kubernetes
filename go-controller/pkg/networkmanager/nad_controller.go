@@ -7,6 +7,11 @@ import (
 	"sync"
 	"time"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,10 +24,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
-	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
-	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	rainformers "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
@@ -424,23 +425,16 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 		return &util.DefaultNetInfo{}, nil
 	}
 
-	c.RLock()
-	defer c.RUnlock()
-	primaryNAD := c.primaryNADs[namespace]
-	if primaryNAD != "" {
-		// we have a primary NAD, no need to check for NS UDN annotation because NAD would not have existed otherwise
-		// get the network
-		netName := c.nads[primaryNAD]
-		if netName == "" {
-			// this should never happen where we have a nad keyed in the primaryNADs
-			// map, but it doesn't exist in the nads map
-			panic("NAD Controller broken consistency between primary NADs and cached NADs")
-		}
-		network := c.networkController.getNetwork(netName)
-		n := util.NewMutableNetInfo(network)
-		// update the returned netInfo copy to only have the primary NAD for this namespace
-		n.SetNADs(primaryNAD)
-		return n, nil
+	nad, network := c.getActiveNetworkForNamespace(namespace)
+	if nad == "" {
+		// default network, just return
+		return network, nil
+	}
+	if network != nil {
+		// primary network
+		copy := util.NewMutableNetInfo(network)
+		copy.SetNADs(nad)
+		return copy, nil
 	}
 
 	// no primary network found, make sure we just haven't processed it yet and no UDN / CUDN exists
@@ -479,6 +473,38 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 
 	// namespace has required UDN label, but no UDN was found
 	return nil, util.NewInvalidPrimaryNetworkError(namespace)
+}
+
+func (c *nadController) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
+	_, network := c.getActiveNetworkForNamespace(namespace)
+	return network
+}
+
+func (c *nadController) getActiveNetworkForNamespace(namespace string) (string, util.NetInfo) {
+	c.RLock()
+	defer c.RUnlock()
+
+	var network util.NetInfo
+	primaryNAD := c.primaryNADs[namespace]
+	switch primaryNAD {
+	case "":
+		// default network
+		network = c.networkController.getNetwork(types.DefaultNetworkName)
+		if network == nil {
+			network = &util.DefaultNetInfo{}
+		}
+	default:
+		// we have a primary netwrok
+		netName := c.nads[primaryNAD]
+		if netName == "" {
+			// this should never happen where we have a nad keyed in the primaryNADs
+			// map, but it doesn't exist in the nads map
+			panic("NAD Controller broken consistency between primary NADs and cached NADs")
+		}
+		network = c.networkController.getNetwork(netName)
+	}
+
+	return primaryNAD, network
 }
 
 func (c *nadController) GetNetwork(name string) util.NetInfo {
