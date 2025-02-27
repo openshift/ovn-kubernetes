@@ -6,10 +6,10 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
-	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	v1 "k8s.io/api/core/v1"
 
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 )
 
 func TestUpdatePodWithAllocationOrRollback(t *testing.T) {

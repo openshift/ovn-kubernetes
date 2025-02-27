@@ -6,11 +6,10 @@ import (
 	"net"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
-
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	v1 "k8s.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 

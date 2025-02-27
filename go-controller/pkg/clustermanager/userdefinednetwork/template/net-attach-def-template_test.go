@@ -1,18 +1,17 @@
 package template
 
 import (
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("NetAttachDefTemplate", func() {
@@ -251,8 +250,9 @@ var _ = Describe("NetAttachDefTemplate", func() {
 	DescribeTable("should create UDN NAD from spec",
 		func(testSpec udnv1.UserDefinedNetworkSpec, expectedNadNetConf string) {
 			testUdn := &udnv1.UserDefinedNetwork{
-				ObjectMeta: metav1.ObjectMeta{Namespace: "mynamespace", Name: "test-net", UID: "1"},
-				Spec:       testSpec,
+				ObjectMeta: metav1.ObjectMeta{Namespace: "mynamespace", Name: "test-net", UID: "1",
+					Labels: map[string]string{"testLabel": "test"}},
+				Spec: testSpec,
 			}
 			testNs := "mynamespace"
 			ownerRef := metav1.OwnerReference{
@@ -266,7 +266,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			expectedNAD := &netv1.NetworkAttachmentDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:            "test-net",
-					Labels:          map[string]string{"k8s.ovn.org/user-defined-network": ""},
+					Labels:          map[string]string{"k8s.ovn.org/user-defined-network": "", "testLabel": "test"},
 					OwnerReferences: []metav1.OwnerReference{ownerRef},
 					Finalizers:      []string{"k8s.ovn.org/user-defined-network-protection"},
 				},
@@ -408,7 +408,9 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				},
 				Spec: netv1.NetworkAttachmentDefinitionSpec{Config: expectedNadNetConf},
 			}
-
+			// must be defined so the primary user defined network can match the ip families of the underlying cluster
+			config.IPv4Mode = true
+			config.IPv6Mode = true
 			nad, err := RenderNetAttachDefManifest(cudn, testNs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))

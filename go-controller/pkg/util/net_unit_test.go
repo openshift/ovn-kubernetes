@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
+	"github.com/stretchr/testify/assert"
+
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestNextSloppyIP(t *testing.T) {

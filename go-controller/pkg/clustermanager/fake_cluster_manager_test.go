@@ -8,6 +8,11 @@ import (
 	"github.com/onsi/gomega"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	cloudservicefake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -19,9 +24,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
 )
 
 type FakeClusterManager struct {

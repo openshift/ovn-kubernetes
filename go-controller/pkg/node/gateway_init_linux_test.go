@@ -15,17 +15,19 @@ import (
 	"syscall"
 	"time"
 
-	utilnet "k8s.io/utils/net"
-
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
+	"github.com/vishvananda/netlink"
+
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
-
-	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
@@ -40,10 +42,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/vishvananda/netlink"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

@@ -6,11 +6,15 @@ import (
 	"strings"
 	"sync/atomic"
 
-	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	. "github.com/onsi/gomega"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 
@@ -23,11 +27,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/utils/pointer"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 func getNodeWithZone(nodeName, zoneName string) *v1.Node {

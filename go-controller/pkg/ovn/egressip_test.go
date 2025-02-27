@@ -3,9 +3,20 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+	"github.com/urfave/cli/v2"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	utilnet "k8s.io/utils/net"
+	utilpointer "k8s.io/utils/pointer"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -17,16 +28,7 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli/v2"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
-	utilnet "k8s.io/utils/net"
-	utilpointer "k8s.io/utils/pointer"
 )
 
 var (
@@ -224,9 +226,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 	})
 
 	getPodAssignmentState := func(pod *corev1.Pod) *podAssignmentState {
-		fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-		defer fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
-		if pas := fakeOvn.controller.eIPC.podAssignment[getPodKey(pod)]; pas != nil {
+		podKey := getPodKey(pod)
+		fakeOvn.controller.eIPC.podAssignment.LockKey(podKey)
+		defer fakeOvn.controller.eIPC.podAssignment.UnlockKey(podKey)
+		if pas, exists := fakeOvn.controller.eIPC.podAssignment.Load(podKey); exists && pas != nil {
 			return pas.Clone()
 		}
 		return nil
@@ -7783,12 +7786,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						g.Expect(pas.egressStatuses.statusMap[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
 						g.Expect(pas.standbyEgressIPNames.Has(egressIP2Name)).To(gomega.BeTrue())
 					}).Should(gomega.Succeed())
-					// let's test syncPodAssignmentCache works as expected! Nuke the podAssignment cache first
-					fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-					fakeOvn.controller.eIPC.podAssignment = make(map[string]*podAssignmentState)
-					// replicates controller startup state
-					fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
 
+					// let's test syncPodAssignmentCache works as expected! Nuke the podAssignment cache first
+					// only key in the map, lets lock it out of precaution to wipe the cache
+					egressPod1Key := getPodKey(&egressPod1)
+					oldPodAssignment := fakeOvn.controller.eIPC.podAssignment
+					oldPodAssignment.LockKey(egressPod1Key)
+					fakeOvn.controller.eIPC.podAssignment = syncmap.NewSyncMap[*podAssignmentState]()
+					oldPodAssignment.UnlockKey(egressPod1Key)
+					// replicates controller startup state
 					egressIPCache, err := fakeOvn.controller.eIPC.generateCacheForEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.eIPC.syncPodAssignmentCache(egressIPCache)
@@ -7801,10 +7807,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					gomega.Expect(pas.standbyEgressIPNames.Has(egressIP2Name)).To(gomega.BeTrue())
 
 					// reset egressStatuses for rest of the test to progress correctly
-					fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-					fakeOvn.controller.eIPC.podAssignment[getPodKey(&egressPod1)].egressStatuses.statusMap[eip1Obj.Status.Items[0]] = ""
-					fakeOvn.controller.eIPC.podAssignment[getPodKey(&egressPod1)].egressStatuses.statusMap[eip1Obj.Status.Items[1]] = ""
-					fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
+					fakeOvn.controller.eIPC.podAssignment.LockKey(egressPod1Key)
+					podStatus, exists := fakeOvn.controller.eIPC.podAssignment.Load(egressPod1Key)
+					gomega.Expect(exists).To(gomega.BeTrue())
+					podStatus.egressStatuses.statusMap[eip1Obj.Status.Items[0]] = ""
+					podStatus.egressStatuses.statusMap[eip1Obj.Status.Items[1]] = ""
+					fakeOvn.controller.eIPC.podAssignment.Store(egressPod1Key, podStatus)
+					fakeOvn.controller.eIPC.podAssignment.UnlockKey(egressPod1Key)
 
 					// delete the standby egressIP object to make sure the cache is updated
 					err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIP2Name, metav1.DeleteOptions{})
@@ -7965,9 +7974,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					}).Should(gomega.BeFalse())
 
 					// let's test syncPodAssignmentCache works as expected! Nuke the podAssignment cache first
-					fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-					fakeOvn.controller.eIPC.podAssignment = make(map[string]*podAssignmentState) // replicates controller startup state
-					fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
+					oldPodAssignment = fakeOvn.controller.eIPC.podAssignment
+					oldPodAssignment.LockKey(egressPod1Key)
+					fakeOvn.controller.eIPC.podAssignment = syncmap.NewSyncMap[*podAssignmentState]()
+					oldPodAssignment.UnlockKey(egressPod1Key)
 
 					egressIPCache, err = fakeOvn.controller.eIPC.generateCacheForEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())

@@ -10,12 +10,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"golang.org/x/exp/maps"
-	kapi "k8s.io/api/core/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	knet "k8s.io/utils/net"
-
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -542,7 +542,7 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
-func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string {
+func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(_ string) string {
 	return ""
 }
 
@@ -1244,7 +1244,7 @@ func subnetOverlapCheck(netconf *ovncnitypes.NetConf) error {
 //	    for the specified network, key is NADName. Note multiple NADs of the same network are allowed
 //	    on one pod, as long as they are of different NADName.
 //	error:  error in case of failure
-func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+func GetPodNADToNetworkMapping(pod *corev1.Pod, nInfo NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	if pod.Spec.HostNetwork {
 		return false, nil, nil
 	}
@@ -1294,7 +1294,7 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 // GetPodNADToNetworkMappingWithActiveNetwork will call `GetPodNADToNetworkMapping` passing "nInfo" which correspond
 // to the NetInfo representing the NAD, the resulting NetworkSelectingElements will be decorated with the ones
 // from found active network
-func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, activeNetwork NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+func GetPodNADToNetworkMappingWithActiveNetwork(pod *corev1.Pod, nInfo NetInfo, activeNetwork NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	on, networkSelections, err := GetPodNADToNetworkMapping(pod, nInfo)
 	if err != nil {
 		return false, nil, err
@@ -1439,7 +1439,7 @@ func CanServeNamespace(network NetInfo, namespace string) bool {
 //	is otherwise locked for all intents and purposes.
 //
 // (4) "none" if the pod has no networks on this controller
-func GetNetworkRole(controllerNetInfo NetInfo, getActiveNetworkForNamespace func(namespace string) (NetInfo, error), pod *kapi.Pod) (string, error) {
+func GetNetworkRole(controllerNetInfo NetInfo, getActiveNetworkForNamespace func(namespace string) (NetInfo, error), pod *corev1.Pod) (string, error) {
 
 	// no network segmentation enabled, and is default controller, must be default network
 	if !IsNetworkSegmentationSupportEnabled() && controllerNetInfo.IsDefault() {

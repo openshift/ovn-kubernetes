@@ -11,17 +11,19 @@ import (
 	"github.com/onsi/gomega"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpconfigapi "github.com/openshift/api/config/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type fakeEgressIPDialer struct{}

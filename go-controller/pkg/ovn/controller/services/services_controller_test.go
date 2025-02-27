@@ -10,7 +10,6 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"golang.org/x/exp/maps"
 
 	v1 "k8s.io/api/core/v1"
@@ -21,6 +20,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	utilnet "k8s.io/utils/net"
 	utilpointer "k8s.io/utils/pointer"
+
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"

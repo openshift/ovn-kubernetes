@@ -11,6 +11,7 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/stretchr/testify/assert"
+
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"

@@ -7,12 +7,14 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+	"github.com/urfave/cli/v2"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
-
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	utilnet "k8s.io/utils/net"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -21,8 +23,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -105,7 +105,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				c, cancel := context.WithCancel(ctx.Context)
 				defer cancel()
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(c)
@@ -188,7 +188,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				c, cancel := context.WithCancel(ctx.Context)
 				defer cancel()
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(c)
@@ -280,7 +280,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				c, cancel := context.WithCancel(ctx.Context)
 				defer cancel()
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(c)
@@ -352,7 +352,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				c, cancel := context.WithCancel(ctx.Context)
 				defer cancel()
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(c)
@@ -461,7 +461,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -534,7 +534,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -647,7 +647,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				wg1 := &sync.WaitGroup{}
-				clusterManager, err := NewClusterManager(fakeClient, f, "cm1", wg1, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "cm1", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -699,7 +699,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				cm2, err := NewClusterManager(fakeClient, f, "cm2", wg, nil)
+				cm2, err := NewClusterManager(fakeClient, f, "cm2", nil)
 				gomega.Expect(cm2).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = cm2.Start(ctx.Context)
@@ -774,7 +774,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				wg1 := &sync.WaitGroup{}
-				clusterManager, err := NewClusterManager(fakeClient, f, "cm1", wg1, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "cm1", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -833,7 +833,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Start a new cluster manager
-				cm2, err := NewClusterManager(fakeClient, f, "cm2", wg, nil)
+				cm2, err := NewClusterManager(fakeClient, f, "cm2", nil)
 				gomega.Expect(cm2).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = cm2.Start(ctx.Context)
@@ -899,7 +899,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -971,7 +971,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -1075,7 +1075,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				wg1 := &sync.WaitGroup{}
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg1, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -1134,7 +1134,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Start a new cluster manager
-				cm2, err := NewClusterManager(fakeClient, f, "cm2", wg, nil)
+				cm2, err := NewClusterManager(fakeClient, f, "cm2", nil)
 				gomega.Expect(cm2).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = cm2.Start(ctx.Context)
@@ -1208,7 +1208,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -1305,7 +1305,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)
@@ -1419,7 +1419,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", wg, nil)
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
 				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = clusterManager.Start(ctx.Context)

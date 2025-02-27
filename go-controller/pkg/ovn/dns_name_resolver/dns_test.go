@@ -6,19 +6,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/miekg/dns"
+	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
+
+	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"github.com/miekg/dns"
-	utilnet "k8s.io/utils/net"
+	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 )
 
 const DefaultNetworkControllerName = "default-network-controller"

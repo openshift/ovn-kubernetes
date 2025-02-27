@@ -9,14 +9,16 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
+	"github.com/vishvananda/netlink"
+
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/stretchr/testify/mock"
-	"github.com/vishvananda/netlink"
-	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 var (
