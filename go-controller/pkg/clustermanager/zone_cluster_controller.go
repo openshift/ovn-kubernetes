@@ -111,7 +111,7 @@ func (zcc *zoneClusterController) initRetryFramework() {
 }
 
 // Start starts the zone cluster controller to watch the kubernetes nodes
-func (zcc *zoneClusterController) Start(ctx context.Context) error {
+func (zcc *zoneClusterController) Start(_ context.Context) error {
 	nodeHandler, err := zcc.retryNodes.WatchResource()
 
 	if err != nil {
@@ -228,7 +228,7 @@ type zoneClusterControllerEventHandler struct {
 	syncFunc func([]interface{}) error
 }
 
-func (h *zoneClusterControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *zoneClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
 	return false
 }
 
@@ -236,7 +236,7 @@ func (h *zoneClusterControllerEventHandler) FilterOutResource(obj interface{}) b
 
 // AddResource adds the specified object to the cluster according to its type and
 // returns the error, if any, yielded during object creation.
-func (h *zoneClusterControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *zoneClusterControllerEventHandler) AddResource(obj interface{}, _ bool) error {
 	var err error
 
 	switch h.objType {
@@ -258,7 +258,7 @@ func (h *zoneClusterControllerEventHandler) AddResource(obj interface{}, fromRet
 // UpdateResource updates the specified object in the cluster to its version in newObj according
 // to its type and returns the error, if any, yielded during the object update.
 // The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *zoneClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *zoneClusterControllerEventHandler) UpdateResource(_, newObj interface{}, _ bool) error {
 	var err error
 
 	switch h.objType {
@@ -279,7 +279,7 @@ func (h *zoneClusterControllerEventHandler) UpdateResource(oldObj, newObj interf
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network policies.
-func (h *zoneClusterControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *zoneClusterControllerEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)

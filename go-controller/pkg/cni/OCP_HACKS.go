@@ -9,8 +9,10 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	configv1 "github.com/openshift/api/config/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+
 	"sigs.k8s.io/knftables"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 func doNFTablesRules(platformType string) error {
@@ -87,8 +89,8 @@ func doNFTablesRules(platformType string) error {
 }
 
 // OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
-func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
-	return netns.Do(func(hostNS ns.NetNS) error {
+func setupIPTablesBlocks(netns ns.NetNS) error {
+	return netns.Do(func(_ ns.NetNS) error {
 		return doNFTablesRules(config.Kubernetes.PlatformType)
 	})
 }
