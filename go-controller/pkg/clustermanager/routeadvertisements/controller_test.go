@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	nadtypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	frrapi "github.com/metallb/frr-k8s/api/v1beta1"
+	frrfake "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/fake"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 
-	nadtypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	frrapi "github.com/metallb/frr-k8s/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,7 +23,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
-	frrfake "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	controllerutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	eiptypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"

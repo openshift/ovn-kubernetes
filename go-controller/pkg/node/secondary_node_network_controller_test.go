@@ -9,8 +9,6 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 
@@ -30,6 +28,9 @@ import (
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("SecondaryNodeNetworkController", func() {
@@ -246,31 +247,40 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		stopCh = make(chan struct{})
 		routeManager := routemanager.NewController()
 		wg.Add(1)
-		go testNS.Do(func(netNS ns.NetNS) error {
+		go func() {
+			defer GinkgoRecover()
 			defer wg.Done()
-			routeManager.Run(stopCh, 2*time.Minute)
-			return nil
-		})
+			err := testNS.Do(func(ns.NetNS) error {
+				routeManager.Run(stopCh, 2*time.Minute)
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}()
 		ipRulesManager = iprulemanager.NewController(true, true)
 		wg.Add(1)
-		go testNS.Do(func(netNS ns.NetNS) error {
+		go func() {
+			defer GinkgoRecover()
 			defer wg.Done()
-			ipRulesManager.Run(stopCh, 4*time.Minute)
-			return nil
-		})
+			err := testNS.Do(func(ns.NetNS) error {
+				ipRulesManager.Run(stopCh, 4*time.Minute)
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}()
 		vrf = vrfmanager.NewController(routeManager)
 		wg2 := &sync.WaitGroup{}
 		defer func() {
 			wg2.Wait()
 		}()
 		wg2.Add(1)
-		go testNS.Do(func(netNS ns.NetNS) error {
-			defer wg2.Done()
+		go func() {
 			defer GinkgoRecover()
-			err = vrf.Run(stopCh, wg)
+			defer wg2.Done()
+			err := testNS.Do(func(ns.NetNS) error {
+				return vrf.Run(stopCh, wg)
+			})
 			Expect(err).NotTo(HaveOccurred())
-			return nil
-		})
+		}()
 	})
 	AfterEach(func() {
 		close(stopCh)
@@ -342,7 +352,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			Expect(err).NotTo(HaveOccurred())
 			Expect(vrfLink.Type()).To(Equal("vrf"))
 			vrfDev, ok := vrfLink.(*netlink.Vrf)
-			Expect(ok).To(Equal(true))
+			Expect(ok).To(BeTrue())
 			mplink, err := util.GetNetLinkOps().LinkByName(mgtPort)
 			Expect(err).NotTo(HaveOccurred())
 			vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
@@ -354,7 +364,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			Eventually(func() error {
 				_, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
 				return err
-			}).WithTimeout(120 * time.Second).Should(BeNil())
+			}).WithTimeout(120 * time.Second).Should(Succeed())
 
 			By("check iprules are created for the network")
 			rulesFound, err := netlink.RuleList(netlink.FAMILY_ALL)
@@ -375,7 +385,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			Eventually(func() error {
 				_, err := util.GetNetLinkOps().LinkByName(vrfDeviceName)
 				return err
-			}).WithTimeout(120 * time.Second).ShouldNot(BeNil())
+			}).WithTimeout(120 * time.Second).ShouldNot(Succeed())
 
 			By("check masquerade iprules are deleted for the network")
 			rulesFound, err = netlink.RuleList(netlink.FAMILY_ALL)
@@ -386,7 +396,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 					udnRules = append(udnRules, rule)
 				}
 			}
-			Expect(udnRules).To(HaveLen(0))
+			Expect(udnRules).To(BeEmpty())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
