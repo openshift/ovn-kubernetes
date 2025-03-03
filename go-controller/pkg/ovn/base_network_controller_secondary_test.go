@@ -3,8 +3,6 @@ package ovn
 import (
 	"context"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +15,9 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("BaseSecondaryNetworkController", func() {
@@ -68,7 +69,6 @@ var _ = Describe("BaseSecondaryNetworkController", func() {
 		vmName                string
 		ips                   []string
 		dns                   []string
-		gateways              []string
 		expectedDHCPv4Options *nbdb.DHCPOptions
 		expectedDHCPv6Options *nbdb.DHCPOptions
 	}
