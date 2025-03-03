@@ -276,9 +276,14 @@ func (gw *GatewayManager) GatewayInit(
 		physicalIPs[i] = ip.IP.String()
 	}
 
+	dynamicNeighRouters := "true"
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		dynamicNeighRouters = "false"
+	}
+
 	logicalRouterOptions := map[string]string{
 		"always_learn_from_arp_request": "false",
-		"dynamic_neigh_routers":         "true",
+		"dynamic_neigh_routers":         dynamicNeighRouters,
 		"chassis":                       l3GatewayConfig.ChassisID,
 		"lb_force_snat_ip":              "router_ip",
 		"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
