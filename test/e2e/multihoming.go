@@ -11,6 +11,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,7 +37,7 @@ const (
 	nodeHostnameKey     = "kubernetes.io/hostname"
 )
 
-var _ = Describe("Multi Homing", func() {
+var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 	const (
 		podName                      = "tinypod"
 		secondaryNetworkCIDR         = "11.128.0.0/16"
