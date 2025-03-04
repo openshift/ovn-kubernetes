@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	ginkgowrapper "github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/openshift-hack/ocpfeaturegate"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -27,7 +28,7 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 )
 
-var _ = ginkgowrapper.Describe(feature.NetworkSegmentation, "services", func() {
+var _ = ginkgowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.NetworkSegmentation, "services", func() {
 
 	f := wrappedTestFramework("udn-services")
 	f.SkipNamespaceCreation = true
