@@ -156,7 +156,7 @@ const (
 	InvalidID = -1
 
 	// NoID signifies an empty/unset ID. Currently used for tunnel ID (reserved as un-usable when the allocator is created)
-	// and network ID.
+	// and network ID (reserved as default network ID).
 	NoID = 0
 )
 
