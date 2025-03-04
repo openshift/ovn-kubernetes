@@ -11,6 +11,8 @@ WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
 RUN cd go-controller; CGO_ENABLED=1 make
 RUN cd go-controller; CGO_ENABLED=0 make windows
+RUN cd openshift; CGO_ENABLED=0 ./hack/build-tests-ext.sh && \
+    gzip ./bin/ovn-kubernetes-tests-ext
 
 # Build RHEL-8 binaries (for upgrades from 4.12 and earlier)
 FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.24-openshift-4.22 AS rhel8
@@ -58,6 +60,7 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-trace /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/hybrid-overlay-node /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-observ /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/openshift/bin/ovn-kubernetes-tests-ext.gz /usr/bin/
 
 # Copy RHEL-8 and RHEL-9 shim binaries where the CNO's ovnkube-node container startup script can find them
 RUN mkdir -p /usr/libexec/cni/rhel9
@@ -73,7 +76,7 @@ RUN stat /usr/bin/oc
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
       summary="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
-      io.openshift.tags="openshift" \
+      io.openshift.tags="openshift,networking" \
       maintainer="Tim Rozet <trozet@redhat.com>"
 
 WORKDIR /root
