@@ -233,4 +233,4 @@ replace (
 replace github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 
 // remove !!! when https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5084 merges downstream
-replace github.com/ovn-org/ovn-kubernetes/test/e2e => github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250225174021-505c2e7f57d8
+replace github.com/ovn-org/ovn-kubernetes/test/e2e => github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250304155258-5a7f9c8b39cc
