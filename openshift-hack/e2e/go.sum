@@ -675,8 +675,8 @@ github.com/mailru/easyjson v0.7.6/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJ
 github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0=
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
 github.com/marstr/guid v1.1.0/go.mod h1:74gB1z2wpxxInTG6yaqA7KrtM0NZ+RbrcqDvYHefzho=
-github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250304155258-5a7f9c8b39cc h1:KNZYSi829yRzzRYaH+ditm1nSN5b8u3xw+ZP4TVp794=
-github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250304155258-5a7f9c8b39cc/go.mod h1:U/pmOEEHWgg7/ykGiCw24ZcqlU4aVOSjC7yCWOPGIho=
+github.com/martinkennelly/ovn-kubernetes/test/e2e v0.0.0-20250306150439-be052c7fcf53 h1:gHAE0P9schkrNmCOLpgZgsAc5zHHD9yHeKpzQq0cA/k=
+github.com/martinkennelly/ovn-kubernetes/test/e2e v0.0.0-20250306150439-be052c7fcf53/go.mod h1:U/pmOEEHWgg7/ykGiCw24ZcqlU4aVOSjC7yCWOPGIho=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-isatty v0.0.4/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
 github.com/mattn/go-runewidth v0.0.2/go.mod h1:LwmH8dsx7+W8Uxz3IHJYH5QSwggIsqBzpuz5H//U1FU=

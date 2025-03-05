@@ -717,7 +717,7 @@ github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube
 github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types
 github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util
 github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors
-# github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250213041128-6a64865ff9b2 => github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250304155258-5a7f9c8b39cc
+# github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250213041128-6a64865ff9b2 => github.com/martinkennelly/ovn-kubernetes/test/e2e v0.0.0-20250306150439-be052c7fcf53
 ## explicit; go 1.22.0
 github.com/ovn-org/ovn-kubernetes/test/e2e
 github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics
@@ -726,6 +726,7 @@ github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper
 github.com/ovn-org/ovn-kubernetes/test/e2e/images
 github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt
 github.com/ovn-org/ovn-kubernetes/test/e2e/label
+github.com/ovn-org/ovn-kubernetes/test/e2e/openshift-hack/ocpfeaturegate
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
@@ -2390,4 +2391,4 @@ sigs.k8s.io/yaml/goyaml.v2
 # sigs.k8s.io/json => sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd
 # sigs.k8s.io/structured-merge-diff/v4 => sigs.k8s.io/structured-merge-diff/v4 v4.4.1
 # github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
-# github.com/ovn-org/ovn-kubernetes/test/e2e => github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250304155258-5a7f9c8b39cc
+# github.com/ovn-org/ovn-kubernetes/test/e2e => github.com/martinkennelly/ovn-kubernetes/test/e2e v0.0.0-20250306150439-be052c7fcf53

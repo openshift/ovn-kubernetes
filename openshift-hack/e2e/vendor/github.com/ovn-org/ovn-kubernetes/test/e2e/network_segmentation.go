@@ -17,6 +17,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	ginkgowrapper "github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/openshift-hack/ocpfeaturegate"
 
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -41,7 +42,7 @@ const openDefaultPortsAnnotation = "k8s.ovn.org/open-default-ports"
 const RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 const OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 
-var _ = ginkgowrapper.Describe(feature.NetworkSegmentation, func() {
+var _ = ginkgowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.NetworkSegmentation, func() {
 	f := wrappedTestFramework("network-segmentation")
 	// disable automatic namespace creation, we need to add the required UDN label
 	f.SkipNamespaceCreation = true

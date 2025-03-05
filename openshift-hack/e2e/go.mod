@@ -157,7 +157,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.27.0 // indirect
 	go.opentelemetry.io/otel/metric v1.28.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.28.0 // indirect
-	go.opentelemetry.io/otel/trace v1.28.0 // indirect
+	go.opentelemetry.io/otel/trace v1.28.0 // indirect; indirect:1
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
@@ -233,4 +233,4 @@ replace (
 replace github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 
 // remove !!! when https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5084 merges downstream
-replace github.com/ovn-org/ovn-kubernetes/test/e2e => github.com/martinkennelly/ovn-kubernetes-1/test/e2e v0.0.0-20250304155258-5a7f9c8b39cc
+replace github.com/ovn-org/ovn-kubernetes/test/e2e => github.com/martinkennelly/ovn-kubernetes/test/e2e v0.0.0-20250306150439-be052c7fcf53

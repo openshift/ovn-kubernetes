@@ -11,6 +11,7 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	gingowrapper "github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/openshift-hack/ocpfeaturegate"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -20,7 +21,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
-var _ = gingowrapper.Describe(feature.NetworkSegmentation, "Network Policies", func() {
+var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.NetworkSegmentation, "Network Policies", func() {
 	f := wrappedTestFramework("network-segmentation")
 	f.SkipNamespaceCreation = true
 

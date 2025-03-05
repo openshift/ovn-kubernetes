@@ -577,147 +577,147 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:NetworkPolicy] ACL Logging when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller pod connected to ClusterUserDefinedNetwork CR & managed NADs cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller should create NAD according to spec in each target namespace and report active namespaces": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller should create NAD in new created namespaces that apply to namespace-selector": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller when CR is deleted, should delete all managed NAD in each target namespace": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller when namespace-selector is mutated should create NAD in namespaces that apply to mutated namespace-selector": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller when namespace-selector is mutated should delete managed NAD in namespaces that no longer apply to namespace-selector": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L2 secondary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L3 secondary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L2 secondary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L3 secondary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] Network Policies on a user defined primary network allow ingress traffic to one pod from a particular namespace in L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] Network Policies on a user defined primary network allow ingress traffic to one pod from a particular namespace in L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] Network Policies on a user defined primary network pods within namespace should be isolated when deny policy is present in L2 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] Network Policies on a user defined primary network pods within namespace should be isolated when deny policy is present in L3 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] Sync perform east/west traffic between nodes following OVN Kube node pod restart L2": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] Sync perform east/west traffic between nodes following OVN Kube node pod restart L3": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network should create NetworkAttachmentDefinition according to spec": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network should delete NetworkAttachmentDefinition when UserDefinedNetwork is deleted": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should be able to create pod and it will attach to the cluster default network": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and add the UDN label": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] UserDefinedNetwork CRD Controller should correctly report subsystem error on node subnet allocation": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork creates a networkStatus Annotation with UDN interface L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork creates a networkStatus Annotation with UDN interface L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork is isolated from the default network with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork is isolated from the default network with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions can perform east/west traffic between nodes two pods connected over a L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions can perform east/west traffic between nodes two pods connected over a L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions creates a networkStatus Annotation with UDN interface L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions creates a networkStatus Annotation with UDN interface L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions is isolated from the default network with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions is isolated from the default network with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork creates a networkStatus Annotation with UDN interface L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork creates a networkStatus Annotation with UDN interface L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork is isolated from the default network with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork is isolated from the default network with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network doesn't cause network name conflict": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer2 UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer3 UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer2 UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer3 UDN": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] pod2Egress on a user defined primary network created using NetworkAttachmentDefinitions can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] pod2Egress on a user defined primary network created using NetworkAttachmentDefinitions can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] pod2Egress on a user defined primary network created using UserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Suite:openshift/conformance/parallel]",
-
-	"[ovn-kubernetes][Feature:NetworkSegmentation] pod2Egress on a user defined primary network created using UserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Suite:openshift/conformance/parallel]",
-
 	"[ovn-kubernetes][Feature:NetworkSegmentation] services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN, cluster-networked pods, NodePort service": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NetworkSegmentation] services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L3 primary UDN, cluster-networked pods, NodePort service": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] when primary network exist, ClusterUserDefinedNetwork status should report not-ready": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller pod connected to ClusterUserDefinedNetwork CR & managed NADs cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:NetworkSegmentation] when primary network exist, UserDefinedNetwork status should report not-ready": "[Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller should create NAD according to spec in each target namespace and report active namespaces": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller should create NAD in new created namespaces that apply to namespace-selector": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller when CR is deleted, should delete all managed NAD in each target namespace": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller when namespace-selector is mutated should create NAD in namespaces that apply to mutated namespace-selector": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] ClusterUserDefinedNetwork CRD Controller when namespace-selector is mutated should delete managed NAD in namespaces that no longer apply to namespace-selector": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L2 secondary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions does not mirror EndpointSlices in namespaces not using user defined primary networks L3 secondary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using NetworkAttachmentDefinitions mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L2 secondary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork does not mirror EndpointSlices in namespaces not using user defined primary networks L3 secondary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L2 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, cluster-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, host-networked pods": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] Network Policies on a user defined primary network allow ingress traffic to one pod from a particular namespace in L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] Network Policies on a user defined primary network allow ingress traffic to one pod from a particular namespace in L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] Network Policies on a user defined primary network pods within namespace should be isolated when deny policy is present in L2 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] Network Policies on a user defined primary network pods within namespace should be isolated when deny policy is present in L3 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] Sync perform east/west traffic between nodes following OVN Kube node pod restart L2": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] Sync perform east/west traffic between nodes following OVN Kube node pod restart L3": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network should create NetworkAttachmentDefinition according to spec": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UserDefinedNetwork CRD Controller for L2 secondary network should delete NetworkAttachmentDefinition when UserDefinedNetwork is deleted": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should be able to create pod and it will attach to the cluster default network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and add the UDN label": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] UserDefinedNetwork CRD Controller should correctly report subsystem error on node subnet allocation": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork creates a networkStatus Annotation with UDN interface L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork creates a networkStatus Annotation with UDN interface L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork is isolated from the default network with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork is isolated from the default network with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using ClusterUserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions can perform east/west traffic between nodes two pods connected over a L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions can perform east/west traffic between nodes two pods connected over a L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions creates a networkStatus Annotation with UDN interface L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions creates a networkStatus Annotation with UDN interface L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions is isolated from the default network with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions is isolated from the default network with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using NetworkAttachmentDefinitions isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork creates a networkStatus Annotation with UDN interface L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork creates a networkStatus Annotation with UDN interface L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork is isolated from the default network with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork is isolated from the default network with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network doesn't cause network name conflict": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer2 UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer3 UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer2 UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer3 UDN": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] pod2Egress on a user defined primary network created using NetworkAttachmentDefinitions can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] pod2Egress on a user defined primary network created using NetworkAttachmentDefinitions can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] pod2Egress on a user defined primary network created using UserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] pod2Egress on a user defined primary network created using UserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] when primary network exist, ClusterUserDefinedNetwork status should report not-ready": "[Suite:openshift/conformance/parallel]",
+
+	"[ovn-kubernetes][Feature:NetworkSegmentation][OCPFeatureGate:NetworkSegmentation] when primary network exist, UserDefinedNetwork status should report not-ready": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:NodeIPMACMigration] when the node IPv4 address is updated when ETP=Local service with host network backend is configured makes sure that the flows are updated with new IP address (update kubelet first, the IP address later)": "[Disabled:Unimplemented]",
 
