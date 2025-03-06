@@ -246,9 +246,14 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	networkName := na.netInfo.GetNetworkName()
 
 	networkID, err := util.ParseNetworkIDAnnotation(node, networkName)
-	if err != nil && !util.IsAnnotationNotSetError(err) {
-		// Log the error and try to allocate new subnets
-		klog.Warningf("Failed to get node %s network id annotations for network %s : %v", node.Name, networkName, err)
+	if err != nil {
+		if !util.IsAnnotationNotSetError(err) {
+			// Log the error and try to allocate new subnets
+			klog.Warningf("Failed to get node %s network id annotations for network %s : %v", node.Name, networkName, err)
+		}
+		// if there is an error we are going to set networkID here to NoNetworkID to prevent
+		// the annotation being updated
+		networkID = types.NoNetworkID
 	}
 
 	updatedSubnetsMap := map[string][]*net.IPNet{}
@@ -319,14 +324,14 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 			updatedSubnetsMap[networkName] = validExistingSubnets
 		}
 	}
-	newTunnelID := util.NoID
+	newTunnelID := types.NoTunnelID
 	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
 		existingTunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName)
 		if err != nil && !util.IsAnnotationNotSetError(err) {
 			return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %v",
 				node.Name, networkName, err)
 		}
-		if existingTunnelID == util.InvalidID {
+		if existingTunnelID == types.InvalidID {
 			if newTunnelID, err = na.idAllocator.AllocateID(networkName + "_" + node.Name); err != nil {
 				return fmt.Errorf("failed to assign node %s tunnel id for network %s: %w", node.Name, networkName, err)
 			}
@@ -340,22 +345,24 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 		}
 	}
 
-	// only update node annotation with ID if it had it before and does not match
-	// NoID means it will not update
-	// InvalidID means node did not have the annotation
-	annoUpdateID := util.NoID
-	if networkID != util.InvalidID && networkID != na.networkID {
-		annoUpdateID = na.networkID
+	// only update node annotation with ID if it had it before (networkID is not NoNetworkID)
+	// and does not match.
+	// NoNetworkID means do not update the annotation
+	if networkID != types.NoNetworkID && networkID != na.networkID {
+		networkID = na.networkID
+	} else if networkID == na.networkID {
+		// don't need to update if there was no change to the ID
+		networkID = types.NoNetworkID
 	}
 
 	// Also update the node annotation if the networkID doesn't match
-	if len(updatedSubnetsMap) > 0 || annoUpdateID != util.NoID || len(allocatedJoinSubnets) > 0 || newTunnelID != util.NoID {
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, annoUpdateID, newTunnelID, allocatedJoinSubnets)
+	if len(updatedSubnetsMap) > 0 || networkID != types.NoNetworkID || len(allocatedJoinSubnets) > 0 || newTunnelID != types.NoTunnelID {
+		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, networkID, newTunnelID, allocatedJoinSubnets)
 		if err != nil {
 			if errR := na.clusterSubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); errR != nil {
 				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
 			}
-			if newTunnelID != util.NoID {
+			if newTunnelID != types.NoTunnelID {
 				na.idAllocator.ReleaseID(networkName + "_" + node.Name)
 				klog.Infof("Releasing node %s tunnelID for network %s since annotation update failed", node.Name, networkName)
 			}
@@ -453,14 +460,14 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 			return fmt.Errorf("failed to update node %q annotation LRPAddrAnnotation %s: %w",
 				node.Name, util.JoinIPNets(joinAddr, ","), err)
 		}
-		if networkId != util.NoID {
+		if networkId != types.NoNetworkID {
 			cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, networkName, networkId)
 			if err != nil {
 				return fmt.Errorf("failed to update node %q network id annotation %d for network %s: %w",
 					node.Name, networkId, networkName, err)
 			}
 		}
-		if tunnelID != util.NoID {
+		if tunnelID != types.NoTunnelID {
 			cnode.Annotations, err = util.UpdateUDNLayer2NodeGRLRPTunnelIDs(cnode.Annotations, networkName, tunnelID)
 			if err != nil {
 				return fmt.Errorf("failed to update node %q tunnel id annotation %d for network %s: %w",
@@ -497,7 +504,7 @@ func (na *NodeAllocator) Cleanup() error {
 
 		hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
 		// passing util.InvalidID deletes the network/tunnel id annotation for the network.
-		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, util.InvalidID, util.InvalidID, nil)
+		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, hostSubnetsMap, types.InvalidID, types.InvalidID, nil)
 		if err != nil {
 			return fmt.Errorf("failed to clear node %q subnet annotation for network %s",
 				node.Name, networkName)

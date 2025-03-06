@@ -892,7 +892,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -919,7 +919,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -943,7 +943,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error
 		allowPersistentIPs:  netconf.AllowPersistentIPs,
 		physicalNetworkName: netconf.PhysicalNetworkName,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -1123,13 +1123,13 @@ func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 		return nil, err
 	}
 
-	id := InvalidID
+	id := types.InvalidID
 	n, err := newNetInfo(netconf)
 	if err != nil {
 		return nil, err
 	}
 	if n.GetNetworkName() == types.DefaultNetworkName {
-		id = NoID
+		id = types.DefaultNetworkID
 	}
 	if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
 		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
