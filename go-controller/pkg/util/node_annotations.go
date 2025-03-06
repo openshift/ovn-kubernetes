@@ -151,13 +151,6 @@ const (
 	//		"l2-network-b":"10"}
 	// }",
 	ovnUDNLayer2NodeGRLRPTunnelIDs = "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids"
-
-	// InvalidID signifies an invalid ID. Currently used for network and tunnel IDs.
-	InvalidID = -1
-
-	// NoID signifies an empty/unset ID. Currently used for tunnel ID (reserved as un-usable when the allocator is created)
-	// and network ID (reserved as default network ID).
-	NoID = 0
 )
 
 type L3GatewayConfig struct {
@@ -485,12 +478,12 @@ func HasUDNLayer2NodeGRLRPTunnelID(node *corev1.Node, netName string) bool {
 func ParseUDNLayer2NodeGRLRPTunnelIDs(node *corev1.Node, netName string) (int, error) {
 	tunnelIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnUDNLayer2NodeGRLRPTunnelIDs)
 	if err != nil {
-		return InvalidID, err
+		return types.InvalidID, err
 	}
 
 	tunnelID, ok := tunnelIDsMap[netName]
 	if !ok {
-		return InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnUDNLayer2NodeGRLRPTunnelIDs, netName)
+		return types.InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnUDNLayer2NodeGRLRPTunnelIDs, netName)
 	}
 
 	return strconv.Atoi(tunnelID)
@@ -1363,12 +1356,12 @@ func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName
 func ParseNetworkIDAnnotation(node *corev1.Node, netName string) (int, error) {
 	networkIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
 	if err != nil {
-		return InvalidID, err
+		return types.InvalidID, err
 	}
 
 	networkID, ok := networkIDsMap[netName]
 	if !ok {
-		return InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
+		return types.InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
 	}
 
 	return strconv.Atoi(networkID)
@@ -1393,7 +1386,7 @@ func updateNetworkAnnotation(annotations map[string]string, netName string, id i
 	}
 
 	// add or delete network id of the specified network
-	if id == InvalidID {
+	if id == types.InvalidID {
 		delete(idsMap, netName)
 	} else {
 		idsMap[netName] = strconv.Itoa(id)
@@ -1480,24 +1473,4 @@ func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
 		validCIDRs = append(validCIDRs, cidr)
 	}
 	return validCIDRs
-}
-
-// GetNetworkID will retrieve the network id for the specified network from the
-// first node that contains that network at the network id annotations, it will
-// return at the first ocurrence, rest of nodes will not be parsed.
-func GetNetworkID(nodes []*corev1.Node, nInfo NetInfo) (int, error) {
-	for _, node := range nodes {
-		var err error
-		networkID, err := ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
-		if err != nil {
-			if IsAnnotationNotSetError(err) {
-				continue
-			}
-			return InvalidID, err
-		}
-		if networkID != InvalidID {
-			return networkID, nil
-		}
-	}
-	return InvalidID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
 }

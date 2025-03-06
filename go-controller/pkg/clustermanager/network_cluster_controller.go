@@ -120,7 +120,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 	// defaiult network
 	networkIDAllocator := id.NewIDAllocator(types.DefaultNetworkName, 1)
 	// Reserve the id 0 for the default network.
-	err := networkIDAllocator.ReserveID(types.DefaultNetworkName, defaultNetworkID)
+	err := networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
 	if err != nil {
 		panic(fmt.Errorf("could not reserve default network ID: %w", err))
 	}
@@ -175,7 +175,7 @@ func (ncc *networkClusterController) init() error {
 	if util.DoesNetworkRequireTunnelIDs(ncc.GetNetInfo()) {
 		ncc.tunnelIDAllocator = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
 		// Reserve the id 0. We don't want to assign this id to any of the pods or nodes.
-		if err = ncc.tunnelIDAllocator.ReserveID("zero", util.NoID); err != nil {
+		if err = ncc.tunnelIDAllocator.ReserveID("zero", types.NoTunnelID); err != nil {
 			return err
 		}
 		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() {
@@ -196,7 +196,7 @@ func (ncc *networkClusterController) init() error {
 							node.Name, ncc.GetNetworkName(), err)
 					}
 				}
-				if tunnelID != util.InvalidID {
+				if tunnelID != types.InvalidID {
 					if err := ncc.tunnelIDAllocator.ReserveID(ncc.GetNetworkName()+"_"+node.Name, tunnelID); err != nil {
 						return fmt.Errorf("unable to reserve id for network %s, node %s: %w", ncc.GetNetworkName(), node.Name, err)
 					}
