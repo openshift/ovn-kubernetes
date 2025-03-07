@@ -38,7 +38,7 @@ var _ = ginkgowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Netwo
 			nadName                      = "tenant-red"
 			servicePort                  = 88
 			serviceTargetPort            = 80
-			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv4Subnet = "11.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
 			clientContainer              = "frr"
 		)
