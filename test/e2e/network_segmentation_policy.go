@@ -26,7 +26,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 	ginkgo.Context("on a user defined primary network", func() {
 		const (
 			nadName                      = "tenant-red"
-			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv4Subnet = "192.0.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
 			customL2IPv4Gateway                 = "10.128.0.3"
 			customL2IPv6Gateway                 = "2014:100:200::3"

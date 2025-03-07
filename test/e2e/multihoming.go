@@ -41,10 +41,10 @@ const (
 var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 	const (
 		podName                      = "tinypod"
-		secondaryNetworkCIDR         = "10.128.0.0/16"
+		secondaryNetworkCIDR         = "192.0.0.0/16"
 		secondaryNetworkName         = "tenant-blue"
-		secondaryFlatL2IgnoreCIDR    = "10.128.0.0/29"
-		secondaryFlatL2NetworkCIDR   = "10.128.0.0/24"
+		secondaryFlatL2IgnoreCIDR    = "192.0.0.0/29"
+		secondaryFlatL2NetworkCIDR   = "192.0.0.0/24"
 		secondaryLocalnetIgnoreCIDR  = "60.128.0.0/29"
 		secondaryLocalnetNetworkCIDR = "60.128.0.0/24"
 		netPrefixLengthPerNode       = 24
