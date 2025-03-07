@@ -150,6 +150,21 @@ func generatePodSpec(config podConfiguration) *v1.Pod {
 	if config.isPrivileged {
 		privileged := true
 		podSpec.Spec.Containers[0].SecurityContext.Privileged = &privileged
+	} else {
+		falsePtr := false
+		truePtr := true
+		var userID int64 = 1000
+		for _, container := range podSpec.Spec.Containers {
+			if container.SecurityContext.Capabilities == nil {
+				container.SecurityContext.Capabilities = &v1.Capabilities{}
+			}
+			container.SecurityContext.Capabilities.Drop = []v1.Capability{"ALL"}
+			container.SecurityContext.Privileged = &falsePtr
+			container.SecurityContext.RunAsNonRoot = &truePtr
+			container.SecurityContext.RunAsUser = &userID
+			container.SecurityContext.AllowPrivilegeEscalation = &falsePtr
+			container.SecurityContext.SeccompProfile = &v1.SeccompProfile{Type: v1.SeccompProfileTypeRuntimeDefault}
+		}
 	}
 	return podSpec
 }
