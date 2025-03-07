@@ -506,13 +506,16 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 		matchedNetworks := sets.New[string]()
 		for _, frrConfig := range frrConfigs {
 			// generate FRRConfiguration for each source FRRConfiguration/node combination
-			new := c.generateFRRConfiguration(
+			new, err := c.generateFRRConfiguration(
 				ra,
 				frrConfig,
 				nodeName,
 				selectedNetworks,
 				matchedNetworks,
 			)
+			if err != nil {
+				return nil, nil, err
+			}
 			if new == nil {
 				// if we got nil, we didn't match any VRF
 				return nil, nil, fmt.Errorf("%w: FRRConfiguration %q selected for node %q has no VRF matching the RouteAdvertisements target VRF or any selected network",
@@ -538,7 +541,7 @@ func (c *Controller) generateFRRConfiguration(
 	nodeName string,
 	selectedNetworks *selectedNetworks,
 	matchedNetworks sets.Set[string],
-) *frrtypes.FRRConfiguration {
+) (*frrtypes.FRRConfiguration, error) {
 	routers := []frrtypes.Router{}
 	advertisements := sets.New(ra.Spec.Advertisements...)
 
@@ -597,16 +600,30 @@ func (c *Controller) generateFRRConfiguration(
 		targetRouter.Prefixes = advertisePrefixes
 		targetRouter.Neighbors = make([]frrtypes.Neighbor, 0, len(source.Spec.BGP.Routers[i].Neighbors))
 		for _, neighbor := range source.Spec.BGP.Routers[i].Neighbors {
-			advertisePrefixes := advertisePrefixes
-			receivePrefixes := receivePrefixes
-			if neighbor.DisableMP {
-				isIPV6 := utilnet.IsIPv6String(neighbor.Address)
-				advertisePrefixes = util.MatchAllIPNetsStringFamily(isIPV6, advertisePrefixes)
-				receivePrefixes = util.MatchAllIPNetsStringFamily(isIPV6, receivePrefixes)
+			// If MultiProtocol is enabled (default) then a BGP session carries
+			// prefixes of both IPv4 and IPv6 families. Our problem is that with
+			// an IPv4 session, FRR can incorrectly pick the masquerade IPv6
+			// address (instead of the real address) as next hop for IPv6
+			// prefixes and that won't work. Note that with a dedicated IPv6
+			// session that can't happen since FRR will use the same address
+			// that was used to stablish the session. Let's enforce the use of
+			// DisableMP for now.
+			if !neighbor.DisableMP {
+				return nil, fmt.Errorf("%w: DisableMP==false not supported, seen on FRRConfiguration %s/%s neighbor %s",
+					errConfig,
+					source.Namespace,
+					source.Name,
+					neighbor.Address,
+				)
 			}
+
+			isIPV6 := utilnet.IsIPv6String(neighbor.Address)
+			advertisePrefixes := util.MatchAllIPNetsStringFamily(isIPV6, advertisePrefixes)
+			receivePrefixes := util.MatchAllIPNetsStringFamily(isIPV6, receivePrefixes)
 			if len(advertisePrefixes) == 0 {
 				continue
 			}
+
 			neighbor.ToAdvertise = frrtypes.Advertise{
 				Allowed: frrtypes.AllowedOutPrefixes{
 					Mode:     frrtypes.AllowRestricted,
@@ -686,7 +703,7 @@ func (c *Controller) generateFRRConfiguration(
 	}
 	if len(routers) == 0 {
 		// we ended up with no routers, bail out
-		return nil
+		return nil, nil
 	}
 
 	new := &frrtypes.FRRConfiguration{}
@@ -712,7 +729,7 @@ func (c *Controller) generateFRRConfiguration(
 		},
 	}
 
-	return new
+	return new, nil
 }
 
 // updateFRRConfigurations updates the FRRConfigurations that apply for a

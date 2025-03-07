@@ -13,9 +13,6 @@ import (
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
 const (
-	// DefaultNetworkID is the default network.
-	DefaultNetworkID = 0
-
 	// MaxNetworks is the maximum number of networks allowed.
 	MaxNetworks = 4096
 )

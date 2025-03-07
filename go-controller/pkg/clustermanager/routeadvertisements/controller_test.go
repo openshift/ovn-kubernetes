@@ -22,6 +22,7 @@ import (
 	ctesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	controllerutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
@@ -102,14 +103,16 @@ func (tn testNode) Node() *corev1.Node {
 type testNeighbor struct {
 	ASN       uint32
 	Address   string
+	DisableMP *bool
 	Receive   []string
 	Advertise []string
 }
 
 func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 	n := frrapi.Neighbor{
-		ASN:     tn.ASN,
-		Address: tn.Address,
+		ASN:       tn.ASN,
+		Address:   tn.Address,
+		DisableMP: true,
 		ToReceive: frrapi.Receive{
 			Allowed: frrapi.AllowedInPrefixes{
 				Mode: frrapi.AllowRestricted,
@@ -121,6 +124,9 @@ func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 				Prefixes: tn.Advertise,
 			},
 		},
+	}
+	if tn.DisableMP != nil {
+		n.DisableMP = *tn.DisableMP
 	}
 	for _, receive := range tn.Receive {
 		sep := strings.LastIndex(receive, "/")
@@ -360,6 +366,39 @@ func TestController_reconcile(t *testing.T) {
 					Routers: []*testRouter{
 						{ASN: 1, Prefixes: []string{"1.0.1.1/32", "1.1.0.0/24"}, Neighbors: []*testNeighbor{
 							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1/32", "1.1.0.0/24"}, Receive: []string{"1.1.0.0/16/24"}},
+						}},
+					}},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "reconciles dual-stack pod+eip RouteAdvertisement for a single FRR config, node and default network and target VRF",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+							{ASN: 1, Address: "fd02::ffff:100:64"},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":[\"1.1.0.0/24\",\"fd01::/64\"]}"}},
+			eips:                 []*testEIP{{Name: "eipv4", EIPs: map[string]string{"node": "1.0.1.1"}}, {Name: "eipv6", EIPs: map[string]string{"node": "fd03::ffff:100:101"}}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.0.1.1/32", "1.1.0.0/24", "fd01::/64", "fd03::ffff:100:101/128"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1/32", "1.1.0.0/24"}, Receive: []string{"1.1.0.0/16/24"}},
+							{ASN: 1, Address: "fd02::ffff:100:64", Advertise: []string{"fd01::/64", "fd03::ffff:100:101/128"}, Receive: []string{"fd01::/48/64"}},
 						}},
 					}},
 			},
@@ -785,6 +824,24 @@ func TestController_reconcile(t *testing.T) {
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
+		{
+			name: "fails to reconcile if DisableMP is unset",
+			ra:   &testRA{Name: "ra", AdvertisePods: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", DisableMP: ptr.To(false)},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -797,6 +854,10 @@ func TestController_reconcile(t *testing.T) {
 				{
 					CIDR:             ovntest.MustParseIPNet("1.1.0.0/16"),
 					HostSubnetLength: 24,
+				},
+				{
+					CIDR:             ovntest.MustParseIPNet("fd01::/48"),
+					HostSubnetLength: 64,
 				},
 			}
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
@@ -885,7 +946,7 @@ func TestController_reconcile(t *testing.T) {
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				accepted := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
 				g.Expect(accepted).NotTo(gomega.BeNil())
-				g.Expect(accepted.Status).To(gomega.Equal(tt.expectAcceptedStatus))
+				g.Expect(accepted.Status).To(gomega.Equal(tt.expectAcceptedStatus), accepted.Message)
 			}
 
 			// verify FRRConfigurations have been created/updated/deleted as expected

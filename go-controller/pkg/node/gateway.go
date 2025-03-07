@@ -32,6 +32,7 @@ type Gateway interface {
 	Init(<-chan struct{}, *sync.WaitGroup) error
 	Start()
 	GetGatewayBridgeIface() string
+	GetGatewayIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
 	SetDefaultPodNetworkAdvertised(bool)
 	Reconcile() error
@@ -456,6 +457,10 @@ func (g *gateway) GetGatewayBridgeIface() string {
 	return g.openflowManager.getDefaultBridgeName()
 }
 
+func (g *gateway) GetGatewayIface() string {
+	return g.openflowManager.defaultBridge.getGatewayIface()
+}
+
 // getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
 func getMaxFrameLength() int {
 	return config.Default.MTU + 14
@@ -537,6 +542,8 @@ type bridgeConfiguration struct {
 	nodeName    string
 	bridgeName  string
 	uplinkName  string
+	gwIface     string
+	gwIfaceRep  string
 	ips         []*net.IPNet
 	interfaceID string
 	macAddress  net.HardwareAddr
@@ -546,11 +553,19 @@ type bridgeConfiguration struct {
 	eipMarkIPs  *markIPsCache
 }
 
+func (b *bridgeConfiguration) getGatewayIface() string {
+	// If gwIface is set, then accelerated GW interface is present and we use it. If else use external bridge instead.
+	if b.gwIface != "" {
+		return b.gwIface
+	}
+	return b.bridgeName
+}
+
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
 func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *corev1.Node) ([]*net.IPNet, error) {
 	b.Lock()
 	defer b.Unlock()
-	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
+	ifAddrs, err := getNetworkInterfaceIPAddresses(b.getGatewayIface())
 	if err != nil {
 		return nil, err
 	}
@@ -578,6 +593,11 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *corev1.Node) ([]*
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubnets, gwIPs []*net.IPNet,
 	advertised bool) (*bridgeConfiguration, error) {
+	var intfRep string
+	var err error
+	isGWAcclInterface := false
+	gwIntf := intfName
+
 	defaultNetConfig := &bridgeUDNConfiguration{
 		masqCTMark:  ctMarkOVN,
 		subnets:     config.Default.ClusterSubnets,
@@ -591,15 +611,47 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubn
 		eipMarkIPs: newMarkIPsCache(),
 	}
 	res.netConfig[types.DefaultNetworkName].advertised.Store(advertised)
-	gwIntf := intfName
 
-	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
+	if config.Gateway.GatewayAcceleratedInterface != "" {
+		// Try to get representor for the specified gateway device.
+		// If function succeeds, then it is either a valid switchdev VF or SF, and we can use this accelerated device
+		// for node IP, Host Ofport for Openflow etc.
+		// If failed - error for improper configuration option
+		intfRep, err = getRepresentor(config.Gateway.GatewayAcceleratedInterface)
+		if err != nil {
+			return nil, fmt.Errorf("gateway accelerated interface %s is not valid: %w", config.Gateway.GatewayAcceleratedInterface, err)
+		}
+		isGWAcclInterface = true
+		klog.Infof("For gateway accelerated interface %s representor: %s", config.Gateway.GatewayAcceleratedInterface, intfRep)
+	}
+
+	if isGWAcclInterface {
+		gatewayAcceleratedInterface := config.Gateway.GatewayAcceleratedInterface
+		bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfRep)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find bridge that has port %s: %w", intfRep, err)
+		}
+		link, err := util.GetNetLinkOps().LinkByName(gatewayAcceleratedInterface)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get netdevice link for %s: %w", gatewayAcceleratedInterface, err)
+		}
+		uplinkName, err := util.GetNicName(bridgeName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)
+		}
+		res.bridgeName = bridgeName
+		res.uplinkName = uplinkName
+		res.gwIfaceRep = intfRep
+		res.gwIface = gatewayAcceleratedInterface
+		res.macAddress = link.Attrs().HardwareAddr
+	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)
 		}
 		res.bridgeName = bridgeName
+		res.gwIface = bridgeName
 		res.uplinkName = uplinkName
 		gwIntf = bridgeName
 	} else if _, _, err := util.RunOVSVsctl("br-exists", intfName); err != nil {
@@ -610,6 +662,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubn
 			return nil, fmt.Errorf("nicToBridge failed for %s: %w", intfName, err)
 		}
 		res.bridgeName = bridgeName
+		res.gwIface = bridgeName
 		res.uplinkName = intfName
 		gwIntf = bridgeName
 	} else {
@@ -625,8 +678,8 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubn
 			res.uplinkName = uplinkName
 		}
 		res.bridgeName = intfName
+		res.gwIface = intfName
 	}
-	var err error
 	// Now, we get IP addresses for the bridge
 	if len(gwIPs) > 0 {
 		// use gwIPs if provided
@@ -640,9 +693,11 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubn
 		}
 	}
 
-	res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get MAC address for ovs port %s: %w", gwIntf, err)
+	if !isGWAcclInterface { // We do not have an accelerated device for Gateway interface
+		res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get MAC address for ovs port %s: %w", gwIntf, err)
+		}
 	}
 
 	res.interfaceID, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, physicalNetworkName)
@@ -665,6 +720,14 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubn
 			return nil, err
 		}
 	}
-
 	return &res, nil
+}
+
+func getRepresentor(intfName string) (string, error) {
+	deviceID, err := util.GetDeviceIDFromNetdevice(intfName)
+	if err != nil {
+		return "", err
+	}
+
+	return util.GetFunctionRepresentorName(deviceID)
 }
