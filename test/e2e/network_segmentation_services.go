@@ -10,6 +10,9 @@ import (
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
+	ginkgowrapper "github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/openshift-hack/ocpfeaturegate"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -25,7 +28,7 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 )
 
-var _ = Describe("Network Segmentation: services", func() {
+var _ = ginkgowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.NetworkSegmentation, "services", func() {
 
 	f := wrappedTestFramework("udn-services")
 	f.SkipNamespaceCreation = true
@@ -35,7 +38,7 @@ var _ = Describe("Network Segmentation: services", func() {
 			nadName                      = "tenant-red"
 			servicePort                  = 88
 			serviceTargetPort            = 80
-			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv4Subnet = "99.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
 			clientContainer              = "frr"
 		)
