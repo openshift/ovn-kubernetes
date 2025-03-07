@@ -104,7 +104,7 @@ func newController(
 	if zone == "" && node == "" {
 		c.networkIDAllocator = id.NewIDAllocator("NetworkIDs", MaxNetworks)
 		// Reserve the ID of the default network
-		err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, DefaultNetworkID)
+		err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to allocate default network ID: %w", err)
 		}
@@ -359,7 +359,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 	// if network ID has not been set and this is not the well known default
 	// network, need to wait until cluster nad controller allocates an ID for
 	// the network
-	if ensureNetwork.GetNetworkID() == util.InvalidID {
+	if ensureNetwork.GetNetworkID() == types.InvalidID {
 		klog.V(4).Infof("%s: will wait for cluster manager to allocate an ID before ensuring network %s", c.name, nadNetworkName)
 		return nil
 	}
@@ -553,7 +553,7 @@ func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInf
 	}
 
 	var err error
-	id := util.InvalidID
+	id := types.InvalidID
 
 	// check what ID is currently annotated
 	if nad != nil && nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
@@ -585,16 +585,16 @@ func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInf
 	name := new.GetNetworkName()
 
 	// an ID was annotated, check if it is free to use or stale
-	if id != util.InvalidID {
+	if id != types.InvalidID {
 		err = c.networkIDAllocator.ReserveID(name, id)
 		if err != nil {
 			// already reserved for a different network, allocate a new id
-			id = util.InvalidID
+			id = types.InvalidID
 		}
 	}
 
 	// we don't have an ID, allocate a new one
-	if id == util.InvalidID {
+	if id == types.InvalidID {
 		id, err = c.networkIDAllocator.AllocateID(name)
 		if err != nil {
 			return fmt.Errorf("failed to allocate network ID: %w", err)
