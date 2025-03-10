@@ -275,7 +275,7 @@ func (c *controller) syncLinkUpdate(update *netlink.LinkUpdate) {
 	newTable := int(vrf.Table)
 	oldTable := noTable
 	var networkName string
-	networkID := util.InvalidID
+	networkID := types.InvalidID
 	// we might not be aware of the UDN but this might still be a VRF for a UDN
 	// that is being created or destroyed so we still need to handle it
 	if network != nil {
@@ -497,7 +497,7 @@ func (c *controller) getNetworksFromVRFsWithLock(vrfNames ...string) ([]util.Net
 			return nil, err
 		}
 		networkName := vrfName
-		if id != util.InvalidID {
+		if id != types.InvalidID {
 			networkName = c.networkIDs[id]
 			if networkName == "" {
 				// we might not know about this network yet

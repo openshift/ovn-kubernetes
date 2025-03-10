@@ -1420,14 +1420,14 @@ func GetNetworkVRFName(netInfo NetInfo) string {
 
 func ParseNetworkIDFromVRFName(name string) (int, error) {
 	if !strings.HasPrefix(name, types.UDNVRFDevicePrefix) {
-		return InvalidID, nil
+		return types.InvalidID, nil
 	}
 	if !strings.HasSuffix(name, types.UDNVRFDeviceSuffix) {
-		return InvalidID, nil
+		return types.InvalidID, nil
 	}
 	id, err := strconv.Atoi(name[len(types.UDNVRFDevicePrefix) : len(name)-len(types.UDNVRFDeviceSuffix)])
 	if err != nil {
-		return InvalidID, fmt.Errorf("failed to parse network ID from name %q: %w", name, err)
+		return types.InvalidID, fmt.Errorf("failed to parse network ID from name %q: %w", name, err)
 	}
 	return id, nil
 }
