@@ -603,7 +603,7 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 		return nil
 	}
 
-	if nc.Gateway.GetGatewayBridgeIface() != link.Attrs().Name {
+	if nc.Gateway.GetGatewayIface() != link.Attrs().Name {
 		return nil
 	}
 
