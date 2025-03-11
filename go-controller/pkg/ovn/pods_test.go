@@ -228,11 +228,12 @@ type secondaryPodInfo struct {
 }
 
 type portInfo struct {
-	portUUID string
-	podIP    string
-	podMAC   string
-	portName string
-	tunnelID int
+	portUUID  string
+	podIP     string
+	podMAC    string
+	portName  string
+	tunnelID  int
+	prefixLen int
 }
 
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) testPod {
@@ -368,10 +369,20 @@ func (p testPod) getAnnotationsJson() string {
 	}
 
 	for _, portInfos := range p.secondaryPodInfos {
+		var secondaryIfaceRoutes []podRoute
+		for _, route := range portInfos.routes {
+			secondaryIfaceRoutes = append(
+				secondaryIfaceRoutes,
+				podRoute{Dest: route.Dest.String(), NextHop: route.NextHop.String()},
+			)
+		}
 		for nad, portInfo := range portInfos.allportInfo {
 			ipPrefix := 24
 			if ovntest.MustParseIP(p.podIP).To4() == nil {
 				ipPrefix = 64
+			}
+			if portInfo.prefixLen != 0 {
+				ipPrefix = portInfo.prefixLen
 			}
 			ip := fmt.Sprintf("%s/%d", portInfo.podIP, ipPrefix)
 			podAnnotation := podAnnotation{
@@ -379,6 +390,11 @@ func (p testPod) getAnnotationsJson() string {
 				IP:       ip,
 				IPs:      []string{ip},
 				TunnelID: portInfo.tunnelID,
+				Routes:   secondaryIfaceRoutes,
+			}
+			if portInfos.nodeGWIP != "" {
+				podAnnotation.Gateway = portInfos.nodeGWIP
+				podAnnotation.Gateways = []string{portInfos.nodeGWIP}
 			}
 			podAnnotations[nad] = podAnnotation
 		}
