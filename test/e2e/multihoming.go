@@ -1165,7 +1165,45 @@ var _ = Describe("Multi Homing", func() {
 						metav1.LabelSelector{
 							MatchLabels: map[string]string{"role": "trusted"},
 						},
-						port,
+						multiNetPolicyPort(port),
+					),
+				),
+				ginkgo.Entry(
+					"using pod selectors and port range for a pure L2 overlay",
+					networkAttachmentConfigParams{
+						name:     secondaryNetworkName,
+						topology: "layer2",
+						cidr:     secondaryFlatL2NetworkCIDR,
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+						labels: map[string]string{
+							"app":  "client",
+							"role": "trusted",
+						},
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        blockedClient(clientPodName),
+						labels:      map[string]string{"app": "client"},
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingPolicy(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"role": "trusted"},
+						},
+						// build a random range around the port we are actually trying to allow without explicitly setting it
+						multiNetPolicyPortRange(port-3, port+5),
 					),
 				),
 				ginkgo.Entry(
@@ -1202,7 +1240,7 @@ var _ = Describe("Multi Homing", func() {
 						metav1.LabelSelector{
 							MatchLabels: map[string]string{"role": "trusted"},
 						},
-						port,
+						multiNetPolicyPort(port),
 					),
 				),
 				ginkgo.Entry(
@@ -1239,7 +1277,7 @@ var _ = Describe("Multi Homing", func() {
 						metav1.LabelSelector{
 							MatchLabels: map[string]string{"role": "trusted"},
 						},
-						port,
+						multiNetPolicyPort(port),
 					),
 				),
 				ginkgo.Entry(
@@ -1608,7 +1646,7 @@ var _ = Describe("Multi Homing", func() {
 			)
 
 			ginkgo.DescribeTable(
-				"deny all",
+				"deny traffic",
 				func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
@@ -1668,6 +1706,39 @@ var _ = Describe("Multi Homing", func() {
 						[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
 						nil,
 						nil,
+					),
+				),
+				ginkgo.Entry(
+					"using pod selectors and wrong port range for a localnet topology",
+					networkAttachmentConfigParams{
+						name:     secondaryNetworkName,
+						topology: "localnet",
+						cidr:     secondaryLocalnetNetworkCIDR,
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+						labels: map[string]string{
+							"app":  "client",
+							"role": "trusted",
+						},
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingPolicy(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"role": "trusted"},
+						},
+						// build a port range that doesn't include server port
+						multiNetPolicyPortRange(port-10, port-1),
 					),
 				),
 			)
