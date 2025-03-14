@@ -24,6 +24,9 @@ packages:
     config:
       all: true
       dir: pkg/kube/mocks
+  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node:
+    interfaces:
+      ManagementPort:
   github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set:
     config:
       all: true
