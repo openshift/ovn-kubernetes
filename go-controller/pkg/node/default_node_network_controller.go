@@ -1180,9 +1180,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
 	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		bridgeName := ""
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			bridgeName = nc.Gateway.GetGatewayBridgeIface()
+			bridgeName := nc.Gateway.GetGatewayIface()
 			// Configure route for svc towards shared gw bridge
 			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
 			if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
