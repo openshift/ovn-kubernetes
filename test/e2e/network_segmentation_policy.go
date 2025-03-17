@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 )
 
 var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.NetworkSegmentation, "Network Policies", func() {
@@ -31,8 +32,6 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 			userDefinedNetworkIPv4Subnet = "11.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
 			nodeHostnameKey              = "kubernetes.io/hostname"
-			workerOneNodeName            = "ovn-worker"
-			workerTwoNodeName            = "ovn-worker2"
 			port                         = 9000
 			randomStringLength           = 5
 			nameSpaceYellowSuffix        = "yellow"
@@ -79,10 +78,13 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 				clientPodConfig podConfiguration,
 				serverPodConfig podConfiguration,
 			) {
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), cs, 2)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "expect at least 2 schedulable nodes")
 				ginkgo.By("Creating the attachment configuration")
+				netConfigParams.cidr = correctCIDRFamily(cs, userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet)
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 				netConfig.namespace = f.Namespace.Name
-				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+				_, err = nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
 					generateNAD(netConfig),
 					metav1.CreateOptions{},
@@ -91,7 +93,9 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 
 				ginkgo.By("creating client/server pods")
 				serverPodConfig.namespace = f.Namespace.Name
+				serverPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].Name}
 				clientPodConfig.namespace = f.Namespace.Name
+				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].Name}
 				runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
 				runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
 
@@ -134,19 +138,17 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer2",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 				),
 			),
 			ginkgo.Entry(
@@ -154,19 +156,17 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 				),
 			),
 		)
@@ -179,13 +179,14 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 				allowServerPodConfig podConfiguration,
 				denyServerPodConfig podConfiguration,
 			) {
-
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), cs, 2)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "expect at least 2 schedulable nodes")
 				namespaceYellow := getNamespaceName(f, nameSpaceYellowSuffix)
 				namespaceBlue := getNamespaceName(f, namespaceBlueSuffix)
 
 				nad := networkAttachmentConfigParams{
 					topology: topology,
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     correctCIDRFamily(cs, userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					// Both yellow and blue namespaces are going to served by green network.
 					// Use random suffix for the network name to avoid race between tests.
 					networkName: fmt.Sprintf("%s-%s", "green", rand.String(randomStringLength)),
@@ -210,8 +211,11 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 
 				ginkgo.By("creating client/server pods")
 				allowServerPodConfig.namespace = namespaceYellow
+				allowServerPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].Name}
 				denyServerPodConfig.namespace = namespaceYellow
+				denyServerPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].Name}
 				clientPodConfig.namespace = namespaceBlue
+				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].Name}
 				runUDNPod(cs, namespaceYellow, allowServerPodConfig, nil)
 				runUDNPod(cs, namespaceYellow, denyServerPodConfig, nil)
 				runUDNPod(cs, namespaceBlue, clientPodConfig, nil)
@@ -247,7 +251,7 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 				}, 2*time.Minute, 6*time.Second).Should(gomega.Succeed())
 
 				ginkgo.By("creating a \"default deny\" network policy")
-				_, err := makeDenyAllPolicy(f, namespaceYellow, "deny-all")
+				_, err = makeDenyAllPolicy(f, namespaceYellow, "deny-all")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ginkgo.By("asserting the *client* pod can not contact the allow server pod exposed endpoint")
@@ -280,14 +284,12 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 				"layer2",
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"allow-server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(allowServerPodLabel),
 				),
 				*podConfig(
@@ -295,7 +297,6 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(denyServerPodLabel),
 				),
 			),
@@ -304,14 +305,12 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 				"layer3",
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"allow-server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(allowServerPodLabel),
 				),
 				*podConfig(
@@ -319,7 +318,6 @@ var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.Networ
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(denyServerPodLabel),
 				),
 			))

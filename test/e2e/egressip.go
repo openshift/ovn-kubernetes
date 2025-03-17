@@ -102,13 +102,15 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (s
 		// to restore to.
 		return "", "", false
 	}
+	ovnKubeNs, err := getOVNKubeNamespaceName(h.F.ClientSet.CoreV1().Namespaces())
+	framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 	framework.Logf("Checking the ovnkube-node and ovnkube-master (ovnkube-cluster-manager if interconnect=true) healthcheck ports in use")
-	portNode := getTemplateContainerEnv(ovnNamespace, "daemonset/ovnkube-node", getNodeContainerName(), OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+	portNode := getTemplateContainerEnv(ovnKubeNs, "daemonset/ovnkube-node", getNodeContainerName(h.F.ClientSet.CoreV1().Namespaces()), OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
 	var portMaster string
 	if isInterconnectEnabled() {
-		portMaster = getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+		portMaster = getTemplateContainerEnv(ovnKubeNs, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
 	} else {
-		portMaster = getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+		portMaster = getTemplateContainerEnv(ovnKubeNs, "deployment/ovnkube-master", "ovnkube-master", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
 	}
 
 	wantLegacy := (h.Legacy && !restore) || (h.modeWasLegacy && restore)
@@ -149,14 +151,16 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (s
 // observed.
 func (h *egressNodeAvailabilityHandlerViaHealthCheck) setMode(nodeName string, reject, restore bool) {
 	portEnv, port, changeEnv := h.checkMode(restore)
+	ovnKubeNs, err := getOVNKubeNamespaceName(h.F.ClientSet.CoreV1().Namespaces())
+	framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 	if changeEnv {
 		framework.Logf("Updating ovnkube to use health check on port %s (0 is legacy, non 0 is GRPC)", portEnv)
 		setEnv := map[string]string{OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME: portEnv}
-		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "daemonset/ovnkube-node", getNodeContainerName(), setEnv)
+		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnKubeNs, "daemonset/ovnkube-node", getNodeContainerName(h.F.ClientSet.CoreV1().Namespaces()), setEnv)
 		if isInterconnectEnabled() {
-			setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", setEnv)
+			setUnsetTemplateContainerEnv(h.F.ClientSet, ovnKubeNs, "deployment/ovnkube-control-plane", "ovnkube-cluster-manager", setEnv)
 		} else {
-			setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", setEnv)
+			setUnsetTemplateContainerEnv(h.F.ClientSet, ovnKubeNs, "deployment/ovnkube-master", "ovnkube-master", setEnv)
 		}
 	}
 	if port != "" {
@@ -165,7 +169,7 @@ func (h *egressNodeAvailabilityHandlerViaHealthCheck) setMode(nodeName string, r
 			op = "Drop"
 		}
 		framework.Logf("%s health check traffic on port %s on node %s", op, port, nodeName)
-		allowOrDropNodeInputTrafficOnPort(op, nodeName, "tcp", port)
+		allowOrDropNodeInputTrafficOnPort(h.F.ClientSet.CoreV1().Namespaces(), op, ovnKubeNs, nodeName, "tcp", port)
 	}
 }
 
@@ -703,6 +707,7 @@ var _ = ginkgo_wrapper.DescribeTableSubTree(feature.EgressIP, func(netConfigPara
 		// configure UDN
 		nadClient, err := nadclient.NewForConfig(f.ClientConfig())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		netConfigParams.cidr = filterUnsupportedCIDRs(f.ClientSet, netConfigParams.cidr)
 		netConfig := newNetworkAttachmentConfig(netConfigParams)
 		netConfig.namespace = f.Namespace.Name
 		_, err = nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
@@ -1394,10 +1399,12 @@ spec:
 		framework.ExpectNoError(err, "Step 6. Check that the second egressIP object is assigned to node2 (pod2Node/egress1Node), failed: %v", err)
 
 		ginkgo.By("7. Check the OVN DB to ensure no SNATs are added for the standby egressIP")
-		dbPods, err := e2ekubectl.RunKubectl(ovnNamespace, "get", "pods", "-l", "name=ovnkube-db", "-o=jsonpath='{.items..metadata.name}'")
+		ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+		framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
+		dbPods, err := e2ekubectl.RunKubectl(ovnKubeNs, "get", "pods", "-l", "name=ovnkube-db", "-o=jsonpath='{.items..metadata.name}'")
 		dbContainerName := "nb-ovsdb"
 		if isInterconnectEnabled() {
-			dbPods, err = e2ekubectl.RunKubectl(ovnNamespace, "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress1Node.name), "-o=jsonpath='{.items..metadata.name}'")
+			dbPods, err = e2ekubectl.RunKubectl(ovnKubeNs, "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress1Node.name), "-o=jsonpath='{.items..metadata.name}'")
 		}
 		if err != nil || len(dbPods) == 0 {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
@@ -1412,7 +1419,7 @@ spec:
 		if isIPv6TestRun {
 			logicalIP = fmt.Sprintf("logical_ip=\"%s\"", srcPodIP.String())
 		}
-		snats, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err := e2ekubectl.RunKubectl(ovnKubeNs, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 		}
@@ -1476,7 +1483,7 @@ spec:
 		framework.ExpectNoError(err, "Step 11. Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP3 from object2, failed: %v", err)
 
 		ginkgo.By("12. Check the OVN DB to ensure SNATs are added for only the standby egressIP")
-		snats, err = e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err = e2ekubectl.RunKubectl(ovnKubeNs, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for only the standby egressIP, err: %v", err)
 		}
@@ -1511,7 +1518,7 @@ spec:
 		framework.ExpectNoError(err, "Step 14. Ensure egressIP1 from egressIP object1 and egressIP3 from object2 is correctly transferred to egress2Node, failed: %v", err)
 
 		if isInterconnectEnabled() {
-			dbPods, err = e2ekubectl.RunKubectl(ovnNamespace, "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress2Node.name), "-o=jsonpath='{.items..metadata.name}'")
+			dbPods, err = e2ekubectl.RunKubectl(ovnKubeNs, "get", "pods", "-l", "name=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress2Node.name), "-o=jsonpath='{.items..metadata.name}'")
 		}
 		if err != nil || len(dbPods) == 0 {
 			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
@@ -1524,7 +1531,7 @@ spec:
 		}
 
 		ginkgo.By("15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3")
-		snats, err = e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		snats, err = e2ekubectl.RunKubectl(ovnKubeNs, "exec", dbPod, "-c", dbContainerName, "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
 		if err != nil {
 			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, err: %v", err)
 		}
@@ -2942,6 +2949,7 @@ spec:
 		if !isNetworkSegmentationEnabled() {
 			ginkgo.Skip("network segmentation is disabled")
 		}
+		otherNetworkAttachParms.cidr = filterUnsupportedCIDRs(f.ClientSet, otherNetworkAttachParms.cidr)
 		var otherNetworkNamespace *corev1.Namespace
 		var err error
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -3057,13 +3065,13 @@ spec:
 		ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
 			name:     "l3primary",
 			topology: types.Layer3Topology,
-			cidr:     correctCIDRFamily("30.10.0.0/16", "2014:100:200::0/60"),
+			cidr:     joinCIDRs("30.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
 		ginkgo.Entry("L2 Primary UDN", networkAttachmentConfigParams{
 			name:     "l2primary",
 			topology: types.Layer2Topology,
-			cidr:     correctCIDRFamily("10.10.0.0/16", "2014:100:200::0/60"),
+			cidr:     joinCIDRs("10.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
 	)

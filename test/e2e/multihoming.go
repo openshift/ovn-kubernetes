@@ -346,6 +346,8 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 				netConfig.namespace = f.Namespace.Name
 				clientPodConfig.namespace = f.Namespace.Name
 				serverPodConfig.namespace = f.Namespace.Name
+				ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+				framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 
 				if netConfig.topology == "localnet" {
 					By("setting up the localnet underlay")
@@ -353,15 +355,15 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 					Expect(nodes).NotTo(BeEmpty())
 					defer func() {
 						By("tearing down the localnet underlay")
-						Expect(teardownUnderlay(nodes)).To(Succeed())
+						Expect(teardownUnderlay(nodes, ovnKubeNs)).To(Succeed())
 					}()
 
 					const secondaryInterfaceName = "eth1"
-					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+					Expect(setupUnderlay(nodes, ovnKubeNs, secondaryInterfaceName, netConfig)).To(Succeed())
 				}
 
 				By("creating the attachment configuration")
-				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+				_, err = nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
 					generateNAD(netConfig),
 					metav1.CreateOptions{},
@@ -715,7 +717,6 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 		Context("localnet OVN-K secondary network", func() {
 			const (
 				clientPodName          = "client-pod"
-				nodeHostnameKey        = "kubernetes.io/hostname"
 				servicePort            = 9000
 				dockerNetworkName      = "underlay"
 				underlayServiceIP      = "60.128.0.1"
@@ -743,7 +744,9 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 					By("setting up the localnet underlay")
 					nodes = ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
-					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+					ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+					framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
+					Expect(setupUnderlay(nodes, ovnKubeNs, secondaryInterfaceName, netConfig)).To(Succeed())
 				})
 
 				BeforeEach(func() {
@@ -794,7 +797,9 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 
 				AfterEach(func() {
 					By("tearing down the localnet underlay")
-					Expect(teardownUnderlay(nodes)).To(Succeed())
+					ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+					framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
+					Expect(teardownUnderlay(nodes, ovnKubeNs)).To(Succeed())
 				})
 
 				It("can communicate over a localnet secondary network from pod to the underlay service", func() {
@@ -989,7 +994,9 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 						})
 
 					By("setting up the localnet underlay with a trunked configuration")
-					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed(), "configuring the OVS bridge")
+					ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+					framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
+					Expect(setupUnderlay(nodes, ovnKubeNs, secondaryInterfaceName, netConfig)).To(Succeed(), "configuring the OVS bridge")
 
 					By(fmt.Sprintf("creating a VLAN interface on top of the bridge connecting the cluster nodes with IP: %s", underlayIP))
 					cli, err := client.NewClientWithOpts(client.FromEnv)
@@ -1014,7 +1021,9 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 				AfterEach(func() {
 					Expect(cmdWebServer.Process.Kill()).NotTo(HaveOccurred(), "kill the python webserver")
 					Expect(deleteVLANInterface(underlayBridgeName, strconv.Itoa(vlanID))).NotTo(HaveOccurred(), "remove the underlay physical configuration")
-					Expect(teardownUnderlay(nodes)).To(Succeed(), "tear down the localnet underlay")
+					ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+					framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
+					Expect(teardownUnderlay(nodes, ovnKubeNs)).To(Succeed(), "tear down the localnet underlay")
 				})
 
 				It("the same bridge mapping can be shared by a separate VLAN by using the physical network name attribute", func() {
@@ -1096,13 +1105,15 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 						By("setting up the localnet underlay")
 						nodes := ovsPods(cs)
 						Expect(nodes).NotTo(BeEmpty())
+						ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+						framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 						defer func() {
 							By("tearing down the localnet underlay")
-							Expect(teardownUnderlay(nodes)).To(Succeed())
+							Expect(teardownUnderlay(nodes, ovnKubeNs)).To(Succeed())
 						}()
 
 						const secondaryInterfaceName = "eth1"
-						Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+						Expect(setupUnderlay(nodes, ovnKubeNs, secondaryInterfaceName, netConfig)).To(Succeed())
 					}
 
 					Expect(createNads(f, nadClient, extraNamespace, netConfig)).NotTo(HaveOccurred())
@@ -1485,12 +1496,14 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 					By("setting up the localnet underlay")
 					nodes := ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
+					ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+					framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 					defer func() {
 						By("tearing down the localnet underlay")
-						Expect(teardownUnderlay(nodes)).To(Succeed())
+						Expect(teardownUnderlay(nodes, ovnKubeNs)).To(Succeed())
 					}()
 					const secondaryInterfaceName = "eth1"
-					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+					Expect(setupUnderlay(nodes, ovnKubeNs, secondaryInterfaceName, netConfig)).To(Succeed())
 
 					Expect(createNads(f, nadClient, extraNamespace, netConfig)).NotTo(HaveOccurred())
 
@@ -1617,12 +1630,14 @@ var _ = ginkgo_wrapper.Describe(feature.MultiHoming, func() {
 					By("setting up the localnet underlay")
 					nodes := ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
+					ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+					framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 					defer func() {
 						By("tearing down the localnet underlay")
-						Expect(teardownUnderlay(nodes)).To(Succeed())
+						Expect(teardownUnderlay(nodes, ovnKubeNs)).To(Succeed())
 					}()
 					const secondaryInterfaceName = "eth1"
-					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+					Expect(setupUnderlay(nodes, ovnKubeNs, secondaryInterfaceName, netConfig)).To(Succeed())
 
 					Expect(createNads(f, nadClient, extraNamespace, netConfig)).NotTo(HaveOccurred())
 
