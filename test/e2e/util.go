@@ -1140,18 +1140,30 @@ func isIPv6Supported() bool {
 }
 
 func isInterconnectEnabled() bool {
-	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
-	return present && val == "true"
+	// Downstream hack start
+	// Remove when infra provider framework is enabled
+	//val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
+	//return present && val == "true"
+	return true
+	// Downstream hack end
 }
 
 func isUDNHostIsolationDisabled() bool {
-	val, present := os.LookupEnv("DISABLE_UDN_HOST_ISOLATION")
-	return present && val == "true"
+	// Downstream hack start
+	// Remove when infra provider framework is enabled
+	//val, present := os.LookupEnv("DISABLE_UDN_HOST_ISOLATION")
+	//return present && val == "true"
+	return false
+	// Downstream hack end
 }
 
 func isNetworkSegmentationEnabled() bool {
-	val, present := os.LookupEnv("ENABLE_NETWORK_SEGMENTATION")
-	return present && val == "true"
+	// Downstream hack start
+	// Remove when infra provider framework is enabled
+	//val, present := os.LookupEnv("ENABLE_NETWORK_SEGMENTATION")
+	//return present && val == "true"
+	return true
+	// Downstream hack end
 }
 
 func isLocalGWModeEnabled() bool {
