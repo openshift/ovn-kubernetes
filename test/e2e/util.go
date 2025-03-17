@@ -1003,53 +1003,53 @@ func wrappedTestFramework(basename string) *framework.Framework {
 			return
 		}
 
-		logLocation := "/var/log"
-		dbLocation := "/var/lib/openvswitch"
-		// Potential database locations
-		ovsdbLocations := []string{"/etc/origin/openvswitch", "/etc/openvswitch"}
-		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
-		ovsdb := "conf.db"
-
-		testName := strings.Replace(ginkgo.CurrentSpecReport().LeafNodeText, " ", "_", -1)
-		logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
-
-		var args []string
-
-		// grab all OVS and OVN dbs
-		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
-		framework.ExpectNoError(err)
-		for _, node := range nodes.Items {
-			// ensure e2e-dbs directory with test case exists
-			args = []string{containerRuntime, "exec", node.Name, "mkdir", "-p", logDir}
-			_, err = runCommand(args...)
-			framework.ExpectNoError(err)
-
-			// Loop through potential OVSDB db locations
-			for _, ovsdbLocation := range ovsdbLocations {
-				args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb)}
-				_, err = runCommand(args...)
-				if err == nil {
-					// node name is the same in kapi and docker
-					args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
-						fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
-					_, err = runCommand(args...)
-					framework.ExpectNoError(err)
-					break // Stop the loop: the file is found and copied successfully
-				}
-			}
-
-			// IC will have dbs on every node, but legacy mode wont, check if they exist
-			args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
-			_, err = runCommand(args...)
-			if err == nil {
-				for _, db := range dbs {
-					args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
-						fmt.Sprintf("%s/%s", logDir, db)}
-					_, err = runCommand(args...)
-					framework.ExpectNoError(err)
-				}
-			}
-		}
+		//logLocation := "/var/log"
+		//dbLocation := "/var/lib/openvswitch"
+		//// Potential database locations
+		//ovsdbLocations := []string{"/etc/origin/openvswitch", "/etc/openvswitch"}
+		//dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
+		//ovsdb := "conf.db"
+		//
+		//testName := strings.Replace(ginkgo.CurrentSpecReport().LeafNodeText, " ", "_", -1)
+		//logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
+		//
+		//var args []string
+		//
+		//// grab all OVS and OVN dbs
+		//nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+		//framework.ExpectNoError(err)
+		//for _, node := range nodes.Items {
+		//	// ensure e2e-dbs directory with test case exists
+		//	args = []string{containerRuntime, "exec", node.Name, "mkdir", "-p", logDir}
+		//	_, err = runCommand(args...)
+		//	framework.ExpectNoError(err)
+		//
+		//	// Loop through potential OVSDB db locations
+		//	for _, ovsdbLocation := range ovsdbLocations {
+		//		args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb)}
+		//		_, err = runCommand(args...)
+		//		if err == nil {
+		//			// node name is the same in kapi and docker
+		//			args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
+		//				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
+		//			_, err = runCommand(args...)
+		//			framework.ExpectNoError(err)
+		//			break // Stop the loop: the file is found and copied successfully
+		//		}
+		//	}
+		//
+		//	// IC will have dbs on every node, but legacy mode wont, check if they exist
+		//	args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
+		//	_, err = runCommand(args...)
+		//	if err == nil {
+		//		for _, db := range dbs {
+		//			args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
+		//				fmt.Sprintf("%s/%s", logDir, db)}
+		//			_, err = runCommand(args...)
+		//			framework.ExpectNoError(err)
+		//		}
+		//	}
+		//}
 	})
 
 	return f
