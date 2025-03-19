@@ -19,6 +19,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	"k8s.io/utils/ptr"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -166,8 +167,19 @@ func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec.Spec.NodeSelector = config.nodeSelector
 	podSpec.Labels = config.labels
 	if config.isPrivileged {
-		privileged := true
-		podSpec.Spec.Containers[0].SecurityContext.Privileged = &privileged
+		podSpec.Spec.Containers[0].SecurityContext.Privileged = ptr.To(true)
+	} else {
+		for _, container := range podSpec.Spec.Containers {
+			if container.SecurityContext.Capabilities == nil {
+				container.SecurityContext.Capabilities = &v1.Capabilities{}
+			}
+			container.SecurityContext.Capabilities.Drop = []v1.Capability{"ALL"}
+			container.SecurityContext.Privileged = ptr.To(false)
+			container.SecurityContext.RunAsNonRoot = ptr.To(true)
+			container.SecurityContext.RunAsUser = ptr.To(int64(1000))
+			container.SecurityContext.AllowPrivilegeEscalation = ptr.To(false)
+			container.SecurityContext.SeccompProfile = &v1.SeccompProfile{Type: v1.SeccompProfileTypeRuntimeDefault}
+		}
 	}
 	return podSpec
 }
