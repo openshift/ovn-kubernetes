@@ -642,11 +642,11 @@ func PrepareTestConfig() error {
 	}
 
 	// Don't pick up defaults from the environment
-	os.Unsetenv("KUBECONFIG")
-	os.Unsetenv("K8S_CACERT")
-	os.Unsetenv("K8S_APISERVER")
-	os.Unsetenv("K8S_TOKEN")
-	os.Unsetenv("K8S_TOKEN_FILE")
+	_ = os.Unsetenv("KUBECONFIG")
+	_ = os.Unsetenv("K8S_CACERT")
+	_ = os.Unsetenv("K8S_APISERVER")
+	_ = os.Unsetenv("K8S_TOKEN")
+	_ = os.Unsetenv("K8S_TOKEN_FILE")
 
 	return nil
 }

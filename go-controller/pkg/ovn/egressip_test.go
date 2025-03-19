@@ -4944,7 +4944,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil, types.DefaultNetworkName, DefaultNetworkControllerName)
+
 					dynamicNeighRouters := "true"
 					if config.OVNKubernetesFeature.EnableInterconnect {
 						dynamicNeighRouters = "false"
@@ -5789,7 +5789,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 				_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 				_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
-				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil, types.DefaultNetworkName, DefaultNetworkControllerName)
+
 				dynamicNeighRouters := "true"
 				if config.OVNKubernetesFeature.EnableInterconnect {
 					dynamicNeighRouters = "false"
