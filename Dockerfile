@@ -43,7 +43,6 @@ RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	tcpdump iputils \
-	libreswan-4.6-3.el9_0.3 \
 	ethtool conntrack-tools \
 	openshift-clients \
 	" && \
