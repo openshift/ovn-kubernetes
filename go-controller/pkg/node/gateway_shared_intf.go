@@ -28,6 +28,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -49,13 +50,6 @@ const (
 	ctMarkOVN = "0x1"
 	// ctMarkHost is the conntrack mark value for host traffic
 	ctMarkHost = "0x2"
-	// ovnkubeITPMark is the fwmark used for host->ITP=local svc traffic. Note that the fwmark is not a part
-	// of the packet, but just stored by kernel in its memory to track/filter packet. Hence fwmark is lost as
-	// soon as packet exits the host.
-	ovnkubeITPMark = "0x1745ec" // constant itp(174)-service(5ec)
-	// ovnkubeSvcViaMgmPortRT is the number of the custom routing table used to steer host->service
-	// traffic packets into OVN via ovn-k8s-mp0. Currently only used for ITP=local traffic.
-	ovnkubeSvcViaMgmPortRT = "7"
 	// ovnKubeNodeSNATMark is used to mark packets that need to be SNAT-ed to nodeIP for
 	// traffic originating from egressIP and egressService controlled pods towards other nodes in the cluster.
 	ovnKubeNodeSNATMark = "0x3f0"
@@ -117,7 +111,7 @@ func configureUDNServicesNFTables() error {
 	tx.Add(&knftables.Rule{
 		Chain: nftablesUDNServicePreroutingChain,
 		Rule: knftables.Concat(
-			"iifname", "!=", fmt.Sprintf("%q", types.K8sMgmtIntfName),
+			"iifname", "!=", types.K8sMgmtIntfName,
 			"jump", nftablesUDNServiceMarkChain,
 		),
 	})
@@ -1061,7 +1055,12 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			errors = append(errors, err)
 		}
 
-		for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+		nftableManagementPortSets := []string{
+			types.NFTMgmtPortNoSNATNodePorts,
+			types.NFTMgmtPortNoSNATServicesV4,
+			types.NFTMgmtPortNoSNATServicesV6,
+		}
+		for _, set := range nftableManagementPortSets {
 			if err = recreateNFTSet(set, keepNFTSetElems); err != nil {
 				errors = append(errors, err)
 			}
@@ -1396,7 +1395,12 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		}
 	}
 
-	for _, set := range []string{nftablesMgmtPortNoSNATNodePorts, nftablesMgmtPortNoSNATServicesV4, nftablesMgmtPortNoSNATServicesV6} {
+	nftableManagementPortSets := []string{
+		types.NFTMgmtPortNoSNATNodePorts,
+		types.NFTMgmtPortNoSNATServicesV4,
+		types.NFTMgmtPortNoSNATServicesV6,
+	}
+	for _, set := range nftableManagementPortSets {
 		if err = recreateNFTSet(set, keepNFTElems); err != nil {
 			errors = append(errors, err)
 		}
@@ -1440,10 +1444,10 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
 					"actions=NORMAL", defaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
 
-			// table0, Geneve packets coming from LOCAL. Skip conntrack and go directly to external
+			// table0, Geneve packets coming from LOCAL/Host OFPort. Skip conntrack and go directly to external
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-					"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+					"actions=output:%s", defaultOpenFlowCookie, ofPortHost, config.Default.EncapPort, ofPortPhys))
 		}
 		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
@@ -2148,63 +2152,15 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 				hostRep, stderr, err)
 		}
 	} else {
-		bridge.ofPortHost = ovsLocalPort
-	}
-
-	return nil
-}
-
-// initSvcViaMgmPortRoutingRules creates the svc2managementport routing table, routes and rules
-// that let's us forward service traffic to ovn-k8s-mp0 as opposed to the default route towards breth0
-func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
-	// create ovnkubeSvcViaMgmPortRT and service route towards ovn-k8s-mp0
-	for _, hostSubnet := range hostSubnets {
-		isIPv6 := utilnet.IsIPv6CIDR(hostSubnet)
-		gatewayIP := util.GetNodeGatewayIfAddr(hostSubnet).IP.String()
-		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
-			if isIPv6 == utilnet.IsIPv6CIDR(svcCIDR) {
-				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", types.K8sMgmtIntfName); err != nil {
-					return fmt.Errorf("error adding routing table entry into custom routing table: %s: stdout: %s, stderr: %s, err: %v", ovnkubeSvcViaMgmPortRT, stdout, stderr, err)
-				}
-				klog.V(5).Infof("Successfully added route into custom routing table: %s", ovnkubeSvcViaMgmPortRT)
+		var err error
+		if bridge.gwIfaceRep != "" {
+			bridge.ofPortHost, _, err = util.RunOVSVsctl("get", "interface", bridge.gwIfaceRep, "ofport")
+			if err != nil {
+				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", bridge.gwIfaceRep, err)
 			}
+		} else {
+			bridge.ofPortHost = ovsLocalPort
 		}
-	}
-
-	createRule := func(family string) error {
-		stdout, stderr, err := util.RunIP(family, "rule")
-		if err != nil {
-			return fmt.Errorf("error listing routing rules, stdout: %s, stderr: %s, err: %v", stdout, stderr, err)
-		}
-		if !strings.Contains(stdout, fmt.Sprintf("from all fwmark %s lookup %s", ovnkubeITPMark, ovnkubeSvcViaMgmPortRT)) {
-			if stdout, stderr, err := util.RunIP(family, "rule", "add", "fwmark", ovnkubeITPMark, "lookup", ovnkubeSvcViaMgmPortRT, "prio", "30"); err != nil {
-				return fmt.Errorf("error adding routing rule for service via management table (%s): stdout: %s, stderr: %s, err: %v", ovnkubeSvcViaMgmPortRT, stdout, stderr, err)
-			}
-		}
-		return nil
-	}
-
-	// create ip rule that will forward ovnkubeITPMark marked packets to ovnkubeITPRoutingTable
-	if config.IPv4Mode {
-		if err := createRule("-4"); err != nil {
-			return fmt.Errorf("could not add IPv4 rule: %v", err)
-		}
-	}
-	if config.IPv6Mode {
-		if err := createRule("-6"); err != nil {
-			return fmt.Errorf("could not add IPv6 rule: %v", err)
-		}
-	}
-
-	// lastly update the reverse path filtering options for ovn-k8s-mp0 interface to avoid dropping return packets
-	// NOTE: v6 doesn't have rp_filter strict mode block
-	rpFilterLooseMode := "2"
-	// TODO: Convert testing framework to mock golang module utilities. Example:
-	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), rpFilterLooseMode)
-	stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", types.K8sMgmtIntfName, rpFilterLooseMode))
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", types.K8sMgmtIntfName, rpFilterLooseMode) {
-		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
-			types.K8sMgmtIntfName, stdout, stderr, err)
 	}
 
 	return nil
@@ -2217,7 +2173,7 @@ func newGateway(
 	gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet,
 	nodeAnnotator kube.Annotator,
-	cfg *managementPortConfig,
+	mgmtPort managementport.Interface,
 	kube kube.Interface,
 	watchFactory factory.NodeWatchFactory,
 	routeManager *routemanager.Controller,
@@ -2229,7 +2185,7 @@ func newGateway(
 	gw := &gateway{}
 
 	if gatewayMode == config.GatewayModeLocal {
-		if err := initLocalGateway(subnets, cfg); err != nil {
+		if err := initLocalGateway(subnets, mgmtPort); err != nil {
 			return nil, fmt.Errorf("failed to initialize new local gateway, err: %w", err)
 		}
 	}
@@ -2302,22 +2258,21 @@ func newGateway(
 			gw.bridgeEIPAddrManager = newBridgeEIPAddrManager(nodeName, gwBridge.bridgeName, linkManager, kube, watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
 			gwBridge.eipMarkIPs = gw.bridgeEIPAddrManager.GetCache()
 		}
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
-		nodeIPs := gw.nodeIPManager.ListAddresses()
+		gw.nodeIPManager = newAddressManager(nodeName, kube, mgmtPort, watchFactory, gwBridge)
 
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
 			// Delete stale masquerade resources if there are any. This is to make sure that there
 			// are no Linux resources with IP from old masquerade subnet when masquerade subnet
 			// gets changed as part of day2 operation.
-			if err := deleteStaleMasqueradeResources(gwBridge.bridgeName, nodeName, watchFactory); err != nil {
+			if err := deleteStaleMasqueradeResources(gwBridge.getGatewayIface(), nodeName, watchFactory); err != nil {
 				return fmt.Errorf("failed to remove stale masquerade resources: %w", err)
 			}
 
-			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
-				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.getGatewayIface()); err != nil {
+				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.getGatewayIface(), err)
 			}
 
-			if err := addMasqueradeRoute(routeManager, gwBridge.bridgeName, nodeName, gwIPs, watchFactory); err != nil {
+			if err := addMasqueradeRoute(routeManager, gwBridge.getGatewayIface(), nodeName, gwIPs, watchFactory); err != nil {
 				return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 			}
 
@@ -2327,7 +2282,7 @@ func newGateway(
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge)
 		if err != nil {
 			return err
 		}
@@ -2354,12 +2309,6 @@ func newGateway(
 		}
 
 		if config.Gateway.NodeportEnable {
-			if config.OvnKubeNode.Mode == types.NodeModeFull {
-				// (TODO): Internal Traffic Policy is not supported in DPU mode
-				if err := initSvcViaMgmPortRoutingRules(subnets); err != nil {
-					return err
-				}
-			}
 			klog.Info("Creating Gateway Node Port Watcher")
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, networkManager)
 			if err != nil {
@@ -2370,7 +2319,7 @@ func newGateway(
 			gw.openflowManager.requestFlowSync()
 		}
 
-		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+		if err := addHostMACBindings(gwBridge.getGatewayIface()); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 		}
 
@@ -2427,11 +2376,11 @@ func newNodePortWatcher(
 	subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
 	if config.Gateway.DisableForwarding {
 		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
+			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.getGatewayIface(), err)
 		}
 	} else {
 		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.bridgeName, err)
+			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.getGatewayIface(), err)
 		}
 	}
 
@@ -2449,7 +2398,7 @@ func newNodePortWatcher(
 		gatewayIPv4:    gatewayIPv4,
 		gatewayIPv6:    gatewayIPv6,
 		ofportPhys:     ofportPhys,
-		gwBridge:       gwBridge.bridgeName,
+		gwBridge:       gwBridge.getGatewayIface(),
 		serviceInfo:    make(map[ktypes.NamespacedName]*serviceConfig),
 		nodeIPManager:  nodeIPManager,
 		ofm:            ofm,
