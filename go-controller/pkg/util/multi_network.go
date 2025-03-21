@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -839,6 +840,9 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.primaryNetwork != other.IsPrimaryNetwork() {
 		return false
 	}
+	if nInfo.physicalNetworkName != other.PhysicalNetworkName() {
+		return false
+	}
 
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
@@ -891,7 +895,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -918,7 +922,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -942,7 +946,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error
 		allowPersistentIPs:  netconf.AllowPersistentIPs,
 		physicalNetworkName: netconf.PhysicalNetworkName,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -1111,18 +1115,36 @@ func GetAnnotatedNetworkName(netattachdef *nettypes.NetworkAttachmentDefinition)
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks
-func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
-	netconf, err := ParseNetConf(netattachdef)
+func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
+	netconf, err := ParseNetConf(nad)
 	if err != nil {
 		return nil, err
 	}
 
-	nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
+	nadName := GetNADName(nad.Namespace, nad.Name)
 	if err := ValidateNetConf(nadName, netconf); err != nil {
 		return nil, err
 	}
 
-	return NewNetInfo(netconf)
+	id := types.InvalidID
+	n, err := newNetInfo(netconf)
+	if err != nil {
+		return nil, err
+	}
+	if n.GetNetworkName() == types.DefaultNetworkName {
+		id = types.DefaultNetworkID
+	}
+	if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
+		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
+		id, err = strconv.Atoi(annotated)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse annotated network ID: %w", err)
+		}
+	}
+
+	n.SetNetworkID(id)
+
+	return n, nil
 }
 
 // ParseNetConf parses config in NAD spec for secondary networks

@@ -120,7 +120,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 	// defaiult network
 	networkIDAllocator := id.NewIDAllocator(types.DefaultNetworkName, 1)
 	// Reserve the id 0 for the default network.
-	err := networkIDAllocator.ReserveID(types.DefaultNetworkName, defaultNetworkID)
+	err := networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
 	if err != nil {
 		panic(fmt.Errorf("could not reserve default network ID: %w", err))
 	}
@@ -175,7 +175,7 @@ func (ncc *networkClusterController) init() error {
 	if util.DoesNetworkRequireTunnelIDs(ncc.GetNetInfo()) {
 		ncc.tunnelIDAllocator = id.NewIDAllocator(ncc.GetNetworkName(), types.MaxLogicalPortTunnelKey)
 		// Reserve the id 0. We don't want to assign this id to any of the pods or nodes.
-		if err = ncc.tunnelIDAllocator.ReserveID("zero", util.NoID); err != nil {
+		if err = ncc.tunnelIDAllocator.ReserveID("zero", types.NoTunnelID); err != nil {
 			return err
 		}
 		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() {
@@ -196,7 +196,7 @@ func (ncc *networkClusterController) init() error {
 							node.Name, ncc.GetNetworkName(), err)
 					}
 				}
-				if tunnelID != util.InvalidID {
+				if tunnelID != types.InvalidID {
 					if err := ncc.tunnelIDAllocator.ReserveID(ncc.GetNetworkName()+"_"+node.Name, tunnelID); err != nil {
 						return fmt.Errorf("unable to reserve id for network %s, node %s: %w", ncc.GetNetworkName(), node.Name, err)
 					}
@@ -489,6 +489,8 @@ type networkClusterControllerEventHandler struct {
 	objType  reflect.Type
 	ncc      *networkClusterController
 	syncFunc func([]interface{}) error
+
+	nodeSyncFailed sync.Map
 }
 
 func (h *networkClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
@@ -520,6 +522,9 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, _ bo
 		err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node)
 		if err == nil {
 			h.clearInitialNodeNetworkUnavailableCondition(node)
+			h.nodeSyncFailed.Delete(node.Name)
+		} else {
+			h.nodeSyncFailed.Store(node.Name, true)
 		}
 		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
 		joinedErr := errors.Join(err, statusErr)
@@ -557,19 +562,35 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 			return err
 		}
 	case factory.NodeType:
-		node, ok := newObj.(*corev1.Node)
+		oldNode, ok := oldObj.(*corev1.Node)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *corev1.Node", oldObj)
+		}
+		newNode, ok := newObj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Node", newObj)
 		}
-		err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node)
-		if err == nil {
-			h.clearInitialNodeNetworkUnavailableCondition(node)
+		_, nodeFailed := h.nodeSyncFailed.Load(newNode.GetName())
+		// Note: (trozet) It might be pedantic to check if the NeedsNodeAllocation. This assumes one of the following:
+		// 1. we missed an add event (bug in kapi informer code)
+		// 2. a user removed the annotation on the node
+		// Either way to play it safe for now do a partial json unmarshal check
+		if !nodeFailed && util.NoHostSubnet(oldNode) != util.NoHostSubnet(newNode) && !h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) {
+			// no other node updates would require us to reconcile again
+			return nil
 		}
-		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
+		err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(newNode)
+		if err == nil {
+			h.clearInitialNodeNetworkUnavailableCondition(newNode)
+			h.nodeSyncFailed.Delete(newNode.GetName())
+		} else {
+			h.nodeSyncFailed.Store(newNode.Name, true)
+		}
+		statusErr := h.ncc.updateNetworkStatus(newNode.Name, err)
 		joinedErr := errors.Join(err, statusErr)
 		if joinedErr != nil {
 			klog.Infof("Cluster Manager Network Controller %q: Node update failed for %s, will try again later: %v",
-				h.ncc.GetNetworkName(), node.Name, err)
+				h.ncc.GetNetworkName(), newNode.Name, err)
 			return err
 		}
 	case factory.IPAMClaimsType:
@@ -600,7 +621,12 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, _ interface{}
 		}
 		err := h.ncc.nodeAllocator.HandleDeleteNode(node)
 		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
-		return errors.Join(err, statusErr)
+		jErr := errors.Join(err, statusErr)
+		if jErr != nil {
+			return jErr
+		}
+		h.nodeSyncFailed.Delete(node.Name)
+		return nil
 	case factory.IPAMClaimsType:
 		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
 		if !ok {

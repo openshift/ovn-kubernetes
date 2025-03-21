@@ -7,15 +7,19 @@ import (
 	"net"
 	"strings"
 
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
+
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	"k8s.io/utils/ptr"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -84,11 +88,11 @@ func uniqueNadName(originalNetName string) string {
 	return fmt.Sprintf("%s_%s", rand.String(randomStringLength), originalNetName)
 }
 
-func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+func generateNADSpec(config networkAttachmentConfig) string {
 	if config.mtu == 0 {
 		config.mtu = 1300
 	}
-	nadSpec := fmt.Sprintf(
+	return fmt.Sprintf(
 		`
 {
         "cniVersion": "0.3.0",
@@ -116,6 +120,10 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
 		config.physicalNetworkName,
 		config.role,
 	)
+}
+
+func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+	nadSpec := generateNADSpec(config)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }
 
@@ -127,6 +135,17 @@ func generateNetAttachDef(namespace, nadName, nadSpec string) *nadapi.NetworkAtt
 		},
 		Spec: nadapi.NetworkAttachmentDefinitionSpec{Config: nadSpec},
 	}
+}
+
+func patchNADSpec(nadClient nadclient.K8sCniCncfIoV1Interface, name, namespace string, patch []byte) error {
+	_, err := nadClient.NetworkAttachmentDefinitions(namespace).Patch(
+		context.Background(),
+		name,
+		kapitypes.JSONPatchType,
+		patch,
+		metav1.PatchOptions{},
+	)
+	return err
 }
 
 type podConfiguration struct {
@@ -148,8 +167,19 @@ func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec.Spec.NodeSelector = config.nodeSelector
 	podSpec.Labels = config.labels
 	if config.isPrivileged {
-		privileged := true
-		podSpec.Spec.Containers[0].SecurityContext.Privileged = &privileged
+		podSpec.Spec.Containers[0].SecurityContext.Privileged = ptr.To(true)
+	} else {
+		for _, container := range podSpec.Spec.Containers {
+			if container.SecurityContext.Capabilities == nil {
+				container.SecurityContext.Capabilities = &v1.Capabilities{}
+			}
+			container.SecurityContext.Capabilities.Drop = []v1.Capability{"ALL"}
+			container.SecurityContext.Privileged = ptr.To(false)
+			container.SecurityContext.RunAsNonRoot = ptr.To(true)
+			container.SecurityContext.RunAsUser = ptr.To(int64(1000))
+			container.SecurityContext.AllowPrivilegeEscalation = ptr.To(false)
+			container.SecurityContext.SeccompProfile = &v1.SeccompProfile{Type: v1.SeccompProfileTypeRuntimeDefault}
+		}
 	}
 	return podSpec
 }
@@ -232,6 +262,47 @@ func connectToServer(clientPodConfig podConfiguration, serverIP string, port int
 	return err
 }
 
+func getMTUByInterfaceName(output, interfaceName string) (int, error) {
+	var ifaces []struct {
+		Name string `json:"ifname"`
+		MTU  int    `json:"mtu"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &ifaces); err != nil {
+		return 0, fmt.Errorf("%s: %v", output, err)
+	}
+
+	for _, iface := range ifaces {
+		if iface.Name == interfaceName {
+			return iface.MTU, nil
+		}
+	}
+	return 0, fmt.Errorf("interface %s not found", interfaceName)
+}
+
+func getSecondaryInterfaceMTU(clientPodConfig podConfiguration) (int, error) {
+	const podSecondaryInterface = "net1"
+	deviceInfoJSON, err := e2ekubectl.RunKubectl(
+		clientPodConfig.namespace,
+		"exec",
+		clientPodConfig.name,
+		"--",
+		"ip",
+		"-j",
+		"link",
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	mtu, err := getMTUByInterfaceName(deviceInfoJSON, podSecondaryInterface)
+	if err != nil {
+		return 0, err
+	}
+
+	return mtu, nil
+}
+
 func newAttachmentConfigWithOverriddenName(name, namespace, networkName, topology, cidr string) networkAttachmentConfig {
 	return newNetworkAttachmentConfig(
 		networkAttachmentConfigParams{
@@ -289,18 +360,27 @@ func blockedClient(podName string) string {
 	return "blocked-" + podName
 }
 
-func multiNetIngressLimitingPolicy(policyFor string, appliesFor metav1.LabelSelector, allowForSelector metav1.LabelSelector, allowPorts ...int) *mnpapi.MultiNetworkPolicy {
+func multiNetPolicyPort(port int) mnpapi.MultiNetworkPolicyPort {
+	tcp := v1.ProtocolTCP
+	p := intstr.FromInt32(int32(port))
+	return mnpapi.MultiNetworkPolicyPort{
+		Protocol: &tcp,
+		Port:     &p,
+	}
+}
+
+func multiNetPolicyPortRange(port, endPort int) mnpapi.MultiNetworkPolicyPort {
+	netpolPort := multiNetPolicyPort(port)
+	endPort32 := int32(endPort)
+	netpolPort.EndPort = &endPort32
+	return netpolPort
+}
+
+func multiNetIngressLimitingPolicy(policyFor string, appliesFor metav1.LabelSelector, allowForSelector metav1.LabelSelector, allowPorts ...mnpapi.MultiNetworkPolicyPort) *mnpapi.MultiNetworkPolicy {
 	var (
 		portAllowlist []mnpapi.MultiNetworkPolicyPort
 	)
-	tcp := v1.ProtocolTCP
-	for _, port := range allowPorts {
-		p := intstr.FromInt(port)
-		portAllowlist = append(portAllowlist, mnpapi.MultiNetworkPolicyPort{
-			Protocol: &tcp,
-			Port:     &p,
-		})
-	}
+	portAllowlist = append(portAllowlist, allowPorts...)
 	return &mnpapi.MultiNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 			PolicyForAnnotation: policyFor,
