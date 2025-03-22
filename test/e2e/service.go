@@ -514,7 +514,7 @@ var _ = ginkgo.Describe("Services", func() {
 							// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
 							ovnKubernetesNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 							ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnKubernetesNamespace).List(context.TODO(), metav1.ListOptions{
-								LabelSelector: "name=ovnkube-node",
+								LabelSelector: "app=ovnkube-node",
 							})
 							if err != nil {
 								framework.Failf("could not get ovnkube-node pods: %v", err)
