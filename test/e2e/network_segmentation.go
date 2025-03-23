@@ -17,6 +17,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	ginkgowrapper "github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/openshift-hack/ocpfeaturegate"
 
 	v1 "k8s.io/api/core/v1"
@@ -1447,7 +1448,7 @@ spec:
 		BeforeEach(func() {
 			externalIpv4, externalIpv6 = createClusterExternalContainer(
 				externalContainerName,
-				"registry.k8s.io/e2e-test-images/agnhost:2.45",
+				images.AgnHost(),
 				runExternalContainerCmd(),
 				httpServerContainerCmd(port),
 			)

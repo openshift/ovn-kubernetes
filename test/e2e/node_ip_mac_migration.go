@@ -41,7 +41,6 @@ var _ = ginkgo_wrapper.Describe(feature.NodeIPMACMigration, func() {
 		pollingInterval            = 10
 		settleTimeout              = 10
 		egressIPYaml               = "egressip.yaml"
-		externalContainerImage     = "registry.k8s.io/e2e-test-images/agnhost:2.26"
 		ciNetworkName              = "kind"
 		externalContainerName      = "ip-migration-external"
 		externalContainerPort      = "80"

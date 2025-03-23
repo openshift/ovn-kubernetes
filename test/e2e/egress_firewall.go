@@ -16,6 +16,7 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -179,11 +180,11 @@ var _ = ginkgo_wrapper.Describe(feature.EgressFirewall, "policy validation", fun
 		}
 
 		ginkgo.BeforeEach(func() {
-			externalContainer1IPV4, externalContainer1IPV6 := createClusterExternalContainer(externalContainerName1, agnhostImage,
+			externalContainer1IPV4, externalContainer1IPV6 := createClusterExternalContainer(externalContainerName1, images.AgnHost(),
 				[]string{"--network", ciNetworkName, "-p", fmt.Sprintf("%d:%d", externalContainerPort1, externalContainerPort1)},
 				[]string{"netexec", fmt.Sprintf("--http-port=%d", externalContainerPort1)})
 
-			externalContainer2IPV4, externalContainer2IPV6 := createClusterExternalContainer(externalContainerName2, agnhostImage,
+			externalContainer2IPV4, externalContainer2IPV6 := createClusterExternalContainer(externalContainerName2, images.AgnHost(),
 				[]string{"--network", ciNetworkName, "-p", fmt.Sprintf("%d:%d", externalContainerPort2, externalContainerPort2)},
 				[]string{"netexec", fmt.Sprintf("--http-port=%d", externalContainerPort2)})
 
