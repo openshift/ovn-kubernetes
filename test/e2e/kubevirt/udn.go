@@ -20,7 +20,13 @@ import (
 func GenerateCUDN(namespace, name string, topology udnv1.NetworkTopology, role udnv1.NetworkRole, subnets udnv1.DualStackCIDRs) (*udnv1.ClusterUserDefinedNetwork, string) {
 	cudn := &udnv1.ClusterUserDefinedNetwork{
 		ObjectMeta: metav1.ObjectMeta{
+			// Generate a unique name for the CUDN by combining the namespace and name and add
+			// a label with the same value for easy identification, for example at the RouteAdvertisement
+			// CUDN selector
 			Name: namespace + "-" + name,
+			Labels: map[string]string{
+				"name": namespace + "-" + name,
+			},
 		},
 		Spec: udnv1.ClusterUserDefinedNetworkSpec{
 			NamespaceSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{

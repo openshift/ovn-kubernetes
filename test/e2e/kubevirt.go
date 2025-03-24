@@ -18,6 +18,8 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	rav1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	crdtypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
@@ -82,6 +84,9 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 		return nil, err
 	}
 	if err := udnv1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
+	if err := rav1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	return crclient.New(config, crclient.Options{
@@ -1244,6 +1249,23 @@ fi
 			})
 			Eventually(clusterUserDefinedNetworkReadyFunc(fr.DynamicClient, cudn.Name), 5*time.Second, time.Second).Should(Succeed())
 		}
+
+		createRA = func(ra *rav1.RouteAdvertisements) {
+			GinkgoHelper()
+			By("Creating RouteAdvertisements")
+			Expect(crClient.Create(context.Background(), ra)).To(Succeed())
+			DeferCleanup(func() {
+				if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
+					crClient.Delete(context.Background(), ra)
+				}
+			})
+
+			By("ensure route advertisement matching CUDN was created successfully")
+			Eventually(func(g Gomega) string {
+				Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(ra), ra)).To(Succeed())
+				return ra.Status.Status
+			}, 30*time.Second, time.Second).Should(Equal("Accepted"))
+		}
 	)
 	BeforeEach(func() {
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
@@ -1571,6 +1593,7 @@ runcmd:
 			test        testCommand
 			topology    udnv1.NetworkTopology
 			role        udnv1.NetworkRole
+			ingress     string
 		}
 		DescribeTable("should keep ip", func(td testData) {
 			if td.role == "" {
@@ -1612,8 +1635,26 @@ runcmd:
 				const secondaryInterfaceName = "eth1"
 				Expect(setupUnderlay(nodes, secondaryBridge, secondaryInterfaceName, networkName, 0 /*vlanID*/)).To(Succeed())
 			}
-
 			createCUDN(cudn)
+
+			if td.ingress == "routed" {
+				createRA(&rav1.RouteAdvertisements{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: cudn.Name,
+					},
+					Spec: rav1.RouteAdvertisementsSpec{
+						Advertisements: []rav1.AdvertisementType{rav1.PodNetwork},
+						NetworkSelectors: crdtypes.NetworkSelectors{{
+							NetworkSelectionType: crdtypes.ClusterUserDefinedNetworks,
+							ClusterUserDefinedNetworkSelector: &crdtypes.ClusterUserDefinedNetworkSelector{
+								NetworkSelector: metav1.LabelSelector{
+									MatchLabels: map[string]string{"name": cudn.Name},
+								},
+							},
+						}},
+					},
+				})
+			}
 
 			workerNodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{LabelSelector: labels.FormatLabels(map[string]string{"node-role.kubernetes.io/worker": ""})})
 			Expect(err).NotTo(HaveOccurred())
@@ -1786,7 +1827,11 @@ runcmd:
 				if td.role != "" {
 					role = td.role
 				}
-				return fmt.Sprintf("after %s of %s with %s/%s", td.test.description, td.resource.description, role, td.topology)
+				ingress := "snat"
+				if td.ingress != "" {
+					ingress = td.ingress
+				}
+				return fmt.Sprintf("after %s of %s with %s/%s with %q ingress", td.test.description, td.resource.description, role, td.topology, ingress)
 			},
 			Entry(nil, testData{
 				resource: virtualMachine,
