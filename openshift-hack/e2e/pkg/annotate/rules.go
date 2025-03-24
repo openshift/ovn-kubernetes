@@ -24,7 +24,6 @@ var (
 			`\[Feature:VirtualMachineSupport\]`,
 			`\[Feature:Interconnect\]`,
 			`\[Feature:Multicast\]`,
-			`\[Feature:MultiHoming\]`,
 			`\[Feature:NodeIPMACMigration\]`,
 			`\[Feature:OVSCPUPin\]`,
 			`\[Feature:Unidle\]`,

@@ -469,101 +469,101 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:Interconnect] Multi node zones Pod interconnectivity": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network featuring `excludeCIDR`s": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network featuring `excludeCIDR`s": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with a dual stack configuration": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with a dual stack configuration": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with an IPv6 subnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network with an IPv6 subnet": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network without IPAM": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network without IPAM": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L2 - switched - network": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network with IPv6 network": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network with IPv6 network": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an L3 - routed - network": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an Localnet - switched - network featuring `excludeCIDR`s": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an Localnet - switched - network featuring `excludeCIDR`s": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network with an IPv6 subnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network with an IPv6 subnet": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network without IPAM": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network without IPAM": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] A single pod with an OVN-K secondary network is able to get to the Running phase when attaching to an localnet - switched - network": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network with `excludeCIDR`s": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network with `excludeCIDR`s": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network without IPAM": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 - switched - secondary network without IPAM": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network when the pods are scheduled in different nodes": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network when the pods are scheduled in different nodes": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with a dual stack configuration": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with a dual stack configuration": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with an IPv6 subnet when pods are scheduled in different nodes": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network with an IPv6 subnet when pods are scheduled in different nodes": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network without IPAM, with static IPs configured via network selection elements": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L2 secondary network without IPAM, with static IPs configured via network selection elements": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with IPv6 subnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with IPv6 subnet": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with a dual stack configuration": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network with a dual stack configuration": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an L3 - routed - secondary network": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network when the pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network when the pods are scheduled on different nodes": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with a dual stack configuration when pods are scheduled on different nodes": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network with an IPv6 subnet when pods are scheduled on different nodes": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network can communicate over the secondary network can communicate over an localnet secondary network without IPAM when the pods are scheduled on different nodes, with static IPs configured via network selection elements": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network eventually configures pods that were added to an already existing network before the nad": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network eventually configures pods that were added to an already existing network before the nad": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay can communicate over a localnet secondary network from pod to the underlay service": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay can communicate over a localnet secondary network from pod to the underlay service": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress allow all": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress allow all": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress deny all": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw egress deny all": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, egress allow all, ingress policy should have no impact on egress": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, egress allow all, ingress policy should have no impact on egress": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, ingress policy should have no impact on egress": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay when a policy is provisioned can communicate over a localnet secondary network from pod to gw ingress denyall, ingress policy should have no impact on egress": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay with multi network policy blocking the traffic can not communicate over a localnet secondary network from pod to the underlay service": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay with multi network policy blocking the traffic can not communicate over a localnet secondary network from pod to the underlay service": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a trunked configuration the same bridge mapping can be shared by a separate VLAN by using the physical network name attribute": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a trunked configuration the same bridge mapping can be shared by a separate VLAN by using the physical network name attribute": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, ingress allow-all": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, ingress allow-all": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, should not affect ingress": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is egress deny-all, should not affect ingress": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is ingress allow-all": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress allow all for a localnet topology when the multi-net policy is ingress allow-all": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress deny all policies for a localnet topology when the multi-net policy is ingress deny-all": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network ingress deny all policies for a localnet topology when the multi-net policy is ingress deny-all": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using IPBlock": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list using pod selectors": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a localnet topology when the multi-net policy describes the allow-list via namespace selectors": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a pure L2 overlay when the multi-net policy describes the allow-list via namespace selectors": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using IPBlock": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using pod selectors": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list using pod selectors": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list via namespace selectors": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for a routed topology when the multi-net policy describes the allow-list via namespace selectors": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for an IPAMless pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:MultiHoming] multiple pods connected to the same OVN-K secondary network multi-network policies multi-network policies configure traffic allow lists for an IPAMless pure L2 overlay when the multi-net policy describes the allow-list using IPBlock": "[Suite:openshift/conformance/parallel]",
 
 	"[ovn-kubernetes][Feature:Multicast] when multicast enabled for namespace should be able to receive multicast IGMP query": "[Disabled:Unimplemented]",
 
