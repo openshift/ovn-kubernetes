@@ -14,6 +14,9 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,7 +48,7 @@ var (
 	reportPath string
 )
 
-var _ = ginkgo.Describe("Services", func() {
+var _ = ginkgo_wrapper.Describe(feature.Service, func() {
 	const (
 		serviceName               = "testservice"
 		ovnWorkerNode             = "ovn-worker"
@@ -133,7 +136,9 @@ var _ = ginkgo.Describe("Services", func() {
 
 		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
 		// find the ovn-kube node pod on this node
-		pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
+		ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+		framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
+		pods, err := cs.CoreV1().Pods(ovnKubeNs).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
@@ -483,13 +488,15 @@ var _ = ginkgo.Describe("Services", func() {
 								}
 								return nil
 							}, 60*time.Second, 1*time.Second).Should(gomega.Succeed())
+							ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+							framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 							// Flushing the IP route cache will remove any routes in the cache
 							// that are a result of receiving a "need to frag" packet. Let's
 							// flush this on all 3 nodes else we will run into the
 							// bug: https://issues.redhat.com/browse/OCPBUGS-7609.
 							// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
-							ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
-								LabelSelector: "name=ovnkube-node",
+							ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnKubeNs).List(context.TODO(), metav1.ListOptions{
+								LabelSelector: "app=ovnkube-node",
 							})
 							if err != nil {
 								framework.Failf("could not get ovnkube-node pods: %v", err)
@@ -504,7 +511,7 @@ var _ = ginkgo.Describe("Services", func() {
 								arguments := []string{"exec", ovnKubeNodePod.Name, "--container", containerName, "--"}
 								sepFlush := strings.Split(flushCmd, " ")
 								arguments = append(arguments, sepFlush...)
-								_, err := e2ekubectl.RunKubectl(ovnNamespace, arguments...)
+								_, err := e2ekubectl.RunKubectl(ovnKubeNs, arguments...)
 								framework.ExpectNoError(err, "Flushing the ip route cache failed")
 							}
 						}
@@ -566,7 +573,9 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 		node := nodes.Items[0]
 		nodeName := node.Name
-		pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
+		ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+		framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
+		pods, err := cs.CoreV1().Pods(ovnKubeNs).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
@@ -606,7 +615,7 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 		cleanupFn = func() {
 			// initial pod used for host command may be deleted at this point, refetch
-			pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
+			pods, err := cs.CoreV1().Pods(ovnKubeNs).List(context.TODO(), metav1.ListOptions{
 				LabelSelector: "app=ovnkube-node",
 				FieldSelector: "spec.nodeName=" + nodeName,
 			})
@@ -786,7 +795,7 @@ var _ = ginkgo.Describe("Services", func() {
 			}
 
 			ginkgo.By("Creating an external container to send the traffic from")
-			createClusterExternalContainer(clientContainerName, agnhostImage,
+			createClusterExternalContainer(clientContainerName, images.AgnHost(),
 				[]string{"--network", "kind", "-P"},
 				[]string{"netexec", "--http-port=80"})
 
@@ -990,7 +999,7 @@ spec:
 			}
 
 			ginkgo.By("Creating an external container to send the ingress nodeport service traffic from")
-			extClientv4, extClientv6 := createClusterExternalContainer(clientContainerName, agnhostImage,
+			extClientv4, extClientv6 := createClusterExternalContainer(clientContainerName, images.AgnHost(),
 				[]string{"--network", "kind", "-P"},
 				[]string{"netexec", "--http-port=80"})
 
@@ -1202,7 +1211,7 @@ spec:
 			ginkgo.By("Creating an external client")
 			clientIPv4, clientIPv6 := createClusterExternalContainer(
 				clientContainerName,
-				agnhostImage,
+				images.AgnHost(),
 				[]string{"--privileged", "--network", "kind"},
 				[]string{"pause"},
 			)
@@ -1325,7 +1334,7 @@ func getServiceBackendsFromPod(execPod *v1.Pod, serviceIP string, servicePort in
 // service ip; if the traffic was DNAT-ed to the same src pod (hairpin/loopback case) -
 // the srcIP of reply traffic is SNATed to the special masqurade IP 169.254.0.5
 // or "fd69::5"
-var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
+var _ = ginkgo_wrapper.Describe(feature.Service, "Hairpin SNAT", func() {
 	const (
 		svcName                 = "service-hairpin-test"
 		backendName             = "hairpin-backend-pod"
@@ -1422,7 +1431,7 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 
 })
 
-var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
+var _ = ginkgo_wrapper.Describe(feature.Service, "Load Balancer Service Tests with MetalLB", func() {
 
 	const (
 		svcName          = "lbservice-test"

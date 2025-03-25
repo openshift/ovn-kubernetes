@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
+	gingowrapper "github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/openshift-hack/ocpfeaturegate"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -22,12 +25,12 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 )
 
-var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
+var _ = gingowrapper.Describe(feature.NetworkSegmentation, ocpfeaturegate.NetworkSegmentation, "EndpointSlices mirroring", func() {
 	f := wrappedTestFramework("endpointslices-mirror")
 	f.SkipNamespaceCreation = true
 	Context("a user defined primary network", func() {
 		const (
-			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv4Subnet = "11.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
 			nadName                      = "gryffindor"
 		)
@@ -59,11 +62,12 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 					) {
 						By("creating the network")
 						netConfig.namespace = f.Namespace.Name
+						netConfig.cidr = filterUnsupportedCIDRs(cs, netConfig.cidr)
 						Expect(createNetworkFn(netConfig)).To(Succeed())
 
 						replicas := int32(3)
 						By("creating the deployment")
-						deployment := e2edeployment.NewDeployment("test-deployment", replicas, map[string]string{"app": "test"}, "agnhost", agnhostImage, appsv1.RollingUpdateDeploymentStrategyType)
+						deployment := e2edeployment.NewDeployment("test-deployment", replicas, map[string]string{"app": "test"}, "agnhost", images.AgnHost(), appsv1.RollingUpdateDeploymentStrategyType)
 						deployment.Namespace = f.Namespace.Name
 						deployment.Spec.Template.Spec.HostNetwork = isHostNetwork
 						deployment.Spec.Template.Spec.Containers[0].Command = e2epod.GenerateScriptCmd("/agnhost netexec --http-port 80")
@@ -120,7 +124,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						false,
@@ -130,7 +134,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						false,
@@ -140,7 +144,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						true,
@@ -150,7 +154,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						true,
@@ -190,11 +194,12 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						Expect(err).NotTo(HaveOccurred())
 						By("creating the network")
 						netConfig.namespace = defaultNetNamespace.Name
+						netConfig.cidr = filterUnsupportedCIDRs(cs, netConfig.cidr)
 						Expect(createNetworkFn(netConfig)).To(Succeed())
 
 						replicas := int32(3)
 						By("creating the deployment")
-						deployment := e2edeployment.NewDeployment("test-deployment", replicas, map[string]string{"app": "test"}, "agnhost", agnhostImage, appsv1.RollingUpdateDeploymentStrategyType)
+						deployment := e2edeployment.NewDeployment("test-deployment", replicas, map[string]string{"app": "test"}, "agnhost", images.AgnHost(), appsv1.RollingUpdateDeploymentStrategyType)
 						deployment.Namespace = defaultNetNamespace.Name
 						deployment.Spec.Template.Spec.Containers[0].Command = e2epod.GenerateScriptCmd("/agnhost netexec --http-port 80")
 
@@ -228,7 +233,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "secondary",
 						},
 					),
@@ -237,7 +242,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", func() {
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "secondary",
 						},
 					),

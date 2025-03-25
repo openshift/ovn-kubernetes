@@ -9,6 +9,8 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +21,7 @@ import (
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 )
 
-var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
+var _ = ginkgo_wrapper.Describe("Pod to external server PMTUD", func() {
 	const (
 		echoServerPodNameTemplate = "echo-server-pod-%d"
 		echoClientPodName         = "echo-client-pod"
@@ -90,16 +92,16 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 			serverPodName = fmt.Sprintf(echoServerPodNameTemplate, serverPodPort)
 			framework.Logf("Creating server pod listening on TCP and UDP port %d", serverPodPort)
 			agntHostCmds := []string{"netexec", "--http-port", fmt.Sprintf("%d", serverPodPort), "--udp-port", fmt.Sprintf("%d", serverPodPort)}
-			externalIpv4, externalIpv6 := createClusterExternalContainer(serverPodName, agnhostImage,
+			externalIpv4, externalIpv6 := createClusterExternalContainer(serverPodName, images.AgnHost(),
 				[]string{"--network", "kind", "-P", "--cap-add", "NET_ADMIN"},
 				agntHostCmds,
 			)
 
-			if isIPv4Supported() {
+			if isIPv4Supported(f.ClientSet) {
 				serverNodeInternalIPs = append(serverNodeInternalIPs, externalIpv4)
 			}
 
-			if isIPv6Supported() {
+			if isIPv6Supported(f.ClientSet) {
 				serverNodeInternalIPs = append(serverNodeInternalIPs, externalIpv6)
 			}
 
@@ -198,13 +200,15 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 							}
 							return nil
 						}, 60*time.Second, 1*time.Second).Should(gomega.Succeed())
+						ovnKubeNs, err := getOVNKubeNamespaceName(f.ClientSet.CoreV1().Namespaces())
+						framework.ExpectNoError(err, "failed to get ovn-kubernetes namespace")
 						// Flushing the IP route cache will remove any routes in the cache
 						// that are a result of receiving a "need to frag" packet. Let's
 						// flush this on all 3 nodes else we will run into the
 						// bug: https://issues.redhat.com/browse/OCPBUGS-7609.
 						// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
-						ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
-							LabelSelector: "name=ovnkube-node",
+						ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnKubeNs).List(context.TODO(), metav1.ListOptions{
+							LabelSelector: "app=ovnkube-node",
 						})
 						if err != nil {
 							framework.Failf("could not get ovnkube-node pods: %v", err)
@@ -215,7 +219,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 							if isInterconnectEnabled() {
 								containerName = "ovnkube-controller"
 							}
-							_, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
+							_, err := e2ekubectl.RunKubectl(ovnKubeNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
 								"ip", "route", "flush", "cache")
 							framework.ExpectNoError(err, "Flushing the ip route cache failed")
 						}
@@ -229,7 +233,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 	})
 })
 
-var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
+var _ = ginkgo_wrapper.Describe("Pod to pod TCP with low MTU", func() {
 	const (
 		echoServerPodNameTemplate = "echo-server-pod-%d"
 		echoClientPodName         = "echo-client-pod"
