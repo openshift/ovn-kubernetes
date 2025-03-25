@@ -100,6 +100,7 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		d                   = diagnostics.New(fr)
 		crClient            crclient.Client
 		namespace           string
+		iperf3DefaultPort   = int32(5201)
 		tcpServerPort       = int32(9900)
 		wg                  sync.WaitGroup
 		selectedNodes       = []corev1.Node{}
@@ -360,16 +361,31 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 		startNorthSouthIngressIperfTraffic = func(containerName string, addresses []string, port int32, stage string) error {
 			GinkgoHelper()
 			Expect(addresses).NotTo(BeEmpty())
+			By(fmt.Sprintf("kill iperf3: %s", stage))
+			output, err := runCommand(containerRuntime, "exec", "-i", containerName, "bash", "-c", "killall -q iperf3 | true")
+			if err != nil {
+				return fmt.Errorf("failed killing iperf3 %s: %w", output, err)
+			}
 			for _, address := range addresses {
 				iperfLogFile := fmt.Sprintf("/tmp/ingress_test_%[1]s_%[2]d_iperf3.log", address, port)
-				output, err := runCommand(containerRuntime, "exec", containerName, "bash", "-c", fmt.Sprintf(`
-iperf3 -c %[1]s -p %[2]d
-killall iperf3
-rm -f %[3]s
+				By(fmt.Sprintf("remove iperf3 log for %s: %s", address, stage))
+				output, err := runCommand(containerRuntime, "exec", "-i", containerName, "bash", "-c", fmt.Sprintf("rm -f %s", iperfLogFile))
+				if err != nil {
+					return fmt.Errorf("failed removing iperf3 log file %s: %w", output, err)
+				}
+
+				By(fmt.Sprintf("check iperf3 connectivity for %s: %s", address, stage))
+				output, err = runCommand(containerRuntime, "exec", "-i", containerName, "bash", "-c", fmt.Sprintf("iperf3 -c %s -p %d", address, port))
+				if err != nil {
+					return fmt.Errorf("failed checking iperf3 connectivity %s: %w", output, err)
+				}
+
+				By(fmt.Sprintf("start from %s: %s", address, stage))
+				output, err = runCommand(containerRuntime, "exec", containerName, "bash", "-c", fmt.Sprintf(`
 iperf3 -t 0 -c %[1]s -p %[2]d --logfile %[3]s &
 `, address, port, iperfLogFile))
 				if err != nil {
-					return fmt.Errorf("%s: %w", output, err)
+					return fmt.Errorf("failed at staring iperf3 in background %s: %w", output, err)
 				}
 			}
 			return nil
@@ -1086,15 +1102,33 @@ passwd:
 		}
 
 		iperfServerScript = `
-dnf install -y psmisc procps
+#!/bin/bash -xe
 iface=$(ifconfig  |grep flags |grep -v "eth0\|lo" | sed "s/: .*//")
+iface=${iface:-eth0}
+
 ipv4=$(ifconfig $iface | grep "inet "|awk '{print $2}'| sed "s#/.*##")
-ipv6=$(ifconfig $iface | grep inet6 |grep -v fe80 |awk '{print $2}'| sed "s#/.*##")
 if [ "$ipv4" != "" ]; then
 	iperf3 -s -D --bind $ipv4 --logfile /tmp/test_${ipv4}_iperf3.log
+	sleep 1
+	if grep "iperf3: error" /tmp/test_${ipv4}_iperf3.log; then
+		cat /tmp/test_${ipv4}_iperf3.log
+		exit 1
+	fi
 fi
+
+cnt=0
+while [ "$ipv6" == "" -a $cnt -lt 10 ]; do
+	ipv6=$(ifconfig $iface | grep inet6 |grep -v fe80 |awk '{print $2}'| sed "s#/.*##")
+	sleep 1
+	cnt=$((cnt+1))
+done
 if [ "$ipv6" != "" ]; then
 	iperf3 -s -D --bind $ipv6 --logfile /tmp/test_${ipv6}_iperf3.log
+	sleep 1
+	if grep "iperf3: error" /tmp/test_${ipv6}_iperf3.log; then
+		cat /tmp/test_${ipv6}_iperf3.log 1>&2
+		exit 1
+	fi
 fi
 `
 		nextIPs = func(idx int, subnets []string) ([]string, error) {
@@ -1215,11 +1249,11 @@ fi
 			return nil
 		}
 
-		createIperfExternalContainer = func(name string) (string, string) {
+		createIperfExternalContainer = func(name, network string) (string, string) {
 			return createClusterExternalContainer(
 				name,
 				iperf3Image,
-				[]string{"--network", "kind", "--entrypoint", "/bin/bash"},
+				[]string{"--network", network, "--privileged", "--entrypoint", "/bin/bash"},
 				[]string{"-c", "sleep infinity"},
 			)
 		}
@@ -1509,8 +1543,7 @@ write_files:
     encoding: b64
     content: %s
     permissions: '0755'
-runcmd:
-- /tmp/iperf-server.sh`, base64.StdEncoding.EncodeToString([]byte(iperfServerScript)))
+`, base64.StdEncoding.EncodeToString([]byte(iperfServerScript)))
 
 			virtualMachine = resourceCommand{
 				description: "VirtualMachine",
@@ -1590,6 +1623,29 @@ runcmd:
 			role        udnv1.NetworkRole
 			ingress     string
 		}
+		var (
+			containerNetwork = func(td testData) string {
+				if td.ingress == "routed" {
+					return "bgpnet"
+				}
+				return "kind"
+			}
+			exposeVMIperfServer = func(td testData, vmi *kubevirtv1.VirtualMachineInstance, vmiAddresses []string) ([]string, int32) {
+				GinkgoHelper()
+				if td.ingress == "routed" {
+					return vmiAddresses, iperf3DefaultPort
+				}
+				step := by(vmi.Name, "Expose VM iperf server as a service")
+				svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vmi.Name, iperf3DefaultPort), metav1.CreateOptions{})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(svc.Spec.Ports[0].NodePort).NotTo(Equal(0), step)
+				serverPort := svc.Spec.Ports[0].NodePort
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), fr.ClientSet, 1)
+				Expect(err).NotTo(HaveOccurred())
+				serverIPs := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+				return serverIPs, serverPort
+			}
+		)
 		DescribeTable("should keep ip", func(td testData) {
 			if td.role == "" {
 				td.role = udnv1.NetworkRoleSecondary
@@ -1660,12 +1716,23 @@ runcmd:
 			Expect(err).NotTo(HaveOccurred())
 
 			externalContainerName := namespace + "-iperf"
-			externalContainerIPV4Address, externalContainerIPV6Address := createIperfExternalContainer(externalContainerName)
+			externalContainerIPV4Address, externalContainerIPV6Address := createIperfExternalContainer(externalContainerName, containerNetwork(td))
 			DeferCleanup(func() {
 				if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
 					deleteClusterExternalContainer(externalContainerName)
 				}
 			})
+			if td.ingress == "routed" {
+				frrContainerIPv4, frrContainerIPv6 := getContainerAddressesForNetwork("frr", containerNetwork(td))
+				output, err := runCommand(containerRuntime, "exec", externalContainerName, "bash", "-c", fmt.Sprintf(`
+set -xe
+dnf install -y iproute
+ip route add %[1]s via %[2]s
+ip route add %[3]s via %[4]s
+`, cidrIPv4, frrContainerIPv4, cidrIPv6, frrContainerIPv6))
+				Expect(err).NotTo(HaveOccurred(), output)
+
+			}
 
 			vmiName := td.resource.cmd()
 			vmi = &kubevirtv1.VirtualMachineInstance{
@@ -1693,9 +1760,7 @@ runcmd:
 			expectedAddresesAtGuest := expectedAddreses
 			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, podNetworkStatusByNetConfigPredicate(namespace, cudn.Name, strings.ToLower(string(td.role))))
 
-			step = by(vmi.Name, "Expose VM iperf server as a service")
-			svc, err := fr.ClientSet.CoreV1().Services(namespace).Create(context.TODO(), composeService("iperf3-vm-server", vmi.Name, 5201), metav1.CreateOptions{})
-			Expect(svc.Spec.Ports[0].NodePort).NotTo(Equal(0), step)
+			serverIPs, serverPort := exposeVMIperfServer(td, vmi, expectedAddreses)
 
 			// IPv6 is not support for secondaries with IPAM so guest will
 			// have only ipv4.
@@ -1716,11 +1781,6 @@ runcmd:
 			Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 
-			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), fr.ClientSet, 1)
-			Expect(err).NotTo(HaveOccurred())
-
-			nodeIPs := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
-
 			if td.role == udnv1.NetworkRolePrimary {
 				if isIPv6Supported() && isInterconnectEnabled() {
 					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway before %s %s", td.resource.description, td.test.description))
@@ -1737,8 +1797,10 @@ runcmd:
 						Should(Equal([]string{expectedIPv6GatewayPath}), "should filter remote ipv6 gateway nexthop")
 				}
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
-				startNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
-				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				output, err := kubevirt.RunCommand(vmi, "/tmp/iperf-server.sh", time.Minute)
+				Expect(err).NotTo(HaveOccurred(), step+": "+output)
+				Expect(startNorthSouthIngressIperfTraffic(externalContainerName, serverIPs, serverPort, step)).To(Succeed())
+				checkNorthSouthIngressIperfTraffic(externalContainerName, serverIPs, serverPort, step)
 				checkNorthSouthEgressICMPTraffic(vmi, []string{externalContainerIPV4Address, externalContainerIPV6Address}, step)
 			}
 
@@ -1759,17 +1821,18 @@ runcmd:
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			if td.test.description == restart.description {
-
 				// At restart we need re-connect
 				Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
 				if td.role == udnv1.NetworkRolePrimary {
-					startNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+					output, err := kubevirt.RunCommand(vmi, "/tmp/iperf-server.sh &", time.Minute)
+					Expect(err).NotTo(HaveOccurred(), step+": "+output)
+					Expect(startNorthSouthIngressIperfTraffic(externalContainerName, serverIPs, serverPort, step)).To(Succeed())
 				}
 			}
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 			if td.role == udnv1.NetworkRolePrimary {
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic after %s %s", td.resource.description, td.test.description))
-				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
+				checkNorthSouthIngressIperfTraffic(externalContainerName, serverIPs, serverPort, step)
 				checkNorthSouthEgressICMPTraffic(vmi, []string{externalContainerIPV4Address, externalContainerIPV6Address}, step)
 			}
 
@@ -1849,6 +1912,13 @@ runcmd:
 				test:     liveMigrate,
 				topology: udnv1.NetworkTopologyLayer2,
 				role:     udnv1.NetworkRolePrimary,
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDN,
+				test:     liveMigrate,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+				ingress:  "routed",
 			}),
 			Entry(nil, testData{
 				resource: virtualMachineInstance,
