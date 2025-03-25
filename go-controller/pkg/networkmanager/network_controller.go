@@ -532,7 +532,7 @@ func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 }
 
 func (c *networkController) getRunningNetwork(id int) string {
-	if id == DefaultNetworkID {
+	if id == types.DefaultNetworkID {
 		return types.DefaultNetworkName
 	}
 	for _, state := range c.getAllNetworkStates() {
