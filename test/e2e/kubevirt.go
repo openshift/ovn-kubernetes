@@ -19,6 +19,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt"
 
@@ -87,7 +89,7 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 	})
 }
 
-var _ = Describe("Kubevirt Virtual Machines", func() {
+var _ = ginkgo_wrapper.Describe(feature.VirtualMachineSupport, func() {
 	var (
 		fr                  = wrappedTestFramework("kv-live-migration")
 		d                   = diagnostics.New(fr)
@@ -1366,7 +1368,7 @@ fi
 			nad      *nadv1.NetworkAttachmentDefinition
 			vm       *kubevirtv1.VirtualMachine
 			vmi      *kubevirtv1.VirtualMachineInstance
-			cidrIPv4 = "10.128.0.0/24"
+			cidrIPv4 = "11.128.0.0/24"
 			cidrIPv6 = "2010:100:200::0/60"
 			restart  = testCommand{
 				description: "restart",
@@ -1524,7 +1526,7 @@ runcmd:
 					namespace:          namespace,
 					name:               "net1",
 					topology:           td.topology,
-					cidr:               correctCIDRFamily(cidrIPv4, cidrIPv6),
+					cidr:               correctCIDRFamily(fr.ClientSet, cidrIPv4, cidrIPv6),
 					allowPersistentIPs: true,
 					role:               td.role,
 				})
@@ -1533,15 +1535,17 @@ runcmd:
 				By("setting up the localnet underlay")
 				nodes := ovsPods(clientSet)
 				Expect(nodes).NotTo(BeEmpty())
+				ovnKubeNs, err := getOVNKubeNamespaceName(fr.ClientSet.CoreV1().Namespaces())
+				Expect(err).ShouldNot(HaveOccurred(), "failed to retrieve ovn-kubernetes namespace")
 				DeferCleanup(func() {
 					if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {
 						By("tearing down the localnet underlay")
-						Expect(teardownUnderlay(nodes)).To(Succeed())
+						Expect(teardownUnderlay(nodes, ovnKubeNs)).To(Succeed())
 					}
 				})
 
 				const secondaryInterfaceName = "eth1"
-				Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
+				Expect(setupUnderlay(nodes, ovnKubeNs, secondaryInterfaceName, netConfig)).To(Succeed())
 			}
 
 			By("Creating NetworkAttachmentDefinition")
@@ -1665,7 +1669,7 @@ runcmd:
 				checkNorthSouthEgressICMPTraffic(vmi, []string{externalContainerIPV4Address, externalContainerIPV6Address}, step)
 			}
 
-			if td.role == "primary" && td.test.description == liveMigrate.description && isIPv4Supported() && isInterconnectEnabled() {
+			if td.role == "primary" && td.test.description == liveMigrate.description && isIPv4Supported(fr.ClientSet) && isInterconnectEnabled() {
 				step = by(vm.Name, fmt.Sprintf("Checking IPv4 gateway cached mac after %s %s", td.resource.description, td.test.description))
 				Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
 
@@ -1754,7 +1758,7 @@ runcmd:
 	Context("with kubevirt VM using layer2 UDPN", Ordered, func() {
 		var (
 			podName                 = "virt-launcher-vm1"
-			cidrIPv4                = "10.128.0.0/24"
+			cidrIPv4                = "11.128.0.0/24"
 			cidrIPv6                = "2010:100:200::/60"
 			primaryUDNNetworkStatus nadapi.NetworkStatus
 			virtLauncherCommand     = func(command string) (string, error) {
@@ -1794,7 +1798,7 @@ runcmd:
 					namespace: namespace,
 					name:      "net1",
 					topology:  "layer2",
-					cidr:      correctCIDRFamily(cidrIPv4, cidrIPv6),
+					cidr:      correctCIDRFamily(fr.ClientSet, cidrIPv4, cidrIPv6),
 					role:      "primary",
 					mtu:       1300,
 				})
@@ -1838,7 +1842,7 @@ runcmd:
 				Get(context.Background(), config.Kubernetes.DNSServiceName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			if isIPv4Supported() {
+			if isIPv4Supported(fr.ClientSet) {
 				expectedIP, err := matchIPv4StringFamily(primaryUDNNetworkStatus.IPs)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1866,7 +1870,7 @@ runcmd:
 				Expect(primaryUDNValueForDevice("GENERAL.MTU")).To(ConsistOf("1300"))
 			}
 
-			if isIPv6Supported() {
+			if isIPv6Supported(fr.ClientSet) {
 				expectedIP, err := matchIPv6StringFamily(primaryUDNNetworkStatus.IPs)
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(primaryUDNValueFor).
