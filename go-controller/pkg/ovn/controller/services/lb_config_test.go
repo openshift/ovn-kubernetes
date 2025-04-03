@@ -7,19 +7,20 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
+
+	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	kubetest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var (
@@ -40,77 +41,62 @@ var (
 		},
 	}
 
-	httpPortName    string = "http"
-	httpPortValue   int32  = int32(80)
-	httpsPortName   string = "https"
-	httpsPortValue  int32  = int32(443)
-	customPortName  string = "customApp"
-	customPortValue int32  = int32(10600)
+	httpPortName  string = "http"
+	httpPortValue int32  = int32(80)
 )
 
-func getSampleService(publishNotReadyAddresses bool) *v1.Service {
+func getSampleService(publishNotReadyAddresses bool) *corev1.Service {
 	name := "service-test"
 	namespace := "test"
-	return &v1.Service{
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       k8stypes.UID(namespace),
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: v1.ServiceSpec{
+		Spec: corev1.ServiceSpec{
 			PublishNotReadyAddresses: publishNotReadyAddresses,
 		},
 	}
 }
 
-func getServicePort(name string, targetPort int32, protocol v1.Protocol) v1.ServicePort {
-	return v1.ServicePort{
+func getServicePort(name string, _ int32, protocol corev1.Protocol) corev1.ServicePort {
+	return corev1.ServicePort{
 		Name:       name,
 		TargetPort: intstr.FromInt(int(httpPortValue)),
 		Protocol:   protocol,
 	}
 }
 
-func getSampleServiceWithOnePort(name string, targetPort int32, protocol v1.Protocol) *v1.Service {
+func getSampleServiceWithOnePort(name string, targetPort int32, protocol corev1.Protocol) *corev1.Service {
 	service := getSampleService(false)
-	service.Spec.Ports = []v1.ServicePort{getServicePort(name, targetPort, protocol)}
+	service.Spec.Ports = []corev1.ServicePort{getServicePort(name, targetPort, protocol)}
 	return service
 }
 
-func getSampleServiceWithOnePortAndETPLocal(name string, targetPort int32, protocol v1.Protocol) *v1.Service {
+func getSampleServiceWithOnePortAndETPLocal(name string, targetPort int32, protocol corev1.Protocol) *corev1.Service {
 	service := getSampleServiceWithOnePort(name, targetPort, protocol)
-	service.Spec.Type = v1.ServiceTypeLoadBalancer
-	service.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
+	service.Spec.Type = corev1.ServiceTypeLoadBalancer
+	service.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyLocal
 	return service
 }
 
-// OCP hack begin
-func getSampleServiceWithOnePortAndITPLocal(name string, targetPort int32, protocol v1.Protocol) *v1.Service {
-	service := getSampleServiceWithOnePort(name, targetPort, protocol)
-	service.Spec.Type = v1.ServiceTypeLoadBalancer
-	local := v1.ServiceInternalTrafficPolicyLocal
-	service.Spec.InternalTrafficPolicy = &local
-	return service
-}
-
-// OCP hack end
-
-func getSampleServiceWithTwoPorts(name1, name2 string, targetPort1, targetPort2 int32, protocol1, protocol2 v1.Protocol) *v1.Service {
+func getSampleServiceWithTwoPorts(name1, name2 string, targetPort1, targetPort2 int32, protocol1, protocol2 corev1.Protocol) *corev1.Service {
 	service := getSampleService(false)
-	service.Spec.Ports = []v1.ServicePort{
+	service.Spec.Ports = []corev1.ServicePort{
 		getServicePort(name1, targetPort1, protocol1),
 		getServicePort(name2, targetPort2, protocol2)}
 	return service
 }
 
-func getSampleServiceWithTwoPortsAndETPLocal(name1, name2 string, targetPort1, targetPort2 int32, protocol1, protocol2 v1.Protocol) *v1.Service {
+func getSampleServiceWithTwoPortsAndETPLocal(name1, name2 string, targetPort1, targetPort2 int32, protocol1, protocol2 corev1.Protocol) *corev1.Service {
 	service := getSampleServiceWithTwoPorts(name1, name2, targetPort1, targetPort2, protocol1, protocol2)
-	service.Spec.Type = v1.ServiceTypeLoadBalancer
-	service.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
+	service.Spec.Type = corev1.ServiceTypeLoadBalancer
+	service.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyLocal
 	return service
 }
 
-func getSampleServiceWithOnePortAndPublishNotReadyAddresses(name string, targetPort int32, protocol v1.Protocol) *v1.Service {
+func getSampleServiceWithOnePortAndPublishNotReadyAddresses(name string, targetPort int32, protocol corev1.Protocol) *corev1.Service {
 	service := getSampleServiceWithOnePort(name, targetPort, protocol)
 	service.Spec.PublishNotReadyAddresses = true
 	return service
@@ -125,7 +111,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 	}()
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00::/64")
-	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
+	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 26}, {CIDR: cidr6, HostSubnetLength: 26}}
 
 	// constants
 	serviceName := "foo"
@@ -141,7 +127,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 	// make slices
 	// nil slice = don't use this family
 	// empty slice = family is empty
-	makeSlices := func(v4ips, v6ips []string, proto v1.Protocol) []*discovery.EndpointSlice {
+	makeSlices := func(v4ips, v6ips []string, proto corev1.Protocol) []*discovery.EndpointSlice {
 		out := []*discovery.EndpointSlice{}
 		if v4ips != nil && len(v4ips) == 0 {
 			out = append(out, &discovery.EndpointSlice{
@@ -202,7 +188,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		return out
 	}
 
-	makeV4SliceWithEndpoints := func(proto v1.Protocol, endpoints ...discovery.Endpoint) []*discovery.EndpointSlice {
+	makeV4SliceWithEndpoints := func(proto corev1.Protocol, endpoints ...discovery.Endpoint) []*discovery.EndpointSlice {
 		e := &discovery.EndpointSlice{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      serviceName + "ab1",
@@ -221,7 +207,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 	}
 
 	type args struct {
-		service *v1.Service
+		service *corev1.Service
 		slices  []*discovery.EndpointSlice
 	}
 	tests := []struct {
@@ -241,17 +227,17 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		{
 			name: "v4 clusterip, one port, no endpoints",
 			args: args{
-				slices: makeSlices([]string{}, nil, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{}, nil, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 						}},
 					},
@@ -259,7 +245,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			},
 			resultSharedGatewayCluster: []lbConfig{{
 				vips:             []string{"192.168.1.1"},
-				protocol:         v1.ProtocolTCP,
+				protocol:         corev1.ProtocolTCP,
 				inport:           80,
 				clusterEndpoints: lbEndpoints{},
 				nodeEndpoints:    map[string]lbEndpoints{},
@@ -269,17 +255,17 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		{
 			name: "v4 clusterip, one port, endpoints",
 			args: args{
-				slices: makeSlices([]string{"10.128.0.2"}, nil, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"10.128.0.2"}, nil, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 						}},
 					},
@@ -287,7 +273,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			},
 			resultSharedGatewayCluster: []lbConfig{{
 				vips:     []string{"192.168.1.1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   inport,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"10.128.0.2"},
@@ -300,18 +286,18 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		{
 			name: "v4 type=LoadBalancer, ETP=local, one port, endpoints",
 			args: args{
-				slices: makeSlices([]string{"10.128.0.2"}, nil, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"10.128.0.2"}, nil, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:                  v1.ServiceTypeLoadBalancer,
-						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
+					Spec: corev1.ServiceSpec{
+						Type:                  corev1.ServiceTypeLoadBalancer,
+						ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyLocal,
 						ClusterIP:             "192.168.1.1",
 						ClusterIPs:            []string{"192.168.1.1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 						}},
 					},
@@ -319,7 +305,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			},
 			resultSharedGatewayCluster: []lbConfig{{
 				vips:     []string{"192.168.1.1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   inport,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"10.128.0.2"},
@@ -359,23 +345,23 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Endpoints:   kubetest.MakeReadyEndpointList(nodeA, "10.128.0.2", "10.128.1.2"),
 					},
 				},
-				service: &v1.Service{
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1"},
-						Ports: []v1.ServicePort{
+						Ports: []corev1.ServicePort{
 							{
 								Name:       portName,
 								Port:       inport,
-								Protocol:   v1.ProtocolTCP,
+								Protocol:   corev1.ProtocolTCP,
 								TargetPort: outportstr,
 							},
 							{
 								Name:       portName1,
 								Port:       inport1,
-								Protocol:   v1.ProtocolTCP,
+								Protocol:   corev1.ProtocolTCP,
 								TargetPort: intstr.FromInt(int(outport1)),
 							},
 						},
@@ -386,7 +372,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
@@ -396,7 +382,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport1,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
@@ -431,23 +417,23 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Endpoints:   kubetest.MakeReadyEndpointList(nodeA, "10.128.0.2", "10.128.1.2"),
 					},
 				},
-				service: &v1.Service{
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1"},
-						Ports: []v1.ServicePort{
+						Ports: []corev1.ServicePort{
 							{
 								Name:       portName,
 								Port:       inport,
-								Protocol:   v1.ProtocolTCP,
+								Protocol:   corev1.ProtocolTCP,
 								TargetPort: outportstr,
 							},
 							{
 								Name:       portName1,
 								Port:       inport,
-								Protocol:   v1.ProtocolUDP,
+								Protocol:   corev1.ProtocolUDP,
 								TargetPort: intstr.FromInt(int(outport)),
 							},
 						},
@@ -458,7 +444,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
@@ -468,7 +454,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolUDP,
+					protocol: corev1.ProtocolUDP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
@@ -481,17 +467,17 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		{
 			name: "dual-stack clusterip, one port, endpoints",
 			args: args{
-				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1", "2002::1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 						}},
 					},
@@ -500,7 +486,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultsSame: true,
 			resultSharedGatewayCluster: []lbConfig{{
 				vips:     []string{"192.168.1.1", "2002::1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   inport,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"10.128.0.2"},
@@ -513,24 +499,24 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		{
 			name: "dual-stack clusterip, one port, endpoints, external ips + lb status",
 			args: args{
-				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeLoadBalancer,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeLoadBalancer,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1", "2002::1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 						}},
 						ExternalIPs: []string{"4.2.2.2", "42::42"},
 					},
-					Status: v1.ServiceStatus{
-						LoadBalancer: v1.LoadBalancerStatus{
-							Ingress: []v1.LoadBalancerIngress{{
+					Status: corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{{
 								IP: "5.5.5.5",
 							}},
 						},
@@ -540,7 +526,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultsSame: true,
 			resultSharedGatewayCluster: []lbConfig{{
 				vips:     []string{"192.168.1.1", "2002::1", "4.2.2.2", "42::42", "5.5.5.5"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   inport,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"10.128.0.2"},
@@ -553,25 +539,25 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		{
 			name: "dual-stack clusterip, one port, endpoints, external ips + lb status, ExternalTrafficPolicy=local",
 			args: args{
-				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:                  v1.ServiceTypeLoadBalancer,
+					Spec: corev1.ServiceSpec{
+						Type:                  corev1.ServiceTypeLoadBalancer,
 						ClusterIP:             "192.168.1.1",
 						ClusterIPs:            []string{"192.168.1.1", "2002::1"},
-						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
-						Ports: []v1.ServicePort{{
+						ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 						}},
 						ExternalIPs: []string{"4.2.2.2", "42::42"},
 					},
-					Status: v1.ServiceStatus{
-						LoadBalancer: v1.LoadBalancerStatus{
-							Ingress: []v1.LoadBalancerIngress{{
+					Status: corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{{
 								IP: "5.5.5.5",
 							}},
 						},
@@ -582,7 +568,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2"},
@@ -601,7 +587,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:                 []string{"4.2.2.2", "42::42", "5.5.5.5"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
 					clusterEndpoints: lbEndpoints{
@@ -622,17 +608,17 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 		{
 			name: "dual-stack clusterip, one port, endpoints, nodePort",
 			args: args{
-				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1", "2002::1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 							NodePort:   5,
 						}},
@@ -642,7 +628,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultsSame: true,
 			resultSharedGatewayCluster: []lbConfig{{
 				vips:     []string{"192.168.1.1", "2002::1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   inport,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"10.128.0.2"},
@@ -653,7 +639,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			}},
 			resultSharedGatewayTemplate: []lbConfig{{
 				vips:     []string{"node"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   5,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"10.128.0.2"},
@@ -668,17 +654,17 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			name: "dual-stack clusterip, one port, endpoints, nodePort, hostNetwork",
 			args: args{
 				// These slices are outside of the config, and thus are host network
-				slices: makeSlices([]string{"192.168.0.1"}, []string{"2001::1"}, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"192.168.0.1"}, []string{"2001::1"}, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1", "2002::1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 							NodePort:   5,
 						}},
@@ -689,7 +675,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -702,7 +688,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayTemplate: []lbConfig{
 				{
 					vips:     []string{"node"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   5,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -717,7 +703,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultLocalGatewayNode: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -730,7 +716,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultLocalGatewayTemplate: []lbConfig{
 				{
 					vips:     []string{"node"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   5,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -746,18 +732,18 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			name: "dual-stack clusterip, one port, endpoints, nodePort, hostNetwork, ExternalTrafficPolicy=Local",
 			args: args{
 				// These slices are outside of the config, and thus are host network
-				slices: makeSlices([]string{"192.168.0.1"}, []string{"2001::1"}, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"192.168.0.1"}, []string{"2001::1"}, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:                  v1.ServiceTypeNodePort,
+					Spec: corev1.ServiceSpec{
+						Type:                  corev1.ServiceTypeNodePort,
 						ClusterIP:             "192.168.1.1",
 						ClusterIPs:            []string{"192.168.1.1", "2002::1"},
-						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
-						Ports: []v1.ServicePort{{
+						ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 							NodePort:   5,
 						}},
@@ -768,7 +754,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:     []string{"node"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   5,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -787,7 +773,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -806,7 +792,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultLocalGatewayNode: []lbConfig{
 				{
 					vips:     []string{"node"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   5,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -825,7 +811,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -846,17 +832,17 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			name: "dual-stack clusterip, one port, endpoints, hostNetwork",
 			args: args{
 				// These slices are outside of the config, and thus are host network
-				slices: makeSlices([]string{"192.168.0.1"}, []string{"2001::1"}, v1.ProtocolTCP),
-				service: &v1.Service{
+				slices: makeSlices([]string{"192.168.0.1"}, []string{"2001::1"}, corev1.ProtocolTCP),
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+					Spec: corev1.ServiceSpec{
+						Type:       corev1.ServiceTypeClusterIP,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1", "2002::1"},
-						Ports: []v1.ServicePort{{
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 						}},
 					},
@@ -866,7 +852,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -879,7 +865,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultLocalGatewayNode: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -894,29 +880,29 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			name: "LB service with NodePort, one port, two endpoints, external ips + lb status, ExternalTrafficPolicy=local",
 			args: args{
 				slices: makeV4SliceWithEndpoints(
-					v1.ProtocolTCP,
+					corev1.ProtocolTCP,
 					kubetest.MakeReadyEndpoint(nodeA, "10.128.0.2"),
 					kubetest.MakeReadyEndpoint(nodeB, "10.128.1.2"),
 				),
-				service: &v1.Service{
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:                  v1.ServiceTypeLoadBalancer,
+					Spec: corev1.ServiceSpec{
+						Type:                  corev1.ServiceTypeLoadBalancer,
 						ClusterIP:             "192.168.1.1",
 						ClusterIPs:            []string{"192.168.1.1"},
-						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
-						Ports: []v1.ServicePort{{
+						ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 							NodePort:   5,
 						}},
 						ExternalIPs: []string{"4.2.2.2"},
 					},
-					Status: v1.ServiceStatus{
-						LoadBalancer: v1.LoadBalancerStatus{
-							Ingress: []v1.LoadBalancerIngress{{
+					Status: corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{{
 								IP: "5.5.5.5",
 							}},
 						},
@@ -927,7 +913,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
@@ -948,7 +934,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:                 []string{"node"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5,
 					hasNodePort:          true,
 					externalTrafficLocal: true,
@@ -969,7 +955,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"4.2.2.2", "5.5.5.5"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					hasNodePort:          false,
 					externalTrafficLocal: true,
@@ -996,28 +982,28 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			// The test below will just show both endpoints in its output.
 			name: "LB service with NodePort, port, two endpoints, external ips + lb status, ExternalTrafficPolicy=local, one endpoint is ready, the other one is terminating and serving",
 			args: args{
-				slices: makeV4SliceWithEndpoints(v1.ProtocolTCP,
+				slices: makeV4SliceWithEndpoints(corev1.ProtocolTCP,
 					kubetest.MakeReadyEndpoint(nodeA, "10.128.0.2"),
 					kubetest.MakeTerminatingServingEndpoint(nodeB, "10.128.1.2")),
-				service: &v1.Service{
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:                  v1.ServiceTypeLoadBalancer,
+					Spec: corev1.ServiceSpec{
+						Type:                  corev1.ServiceTypeLoadBalancer,
 						ClusterIP:             "192.168.1.1",
 						ClusterIPs:            []string{"192.168.1.1"},
-						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
-						Ports: []v1.ServicePort{{
+						ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 							NodePort:   5,
 						}},
 						ExternalIPs: []string{"4.2.2.2"},
 					},
-					Status: v1.ServiceStatus{
-						LoadBalancer: v1.LoadBalancerStatus{
-							Ingress: []v1.LoadBalancerIngress{{
+					Status: corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{{
 								IP: "5.5.5.5",
 							}},
 						},
@@ -1028,7 +1014,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2"},
@@ -1049,7 +1035,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:                 []string{"node"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5,
 					hasNodePort:          true,
 					externalTrafficLocal: true,
@@ -1070,7 +1056,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"4.2.2.2", "5.5.5.5"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					hasNodePort:          false,
 					externalTrafficLocal: true,
@@ -1095,28 +1081,28 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			// Terminating & non-serving endpoints are filtered out by buildServiceLBConfigs
 			name: "LB service with NodePort, one port, two endpoints, external ips + lb status, ExternalTrafficPolicy=local, both endpoints terminating: one is serving, the other one is not",
 			args: args{
-				slices: makeV4SliceWithEndpoints(v1.ProtocolTCP,
+				slices: makeV4SliceWithEndpoints(corev1.ProtocolTCP,
 					kubetest.MakeTerminatingServingEndpoint(nodeA, "10.128.0.2"),
 					kubetest.MakeTerminatingNonServingEndpoint(nodeB, "10.128.1.2")),
-				service: &v1.Service{
+				service: &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-					Spec: v1.ServiceSpec{
-						Type:                  v1.ServiceTypeLoadBalancer,
+					Spec: corev1.ServiceSpec{
+						Type:                  corev1.ServiceTypeLoadBalancer,
 						ClusterIP:             "192.168.1.1",
 						ClusterIPs:            []string{"192.168.1.1"},
-						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
-						Ports: []v1.ServicePort{{
+						ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
+						Ports: []corev1.ServicePort{{
 							Name:       portName,
 							Port:       inport,
-							Protocol:   v1.ProtocolTCP,
+							Protocol:   corev1.ProtocolTCP,
 							TargetPort: outportstr,
 							NodePort:   5,
 						}},
 						ExternalIPs: []string{"4.2.2.2"},
 					},
-					Status: v1.ServiceStatus{
-						LoadBalancer: v1.LoadBalancerStatus{
-							Ingress: []v1.LoadBalancerIngress{{
+					Status: corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{{
 								IP: "5.5.5.5",
 							}},
 						},
@@ -1127,7 +1113,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   inport,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2"},
@@ -1144,7 +1130,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:                 []string{"node"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5,
 					hasNodePort:          true,
 					externalTrafficLocal: true,
@@ -1161,7 +1147,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"4.2.2.2", "5.5.5.5"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					hasNodePort:          false,
 					externalTrafficLocal: true,
@@ -1219,10 +1205,10 @@ func Test_buildClusterLBs(t *testing.T) {
 	}()
 	globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 
-	defaultService := &v1.Service{
+	defaultService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: v1.ServiceSpec{
-			Type: v1.ServiceTypeClusterIP,
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
 		},
 	}
 
@@ -1233,14 +1219,14 @@ func Test_buildClusterLBs(t *testing.T) {
 
 	globalconfig.IPv4Mode = true
 	l3UDN, err := getSampleUDNNetInfo(namespace, "layer3")
-	assert.Equal(t, err, nil)
+	require.NoError(t, err)
 	l2UDN, err := getSampleUDNNetInfo(namespace, "layer2")
-	assert.Equal(t, err, nil)
+	require.NoError(t, err)
 	udnNets := []util.NetInfo{l3UDN, l2UDN}
 
 	tc := []struct {
 		name      string
-		service   *v1.Service
+		service   *corev1.Service
 		configs   []lbConfig
 		nodeInfos []nodeInfo
 		expected  []LB
@@ -1251,7 +1237,7 @@ func Test_buildClusterLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"1.2.3.4"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1", "192.168.0.2"},
@@ -1266,7 +1252,7 @@ func Test_buildClusterLBs(t *testing.T) {
 				},
 				{
 					vips:     []string{"1.2.3.4"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   443,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -1310,7 +1296,7 @@ func Test_buildClusterLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"1.2.3.4"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1", "192.168.0.2"},
@@ -1325,7 +1311,7 @@ func Test_buildClusterLBs(t *testing.T) {
 				},
 				{
 					vips:     []string{"1.2.3.4"},
-					protocol: v1.ProtocolUDP,
+					protocol: corev1.ProtocolUDP,
 					inport:   443,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -1381,7 +1367,7 @@ func Test_buildClusterLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"1.2.3.4", "fe80::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1", "192.168.0.2"},
@@ -1399,7 +1385,7 @@ func Test_buildClusterLBs(t *testing.T) {
 				},
 				{
 					vips:     []string{"1.2.3.4", "fe80::1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   443,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"192.168.0.1"},
@@ -1487,7 +1473,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00::/64")
-	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
+	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 26}, {CIDR: cidr6, HostSubnetLength: 26}}
 	_, svcCIDRv4, _ := net.ParseCIDR("192.168.0.0/24")
 	_, svcCIDRv6, _ := net.ParseCIDR("fd92::0/80")
 
@@ -1498,15 +1484,15 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	namespace := "testns"
 
 	l3UDN, err := getSampleUDNNetInfo(namespace, "layer3")
-	assert.Equal(t, err, nil)
+	require.NoError(t, err)
 	l2UDN, err := getSampleUDNNetInfo(namespace, "layer2")
-	assert.Equal(t, err, nil)
+	require.NoError(t, err)
 	udnNetworks := []util.NetInfo{l3UDN, l2UDN}
 
-	defaultService := &v1.Service{
+	defaultService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: v1.ServiceSpec{
-			Type: v1.ServiceTypeClusterIP,
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
 		},
 	}
 
@@ -1555,7 +1541,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 
 	tc := []struct {
 		name           string
-		service        *v1.Service
+		service        *corev1.Service
 		configs        []lbConfig
 		expectedShared []LB
 		expectedLocal  []LB
@@ -1566,7 +1552,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"1.2.3.4"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.0.0.1"},
@@ -1616,7 +1602,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"node"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2"},
@@ -1702,7 +1688,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"192.168.0.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.0.0.1"},
@@ -1717,7 +1703,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:     []string{"node"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.0.0.1"},
@@ -1863,7 +1849,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"192.168.0.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.0.0.1"},
@@ -1878,7 +1864,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"node"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               80,
 					externalTrafficLocal: true,
 					hasNodePort:          true,
@@ -2009,7 +1995,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"192.168.0.1"}, // clusterIP config
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               80,
 					internalTrafficLocal: true,
 					clusterEndpoints: lbEndpoints{
@@ -2029,7 +2015,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:     []string{"1.2.3.4"}, // externalIP config
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.1", "10.128.1.1"},
@@ -2160,7 +2146,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"192.168.0.1"}, // clusterIP config
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               80,
 					internalTrafficLocal: true,
 					clusterEndpoints: lbEndpoints{
@@ -2180,7 +2166,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:     []string{"1.2.3.4"}, // externalIP config
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.0.0.1", "10.0.0.2"},
@@ -2346,7 +2332,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"192.168.0.1"}, // clusterIP config
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               80,
 					internalTrafficLocal: true,
 					externalTrafficLocal: false, // ETP is applicable only to nodePorts and LBs
@@ -2363,7 +2349,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"node"}, // nodePort config
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               34345,
 					externalTrafficLocal: true,
 					internalTrafficLocal: false, // ITP is applicable only to clusterIPs
@@ -2586,7 +2572,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"node"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5, // nodePort
 					hasNodePort:          true,
 					externalTrafficLocal: true,
@@ -2607,7 +2593,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"4.2.2.2", "5.5.5.5"}, // externalIP + LB IP
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               80,
 					hasNodePort:          false,
 					externalTrafficLocal: true,
@@ -2741,7 +2727,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"node"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5, // nodePort
 					hasNodePort:          true,
 					externalTrafficLocal: true,
@@ -2756,7 +2742,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"4.2.2.2", "5.5.5.5"}, // externalIP + LB IP
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               80,
 					hasNodePort:          false,
 					externalTrafficLocal: true,
@@ -2883,7 +2869,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 	// needs separate configuration variables for a V6 cluster
 	tcV6 := []struct {
 		name           string
-		service        *v1.Service
+		service        *corev1.Service
 		configs        []lbConfig
 		expectedShared []LB
 		expectedLocal  []LB
@@ -2895,7 +2881,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"node"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V6IPs: []string{"fe00:0:0:0:1::2"},
@@ -2982,7 +2968,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"node"},
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5, // nodePort
 					hasNodePort:          true,
 					externalTrafficLocal: true,
@@ -2997,7 +2983,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 				{
 					vips:                 []string{"cafe::2", "abcd::5"}, // externalIP + LB IP
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               80,
 					hasNodePort:          false,
 					externalTrafficLocal: true,
@@ -3229,12 +3215,12 @@ func Test_idledServices(t *testing.T) {
 
 	tc := []struct {
 		name     string
-		service  *v1.Service
+		service  *corev1.Service
 		expected LBOpts
 	}{
 		{
 			name: "active service",
-			service: &v1.Service{
+			service: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{}},
 			},
 			expected: LBOpts{
@@ -3244,7 +3230,7 @@ func Test_idledServices(t *testing.T) {
 		},
 		{
 			name: "idled service",
-			service: &v1.Service{
+			service: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{
 					"k8s.ovn.org/idled-at": "2023-01-01T13:14:15Z",
 				}},
@@ -3256,7 +3242,7 @@ func Test_idledServices(t *testing.T) {
 		},
 		{
 			name: "recently unidled service",
-			service: &v1.Service{
+			service: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{
 					"k8s.ovn.org/unidled-at": tenSecondsAgo,
 				}},
@@ -3268,7 +3254,7 @@ func Test_idledServices(t *testing.T) {
 		},
 		{
 			name: "long time unidled service",
-			service: &v1.Service{
+			service: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, Annotations: map[string]string{
 					"k8s.ovn.org/unidled-at": oneHourAgo,
 				}},
@@ -3291,7 +3277,7 @@ func Test_idledServices(t *testing.T) {
 func Test_getEndpointsForService(t *testing.T) {
 	type args struct {
 		slices []*discovery.EndpointSlice
-		svc    *v1.Service
+		svc    *corev1.Service
 		nodes  sets.Set[string]
 	}
 
@@ -3464,7 +3450,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example-wrong"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(8080)),
 							},
 						},
@@ -3520,7 +3506,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3548,7 +3534,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3564,7 +3550,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3593,7 +3579,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3621,7 +3607,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3649,7 +3635,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3665,7 +3651,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3693,7 +3679,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3709,7 +3695,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("other-port"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(8080)),
 							},
 						},
@@ -3740,7 +3726,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3756,7 +3742,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("other-port"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(8080)),
 							},
 						},
@@ -3787,7 +3773,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3822,7 +3808,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3855,7 +3841,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3886,7 +3872,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3905,7 +3891,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3936,7 +3922,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3954,7 +3940,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -3984,7 +3970,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4004,7 +3990,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4036,7 +4022,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4055,7 +4041,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4086,7 +4072,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4104,7 +4090,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4134,7 +4120,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4154,7 +4140,7 @@ func Test_getEndpointsForService(t *testing.T) {
 						Ports: []discovery.EndpointPort{
 							{
 								Name:     ptr.To("tcp-example"),
-								Protocol: ptr.To(v1.ProtocolTCP),
+								Protocol: ptr.To(corev1.ProtocolTCP),
 								Port:     ptr.To(int32(80)),
 							},
 						},
@@ -4221,7 +4207,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			service: defaultService,
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   80,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"192.168.0.1"},
@@ -4247,7 +4233,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   80,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"192.168.0.1", "192.168.1.1"},
@@ -4275,7 +4261,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   80,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"192.168.0.1"},
@@ -4302,7 +4288,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   80,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"192.168.1.1"},     // on nodeB
