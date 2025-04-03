@@ -3,18 +3,17 @@ package template
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
+
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-
-	cnitypes "github.com/containernetworking/cni/pkg/types"
-
-	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -70,7 +69,7 @@ func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*net
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            obj.GetName(),
 			OwnerReferences: []metav1.OwnerReference{ownerRef},
-			Labels:          map[string]string{LabelUserDefinedNetwork: ""},
+			Labels:          renderNADLabels(obj),
 			Finalizers:      []string{FinalizerUserDefinedNetwork},
 		},
 		Spec: *nadSpec,
@@ -94,6 +93,18 @@ func RenderNADSpec(networkName, nadName string, spec SpecGetter) (*netv1.Network
 	return &netv1.NetworkAttachmentDefinitionSpec{
 		Config: string(cniNetConfRaw),
 	}, nil
+}
+
+// renderNADLabels copies labels from UDN to help RenderNADSpec
+// function add those labels to corresponding NAD
+func renderNADLabels(obj client.Object) map[string]string {
+	labels := make(map[string]string)
+	labels[LabelUserDefinedNetwork] = ""
+	udnLabels := obj.GetLabels()
+	if len(udnLabels) != 0 {
+		maps.Copy(labels, udnLabels)
+	}
+	return labels
 }
 
 func validateTopology(spec SpecGetter) error {
