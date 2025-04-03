@@ -8,10 +8,12 @@ import (
 	"sync"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
+
+	"k8s.io/klog/v2"
+
 	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/bitmap"
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog/v2"
 )
 
 // Allocator manages the allocation of IP within specific set of subnets
@@ -262,6 +264,9 @@ func (allocator *allocator) AllocateNextIPs(name string) ([]*net.IPNet, error) {
 	for idx, ipam := range subnetInfo.ipams {
 		ip, err = ipam.AllocateNext()
 		if err != nil {
+			if errors.Is(err, ipallocator.ErrFull) {
+				err = fmt.Errorf("failed to allocate new IPs for %s: %w", name, ipallocator.ErrFull)
+			}
 			return nil, err
 		}
 		ipnet := &net.IPNet{

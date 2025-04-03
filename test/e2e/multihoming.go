@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +16,7 @@ import (
 
 	"github.com/docker/docker/client"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -718,6 +719,7 @@ var _ = Describe("Multi Homing", func() {
 				dockerNetworkName      = "underlay"
 				underlayServiceIP      = "60.128.0.1"
 				secondaryInterfaceName = "eth1"
+				expectedOriginalMTU    = 1200
 			)
 
 			var netConfig networkAttachmentConfig
@@ -736,6 +738,7 @@ var _ = Describe("Multi Homing", func() {
 							topology:     "localnet",
 							cidr:         secondaryLocalnetNetworkCIDR,
 							excludeCIDRs: []string{underlayServiceIP + "/32"},
+							mtu:          expectedOriginalMTU,
 						})
 
 					By("setting up the localnet underlay")
@@ -795,6 +798,26 @@ var _ = Describe("Multi Homing", func() {
 					Expect(teardownUnderlay(nodes)).To(Succeed())
 				})
 
+				It("correctly sets the MTU on the pod", func() {
+					Eventually(func() error {
+						clientPodConfig := podConfiguration{
+							name:        clientPodName + randStr(10),
+							namespace:   f.Namespace.Name,
+							attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						}
+						kickstartPod(cs, clientPodConfig)
+						mtu, err := getSecondaryInterfaceMTU(clientPodConfig)
+						if err != nil {
+							return fmt.Errorf("failed to get MTU: %w", err)
+						}
+
+						if mtu != expectedOriginalMTU {
+							return fmt.Errorf("pod MTU is %d, but expected %d", mtu, expectedOriginalMTU)
+						}
+						return nil
+					}).Should(Succeed(), "pod MTU should be properly configured")
+				})
+
 				It("can communicate over a localnet secondary network from pod to the underlay service", func() {
 					clientPodConfig := podConfiguration{
 						name:        clientPodName,
@@ -805,6 +828,126 @@ var _ = Describe("Multi Homing", func() {
 
 					By("asserting the *client* pod can contact the underlay service")
 					Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+				})
+
+				Context("and networkAttachmentDefinition is modified", func() {
+					const (
+						expectedChangedMTU        = 1600
+						newDesiredRange           = "60.128.0.192/28" // Desired IPs from 60.128.0.192 to 60.128.0.207
+						excludedSubnetLowerRange1 = "60.128.0.0/25"   // Excludes IPs from 60.128.0.0 to 60.128.0.127
+						excludedSubnetLowerRange2 = "60.128.0.128/26" // Excludes IPs from 60.128.0.128 to 60.128.0.191
+						excludedSubnetUpperRange1 = "60.128.0.208/28" // Excludes IPs from 60.128.0.208 to 60.128.0.223
+						excludedSubnetUpperRange2 = "60.128.0.224/27" // Excludes IPs from 60.128.0.224 to 60.128.0.255
+						newLocalnetVLANID         = 30
+					)
+					BeforeEach(func() {
+						By("setting new MTU")
+						netConfig.mtu = expectedChangedMTU
+						By("setting new subnets to leave a smaller range")
+						netConfig.excludeCIDRs = []string{excludedSubnetLowerRange1, excludedSubnetLowerRange2, excludedSubnetUpperRange1, excludedSubnetUpperRange2}
+						By("setting new VLAN-ID")
+						netConfig.vlanID = newLocalnetVLANID
+						p := []byte(fmt.Sprintf(`[{"op":"replace","path":"/spec/config","value":%q}]`, generateNADSpec(netConfig)))
+						Expect(patchNADSpec(nadClient, netConfig.name, netConfig.namespace, p)).To(Succeed())
+					})
+
+					It("sets the new MTU on the pod after NetworkAttachmentDefinition reconcile", func() {
+						Eventually(func() error {
+							clientPodConfig := podConfiguration{
+								name:        clientPodName + randStr(10),
+								namespace:   f.Namespace.Name,
+								attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+							}
+							kickstartPod(cs, clientPodConfig)
+							mtu, err := getSecondaryInterfaceMTU(clientPodConfig)
+							if err != nil {
+								return fmt.Errorf("failed to get MTU: %w", err)
+							}
+							if mtu != expectedChangedMTU {
+								err := fmt.Errorf("pod MTU is %d, but expected %d", mtu, expectedChangedMTU)
+								if delErr := cs.CoreV1().Pods(clientPodConfig.namespace).Delete(context.Background(), clientPodConfig.name, metav1.DeleteOptions{}); delErr != nil {
+									err = errors.Join(err, fmt.Errorf("pod delete failed: %w", delErr))
+								}
+								return err
+							}
+							return nil
+						}).Should(Succeed(), "pod MTU should be properly configured")
+					})
+
+					It("allocates the pod's secondary interface IP in the new range after NetworkAttachmentDefinition reconcile", func() {
+						By("asserting the pod's secondary interface IP is properly configured")
+						Eventually(func() error {
+							clientPodConfig := podConfiguration{
+								name:        clientPodName + "-" + randStr(10),
+								namespace:   f.Namespace.Name,
+								attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+							}
+							kickstartPod(cs, clientPodConfig)
+
+							clientIP, err := podIPForAttachment(cs, clientPodConfig.namespace, clientPodConfig.name, netConfig.name, 0)
+							if err != nil {
+								return err
+							}
+
+							// In order to prevent the pod from interfering with the test, deleting it before retrying
+							if err := inRange(newDesiredRange, clientIP); err != nil {
+								if delErr := cs.CoreV1().Pods(clientPodConfig.namespace).Delete(context.Background(), clientPodConfig.name, metav1.DeleteOptions{}); delErr != nil {
+									err = errors.Join(err, fmt.Errorf("pod delete failed: %w", delErr))
+								}
+								return err
+							}
+							return nil
+						}).Should(Succeed(), "pod's secondary NIC is not allocated in the desired range")
+					})
+
+					It("can no longer communicate over a localnet secondary network from pod to the underlay service", func() {
+						Eventually(func() error {
+							clientPodConfig := podConfiguration{
+								name:        clientPodName,
+								namespace:   f.Namespace.Name,
+								attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+							}
+							kickstartPod(cs, clientPodConfig)
+
+							By("asserting the *client* pod can no longer contact the underlay service")
+							var err error
+							if err = connectToServer(clientPodConfig, underlayServiceIP, servicePort); err != nil && strings.Contains(err.Error(), "exit code 28") {
+								return nil
+							}
+							err = fmt.Errorf("expected exit code 28 from underlay service, got err %w", err)
+
+							if delErr := cs.CoreV1().Pods(clientPodConfig.namespace).Delete(context.Background(), clientPodConfig.name, metav1.DeleteOptions{}); delErr != nil {
+								err = errors.Join(err, fmt.Errorf("pod delete failed: %w", delErr))
+							}
+							return err
+						}).Should(Succeed(), "pod should be disconnected from underlay")
+					})
+
+					Context("and the service connected to the underlay is reconfigured to connect to the new VLAN-ID", func() {
+						BeforeEach(func() {
+							Expect(ovsRemoveSwitchPort(nodes, secondaryInterfaceName, newLocalnetVLANID)).To(Succeed())
+						})
+
+						It("can now communicate over a localnet secondary network from pod to the underlay service", func() {
+							Eventually(func() error {
+								clientPodConfig := podConfiguration{
+									name:        clientPodName,
+									namespace:   f.Namespace.Name,
+									attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+								}
+								kickstartPod(cs, clientPodConfig)
+
+								By("asserting the *client* pod can contact the underlay service")
+								if err := connectToServer(clientPodConfig, underlayServiceIP, servicePort); err != nil {
+									if delErr := cs.CoreV1().Pods(clientPodConfig.namespace).Delete(context.Background(), clientPodConfig.name, metav1.DeleteOptions{}); delErr != nil {
+										err = errors.Join(err, fmt.Errorf("pod delete failed: %w", delErr))
+									}
+									return err
+								}
+								return nil
+							}).Should(Succeed(), "pod should be connected to underlay")
+						})
+					})
 				})
 
 				Context("with multi network policy blocking the traffic", func() {
@@ -1049,7 +1192,7 @@ var _ = Describe("Multi Homing", func() {
 			})
 		})
 
-		Context("multi-network policies", func() {
+		Context("with multi-network policies that", func() {
 			const (
 				generatedNamespaceNamePrefix = "pepe"
 				blockedServerStaticIP        = "192.168.200.30"
@@ -1081,12 +1224,12 @@ var _ = Describe("Multi Homing", func() {
 				Eventually(func() bool {
 					_, err := cs.CoreV1().Namespaces().Get(context.Background(), extraNamespace.Name, metav1.GetOptions{})
 					nsPods, podCatchErr := cs.CoreV1().Pods(extraNamespace.Name).List(context.Background(), metav1.ListOptions{})
-					return podCatchErr == nil && errors.IsNotFound(err) && len(nsPods.Items) == 0
+					return podCatchErr == nil && apierrors.IsNotFound(err) && len(nsPods.Items) == 0
 				}, 2*time.Minute, 5*time.Second).Should(BeTrue())
 			})
 
 			ginkgo.DescribeTable(
-				"multi-network policies configure traffic allow lists",
+				"configure traffic allow lists",
 				func(netConfigParams networkAttachmentConfigParams, allowedClientPodConfig podConfiguration, blockedClientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
@@ -1132,7 +1275,7 @@ var _ = Describe("Multi Homing", func() {
 					Expect(connectToServer(blockedClientPodConfig, serverIP, port)).To(MatchError(ContainSubstring("exit code 28")))
 				},
 				ginkgo.Entry(
-					"for a pure L2 overlay when the multi-net policy describes the allow-list using pod selectors",
+					"using pod selectors for a pure L2 overlay",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "layer2",
@@ -1165,11 +1308,49 @@ var _ = Describe("Multi Homing", func() {
 						metav1.LabelSelector{
 							MatchLabels: map[string]string{"role": "trusted"},
 						},
-						port,
+						multiNetPolicyPort(port),
 					),
 				),
 				ginkgo.Entry(
-					"for a routed topology when the multi-net policy describes the allow-list using pod selectors",
+					"using pod selectors and port range for a pure L2 overlay",
+					networkAttachmentConfigParams{
+						name:     secondaryNetworkName,
+						topology: "layer2",
+						cidr:     secondaryFlatL2NetworkCIDR,
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+						labels: map[string]string{
+							"app":  "client",
+							"role": "trusted",
+						},
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        blockedClient(clientPodName),
+						labels:      map[string]string{"app": "client"},
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingPolicy(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"role": "trusted"},
+						},
+						// build a random range around the port we are actually trying to allow without explicitly setting it
+						multiNetPolicyPortRange(port-3, port+5),
+					),
+				),
+				ginkgo.Entry(
+					"using pod selectors for a routed topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "layer3",
@@ -1202,11 +1383,11 @@ var _ = Describe("Multi Homing", func() {
 						metav1.LabelSelector{
 							MatchLabels: map[string]string{"role": "trusted"},
 						},
-						port,
+						multiNetPolicyPort(port),
 					),
 				),
 				ginkgo.Entry(
-					"for a localnet topology when the multi-net policy describes the allow-list using pod selectors",
+					"using pod selectors for a localnet topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "localnet",
@@ -1239,11 +1420,11 @@ var _ = Describe("Multi Homing", func() {
 						metav1.LabelSelector{
 							MatchLabels: map[string]string{"role": "trusted"},
 						},
-						port,
+						multiNetPolicyPort(port),
 					),
 				),
 				ginkgo.Entry(
-					"for a pure L2 overlay when the multi-net policy describes the allow-list using IPBlock",
+					"using IPBlock for a pure L2 overlay",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "layer2",
@@ -1275,7 +1456,7 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				ginkgo.Entry(
-					"for a routed topology when the multi-net policy describes the allow-list using IPBlock",
+					"using IPBlock for a routed topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "layer3",
@@ -1307,7 +1488,7 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				ginkgo.Entry(
-					"for a localnet topology when the multi-net policy describes the allow-list using IPBlock",
+					"using IPBlock for a localnet topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "localnet",
@@ -1339,7 +1520,7 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				ginkgo.Entry(
-					"for a pure L2 overlay when the multi-net policy describes the allow-list via namespace selectors",
+					"using namespace selectors for a pure L2 overlay",
 					networkAttachmentConfigParams{
 						name:        secondaryNetworkName,
 						topology:    "layer2",
@@ -1373,7 +1554,7 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				ginkgo.Entry(
-					"for a routed topology when the multi-net policy describes the allow-list via namespace selectors",
+					"using namespace selectors for a routed topology",
 					networkAttachmentConfigParams{
 						name:        secondaryNetworkName,
 						topology:    "layer3",
@@ -1407,7 +1588,7 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				ginkgo.Entry(
-					"for a localnet topology when the multi-net policy describes the allow-list via namespace selectors",
+					"using namespace selectors for a localnet topology",
 					networkAttachmentConfigParams{
 						name:        secondaryNetworkName,
 						topology:    "localnet",
@@ -1442,7 +1623,7 @@ var _ = Describe("Multi Homing", func() {
 				),
 
 				ginkgo.Entry(
-					"for an IPAMless pure L2 overlay when the multi-net policy describes the allow-list using IPBlock",
+					"using IPBlock for an IPAMless pure L2 overlay",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "layer2",
@@ -1476,7 +1657,7 @@ var _ = Describe("Multi Homing", func() {
 			)
 
 			ginkgo.DescribeTable(
-				"multi-network ingress allow all",
+				"allow all ingress",
 				func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
@@ -1507,7 +1688,7 @@ var _ = Describe("Multi Homing", func() {
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 				},
 				ginkgo.Entry(
-					"for a localnet topology when the multi-net policy is ingress allow-all",
+					"using ingress allow-all for a localnet topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "localnet",
@@ -1539,7 +1720,7 @@ var _ = Describe("Multi Homing", func() {
 					),
 				),
 				ginkgo.XEntry(
-					"for a localnet topology when the multi-net policy is egress deny-all, should not affect ingress",
+					"using egress deny-all for a localnet topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "localnet",
@@ -1572,7 +1753,7 @@ var _ = Describe("Multi Homing", func() {
 					Label("BUG", "OCPBUGS-25928"),
 				),
 				ginkgo.Entry(
-					"for a localnet topology when the multi-net policy is egress deny-all, ingress allow-all",
+					"using egress deny-all, ingress allow-all for a localnet topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "localnet",
@@ -1608,7 +1789,7 @@ var _ = Describe("Multi Homing", func() {
 			)
 
 			ginkgo.DescribeTable(
-				"multi-network ingress deny all policies",
+				"deny traffic",
 				func(netConfigParams networkAttachmentConfigParams, clientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
@@ -1639,7 +1820,7 @@ var _ = Describe("Multi Homing", func() {
 					}, 2*time.Minute, 6*time.Second).Should(Not(Succeed()))
 				},
 				ginkgo.Entry(
-					"for a localnet topology when the multi-net policy is ingress deny-all",
+					"using ingress deny-all for a localnet topology",
 					networkAttachmentConfigParams{
 						name:     secondaryNetworkName,
 						topology: "localnet",
@@ -1668,6 +1849,39 @@ var _ = Describe("Multi Homing", func() {
 						[]mnpapi.MultiPolicyType{mnpapi.PolicyTypeIngress},
 						nil,
 						nil,
+					),
+				),
+				ginkgo.Entry(
+					"using pod selectors and wrong port range for a localnet topology",
+					networkAttachmentConfigParams{
+						name:     secondaryNetworkName,
+						topology: "localnet",
+						cidr:     secondaryLocalnetNetworkCIDR,
+					},
+					podConfiguration{
+						attachments: []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:        allowedClient(clientPodName),
+						labels: map[string]string{
+							"app":  "client",
+							"role": "trusted",
+						},
+					},
+					podConfiguration{
+						attachments:  []nadapi.NetworkSelectionElement{{Name: secondaryNetworkName}},
+						name:         podName,
+						containerCmd: httpServerContainerCmd(port),
+						labels:       map[string]string{"app": "stuff-doer"},
+					},
+					multiNetIngressLimitingPolicy(
+						secondaryNetworkName,
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "stuff-doer"},
+						},
+						metav1.LabelSelector{
+							MatchLabels: map[string]string{"role": "trusted"},
+						},
+						// build a port range that doesn't include server port
+						multiNetPolicyPortRange(port-10, port-1),
 					),
 				),
 			)

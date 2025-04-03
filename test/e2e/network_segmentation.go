@@ -2117,7 +2117,7 @@ spec:
     topology: Layer3
     layer3:
       role: Primary
-      subnets: ` + generateCIDRforClusterUDN()
+      subnets: ` + generateCIDRforClusterUDN("10.20.100.0/16", "2014:100:200::0/60")
 }
 
 func newL2SecondaryUDNManifest(name string) string {
@@ -2144,32 +2144,32 @@ spec:
   topology: Layer3
   layer3:
     role: Primary
-    subnets: ` + generateCIDRforUDN()
+    subnets: ` + generateCIDRforUDN("10.20.100.0/16", "2014:100:200::0/60")
 }
 
-func generateCIDRforUDN() string {
+func generateCIDRforUDN(v4, v6 string) string {
 	cidr := `
-    - cidr: 10.20.100.0/16
+    - cidr: ` + v4 + `
 `
 	if isIPv6Supported() && isIPv4Supported() {
 		cidr = `
-    - cidr: 10.20.100.0/16
-    - cidr: 2014:100:200::0/60
+    - cidr: ` + v4 + `
+    - cidr: ` + v6 + `
 `
 	} else if isIPv6Supported() {
 		cidr = `
-    - cidr: 2014:100:200::0/60
+    - cidr: ` + v6 + `
 `
 	}
 	return cidr
 }
 
-func generateCIDRforClusterUDN() string {
-	cidr := `[{cidr: "10.100.0.0/16"}]`
+func generateCIDRforClusterUDN(v4, v6 string) string {
+	cidr := `[{cidr: ` + v4 + `}]`
 	if isIPv6Supported() && isIPv4Supported() {
-		cidr = `[{cidr: "10.100.0.0/16"},{cidr: "2014:100:200::0/60"}]`
+		cidr = `[{cidr: ` + v4 + `},{cidr: ` + v6 + `}]`
 	} else if isIPv6Supported() {
-		cidr = `[{cidr: "2014:100:200::0/60"}]`
+		cidr = `[{cidr: ` + v6 + `}]`
 	}
 	return cidr
 }
