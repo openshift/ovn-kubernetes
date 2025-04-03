@@ -611,7 +611,7 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		iptErr = setupIPTablesBlocks(netns, ifInfo)
+		iptErr = setupIPTablesBlocks(netns)
 	}()
 	// END OCP HACK
 

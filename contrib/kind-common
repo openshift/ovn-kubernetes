@@ -792,7 +792,7 @@ install_ffr_k8s() {
       sed -i "${LINE_NUM}a\\${IPv6_LINE}" receive_filtered.yaml
     done
   fi
-  kubectl apply -f receive_filtered.yaml
+  kubectl apply -n frr-k8s-system -f receive_filtered.yaml
   popd || exit 1
 
   rm -rf "${FRR_TMP_DIR}"

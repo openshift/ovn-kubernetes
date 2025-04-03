@@ -50,7 +50,7 @@ type lbEndpoints struct {
 	V6IPs []string
 }
 
-func makeNodeSwitchTargetIPs(service *v1.Service, node string, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
+func makeNodeSwitchTargetIPs(service *corev1.Service, node string, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
 	targetIPsV4 = c.clusterEndpoints.V4IPs
 	targetIPsV6 = c.clusterEndpoints.V6IPs
 
@@ -88,7 +88,7 @@ func makeNodeSwitchTargetIPs(service *v1.Service, node string, c *lbConfig) (tar
 	return
 }
 
-func makeNodeRouterTargetIPs(service *v1.Service, node *nodeInfo, c *lbConfig, hostMasqueradeIPV4, hostMasqueradeIPV6 string) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool, zeroRouterLocalEndpointsV4, zeroRouterLocalEndpointsV6 bool) {
+func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, c *lbConfig, hostMasqueradeIPV4, hostMasqueradeIPV6 string) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool, zeroRouterLocalEndpointsV4, zeroRouterLocalEndpointsV6 bool) {
 	targetIPsV4 = c.clusterEndpoints.V4IPs
 	targetIPsV6 = c.clusterEndpoints.V6IPs
 
@@ -445,7 +445,7 @@ func buildTemplateLBs(service *corev1.Service, configs []lbConfig, nodes []nodeI
 
 				for _, node := range nodes {
 
-					switchV4TargetIPs, switchV6TargetIPs, v4Changed, v6Changed := makeNodeSwitchTargetIPs(node.name, &cfg)
+					switchV4TargetIPs, switchV6TargetIPs, v4Changed, v6Changed := makeNodeSwitchTargetIPs(service, node.name, &cfg)
 					if !switchV4TargetNeedsTemplate && v4Changed {
 						switchV4TargetNeedsTemplate = true
 					}
@@ -645,7 +645,7 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 
 			for _, cfg := range configs {
 
-				switchV4TargetIPs, switchV6TargetIPs, _, _ := makeNodeSwitchTargetIPs(node.name, &cfg)
+				switchV4TargetIPs, switchV6TargetIPs, _, _ := makeNodeSwitchTargetIPs(service, node.name, &cfg)
 
 				routerV4TargetIPs, routerV6TargetIPs, _, _, zeroRouterV4LocalEndpoints, zeroRouterV6LocalEndpoints := makeNodeRouterTargetIPs(
 					service,
@@ -664,18 +664,18 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 				// TODO: Remove this hack once we add support for ITP:preferLocal and DNS operator starts using it.
 				if service.Namespace == "openshift-dns" && service.Name == "dns-default" {
 					// Select endpoints that are local to this node.
-					switchV4targetDNSips := util.FilterIPsSlice(config.clusterEndpoints.V4IPs, node.podSubnets, true)
-					switchV6targetDNSips := util.FilterIPsSlice(config.clusterEndpoints.V6IPs, node.podSubnets, true)
+					switchV4targetDNSips := util.FilterIPsSlice(cfg.clusterEndpoints.V4IPs, node.podSubnets, true)
+					switchV6targetDNSips := util.FilterIPsSlice(cfg.clusterEndpoints.V6IPs, node.podSubnets, true)
 
 					// If no local endpoints were found, add all the endpoints as targets.
 					if len(switchV4targetDNSips) == 0 {
-						switchV4targetDNSips = config.clusterEndpoints.V4IPs
+						switchV4targetDNSips = cfg.clusterEndpoints.V4IPs
 					}
 					if len(switchV6targetDNSips) == 0 {
-						switchV6targetDNSips = config.clusterEndpoints.V6IPs
+						switchV6targetDNSips = cfg.clusterEndpoints.V6IPs
 					}
-					switchV4targets = joinHostsPort(switchV4targetDNSips, config.clusterEndpoints.Port)
-					switchV6targets = joinHostsPort(switchV6targetDNSips, config.clusterEndpoints.Port)
+					switchV4targets = joinHostsPort(switchV4targetDNSips, cfg.clusterEndpoints.Port)
+					switchV6targets = joinHostsPort(switchV6targetDNSips, cfg.clusterEndpoints.Port)
 				}
 				// OCP HACK end
 
@@ -745,7 +745,7 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 					// in other words, is this ExternalTrafficPolicy=local?
 					// if so, this gets a separate load balancer with SNAT disabled
 					// (but there's no need to do this if the list of targets is empty)
-					if cfg.externalTrafficLocal && len(targets) > 0 {
+					if cfg.externalTrafficLocal && len(targets) > 0 && !localWithFallback {
 						noSNATRouterRules = append(noSNATRouterRules, rule)
 					} else {
 						routerRules = append(routerRules, rule)
