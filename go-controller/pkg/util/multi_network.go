@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"golang.org/x/exp/maps"
-	kapi "k8s.io/api/core/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	knet "k8s.io/utils/net"
-
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -542,7 +543,7 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
-func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string {
+func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(_ string) string {
 	return ""
 }
 
@@ -839,6 +840,9 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.primaryNetwork != other.IsPrimaryNetwork() {
 		return false
 	}
+	if nInfo.physicalNetworkName != other.PhysicalNetworkName() {
+		return false
+	}
 
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
@@ -891,7 +895,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -918,7 +922,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -942,7 +946,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error
 		allowPersistentIPs:  netconf.AllowPersistentIPs,
 		physicalNetworkName: netconf.PhysicalNetworkName,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -1111,18 +1115,36 @@ func GetAnnotatedNetworkName(netattachdef *nettypes.NetworkAttachmentDefinition)
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks
-func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
-	netconf, err := ParseNetConf(netattachdef)
+func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
+	netconf, err := ParseNetConf(nad)
 	if err != nil {
 		return nil, err
 	}
 
-	nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
+	nadName := GetNADName(nad.Namespace, nad.Name)
 	if err := ValidateNetConf(nadName, netconf); err != nil {
 		return nil, err
 	}
 
-	return NewNetInfo(netconf)
+	id := types.InvalidID
+	n, err := newNetInfo(netconf)
+	if err != nil {
+		return nil, err
+	}
+	if n.GetNetworkName() == types.DefaultNetworkName {
+		id = types.DefaultNetworkID
+	}
+	if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
+		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
+		id, err = strconv.Atoi(annotated)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse annotated network ID: %w", err)
+		}
+	}
+
+	n.SetNetworkID(id)
+
+	return n, nil
 }
 
 // ParseNetConf parses config in NAD spec for secondary networks
@@ -1244,7 +1266,7 @@ func subnetOverlapCheck(netconf *ovncnitypes.NetConf) error {
 //	    for the specified network, key is NADName. Note multiple NADs of the same network are allowed
 //	    on one pod, as long as they are of different NADName.
 //	error:  error in case of failure
-func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+func GetPodNADToNetworkMapping(pod *corev1.Pod, nInfo NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	if pod.Spec.HostNetwork {
 		return false, nil, nil
 	}
@@ -1294,7 +1316,7 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 // GetPodNADToNetworkMappingWithActiveNetwork will call `GetPodNADToNetworkMapping` passing "nInfo" which correspond
 // to the NetInfo representing the NAD, the resulting NetworkSelectingElements will be decorated with the ones
 // from found active network
-func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, activeNetwork NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+func GetPodNADToNetworkMappingWithActiveNetwork(pod *corev1.Pod, nInfo NetInfo, activeNetwork NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	on, networkSelections, err := GetPodNADToNetworkMapping(pod, nInfo)
 	if err != nil {
 		return false, nil, err
@@ -1439,7 +1461,7 @@ func CanServeNamespace(network NetInfo, namespace string) bool {
 //	is otherwise locked for all intents and purposes.
 //
 // (4) "none" if the pod has no networks on this controller
-func GetNetworkRole(controllerNetInfo NetInfo, getActiveNetworkForNamespace func(namespace string) (NetInfo, error), pod *kapi.Pod) (string, error) {
+func GetNetworkRole(controllerNetInfo NetInfo, getActiveNetworkForNamespace func(namespace string) (NetInfo, error), pod *corev1.Pod) (string, error) {
 
 	// no network segmentation enabled, and is default controller, must be default network
 	if !IsNetworkSegmentationSupportEnabled() && controllerNetInfo.IsDefault() {

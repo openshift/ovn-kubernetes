@@ -1,13 +1,12 @@
 //go:build linux
 // +build linux
 
-package node
+package managementport
 
 import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"strings"
@@ -19,6 +18,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/knftables"
+	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -33,10 +38,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
+	multinetworkmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks/multinetwork"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -80,7 +82,7 @@ func (mptc *managementPortTestConfig) GetMgtPortAddr() *netlink.Addr {
 func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName string) {
 	nft, err := nodenft.GetNFTablesHelper()
 	Expect(err).NotTo(HaveOccurred())
-	rules, err := nft.ListRules(context.Background(), nftablesMgmtPortChain)
+	rules, err := nft.ListRules(context.Background(), nftMgmtPortChain)
 	Expect(err).NotTo(HaveOccurred())
 
 	var returnRule, snatV4Rule, snatV6Rule string
@@ -88,7 +90,7 @@ func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName 
 	var returnNonLocalV4Rule, returnNonLocalV6Rule, returnMgmtIPV4Rule, returnMgmtIPV6Rule string
 	var wantReturnNonLocalV4Rule, wantReturnNonLocalV6Rule, wantReturnMgmtIPV4Rule, wantReturnMgmtIPV6Rule bool
 
-	returnRule = fmt.Sprintf("oifname != %q return", mgmtPortName)
+	returnRule = fmt.Sprintf("oifname != %s return", mgmtPortName)
 	wantReturnRule = true
 
 	for _, cfg := range configs {
@@ -137,14 +139,19 @@ func checkMgmtPortTestNFTables(configs []managementPortTestConfig, mgmtPortName 
 }
 
 // checkMgmtTestPortIpsAndRoutes checks IPs and Routes of the management port
-func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortName string,
-	mgtPortAddrs []*netlink.Addr, expectedLRPMAC string) {
+func checkMgmtTestPortIpsAndRoutes(
+	g Gomega,
+	configs []managementPortTestConfig,
+	mgmtPortName string,
+	mgtPortAddrs []*netlink.Addr,
+	expectedLRPMAC string,
+) {
 	mgmtPortLink, err := netlink.LinkByName(mgmtPortName)
-	Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 	for i, cfg := range configs {
 		// Check whether IP has been added
 		addrs, err := netlink.AddrList(mgmtPortLink, cfg.family)
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 		var foundAddr bool
 		for _, a := range addrs {
 			if a.IP.Equal(mgtPortAddrs[i].IP) && bytes.Equal(a.Mask, mgtPortAddrs[i].Mask) {
@@ -152,7 +159,7 @@ func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortN
 				break
 			}
 		}
-		Expect(foundAddr).To(BeTrue(), "did not find expected management port IP %s", mgtPortAddrs[i].String())
+		g.Expect(foundAddr).To(BeTrue(), "did not find expected management port IP %s", mgtPortAddrs[i].String())
 
 		// Check whether the routes have been added
 		j := 0
@@ -162,30 +169,23 @@ func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortN
 			dstIPnet := ovntest.MustParseIPNet(subnet)
 			route := &netlink.Route{Dst: dstIPnet}
 			filterMask := netlink.RT_FILTER_DST
-			Eventually(func() error {
-				foundRoute := false
-				routes, err := netlink.RouteListFiltered(cfg.family, route, filterMask)
-				if err != nil {
-					return err
+			foundRoute := false
+			routes, err := netlink.RouteListFiltered(cfg.family, route, filterMask)
+			g.Expect(err).ToNot(HaveOccurred())
+			for _, r := range routes {
+				if r.Gw.Equal(gatewayIP) && r.LinkIndex == mgmtPortLink.Attrs().Index {
+					foundRoute = true
+					break
 				}
-				for _, r := range routes {
-					if r.Gw.Equal(gatewayIP) && r.LinkIndex == mgmtPortLink.Attrs().Index {
-						foundRoute = true
-						break
-					}
-				}
-				if !foundRoute {
-					return fmt.Errorf("did not find exected route to %s", subnet)
-				}
-				return nil
-			}, 1*time.Second).ShouldNot(HaveOccurred())
-			j++
+			}
+			g.Expect(foundRoute).To(BeTrue(), "did not find expected route to %s", subnet)
 		}
-		Expect(j).To(Equal(1))
+		j++
+		g.Expect(j).To(Equal(1))
 
 		// Check whether router IP has been added in the arp entry for mgmt port
 		neighbours, err := netlink.NeighList(mgmtPortLink.Attrs().Index, cfg.family)
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 		var foundNeighbour bool
 		for _, neighbour := range neighbours {
 			if neighbour.IP.Equal(gatewayIP) && (neighbour.HardwareAddr.String() == expectedLRPMAC) {
@@ -193,7 +193,7 @@ func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortN
 				break
 			}
 		}
-		Expect(foundNeighbour).To(BeTrue())
+		g.Expect(foundNeighbour).To(BeTrue())
 	}
 }
 
@@ -223,6 +223,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " mac=\"" + mgmtPortMAC.String() + "\"" + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort,
 	})
+	var isRoutingAdvertised bool
 	for _, cfg := range configs {
 		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
@@ -231,15 +232,8 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
+		isRoutingAdvertised = isRoutingAdvertised || cfg.isRoutingAdvertised
 	}
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " ofport",
-		Output: "1",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
-		Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
-	})
 
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
@@ -252,7 +246,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
 	}
 
-	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
 	}}
 
@@ -261,11 +255,18 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 			util.OvnNodeManagementPortMacAddresses: fmt.Sprintf("{\"default\":%q}", mgmtPortMAC)}
 	}
 
-	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-		Items: []v1.Node{existingNode},
+	fakeClient := fake.NewSimpleClientset(&corev1.NodeList{
+		Items: []corev1.Node{existingNode},
 	})
 	fakeNodeClient := &util.OVNNodeClientset{
 		KubeClient: fakeClient,
+	}
+
+	netInfo := &multinetworkmocks.NetInfo{}
+	if isRoutingAdvertised {
+		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return([]string{"vrf"})
+	} else {
+		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 	}
 
 	_, err = config.InitConfig(ctx, fexec, nil)
@@ -277,7 +278,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(watchFactory.Start()).To(Succeed())
-	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
 	rm := routemanager.NewController()
 	stopCh := make(chan struct{})
@@ -286,36 +286,33 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		wg.Wait()
 	}()
 	wg.Add(1)
-	go testNS.Do(func(netNS ns.NetNS) error {
-		defer wg.Done()
+	go func() {
 		defer GinkgoRecover()
-		rm.Run(stopCh, 10*time.Second)
-		return nil
-	})
+		defer wg.Done()
+		err := testNS.Do(func(ns.NetNS) error {
+			rm.Run(stopCh, 10*time.Second)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	}()
 
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
 		netdevName, rep := "", ""
 
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(
-			configs[0].isRoutingAdvertised,
-			rm,
-			&existingNode,
-			watchFactory.NodeCoreInformer().Lister(),
-			kubeInterface,
-			waiter,
-		)
+		mgmtPortController, err := NewManagementPortController(&existingNode, nodeSubnetCIDRs, netdevName, rep, rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
-		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
+		stop := make(chan struct{})
+		err = mgmtPortController.Start(stop)
+		Expect(err).NotTo(HaveOccurred())
+		defer close(stop)
+		Eventually(checkMgmtTestPortIpsAndRoutes).WithArguments(configs, mgtPort, mgtPortAddrs, expectedLRPMAC).Should(Succeed())
 		return nil
 	})
 	Expect(err).NotTo(HaveOccurred())
 
 	err = nodeAnnotator.Run()
-	Expect(err).NotTo(HaveOccurred())
-	err = waiter.Wait()
 	Expect(err).NotTo(HaveOccurred())
 
 	checkMgmtPortTestNFTables(configs, mgtPort)
@@ -332,6 +329,12 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		mtu        int    = 1400
 	)
 
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+		},
+	}
+
 	// OVS cmd setup
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get bridge br-int datapath_type",
@@ -345,15 +348,6 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 			mgtPort, mgtPort, "k8s-"+nodeName, mgmtPortNetdev),
 	})
 
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " ofport",
-		Output: "1",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
-		Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
-	})
-
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -363,16 +357,19 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		nodeSubnetCIDRs[i] = cfg.GetNodeSubnetCIDR()
 	}
 
-	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
 	}}
 
-	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-		Items: []v1.Node{existingNode},
+	fakeClient := fake.NewSimpleClientset(&corev1.NodeList{
+		Items: []corev1.Node{existingNode},
 	})
 	fakeNodeClient := &util.OVNNodeClientset{
 		KubeClient: fakeClient,
 	}
+
+	netInfo := &multinetworkmocks.NetInfo{}
+	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
@@ -382,16 +379,19 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(watchFactory.Start()).To(Succeed())
-	waiter := newStartupWaiter()
 	wg := &sync.WaitGroup{}
 	rm := routemanager.NewController()
 	stopCh := make(chan struct{})
 	wg.Add(1)
-	go testNS.Do(func(netNS ns.NetNS) error {
-		rm.Run(stopCh, 10*time.Second)
-		wg.Done()
-		return nil
-	})
+	go func() {
+		defer GinkgoRecover()
+		defer wg.Done()
+		err := testNS.Do(func(ns.NetNS) error {
+			rm.Run(stopCh, 10*time.Second)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	}()
 	defer func() {
 		close(stopCh)
 		wg.Wait()
@@ -402,33 +402,39 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 
 		netdevName, rep := "pf0vf0", "pf0vf0"
 
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(false, rm, &existingNode, watchFactory.NodeCoreInformer().Lister(), kubeInterface, waiter)
+		mgmtPortController, err := NewManagementPortController(node, nodeSubnetCIDRs, netdevName, rep, rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
-		// make sure interface was renamed and mtu was set
-		l, err := netlink.LinkByName(mgtPort)
+		stop := make(chan struct{})
+		err = mgmtPortController.Start(stop)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Attrs().MTU).To(Equal(mtu))
-		Expect(l.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
+		Eventually(func(g Gomega) {
+			l, err := netlink.LinkByName(mgtPort)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(l.Attrs().MTU).To(Equal(mtu))
+			g.Expect(l.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
+		}).Should(Succeed())
 		return nil
 	})
 	Expect(err).NotTo(HaveOccurred())
 
 	err = nodeAnnotator.Run()
 	Expect(err).NotTo(HaveOccurred())
-	err = waiter.Wait()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	Eventually(fexec.CalledMatchesExpected).Should(BeTrue(), fexec.ErrorDesc)
 }
 
-func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
-	configs []managementPortTestConfig, expectedLRPMAC string) {
+func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS, configs []managementPortTestConfig) {
 	const (
 		nodeName   string = "node1"
 		mgtPortMAC string = "0a:58:0a:01:01:02"
 		mgtPort    string = types.K8sMgmtIntfName
 		mtu        int    = 1400
 	)
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+		},
+	}
 
 	// OVS cmd setup
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -456,18 +462,24 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
 	}
 
+	netInfo := &multinetworkmocks.NetInfo{}
+	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
+
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 	wg := &sync.WaitGroup{}
 	rm := routemanager.NewController()
 	stopCh := make(chan struct{})
 	wg.Add(1)
-	go testNS.Do(func(netNS ns.NetNS) error {
-		defer wg.Done()
+	go func() {
 		defer GinkgoRecover()
-		rm.Run(stopCh, 10*time.Second)
-		return nil
-	})
+		defer wg.Done()
+		err := testNS.Do(func(ns.NetNS) error {
+			rm.Run(stopCh, 10*time.Second)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	}()
 	defer func() {
 		close(stopCh)
 		wg.Wait()
@@ -477,16 +489,19 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 
 		netdevName, rep := "pf0vf0", ""
 
-		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs, netdevName, rep)
-		_, err = mgmtPorts[0].Create(configs[0].isRoutingAdvertised, rm, nil, nil, nil, nil)
+		mgmtPortController, err := NewManagementPortController(node, nodeSubnetCIDRs, netdevName, rep, rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
-		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
-		// check mgmt port MAC, mtu and link state
-		l, err := netlink.LinkByName(mgtPort)
+		stop := make(chan struct{})
+		err = mgmtPortController.Start(stop)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Attrs().HardwareAddr.String()).To(Equal(mgtPortMAC))
-		Expect(l.Attrs().MTU).To(Equal(mtu))
-		Expect(l.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
+		Eventually(func(g Gomega) {
+			l, err := netlink.LinkByName(mgtPort)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(l.Attrs().HardwareAddr.String()).To(Equal(mgtPortMAC))
+			g.Expect(l.Attrs().MTU).To(Equal(mtu))
+			g.Expect(l.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
+		}).Should(Succeed())
+
 		return nil
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -496,7 +511,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
 
-var _ = Describe("Management Port Operations", func() {
+var _ = Describe("Management Port tests", func() {
 	Describe("Syncing management port", func() {
 		var netlinkOpsMock *utilMocks.NetLinkOps
 		var execMock *ovntest.FakeExec
@@ -511,7 +526,6 @@ var _ = Describe("Management Port Operations", func() {
 		mgmtPortName := types.K8sMgmtIntfName
 		netlinkMockErr := fmt.Errorf("netlink mock error")
 		fakeExecErr := fmt.Errorf("face exec error")
-		hostSubnets := []*net.IPNet{}
 		linkMock := &mocks.Link{}
 
 		BeforeEach(func() {
@@ -540,7 +554,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
 				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -552,7 +566,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, netlinkMockErr)
 				linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: netdevName})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -565,7 +579,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("RouteList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Route{}, nil)
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -583,7 +597,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, netdevName).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 			It("Unconfigures old management port netdevice", func() {
@@ -600,7 +614,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, netdevName).Return(nil)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -612,7 +626,7 @@ var _ = Describe("Management Port Operations", func() {
 					Output: "internal," + mgmtPortName,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, true)
+				err := syncMgmtPortInterface(mgmtPortName, true)
 				Expect(err).ToNot(HaveOccurred())
 			})
 			It("Fails to remove port from the bridge", func() {
@@ -625,7 +639,7 @@ var _ = Describe("Management Port Operations", func() {
 					Err: fakeExecErr,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -638,7 +652,7 @@ var _ = Describe("Management Port Operations", func() {
 					"ovs-vsctl --timeout=15 del-port br-int " + mgmtPortName,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -657,7 +671,7 @@ var _ = Describe("Management Port Operations", func() {
 					Err: fakeExecErr,
 				})
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -676,7 +690,7 @@ var _ = Describe("Management Port Operations", func() {
 
 				// Return error here, so we know that function didn't returned earlier
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -691,7 +705,7 @@ var _ = Describe("Management Port Operations", func() {
 				})
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -707,7 +721,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -727,7 +741,7 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(netlinkMockErr)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -747,20 +761,69 @@ var _ = Describe("Management Port Operations", func() {
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(nil)
 
-				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				err := syncMgmtPortInterface(mgmtPortName, false)
 				Expect(err).ToNot(HaveOccurred())
 			})
+		})
 
+		Context("Syncing nftables rules", func() {
+			It("removes stale nftables rules while keeping remaining intact", func() {
+				nft := nodenft.SetFakeNFTablesHelper()
+
+				netInfo := &multinetworkmocks.NetInfo{}
+				netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "").Return(nil)
+
+				// Make a fake MgmtPortConfig with only the fields we care about
+				nodeNet := ovntest.MustParseIPNet("10.1.1.0/24")
+				fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
+					ifAddr: nodeNet,
+				}
+				fakeMgmtPortConfig := managementPortConfig{
+					ipv4:    &fakeMgmtPortIPFamilyConfig,
+					netInfo: netInfo,
+				}
+				err := setupManagementPortNFTSets()
+				Expect(err).NotTo(HaveOccurred())
+				err = setupManagementPortNFTChain(types.K8sMgmtIntfName, &fakeMgmtPortConfig)
+				Expect(err).NotTo(HaveOccurred())
+
+				finalExpectedNFT := nft.Dump()
+
+				// Inject rules into SNAT MGMT chain that shouldn't exist and should be cleared on a restore, even if the chain has no rules
+				tx := nft.NewTransaction()
+				tx.Add(&knftables.Chain{
+					Name:    nftMgmtPortChain,
+					Comment: knftables.PtrTo("OVN SNAT to Management Port"),
+
+					Type:     knftables.PtrTo(knftables.NATType),
+					Hook:     knftables.PtrTo(knftables.PostroutingHook),
+					Priority: knftables.PtrTo(knftables.SNATPriority),
+				})
+				tx.Add(&knftables.Rule{
+					Chain: nftMgmtPortChain,
+					Rule:  "blah blah blah",
+				})
+				Expect(nft.Run(context.Background(), tx)).To(Succeed())
+
+				expectedNFT := finalExpectedNFT + "\nadd rule inet ovn-kubernetes mgmtport-snat blah blah blah\n"
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
+				err = setupManagementPortNFTChain(types.K8sMgmtIntfName, &fakeMgmtPortConfig)
+				Expect(err).NotTo(HaveOccurred())
+				err = nodenft.MatchNFTRules(finalExpectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
 	})
 
-	Describe("Port creation", func() {
+	Describe("Management port controller start", func() {
 		var tmpErr error
 		var app *cli.App
 		var testNS ns.NetNS
 		var fexec *ovntest.FakeExec
 
-		tmpDir, tmpErr = ioutil.TempDir("", "clusternodetest_certdir")
+		tmpDir, tmpErr = os.MkdirTemp("", "clusternodetest_certdir")
 		if tmpErr != nil {
 			GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
 		}
@@ -1054,9 +1117,8 @@ var _ = Describe("Management Port Operations", func() {
 
 		Context("Management Port, ovnkube node mode dpu-host", func() {
 			BeforeEach(func() {
-				var err error
 				// Set up a fake k8sMgmt interface
-				err = testNS.Do(func(ns.NetNS) error {
+				err := testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
 					ovntest.AddLink(mgmtPortNetdev)
 					return nil
@@ -1078,7 +1140,7 @@ var _ = Describe("Management Port Operations", func() {
 								expectedManagementPortIP: v4mgtPortIP,
 								expectedGatewayIP:        v4gwIP,
 							},
-						}, v4lrpMAC)
+						})
 					return nil
 				}
 				err := app.Run([]string{
@@ -1090,6 +1152,69 @@ var _ = Describe("Management Port Operations", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 			})
+		})
+	})
+
+	Context("NewManagementPortController creates a controller according to config.OvnKubeNode.Mode", func() {
+		BeforeEach(func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+		})
+
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "worker-node",
+				Annotations: map[string]string{
+					util.OvnNodeManagementPortMacAddresses: "{\"default\": \"00:11:22:33:44:55\"}",
+				},
+			},
+		}
+		hostSubnets := []*net.IPNet{ovntest.MustParseIPNet("10.1.1.0/24")}
+		netdevName, rep := "ens1f0v0", "ens1f0_0"
+		netInfo := &multinetworkmocks.NetInfo{}
+		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "worker-node").Return(nil)
+
+		It("Creates managementPort by default", func() {
+			mgmtPort, err := NewManagementPortController(node, hostSubnets, netdevName, rep, nil, netInfo)
+			Expect(err).NotTo(HaveOccurred())
+			mgmtPortImpl := mgmtPort.(*managementPortController)
+			Expect(mgmtPortImpl.ports[ovsPort]).ToNot(BeNil())
+			Expect(mgmtPortImpl.ports[netdevPort]).To(BeNil())
+			Expect(mgmtPortImpl.ports[representorPort]).To(BeNil())
+		})
+		It("Creates managementPortRepresentor for Ovnkube Node mode dpu", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPU
+			mgmtPort, err := NewManagementPortController(node, hostSubnets, netdevName, rep, nil, netInfo)
+			Expect(err).NotTo(HaveOccurred())
+			mgmtPortImpl := mgmtPort.(*managementPortController)
+			Expect(mgmtPortImpl.ports[ovsPort]).To(BeNil())
+			Expect(mgmtPortImpl.ports[netdevPort]).To(BeNil())
+			Expect(mgmtPortImpl.ports[representorPort]).ToNot(BeNil())
+			repImpl := mgmtPortImpl.ports[representorPort].(*managementPortRepresentor)
+			Expect(repImpl.repDevName).To(Equal(rep))
+		})
+		It("Creates managementPortNetdev for Ovnkube Node mode dpu-host", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPUHost
+			mgmtPort, err := NewManagementPortController(node, hostSubnets, netdevName, rep, nil, netInfo)
+			Expect(err).NotTo(HaveOccurred())
+			mgmtPortImpl := mgmtPort.(*managementPortController)
+			Expect(mgmtPortImpl.ports[ovsPort]).To(BeNil())
+			Expect(mgmtPortImpl.ports[netdevPort]).ToNot(BeNil())
+			Expect(mgmtPortImpl.ports[representorPort]).To(BeNil())
+			netdevImpl := mgmtPortImpl.ports[netdevPort].(*managementPortNetdev)
+			Expect(netdevImpl.netdevDevName).To(Equal(netdevName))
+		})
+		It("Creates managementPortNetdev and managementPortRepresentor for Ovnkube Node mode full", func() {
+			config.OvnKubeNode.MgmtPortNetdev = netdevName
+			mgmtPort, err := NewManagementPortController(node, hostSubnets, netdevName, rep, nil, netInfo)
+			Expect(err).NotTo(HaveOccurred())
+			mgmtPortImpl := mgmtPort.(*managementPortController)
+			Expect(mgmtPortImpl.ports[ovsPort]).To(BeNil())
+			Expect(mgmtPortImpl.ports[netdevPort]).ToNot(BeNil())
+			Expect(mgmtPortImpl.ports[representorPort]).ToNot(BeNil())
+			netdevImpl := mgmtPortImpl.ports[netdevPort].(*managementPortNetdev)
+			Expect(netdevImpl.netdevDevName).To(Equal(netdevName))
+			repImpl := mgmtPortImpl.ports[representorPort].(*managementPortRepresentor)
+			Expect(repImpl.repDevName).To(Equal(rep))
 		})
 	})
 })
