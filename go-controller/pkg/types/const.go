@@ -145,6 +145,7 @@ const (
 
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
+	NeighborSolicitationICMPType  = 135
 	NeighborAdvertisementICMPType = 136
 
 	// Meter constants
@@ -297,4 +298,7 @@ const (
 	// addressed to an `externalTrafficPolicy: Local` load balancer IP.
 	NFTMgmtPortNoSNATServicesV4 = "mgmtport-no-snat-services-v4"
 	NFTMgmtPortNoSNATServicesV6 = "mgmtport-no-snat-services-v6"
+
+	// CUDNPrefix of all CUDN network names
+	CUDNPrefix = "cluster_udn_"
 )
