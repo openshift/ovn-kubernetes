@@ -47,7 +47,11 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Verify
@@ -103,7 +107,11 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Build - from master branch
@@ -181,7 +189,11 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Install VRF kernel module
@@ -222,18 +234,17 @@ jobs:
       continue-on-error: true
       env:
         COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GO111MODULE: off
       run: |
         set -x
-        go get github.com/mattn/goveralls
-        go get github.com/modocache/gover
+        go install github.com/mattn/goveralls@latest
+        go install github.com/modocache/gover@latest
         PATH=$PATH:$(go env GOPATH)/bin
 
-        mkdir -p $(go env GOPATH)/src/github.com/ovn-kubernetes
-        ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-kubernetes/ovn-kubernetes
+        mkdir -p $(go env GOPATH)/src/github.com/ovn-org
+        ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
 
         gover
-        goveralls -coverprofile=gover.coverprofile -service=github
+        GO111MODULE=off goveralls -coverprofile=gover.coverprofile -service=github
 
     - name: Cache PR image
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
@@ -286,7 +297,11 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Set up environment
@@ -521,7 +536,11 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Set up environment
@@ -685,7 +704,11 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go-controller/go.mod'
-        cache-dependency-path: "**/*.sum"
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Set up environment
