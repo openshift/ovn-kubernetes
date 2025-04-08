@@ -169,7 +169,7 @@ EOF
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
   GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
 
-  docker network rm clientnet || true
+  docker network rm -f clientnet
   docker network create --subnet="${METALLB_CLIENT_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge clientnet
   docker network connect clientnet frr
   if  [ "$KIND_IPV6_SUPPORT" == true ]; then
@@ -177,7 +177,7 @@ EOF
     docker exec frr sysctl -w net.ipv6.conf.all.forwarding=1
   fi
   # Note: this image let's us use it also for creating load balancer backends that can send big packets
-  docker rm -f lbclient || true
+  docker rm -f lbclient
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
   delete_metallb_dir
@@ -730,8 +730,8 @@ deploy_bgp_external_server() {
     ip_family="ipv4"
     ipv6_network=""
   fi
-  docker rm -f bgpserver || true
-  docker network rm bgpnet || true
+  docker rm -f bgpserver
+  docker network rm -f bgpnet
   docker network create --subnet="${BGP_SERVER_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge bgpnet
   docker network connect bgpnet frr
   docker run  --cap-add NET_ADMIN --user 0  -d --network bgpnet  --rm  --name bgpserver -p 8080:8080  registry.k8s.io/e2e-test-images/agnhost:2.45 netexec
@@ -785,6 +785,28 @@ install_ffr_k8s() {
       sed -i "${LINE_NUM}a\\${IPv6_LINE}" receive_filtered.yaml
     done
   fi
+  
+  # frr-k8s webhook is declaring readiness before its endpoint is serving.
+  # Let's do our own probing. Also will print logs in case of failure so we get
+  # insights on why this is hapenning 
+  local r
+  r=0
+  timeout 60s bash -x <<EOF || r=$?
+echo "Attempting to reach frr-k8s webhook"
+kind export kubeconfig --name ovn
+while true; do
+docker exec ovn-control-plane curl -ksS --connect-timeout 0.1 https://$(kubectl get svc -n frr-k8s-system frr-k8s-webhook-service -o jsonpath='{.spec.clusterIP}')
+[ \$? -eq 0 ] && exit 0
+echo "Couldn't reach frr-k8s webhook, trying in 1s..."
+sleep 1s
+done
+EOF
+  echo "r=$r"
+  if [ "$r" -ne "0" ]; then
+    kubectl describe pod -n frr-k8s-system -l app=frr-k8s-webhook-server
+    kubectl logs -n frr-k8s-system -l app=frr-k8s-webhook-server
+  fi
+
   kubectl apply -n frr-k8s-system -f receive_filtered.yaml
   popd || exit 1
 
