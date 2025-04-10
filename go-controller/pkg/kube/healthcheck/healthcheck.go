@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"sync"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -148,18 +148,18 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 		svc.server = hcs.httpFactory.New(addr, hcHandler{name: nsn, hcs: hcs})
 		svc.listener, err = hcs.listener.Listen(addr)
 		if err != nil {
-			msg := fmt.Sprintf("node %s failed to start healthcheck %q on port %d: %v", hcs.hostname, nsn.String(), port, err)
+			err := fmt.Errorf("node %s failed to start healthcheck %q on port %d: %v", hcs.hostname, nsn.String(), port, err)
 
 			if hcs.recorder != nil {
 				hcs.recorder.Eventf(
-					&v1.ObjectReference{
+					&corev1.ObjectReference{
 						Kind:      "Service",
 						Namespace: nsn.Namespace,
 						Name:      nsn.Name,
 						UID:       types.UID(nsn.String()),
-					}, v1.EventTypeWarning, "FailedToStartServiceHealthcheck", msg)
+					}, corev1.EventTypeWarning, "FailedToStartServiceHealthcheck", err.Error())
 			}
-			errors = append(errors, fmt.Errorf(msg))
+			errors = append(errors, err)
 			continue
 		}
 		hcs.services[nsn] = svc
@@ -191,7 +191,7 @@ type hcHandler struct {
 
 var _ http.Handler = hcHandler{}
 
-func (h hcHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+func (h hcHandler) ServeHTTP(resp http.ResponseWriter, _ *http.Request) {
 	h.hcs.lock.RLock()
 	svc, ok := h.hcs.services[h.name]
 	if !ok || svc == nil {

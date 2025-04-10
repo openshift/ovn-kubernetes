@@ -64,8 +64,18 @@ should prevent Ingress creation if more than 1 IngressClass marked as default
 # TODO: Figure out why the below test is failing and if we need to add support in OVN-K for them
 validates that there is no conflict between pods with same hostPort but different hostIP and protocol
 
-# Skip ServiceCidr tests as we dont currenly support this v1alpha feature
-should create Services and servce on different Service CIDRs
+# https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5119
+\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes
+
+# Skip Alpha features in general
+\[Feature:Alpha\]
+\[Alpha\]
+
+# Skip Beta features by feature name for visibility
+\[FeatureGate:MultiCIDRServiceAllocator\] \[Beta\]
+
+# Skip unsupported GA features by feature name for visibility
+# TODO
 "
 
 IPV4_ONLY_TESTS="
@@ -107,6 +117,13 @@ DUALSTACK_CONVERSION_TESTS="
 should function for service endpoints using hostNetwork
 "
 
+# Skips when default pod network is advertised through BGP
+RA_SKIPPED_TESTS="
+# Pod to ETP local nodeport on a different node is broken
+# https://github.com/ovn-org/ovn-kubernetes/issues/4804
+\[sig-network\] Services should fallback to local terminating endpoints when there are no ready endpoints with externalTrafficPolicy=Local
+"
+
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1522
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
@@ -130,6 +147,11 @@ fi
 # If dulastack conversion, skip certain tests due to unknown flakes upstream (FIXME)
 if [ "$DUALSTACK_CONVERSION" == true ]; then
   SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_CONVERSION_TESTS
+fi
+
+# Skip tests that are unsupported or broken when the default pod network is advertised
+if [ "$ADVERTISE_DEFAULT_NETWORK" == true ]; then
+  SKIPPED_TESTS=$SKIPPED_TESTS$RA_SKIPPED_TESTS
 fi
 
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"

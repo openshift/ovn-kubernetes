@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"github.com/mdlayher/arp"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 type NetLinkOps interface {
@@ -51,7 +52,7 @@ type NetLinkOps interface {
 	NeighAdd(neigh *netlink.Neigh) error
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
-	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
+	ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error)
 	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
 	RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error
 	LinkSubscribeWithOptions(ch chan<- netlink.LinkUpdate, done <-chan struct{}, options netlink.LinkSubscribeOptions) error
@@ -185,8 +186,8 @@ func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, erro
 	return netlink.NeighList(linkIndex, family)
 }
 
-func (defaultNetLinkOps) ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error) {
-	return netlink.ConntrackDeleteFilter(table, family, filter)
+func (defaultNetLinkOps) ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error) {
+	return netlink.ConntrackDeleteFilters(table, family, filters...)
 }
 
 func (defaultNetLinkOps) RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error {
@@ -408,7 +409,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 		if len(subnets) == 0 {
 			err = netLinkOps.RouteDel(&route)
 			if err != nil {
-				return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
+				return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v",
 					route.Dst.String(), route.Gw.String(), link.Attrs().Name, err)
 			}
 			continue
@@ -429,7 +430,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 					if route.Dst != nil {
 						net = route.Dst.String()
 					}
-					return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
+					return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v",
 						net, route.Gw.String(), link.Attrs().Name, err)
 				}
 				break
@@ -581,24 +582,24 @@ func LinkNeighIPExists(link netlink.Link, neighIP net.IP) (bool, error) {
 	return false, nil
 }
 
-func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) error {
+func DeleteConntrack(ip string, port int32, protocol corev1.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) error {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
 		return fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ipAddress)
 	}
 
 	filter := &netlink.ConntrackFilter{}
-	if protocol == kapi.ProtocolUDP {
+	if protocol == corev1.ProtocolUDP {
 		// 17 = UDP protocol
 		if err := filter.AddProtocol(17); err != nil {
 			return fmt.Errorf("could not add Protocol UDP to conntrack filter %v", err)
 		}
-	} else if protocol == kapi.ProtocolSCTP {
+	} else if protocol == corev1.ProtocolSCTP {
 		// 132 = SCTP protocol
 		if err := filter.AddProtocol(132); err != nil {
 			return fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
 		}
-	} else if protocol == kapi.ProtocolTCP {
+	} else if protocol == corev1.ProtocolTCP {
 		// 6 = TCP protocol
 		if err := filter.AddProtocol(6); err != nil {
 			return fmt.Errorf("could not add Protocol TCP to conntrack filter %v", err)
@@ -620,11 +621,11 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 		}
 	}
 	if ipAddress.To4() != nil {
-		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
+		if _, err := netLinkOps.ConntrackDeleteFilters(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err
 		}
 	} else {
-		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter); err != nil {
+		if _, err := netLinkOps.ConntrackDeleteFilters(netlink.ConntrackTable, netlink.FAMILY_V6, filter); err != nil {
 			return err
 		}
 	}
@@ -634,7 +635,7 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 // DeleteConntrackServicePort is a wrapper around DeleteConntrack for the purpose of deleting conntrack entries that
 // belong to ServicePorts. Before deleting any conntrack entry, it makes sure that the port is valid. If the port is
 // invalid, it will log a level 5 info message and simply return.
-func DeleteConntrackServicePort(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType,
+func DeleteConntrackServicePort(ip string, port int32, protocol corev1.Protocol, ipFilterType netlink.ConntrackFilterType,
 	labels [][]byte) error {
 	if err := ValidatePort(protocol, port); err != nil {
 		klog.V(5).Infof("Skipping conntrack deletion for IP %q, protocol %q, port \"%d\", err: %q",

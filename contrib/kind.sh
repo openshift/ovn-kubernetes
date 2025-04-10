@@ -45,6 +45,9 @@ delete() {
   if [ "$KIND_INSTALL_METALLB" == true ]; then
     destroy_metallb
   fi
+  if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
+    destroy_bgp
+  fi
   timeout 5 kubectl --kubeconfig "${KUBECONFIG}" delete namespace ovn-kubernetes || true
   sleep 5
   kind delete cluster --name "${KIND_CLUSTER_NAME:-ovn}"
@@ -78,6 +81,7 @@ usage() {
     echo "                 [-cm | --compact-mode]"
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [-rae | --enable-route-advertisements]"
+    echo "                 [-adv | --advertise-default-network]"
     echo "                 [--isolated]"
     echo "                 [-dns | --enable-dnsnameresolver]"
     echo "                 [-obs | --observability]"
@@ -116,6 +120,8 @@ usage() {
     echo "-gm  | --gateway-mode                 Enable 'shared' or 'local' gateway mode."
     echo "                                      DEFAULT: shared."
     echo "-ov  | --ovn-image            	      Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "-ovr  | --ovn-repo                    Specify the repository to build OVN from"
+    echo "-ovg  | --ovn-gitref                  Specify the branch, tag or commit id to build OVN from, it can be a pattern like 'branch-*' it will order results and use the first one"
     echo "-ml  | --master-loglevel              Log level for ovnkube (master), DEFAULT: 5."
     echo "-nl  | --node-loglevel                Log level for ovnkube (node), DEFAULT: 5"
     echo "-dbl | --dbchecker-loglevel           Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
@@ -145,6 +151,7 @@ usage() {
     echo "-dns | --enable-dnsnameresolver       Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
     echo "-obs | --observability                Enable OVN Observability feature."
     echo "-rae | --enable-route-advertisements  Enable route advertisements"
+    echo "-adv | --advertise-default-network    Applies a RouteAdvertisements configuration to advertise the default network on all nodes"
     echo ""
 }
 
@@ -248,6 +255,12 @@ parse_args() {
             -ov | --ovn-image )           	    shift
                                           	    OVN_IMAGE=$1
                                           	    ;;
+            -ovr | --ovn-repo )                 shift
+                                                OVN_REPO=$1
+                                                ;;
+            -ovg | --ovn-gitref)                shift
+                                                OVN_GITREF=$1
+                                                ;;
             -ml  | --master-loglevel )          shift
                                                 if ! [[ "$1" =~ ^[0-9]$ ]]; then
                                                     echo "Invalid master-loglevel: $1"
@@ -324,6 +337,8 @@ parse_args() {
                                                   ;;
             -rae | --route-advertisements-enable) ENABLE_ROUTE_ADVERTISEMENTS=true
                                                   ;;
+            -adv | --advertise-default-network) ADVERTISE_DEFAULT_NETWORK=true
+                                                  ;;
             -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
                                                 ;;
             --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
@@ -393,6 +408,8 @@ print_params() {
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "OVN_REPO = $OVN_REPO"
+     echo "OVN_GITREF = $OVN_GITREF"
      echo "MASTER_LOG_LEVEL = $MASTER_LOG_LEVEL"
      echo "NODE_LOG_LEVEL = $NODE_LOG_LEVEL"
      echo "DBCHECKER_LOG_LEVEL = $DBCHECKER_LOG_LEVEL"
@@ -412,6 +429,7 @@ print_params() {
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "ENABLE_NETWORK_SEGMENTATION= $ENABLE_NETWORK_SEGMENTATION"
      echo "ENABLE_ROUTE_ADVERTISEMENTS= $ENABLE_ROUTE_ADVERTISEMENTS"
+     echo "ADVERTISE_DEFAULT_NETWORK = $ADVERTISE_DEFAULT_NETWORK"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
@@ -511,7 +529,7 @@ set_default_params() {
   fi
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.31.1}
+  K8S_VERSION=${K8S_VERSION:-v1.32.3}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
@@ -537,6 +555,8 @@ set_default_params() {
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
   OVN_IMAGE=${OVN_IMAGE:-local}
+  OVN_REPO=${OVN_REPO:-""}
+  OVN_GITREF=${OVN_GITREF:-""}
   MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-5}
   NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-5}
   DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-5}
@@ -569,6 +589,8 @@ set_default_params() {
   TRANSIT_SWITCH_SUBNET_IPV6=${TRANSIT_SWITCH_SUBNET_IPV6:-fd97::/64}
   METALLB_CLIENT_NET_SUBNET_IPV4=${METALLB_CLIENT_NET_SUBNET_IPV4:-172.22.0.0/16}
   METALLB_CLIENT_NET_SUBNET_IPV6=${METALLB_CLIENT_NET_SUBNET_IPV6:-fc00:f853:ccd:e792::/64}
+  BGP_SERVER_NET_SUBNET_IPV4=${BGP_SERVER_NET_SUBNET_IPV4:-172.26.0.0/16}
+  BGP_SERVER_NET_SUBNET_IPV6=${BGP_SERVER_NET_SUBNET_IPV6:-fc00:f853:ccd:e796::/64}
 
   KIND_NUM_MASTER=1
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
@@ -622,6 +644,7 @@ set_default_params() {
     echo "Route advertisements requires interconnect to be enabled (-ic)"
     exit 1
   fi
+  ADVERTISE_DEFAULT_NETWORK=${ADVERTISE_DEFAULT_NETWORK:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
@@ -788,26 +811,19 @@ build_ovn_image() {
   if [ "$OVN_IMAGE" == local ]; then
     set_ovn_image
 
-    # Build ovn image
-    pushd ${DIR}/../go-controller
-    make
-    popd
+    # Build binaries
+    make -C ${DIR}/../go-controller
 
-    # Build ovn kube image
-    pushd ${DIR}/../dist/images
-    # Find all built executables, but ignore the 'windows' directory if it exists
-    find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
-    echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    # Build image
+    make -C ${DIR}/../dist/images IMAGE="${OVN_IMAGE}" OVN_REPO="${OVN_REPO}" OVN_GITREF="${OVN_GITREF}" OCI_BIN="${OCI_BIN}" fedora-image
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
       echo "Pushing built image to local $OCI_BIN registry"
       $OCI_BIN push "${OVN_IMAGE}"
     fi
-    popd
   # We should push to local registry if image is not remote
-  elif [ "${OVN_IMAGE}" != "" -a "${KIND_LOCAL_REGISTRY}" == true ] && (echo "$OVN_IMAGE" | grep / -vq); then 
+  elif [ "${OVN_IMAGE}" != "" -a "${KIND_LOCAL_REGISTRY}" == true ] && (echo "$OVN_IMAGE" | grep / -vq); then
     local local_registry_ovn_image="localhost:5000/${OVN_IMAGE}"
     $OCI_BIN tag "$OVN_IMAGE" $local_registry_ovn_image
     OVN_IMAGE=$local_registry_ovn_image
@@ -870,6 +886,7 @@ create_ovn_kube_manifests() {
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --network-segmentation-enable="${ENABLE_NETWORK_SEGMENTATION}" \
     --route-advertisements-enable="${ENABLE_ROUTE_ADVERTISEMENTS}" \
+    --advertise-default-network="${ADVERTISE_DEFAULT_NETWORK}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
@@ -1171,6 +1188,7 @@ if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
 fi
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
   deploy_frr_external_container
+  deploy_bgp_external_server
 fi
 build_ovn_image
 detect_apiserver_url
@@ -1202,8 +1220,6 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
-  deploy_kubevirt_binding
-  deploy_passt_binary
 
   install_cert_manager
   if [ "$KIND_OPT_OUT_KUBEVIRT_IPAM" != true ]; then
