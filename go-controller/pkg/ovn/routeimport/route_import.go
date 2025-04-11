@@ -264,8 +264,8 @@ func (c *controller) syncLinkUpdate(update *netlink.LinkUpdate) {
 	c.Lock()
 	defer c.Unlock()
 
-	// for CUDNs, VRF name equals network name
-	network := c.networks[vrf.Name]
+	// for CUDNs, VRF name equals network name sans prefix
+	network := c.networks[util.GenerateCUDNNetworkName(vrf.Name)]
 	// but if we got an ID, this can't be a CUDN, it's a UDN.
 	if networkID != types.InvalidID {
 		network = c.networks[c.networkIDs[networkID]]
