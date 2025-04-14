@@ -1,18 +1,20 @@
 package addressset
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"github.com/onsi/gomega"
 
-	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/libovsdb/ovsdb"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 )
 
 func NewFakeAddressSetFactory(controllerName string) *FakeAddressSetFactory {
@@ -37,7 +39,7 @@ type FakeAddressSetFactory struct {
 // fakeFactory implements the AddressSetFactory interface
 var _ AddressSetFactory = &FakeAddressSetFactory{}
 
-const FakeASFError = "fake asf error"
+var ErrFakeASF = errors.New("fake asf error")
 
 // ErrOnNextNewASCall will make FakeAddressSetFactory return FakeASFError on the next NewAddressSet call
 func (f *FakeAddressSetFactory) ErrOnNextNewASCall() {
@@ -48,7 +50,7 @@ func (f *FakeAddressSetFactory) ErrOnNextNewASCall() {
 func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, addresses []string) (AddressSet, error) {
 	if f.errOnNextNewAddrSet {
 		f.errOnNextNewAddrSet = false
-		return nil, fmt.Errorf(FakeASFError)
+		return nil, ErrFakeASF
 	}
 	if err := f.asf.validateDbIDs(dbIDs); err != nil {
 		return nil, fmt.Errorf("failed to create address set: %w", err)
@@ -71,7 +73,7 @@ func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ad
 func (f *FakeAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, addresses []string) (AddressSet, []ovsdb.Operation, error) {
 	if f.errOnNextNewAddrSet {
 		f.errOnNextNewAddrSet = false
-		return nil, nil, fmt.Errorf(FakeASFError)
+		return nil, nil, ErrFakeASF
 	}
 	if err := f.asf.validateDbIDs(dbIDs); err != nil {
 		return nil, nil, fmt.Errorf("failed to create address set: %w", err)
@@ -289,7 +291,7 @@ func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(dbIDsOrNsName any) 
 
 // ExpectNumberOfAddressSets ensures the number of created address sets equals given number
 func (f *FakeAddressSetFactory) ExpectNumberOfAddressSets(n int) {
-	gomega.Expect(len(f.sets)).To(gomega.Equal(n))
+	gomega.Expect(f.sets).To(gomega.HaveLen(n))
 }
 
 type removeFunc func(string)
