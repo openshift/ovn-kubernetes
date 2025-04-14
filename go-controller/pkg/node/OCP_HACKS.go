@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/coreos/go-iptables/iptables"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 )

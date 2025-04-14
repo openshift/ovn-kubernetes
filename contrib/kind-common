@@ -122,10 +122,12 @@ install_ingress() {
 
 METALLB_DIR="/tmp/metallb"
 install_metallb() {
-  # TODO: Pin to a version tag bigger than v0.14.8 when released
-  #       so we can have a metallb dev-env that support dual stack
-  #       and use a proper tag instead of a commit id.
-  local metallb_version=55f648102b918699da610f20e8d650e76c7561fc
+  # Using latest v0.14.9 as the commit we were using would not build and this
+  # version is the one having least issues for dual stack. However tests might
+  # have to workaround these two outstanding issue until fixed
+  # https://github.com/metallb/metallb/issues/2723
+  # https://github.com/metallb/metallb/issues/2724
+  local metallb_version=v0.14.9
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
@@ -134,6 +136,23 @@ install_metallb() {
   git clone https://github.com/metallb/metallb.git
   cd metallb
   git checkout $metallb_version
+
+  # kindest/node image v1.32+ that we use is only compatible with kind v0.27+
+  # when using 'kind load' command however metallb builds and uses older
+  # incompatible kind version patch it so that it uses our own kind install
+  # instead of their build
+  patch tasks.py << 'EOF'
+@@ -29,7 +29,7 @@ extra_network = "network2"
+ controller_gen_version = "v0.16.3"
+ build_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
+ kubectl_path = os.path.join(build_path, "kubectl")
+-kind_path = os.path.join(build_path, "kind")
++kind_path = "kind"
+ ginkgo_path = os.path.join(build_path, "bin", "ginkgo")
+ controller_gen_path = os.path.join(build_path, "bin", "controller-gen")
+ kubectl_version = "v1.31.0"
+EOF
+
   pip install -r dev-env/requirements.txt
 
   local ip_family ipv6_network
@@ -150,6 +169,7 @@ install_metallb() {
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
   GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
 
+  docker network rm -f clientnet
   docker network create --subnet="${METALLB_CLIENT_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge clientnet
   docker network connect clientnet frr
   if  [ "$KIND_IPV6_SUPPORT" == true ]; then
@@ -157,6 +177,7 @@ install_metallb() {
     docker exec frr sysctl -w net.ipv6.conf.all.forwarding=1
   fi
   # Note: this image let's us use it also for creating load balancer backends that can send big packets
+  docker rm -f lbclient
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
   delete_metallb_dir
@@ -324,7 +345,11 @@ install_kubevirt() {
     # vX.Y.Z - install specific stable (i.e v1.3.1)
     # nightly - install newest nightly
     # nightly tag - install specific nightly (i.e 20240910)
-    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"stable"}
+    # KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"stable"}
+
+    # FIXME: kubevirt v1.5.0 is breaking live migration tcp connections at
+    #        at e2e tests, this pin to v1.4.0 wich is known to work
+    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"v1.4.0"}
 
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
@@ -357,8 +382,7 @@ install_kubevirt() {
     kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/developerConfiguration","value":{"featureGates":[]}},{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"NetworkBindingPlugins"},{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"DynamicPodInterfaceNaming"}]'
 
     local kubevirt_stable_release_url=$(get_kubevirt_release_url "stable")
-    local passt_binding_image="quay.io/kubevirt/network-passt-binding:${kubevirt_stable_release_url##*/}"
-    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"passt":{"computeResourceOverhead":{"requests":{"memory":"500Mi"}},"migration":{"method":"link-refresh"},"networkAttachmentDefinition":"default/primary-udn-kubevirt-binding","sidecarImage":"'"${passt_binding_image}"'"},"l2bridge":{"domainAttachmentType":"managedTap","migration":{}}}}]'
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"l2bridge":{"domainAttachmentType":"managedTap","migration":{}}}}]'
     
     if [ ! -d "./bin" ]
     then
@@ -409,7 +433,7 @@ install_multus() {
 
 install_mpolicy_crd() {
   echo "Installing multi-network-policy CRD ..."
-  mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
+  mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/refs/tags/v1.0.1/scheme.yml"
   run_kubectl apply -f "$mpolicy_manifest"
 }
 
@@ -593,35 +617,6 @@ kubectl_wait_dnsnameresolver_pods() {
   kubectl wait -n dnsnameresolver-operator --for=condition=ready pods --all --timeout=${timeout}s
 }
 
-deploy_kubevirt_binding() {
-  cat <<EOF | run_kubectl apply -f -
----
-apiVersion: "k8s.cni.cncf.io/v1"
-kind: NetworkAttachmentDefinition
-metadata:
-  name: primary-udn-kubevirt-binding
-  namespace: default
-spec:
-  config: '{
-  "cniVersion": "1.0.0",
-  "name": "primary-udn-kubevirt-binding",
-  "plugins": [
-    {
-      "type": "network-passt-binding"
-    }
-  ]
-}'
-EOF
-}
-
-deploy_passt_binary() {
-  echo "Installing passt-binding-cni-ds ..."
-  local manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/passt/passt-binding-cni-ds.yaml"
-  run_kubectl apply -f "$manifest"
-
-  run_kubectl rollout status -n kube-system daemonset/passt-binding-cni --timeout 2m
-}
-
 get_kubevirt_release_url() {
     local VERSION="$1"
 
@@ -648,7 +643,7 @@ get_kubevirt_release_url() {
     echo "$kubevirt_release_url"
 }
 
-readonly FRR_K8S_VERSION=v0.0.14
+readonly FRR_K8S_VERSION=v0.0.17
 readonly FRR_TMP_DIR=$(mktemp -d -u)
 
 clone_frr() {
@@ -656,6 +651,15 @@ clone_frr() {
     mkdir -p "$FRR_TMP_DIR" && trap 'rm -rf $FRR_TMP_DIR' EXIT
     pushd "$FRR_TMP_DIR" || exit 1
     git clone --depth 1 --branch $FRR_K8S_VERSION https://github.com/metallb/frr-k8s
+
+    # Download the patches
+    curl -Ls https://github.com/jcaamano/frr-k8s/archive/refs/heads/ovnk-bgp.tar.gz | tar xzvf - frr-k8s-ovnk-bgp/patches --strip-components 1
+
+    # Change into the cloned repo directory before applying patches
+    pushd frr-k8s
+    git apply ../patches/*
+    popd
+
     popd || exit 1
   }
 }
@@ -672,19 +676,88 @@ deploy_frr_external_container() {
   # can peer with acting as BGP (reflector) external gateway
   pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo || exit 1
   # modify config template to configure neighbors as route reflector clients
+  # First check if IPv4 network already exists
+  grep -q 'network '"${BGP_SERVER_NET_SUBNET_IPV4}" frr/frr.conf.tmpl || \
+    sed -i '/address-family ipv4 unicast/a \ \ network '"${BGP_SERVER_NET_SUBNET_IPV4}"'' frr/frr.conf.tmpl
+
+  # Add route reflector client config
   sed -i '/remote-as 64512/a \ neighbor {{ . }} route-reflector-client' frr/frr.conf.tmpl
+
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # Check if IPv6 address-family section exists
+    if ! grep -q 'address-family ipv6 unicast' frr/frr.conf.tmpl; then
+      # Add IPv6 address-family section if it doesn't exist
+      sed -i '/exit-address-family/a \ \
+  address-family ipv6 unicast\
+    network '"${BGP_SERVER_NET_SUBNET_IPV6}"'\
+  exit-address-family' frr/frr.conf.tmpl
+    else
+      # Add network to existing IPv6 section
+      sed -i '/address-family ipv6 unicast/a \ \ network '"${BGP_SERVER_NET_SUBNET_IPV6}"'' frr/frr.conf.tmpl
+    fi
+
+    # Add route-reflector-client for IPv6 neighbors
+    sed -i '/neighbor fc00.*remote-as 64512/a \ neighbor {{ . }} route-reflector-client' frr/frr.conf.tmpl
+  fi
   ./demo.sh
   popd || exit 1
+  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # Enable IPv6 forwarding in FRR
+    docker exec frr sysctl -w net.ipv6.conf.all.forwarding=1
+  fi
+}
 
-  # this container will act as the gateway for the cluster and will masquerade
-  # towards the external world
-  $OCI_BIN exec frr iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-  # set default route
-  FRR_IP=$($OCI_BIN inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" frr)
-  KIND_NODES=$(kind_get_nodes)
-  for n in $KIND_NODES; do
-    $OCI_BIN exec "$n" ip route replace default via "$FRR_IP"
-  done
+deploy_bgp_external_server() {
+  # We create an external docker container that acts as the server (or client) outside the cluster
+  # in the e2e tests that levergae router advertisements.
+  # This container will be connected to the frr container deployed above to simulate a realistic
+  # network topology
+  # -----------------               ------------------                         ---------------------
+  # |               | 172.26.0.0/16 |                |       172.18.0.0/16     | ovn-control-plane |
+  # |   external    |<------------- |   FRR router   |<------ KIND cluster --  ---------------------
+  # |    server     |               |                |                         |    ovn-worker     |   (client pod advertised
+  # -----------------               ------------------                         ---------------------    using RouteAdvertisements
+  #                                                                            |    ovn-worker2    |    from default pod network)
+  #                                                                            ---------------------
+  local ip_family ipv6_network
+  if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+    ip_family="dual"
+    ipv6_network="--ipv6 --subnet=${BGP_SERVER_NET_SUBNET_IPV6}"
+  elif  [ "$KIND_IPV6_SUPPORT" == true ]; then
+    ip_family="ipv6"
+    ipv6_network="--ipv6 --subnet=${BGP_SERVER_NET_SUBNET_IPV6}"
+  else
+    ip_family="ipv4"
+    ipv6_network=""
+  fi
+  docker rm -f bgpserver
+  docker network rm -f bgpnet
+  docker network create --subnet="${BGP_SERVER_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge bgpnet
+  docker network connect bgpnet frr
+  docker run  --cap-add NET_ADMIN --user 0  -d --network bgpnet  --rm  --name bgpserver -p 8080:8080  registry.k8s.io/e2e-test-images/agnhost:2.45 netexec
+  # let's make the bgp external server have its default route towards FRR router so that we don't need to add routes during tests back to the pods in the
+  # cluster for return traffic
+  local bgp_network_frr_v4 bgp_network_frr_v6
+  bgp_network_frr_v4=$($OCI_BIN inspect -f '{{index .NetworkSettings.Networks "bgpnet" "IPAddress"}}' frr)
+  echo "FRR kind network IPv4: ${bgp_network_frr_v4}"
+  $OCI_BIN exec bgpserver ip route replace default via "$bgp_network_frr_v4"
+  if  [ "$KIND_IPV6_SUPPORT" == true ] ; then
+    bgp_network_frr_v6=$($OCI_BIN inspect -f '{{index .NetworkSettings.Networks "bgpnet" "GlobalIPv6Address"}}' frr)
+    echo "FRR kind network IPv6: ${bgp_network_frr_v6}"
+    $OCI_BIN exec bgpserver ip -6 route replace default via "$bgp_network_frr_v6"
+  fi
+}
+
+destroy_bgp() {
+  if docker ps --format '{{.Names}}' | grep -Eq '^bgpserver$'; then
+      docker stop bgpserver
+  fi
+  if docker ps --format '{{.Names}}' | grep -Eq '^frr$'; then
+      docker stop frr
+  fi
+  if docker network ls --format '{{.Name}}' | grep -q '^bgpnet$'; then
+      docker network rm bgpnet
+  fi
 }
 
 install_ffr_k8s() {
@@ -699,9 +772,79 @@ install_ffr_k8s() {
   # apply a BGP peer configration with the external gateway that does not
   # exchange routes
   pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo/configs || exit 1
-  sed 's/all$/filtered/g' receive_all.yaml > receive_filtered.yaml
-  kubectl apply -f receive_filtered.yaml
+  sed 's/mode: all/mode: filtered/g' receive_all.yaml > receive_filtered.yaml
+  # Allow receiving the bgp external server's prefix
+  sed -i '/mode: filtered/a\            prefixes:\n            - prefix: '"${BGP_SERVER_NET_SUBNET_IPV4}"'' receive_filtered.yaml
+  # If IPv6 is enabled, add the IPv6 prefix as well
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # Find all line numbers where the IPv4 prefix is defined
+    IPv6_LINE="            - prefix: ${BGP_SERVER_NET_SUBNET_IPV6}"
+    # Process each occurrence of the IPv4 prefix
+    for LINE_NUM in $(grep -n "prefix: ${BGP_SERVER_NET_SUBNET_IPV4}" receive_filtered.yaml | cut -d ':' -f 1); do
+      # Insert the IPv6 prefix after each IPv4 prefix line
+      sed -i "${LINE_NUM}a\\${IPv6_LINE}" receive_filtered.yaml
+    done
+  fi
+  
+  # frr-k8s webhook is declaring readiness before its endpoint is serving.
+  # Let's do our own probing. Also will print logs in case of failure so we get
+  # insights on why this is hapenning 
+  local r
+  r=0
+  timeout 60s bash -x <<EOF || r=$?
+echo "Attempting to reach frr-k8s webhook"
+kind export kubeconfig --name ovn
+while true; do
+docker exec ovn-control-plane curl -ksS --connect-timeout 0.1 https://$(kubectl get svc -n frr-k8s-system frr-k8s-webhook-service -o jsonpath='{.spec.clusterIP}')
+[ \$? -eq 0 ] && exit 0
+echo "Couldn't reach frr-k8s webhook, trying in 1s..."
+sleep 1s
+done
+EOF
+  echo "r=$r"
+  if [ "$r" -ne "0" ]; then
+    kubectl describe pod -n frr-k8s-system -l app=frr-k8s-webhook-server
+    kubectl logs -n frr-k8s-system -l app=frr-k8s-webhook-server
+  fi
+
+  kubectl apply -n frr-k8s-system -f receive_filtered.yaml
   popd || exit 1
 
   rm -rf "${FRR_TMP_DIR}"
+  # Add routes for pod networks dynamically into the github runner for return traffic to pass back
+  if [ -n "${JOB_NAME:-}" ] && [[ "$JOB_NAME" == *"shard-conformance"* ]] && [ "$ADVERTISE_DEFAULT_NETWORK" == "true" ]; then
+    echo "Adding routes for Kubernetes pod networks..."
+    NODES=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+    echo "Found nodes: $NODES"
+    for node in $NODES; do
+      # Get the addresses
+      node_ips=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+      # Get subnet information
+      subnet_json=$(kubectl get node $node -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/node-subnets}')
+      
+      if [ "$KIND_IPV4_SUPPORT" == true ]; then
+        # Extract IPv4 address (first address)
+        node_ipv4=$(echo "$node_ips" | awk '{print $1}')
+        ipv4_subnet=$(echo "$subnet_json" | jq -r '.default[0]')
+        
+        # Add IPv4 route
+        if [ -n "$ipv4_subnet" ] && [ -n "$node_ipv4" ]; then
+          echo "Adding IPv4 route for $node ($node_ipv4): $ipv4_subnet"
+          sudo ip route add $ipv4_subnet via $node_ipv4
+        fi
+      fi
+
+      # Add IPv6 route if enabled
+      if [ "$KIND_IPV6_SUPPORT" == true ]; then
+        # Extract IPv6 address (second address, if present)
+        node_ipv6=$(echo "$node_ips" | awk '{print $2}')
+        ipv6_subnet=$(echo "$subnet_json" | jq -r '.default[1] // empty')
+        
+        if [ -n "$ipv6_subnet" ] && [ -n "$node_ipv6" ]; then
+          echo "Adding IPv6 route for $node ($node_ipv6): $ipv6_subnet"
+          sudo ip -6 route add $ipv6_subnet via $node_ipv6
+        fi
+      fi
+    done
+  fi
 }

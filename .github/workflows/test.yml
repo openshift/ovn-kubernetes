@@ -16,8 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: 1.22.0
-  K8S_VERSION: v1.31.0
+  K8S_VERSION: v1.32.3
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -31,6 +30,9 @@ env:
   CI_IMAGE_PR_TAR: image-pr.tar
   CI_DIST_IMAGES_OUTPUT: dist/images/_output/
 
+  # To run CI over custom OVN
+  # OVN_REPO: https://github.com/ovn-org/ovn
+  # OVN_GITREF: main
 
 jobs:
   # separate job for parallelism
@@ -44,14 +46,18 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
-        cache-dependency-path: "**/*.sum"
+        go-version-file: 'go-controller/go.mod'
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Verify
-      uses: golangci/golangci-lint-action@v4
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.56.1
+        version: v1.60.3
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 
@@ -100,8 +106,12 @@ jobs:
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
-        cache-dependency-path: "**/*.sum"
+        go-version-file: 'go-controller/go.mod'
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Build - from master branch
@@ -116,12 +126,11 @@ jobs:
     - name: Build docker image - from master branch
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
       run: |
-        pushd dist/images
-          sudo cp -f ../../go-controller/_output/go/bin/ovn* .
-          sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
-          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-fedora:dev -f Dockerfile.fedora .
-        popd
+        make -C dist/images \
+          IMAGE=ovn-daemonset-fedora:dev \
+          OVN_REPO=${{ env.OVN_REPO }} \
+          OVN_GITREF=${{ env.OVN_GITREF }} \
+          fedora-image
 
     - name: Cache master image
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
@@ -179,8 +188,12 @@ jobs:
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
-        cache-dependency-path: "**/*.sum"
+        go-version-file: 'go-controller/go.mod'
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Install VRF kernel module
@@ -207,12 +220,13 @@ jobs:
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
       run: |
         pushd dist/images
-          sudo cp -f ../../go-controller/_output/go/bin/ovn* .
-          sudo cp -f ../../go-controller/_output/go/bin/hybrid-overlay-node .
-          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-fedora:pr -f Dockerfile.fedora .
+          IMAGE=ovn-daemonset-fedora:pr
+          make IMAGE=${IMAGE} \
+            OVN_REPO=${{ env.OVN_REPO }} \
+            OVN_GITREF=${{ env.OVN_GITREF }} \
+            fedora-image
           mkdir _output
-          docker save ovn-daemonset-fedora:pr > _output/${CI_IMAGE_PR_TAR}
+          docker save ${IMAGE} > _output/${CI_IMAGE_PR_TAR}
         popd
 
     - name: Submit code coverage to Coveralls
@@ -220,18 +234,17 @@ jobs:
       continue-on-error: true
       env:
         COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GO111MODULE: off
       run: |
         set -x
-        go get github.com/mattn/goveralls
-        go get github.com/modocache/gover
+        go install github.com/mattn/goveralls@latest
+        go install github.com/modocache/gover@latest
         PATH=$PATH:$(go env GOPATH)/bin
 
-        mkdir -p $(go env GOPATH)/src/github.com/ovn-kubernetes
-        ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-kubernetes/ovn-kubernetes
+        mkdir -p $(go env GOPATH)/src/github.com/ovn-org
+        ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
 
         gover
-        goveralls -coverprofile=gover.coverprofile -service=github
+        GO111MODULE=off goveralls -coverprofile=gover.coverprofile -service=github
 
     - name: Cache PR image
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
@@ -283,8 +296,12 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
-        cache-dependency-path: "**/*.sum"
+        go-version-file: 'go-controller/go.mod'
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Set up environment
@@ -411,6 +428,8 @@ jobs:
         include:
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default"}
+          - {"target": "shard-conformance", "ha": "HA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-disabled",          "dns-name-resolver": "enable-dns-name-resolver"}
@@ -440,6 +459,8 @@ jobs:
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "bgp", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default"}
+          - {"target": "bgp", "ha": "noHA", "gateway-mode": "shared",  "ipfamily": "ipv4", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default"}
           - {"target": "traffic-flow-test-only","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24"}
           - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
     needs: [ build-pr ]
@@ -455,8 +476,8 @@ jobs:
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' || matrix.target == 'traffic-flow-test-only' }}"
-      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'kv-live-migration' || matrix.target == 'traffic-flow-test-only' }}"
+      ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' || matrix.target == 'traffic-flow-test-only' || matrix.routeadvertisements != '' }}"
+      ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'kv-live-migration' || matrix.target == 'traffic-flow-test-only' || matrix.target == 'bgp' }}"
       DISABLE_UDN_HOST_ISOLATION: "true"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
@@ -468,6 +489,8 @@ jobs:
       USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
       TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
+      ENABLE_ROUTE_ADVERTISEMENTS: "${{ matrix.routeadvertisements != '' }}"
+      ADVERTISE_DEFAULT_NETWORK:  "${{ matrix.routeadvertisements == 'advertise-default' }}"
     steps:
 
     - name: Install VRF kernel module
@@ -486,11 +509,25 @@ jobs:
           llvm-* microsoft-edge-stable mono-* \
           msbuild mysql-server-core-* php-* php7* \
           powershell temurin-* zulu-*
+        sudo docker system prune -af
 
     - name: Setup /mnt/runner directory
       run: |
         sudo mkdir -pv /mnt/runner
         sudo chown runner:runner /mnt/runner
+
+    - name: Setup /mnt/docker-data as docker storage
+      run: |
+        sudo mkdir -pv /mnt/docker-data
+        sudo systemctl stop docker.socket docker
+        [ -s "/etc/docker/daemon.json" ] && {
+          cat "/etc/docker/daemon.json" | jq '. + {"data-root": "/mnt/docker-data"}' | sudo tee /etc/docker/daemon.$$
+        } || {
+          echo '{"data-root": "/mnt/docker-data"}' | sudo tee /etc/docker/daemon.$$
+        }
+        sudo mv -f /etc/docker/daemon.$$ /etc/docker/daemon.json
+        sudo systemctl start docker docker.socket
+        docker system info
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
@@ -498,8 +535,12 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
-        cache-dependency-path: "**/*.sum"
+        go-version-file: 'go-controller/go.mod'
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Set up environment
@@ -510,6 +551,30 @@ jobs:
         if [ $OVN_SECOND_BRIDGE == "true" ]; then
           echo OVN_TEST_EX_GW_NETWORK=kindexgw >> $GITHUB_ENV
           echo OVN_ENABLE_EX_GW_NETWORK_BRIDGE=true >> $GITHUB_ENV
+        fi
+        if [[ "$JOB_NAME" == *"shard-conformance"* ]] && [ "$ADVERTISE_DEFAULT_NETWORK" == "true" ]; then
+          echo "ADVERTISE_DEFAULT_NETWORK=true" >> $GITHUB_ENV
+
+          # Use proper variable declaration with default values
+          NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
+          NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
+
+          sudo ip a
+          sudo ip r
+
+          # Add masquerade rules for both IPv4 and IPv6 networks
+          echo "Adding masquerade rule for $NET_CIDR_IPV4"
+          sudo iptables -t nat -A POSTROUTING -s $NET_CIDR_IPV4 -o eth0 -j MASQUERADE
+
+          echo "Adding masquerade rule for $NET_CIDR_IPV6"
+          sudo ip6tables -t nat -A POSTROUTING -s $NET_CIDR_IPV6 -o eth0 -j MASQUERADE
+
+          # Verify the rules were added
+          echo "IPv4 POSTROUTING rules:"
+          sudo iptables -t nat -L POSTROUTING -v
+
+          echo "IPv6 POSTROUTING rules:"
+          sudo ip6tables -t nat -L POSTROUTING -v
         fi
 
     - name: Disable ufw
@@ -566,6 +631,8 @@ jobs:
           make -C test conformance
         elif [ "${{ matrix.target }}" == "network-segmentation" ]; then
           make -C test control-plane WHAT="Network Segmentation"
+        elif [ "${{ matrix.target }}" == "bgp" ]; then
+          make -C test control-plane WHAT="BGP"
         elif [ "${{ matrix.target }}" == "tools" ]; then
           make -C go-controller build
           make -C test tools
@@ -636,8 +703,12 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
-        cache-dependency-path: "**/*.sum"
+        go-version-file: 'go-controller/go.mod'
+        # Disabling cache to avoid warnings until these two issues are fixed
+        # https://github.com/actions/setup-go/issues/424
+        # https://github.com/actions/setup-go/issues/403
+        # cache-dependency-path: "**/*.sum"
+        cache: false
       id: go
 
     - name: Set up environment

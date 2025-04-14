@@ -7,21 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1"
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-
-	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
-	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
-	egressservicelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
-
 	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
-	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
-	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
-
-	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -31,6 +20,14 @@ import (
 	netlisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
+
+	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
+	egressservicelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
+	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
 // Use a pool of internal informers to allow multiplexing of events
@@ -431,7 +428,11 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 		DeleteFunc: func(obj interface{}) {
 			realObj, err := ensureObjectOnDelete(obj, i.oType)
 			if err != nil {
-				klog.Errorf(err.Error())
+				klog.Errorf("Error in DeleteFunc: %v", err)
+				return
+			}
+			// do not enqueue events to internal informer that has no handlers for better performance
+			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
 				return
 			}
 			// do not enqueue events to internal informer that has no handlers for better performance
@@ -515,7 +516,6 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
 	lister, err := newInformerLister(oType, sharedInformer)
 	if err != nil {
-		klog.Errorf(err.Error())
 		return nil, err
 	}
 

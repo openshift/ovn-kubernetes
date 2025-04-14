@@ -1,8 +1,11 @@
 package pod
 
 import (
+	"errors"
 	"fmt"
 	"sync"
+
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -12,9 +15,8 @@ import (
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -351,6 +353,9 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 	)
 
 	if err != nil {
+		if errors.Is(err, ipallocator.ErrFull) {
+			a.recordPodErrorEvent(pod, err)
+		}
 		return err
 	}
 
