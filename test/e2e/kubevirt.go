@@ -1192,7 +1192,7 @@ fi
 					if nse != nil {
 						pod.Annotations = networkSelectionElements(*nse)
 					}
-					pod.Spec.Containers[0].Image = iperf3Image
+					pod.Spec.Containers[0].Image = images.IPerf3()
 					pod.Spec.Containers[0].Args = []string{iperfServerScript + "\n sleep infinity"}
 
 				})
