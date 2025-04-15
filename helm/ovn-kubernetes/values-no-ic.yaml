@@ -167,10 +167,6 @@ global:
     auth: blah_blah_blah
     create: false
 
-ovnkube-identity:
-    # -- number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes
-    replicas: 1
-
 ovnkube-master:
     # -- number of ovnkube-master pods
     replicas: 1
