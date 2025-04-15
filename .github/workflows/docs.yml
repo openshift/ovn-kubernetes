@@ -37,6 +37,7 @@ jobs:
         with:
           python-version: 3.x
       - run: pip install mkdocs-material
+      - run: pip install mkdocs-awesome-pages-plugin # Install the missing plugin
       - run: pip install $(mkdocs-get-deps)
       - run: mkdocs build
       - name: Setup Pages
@@ -60,6 +61,7 @@ jobs:
           python-version: 3.x
       - run: |
           pip install mkdocs-material
+          pip install mkdocs-awesome-pages-plugin # Install the missing plugin
           pip install $(mkdocs-get-deps)
       - run: mkdocs build
       - name: Upload Artifact (Test)
