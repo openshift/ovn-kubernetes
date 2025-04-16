@@ -25,6 +25,9 @@ const (
 	PhysicalNetworkName     = "physnet"
 	PhysicalNetworkExGwName = "exgwphysnet"
 
+	// LoopbackInterfaceIndex is the link index corresponding to loopback interface
+	LoopbackInterfaceIndex = 1
+
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
 	LocalNetworkName = "locnet"
@@ -157,9 +160,6 @@ const (
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"
 
-	// DefaultNetworkLabelSelector is the label that needs to be matched on a
-	// selector to select the default network
-	DefaultNetworkLabelSelector = OvnK8sPrefix + "/default-network"
 	// OvnNetworkNameAnnotation is the name of the network annotated on the NAD
 	// by cluster manager nad controller
 	OvnNetworkNameAnnotation = OvnK8sPrefix + "/network-name"
