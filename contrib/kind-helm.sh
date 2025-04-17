@@ -403,7 +403,6 @@ helm install ovn-kubernetes . -f "${value_file}" \
           --set k8sAPIServer=${API_URL} \
           --set podNetwork="${NET_CIDR_IPV4}/24" \
           --set serviceNetwork=${SVC_CIDR_IPV4} \
-          --set ovnkube-identity.replicas=${MASTER_REPLICAS} \
           --set ovnkube-master.replicas=${MASTER_REPLICAS} \
           --set global.image.repository=$(get_image) \
           --set global.image.tag=$(get_tag) \
