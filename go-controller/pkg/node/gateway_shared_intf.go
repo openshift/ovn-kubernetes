@@ -316,9 +316,13 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 						errors = append(errors, err)
 						continue
 					}
+					if len(lbe) > 1 {
+						klog.Warningf("Multiple target ports for service %s/%s port %s, using first",
+							service.Namespace, service.Name, svcPortKey)
+					}
 					// The return traffic, matches on the flowProtocol + targetPort. That's different from cookie which
 					// uses svcPort.NodePort.
-					targetPort := lbe.Port
+					targetPort := lbe[0].Port
 					targetPortCookie, err := svcToCookie(service.Namespace, service.Name, flowProtocol, targetPort)
 					if err != nil {
 						klog.Warningf("Unable to generate target port cookie for svc: %s, %s, %d, error: %v",
@@ -552,10 +556,14 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service,
 				errors = append(errors, err)
 				continue
 			}
+			if len(lbe) > 1 {
+				klog.Warningf("Multiple target ports for %s service %s/%s port %s, using first",
+					ipType, service.Namespace, service.Name, svcPortKey)
+			}
 			// cookie uses externalIPOrLBIngressIP and thus generates different cookies for each of the IP addresses.
 			// The return traffic, however, matches on the flowProtocol + src port only. Therefore, generate a stable
 			// cookie regardless of IP address and use this for the return flows.
-			targetPort := lbe.Port
+			targetPort := lbe[0].Port
 			targetPortCookie, err := svcToCookie(service.Namespace, service.Name, flowProtocol, targetPort)
 			if err != nil {
 				klog.Warningf("Unable to generate target port cookie for %s svc: %s, %s, %d, error: %v",
