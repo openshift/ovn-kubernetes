@@ -45,7 +45,7 @@ kubectl_wait_daemonset(){
     READY_REPLICAS=$(run_kubectl get daemonsets.apps $1 -n ovn-kubernetes -o=jsonpath='{.status.numberReady}')
     echo "CURRENT READY REPLICAS: $READY_REPLICAS, CURRENT DESIRED REPLICAS: $DESIRED_REPLICAS for the DaemonSet $1"
     if [[ $READY_REPLICAS -eq $DESIRED_REPLICAS ]]; then
-      UP_TO_DATE_REPLICAS=$(run_kubectl get daemonsets.apps ovnkube-node -n ovn-kubernetes  -o=jsonpath='{.status.updatedNumberScheduled}')
+      UP_TO_DATE_REPLICAS=$(run_kubectl get daemonsets.apps $1 -n ovn-kubernetes  -o=jsonpath='{.status.updatedNumberScheduled}')
       echo "CURRENT UP TO DATE REPLICAS: $UP_TO_DATE_REPLICAS for the Deployment $1"
       if [[ $READY_REPLICAS -eq $UP_TO_DATE_REPLICAS ]]; then
         break
@@ -288,7 +288,7 @@ run_kubectl apply -f rbac-ovnkube-db.yaml
 
 if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
   run_kubectl apply -f ovnkube-identity.yaml
-  kubectl_wait_deployment ovnkube-identity
+  kubectl_wait_daemonset ovnkube-identity
 fi
 
 
