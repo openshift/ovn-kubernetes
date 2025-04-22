@@ -855,9 +855,11 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 				func(ipFamilyIndex int) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
 					err := true
 					out := curlConnectionTimeoutCode
-					if isLocalGWModeEnabled() {
-						// FIXME: L3 - pod in the UDN should NOT be able to access a default network service
-						err = false
+					if cudnATemplate.Spec.Network.Topology == udnv1.NetworkTopologyLayer2 {
+						// FIXME: prevent looping of traffic in L2 UDNs
+						// bad behaviour: packet is looping from management port -> breth0 -> GR -> management port -> breth0 and so on
+						// which is a never ending loop
+						// this causes curl timeout with code 7 host unreachable instead of code 28
 						out = ""
 					}
 					return podsNetA[0].Name, podsNetA[0].Namespace, net.JoinHostPort(svcNetDefault.Spec.ClusterIPs[ipFamilyIndex], "8080") + "/clientip", out, err
