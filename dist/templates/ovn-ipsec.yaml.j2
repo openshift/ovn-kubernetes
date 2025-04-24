@@ -66,6 +66,7 @@ spec:
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
+      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       priorityClassName: "system-node-critical"
       initContainers:
       - name: ovn-keys
@@ -168,8 +169,8 @@ spec:
         securityContext:
           privileged: true
         volumeMounts:
-        - mountPath: /var/run/openvswitch
-          name: host-var-run-ovs
+        - mountPath: /var/run
+          name: host-var-run
         - mountPath: /signer-ca
           name: signer-ca
         - mountPath: /etc/openvswitch
@@ -257,8 +258,8 @@ spec:
         # To check that network setup is complete
         - mountPath: /etc/cni/net.d
           name: host-cni-netd
-        - mountPath: /var/run/openvswitch
-          name: host-var-run-ovs
+        - mountPath: /var/run
+          name: host-var-run
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
         - mountPath: /etc/openvswitch
@@ -286,9 +287,9 @@ spec:
         hostPath:
           path: /var/log/openvswitch
           type: DirectoryOrCreate
-      - name: host-var-run-ovs
+      - name: host-var-run
         hostPath:
-          path: /var/run/openvswitch
+          path: /var/run
           type: DirectoryOrCreate
       - name: signer-ca
         configMap:

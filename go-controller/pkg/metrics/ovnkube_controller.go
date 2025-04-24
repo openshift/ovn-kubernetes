@@ -29,6 +29,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	ipSecTunnelStatusQueryWaitTime = 5 * time.Second
+)
+
 // metricNbE2eTimestamp is the UNIX timestamp value set to NB DB. Northd will eventually copy this
 // timestamp from NB DB to SB DB. The metric 'sb_e2e_timestamp' stores the timestamp that is
 // read from SB DB. This is registered within func RunTimestamp in order to allow gathering this
@@ -253,6 +257,16 @@ var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Name:      "ipsec_enabled",
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
 })
+
+var metricIPsecTunnelState = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "ipsec_tunnel_state",
+	Help:      "Specifies whether IPSec Child SA is established for the Geneve tunnel(1) or not(0)"},
+	[]string{
+		"local_ip", "remote_ip",
+	},
+)
 
 var metricEgressRoutingViaHost = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: types.MetricOvnkubeNamespace,
@@ -571,6 +585,14 @@ func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
 }
 
+func RecordIPsecTunnelStateUpEvent(localIP, remoteIP string) {
+	metricIPsecTunnelState.WithLabelValues(localIP, remoteIP).Set(1)
+}
+
+func RecordIPsecTunnelStateDownEvent(localIP, remoteIP string) {
+	metricIPsecTunnelState.WithLabelValues(localIP, remoteIP).Set(0)
+}
+
 // RecordEgressRoutingViaHost records the egress gateway mode of the cluster
 // The values are:
 // 0: If it is shared gateway mode
@@ -617,6 +639,49 @@ func ipsecMetricHandler(table string, model model.Model) {
 	} else {
 		metricIPsecEnabled.Set(0)
 	}
+}
+
+// MontiorIPsecTunnelsState will register a labeled metric for the ipsec tunnel status. It will keep
+// checking ipsec established status for each Geneve tunnel towards other remote node for every 5s
+// and update the metric with tunnel up or down status.
+func MontiorIPsecTunnelsState(stopChan <-chan struct{}, nbClient libovsdbclient.Client) {
+	prometheus.MustRegister(metricIPsecTunnelState)
+	go func() {
+		for {
+			select {
+			case <-stopChan:
+				return
+			default:
+				nbGlobal := &nbdb.NBGlobal{}
+				nbGlobal, err := libovsdbops.GetNBGlobal(nbClient, nbGlobal)
+				if err != nil {
+					klog.Errorf("Error in getting the NBGlobal row from Northbound db, err: %v", err)
+					return
+				}
+				if !nbGlobal.Ipsec {
+					// IPsec is not enabled, so keep checking for ipsec after wait time.
+					time.Sleep(ipSecTunnelStatusQueryWaitTime)
+					continue
+				}
+				geneveTunnels, err := util.GetGeneveTunnels()
+				if err != nil {
+					klog.Errorf("Error in retrieving Geneve tunnels, err: %v", err)
+				}
+				ipsecTunnels, err := util.GetAllEstablishedIPsecTunnels()
+				if err != nil {
+					klog.Errorf("Error in retrieving established IPsec tunnels, err: %v", err)
+				}
+				for _, geneveTunnel := range geneveTunnels {
+					if ipsecTunnels.Has(fmt.Sprintf("%s-in-1", geneveTunnel.Name)) && ipsecTunnels.Has(fmt.Sprintf("%s-out-1", geneveTunnel.Name)) {
+						RecordIPsecTunnelStateUpEvent(geneveTunnel.LocalIP, geneveTunnel.RemoteIP)
+					} else {
+						RecordIPsecTunnelStateDownEvent(geneveTunnel.LocalIP, geneveTunnel.RemoteIP)
+					}
+				}
+			}
+			time.Sleep(ipSecTunnelStatusQueryWaitTime)
+		}
+	}()
 }
 
 // IncrementEgressFirewallCount increments the number of Egress firewalls
