@@ -359,11 +359,23 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err = udng.vrfManager.AddVRFRoutes(vrfDeviceName, routes); err != nil {
 		return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
 	}
+
+	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
+
 	// create the iprules for this network
 	err = udng.updateUDNVRFIPRule()
 	if err != nil {
 		return fmt.Errorf("failed to update IP rules for network %s: %w", udng.GetNetworkName(), err)
 	}
+
+	if err = udng.updateAdvertisedUDNIsolationRules(isNetworkAdvertised); err != nil {
+		return fmt.Errorf("failed to configure isolation rules for network %s: %w", udng.GetNetworkName(), err)
+	}
+
+	if err := udng.updateUDNVRFIPRoute(isNetworkAdvertised); err != nil {
+		return fmt.Errorf("failed to configure ip routes for network %s: %w", udng.GetNetworkName(), err)
+	}
+
 	// add loose mode for rp filter on management port
 	mgmtPortName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.GetNetworkID()))
 	if err := addRPFilterLooseModeForManagementPort(mgmtPortName); err != nil {
