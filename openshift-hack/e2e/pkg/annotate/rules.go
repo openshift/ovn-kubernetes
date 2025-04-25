@@ -21,7 +21,6 @@ var (
 			`\[Feature:EgressQos\]`,
 			`\[Feature:ExternalGateway\]`,
 			`\[Feature:DisablePacketMTUCheck\]`,
-			`\[Feature:VirtualMachineSupport\]`,
 			`\[Feature:Interconnect\]`,
 			`\[Feature:Multicast\]`,
 			`\[Feature:MultiHoming\]`,
@@ -75,18 +74,20 @@ var (
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)
-		"[Skipped:Disconnected]": {},
-		"[Skipped:alibabacloud]": {},
-		"[Skipped:aws]":          {},
-		"[Skipped:azure]":        {},
-		"[Skipped:baremetal]":    {},
-		"[Skipped:gce]":          {},
-		"[Skipped:ibmcloud]":     {},
-		"[Skipped:kubevirt]":     {},
-		"[Skipped:nutanix]":      {},
-		"[Skipped:openstack]":    {},
-		"[Skipped:ovirt]":        {},
-		"[Skipped:vsphere]":      {},
+		"[Skipped:Disconnected]": {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:alibabacloud]": {`\[Feature:VirtualMachineSupports\]`},
+		// TODO: Don't skip this on VMs to test layer2 primary over br-ex on
+		//       cloud envs.
+		"[Skipped:aws]":       {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:azure]":     {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:baremetal]": {},
+		"[Skipped:gce]":       {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:ibmcloud]":  {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:kubevirt]":  {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:nutanix]":   {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:openstack]": {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:ovirt]":     {`\[Feature:VirtualMachineSupports\]`},
+		"[Skipped:vsphere]":   {`\[Feature:VirtualMachineSupports\]`},
 		// These tests are skipped when openshift-tests needs to use a proxy to reach the
 		// cluster -- either because the test won't work while proxied, or because the test
 		// itself is testing a functionality using it's own proxy.

@@ -805,35 +805,35 @@ var Annotations = map[string]string{
 
 	"[ovn-kubernetes][Feature:Unidle] With non annotated service Should not generate a NeedPods event when has backend": "[Disabled:Unimplemented]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with pre-copy fails, should keep connectivity": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with pre-copy fails, should keep connectivity": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with pre-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with default pod network when live migration with pre-copy succeeds, should keep connectivity": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with primary/layer2": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with secondary/localnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with secondary/localnet": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with primary/layer2": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/layer2": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/localnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with secondary/localnet": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with primary/layer2": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/layer2": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/localnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with secondary/localnet": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with primary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with primary/layer2": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/layer2": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/layer2": "[Suite:openshift/conformance/parallel]",
 
-	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/localnet": "[Disabled:Unimplemented]",
+	"[ovn-kubernetes][Feature:VirtualMachineSupport] with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with secondary/localnet": "[Suite:openshift/conformance/parallel]",
 
 	"e2e br-int flow monitoring export validation Should validate flow data of br-int is sent to an external gateway with netflow v5": "[Disabled:Unimplemented]",
 

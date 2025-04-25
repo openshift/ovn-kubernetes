@@ -10,6 +10,7 @@ import (
 	"github.com/openshift-eng/openshift-tests-extension/pkg/ginkgo"
 	"github.com/openshift/ovn-kubernetes/openshift-hack/e2e/pkg/generated"
 	"github.com/spf13/cobra"
+
 	// ensure providers are initialised for configuring infra
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/aws"
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/azure"
@@ -17,6 +18,7 @@ import (
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/kubemark"
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/openstack"
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/vsphere"
+
 	// Ensure that logging flags are part of the command line.
 	_ "github.com/ovn-org/ovn-kubernetes/test/e2e"
 	_ "k8s.io/component-base/logs/testinit"
