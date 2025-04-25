@@ -359,11 +359,22 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err = udng.vrfManager.AddVRFRoutes(vrfDeviceName, routes); err != nil {
 		return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
 	}
+
+	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
+
 	// create the iprules for this network
-	err = udng.updateUDNVRFIPRule()
-	if err != nil {
+	if err = udng.updateUDNVRFIPRules(isNetworkAdvertised); err != nil {
 		return fmt.Errorf("failed to update IP rules for network %s: %w", udng.GetNetworkName(), err)
 	}
+
+	if err = udng.updateAdvertisedUDNIsolationRules(isNetworkAdvertised); err != nil {
+		return fmt.Errorf("failed to update isolation rules for network %s: %w", udng.GetNetworkName(), err)
+	}
+
+	if err := udng.updateUDNVRFIPRoute(isNetworkAdvertised); err != nil {
+		return fmt.Errorf("failed to update ip routes for network %s: %w", udng.GetNetworkName(), err)
+	}
+
 	// add loose mode for rp filter on management port
 	mgmtPortName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.GetNetworkID()))
 	if err := addRPFilterLooseModeForManagementPort(mgmtPortName); err != nil {
@@ -777,12 +788,11 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 // 2000:	from all to 10.132.0.0/14 lookup 1007
 // 2000:	from all fwmark 0x1001 lookup 1009
 // 2000:	from all to 10.134.0.0/14 lookup 1009
-func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]netlink.Rule, []netlink.Rule, error) {
+func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(isNetworkAdvertised bool) ([]netlink.Rule, []netlink.Rule, error) {
 	var addIPRules []netlink.Rule
 	var delIPRules []netlink.Rule
 	var masqIPRules []netlink.Rule
 	var subnetIPRules []netlink.Rule
-	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
 	masqIPv4, err := udng.getV4MasqueradeIP()
 	if err != nil {
 		return nil, nil, err
@@ -911,7 +921,7 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
 	udng.openflowManager.defaultBridge.netConfig[udng.GetNetworkName()].advertised.Store(isNetworkAdvertised)
 
-	if err := udng.updateUDNVRFIPRule(); err != nil {
+	if err := udng.updateUDNVRFIPRules(isNetworkAdvertised); err != nil {
 		return fmt.Errorf("error while updating ip rule for UDN %s: %s", udng.GetNetworkName(), err)
 	}
 
@@ -932,10 +942,10 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 	return nil
 }
 
-// updateUDNVRFIPRule updates IP rules for a network depending on whether the
+// updateUDNVRFIPRules updates IP rules for a network depending on whether the
 // network is advertised or not
-func (udng *UserDefinedNetworkGateway) updateUDNVRFIPRule() error {
-	addIPRules, deleteIPRules, err := udng.constructUDNVRFIPRules()
+func (udng *UserDefinedNetworkGateway) updateUDNVRFIPRules(isNetworkAdvertised bool) error {
+	addIPRules, deleteIPRules, err := udng.constructUDNVRFIPRules(isNetworkAdvertised)
 	if err != nil {
 		return fmt.Errorf("unable to get iprules for network %s, err: %v", udng.GetNetworkName(), err)
 	}

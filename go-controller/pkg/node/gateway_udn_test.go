@@ -1447,7 +1447,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 			})
 			g.Expect(err).NotTo(HaveOccurred())
 			udnGateway.vrfTableId = test.vrftableID
-			rules, delRules, err := udnGateway.constructUDNVRFIPRules()
+			rules, delRules, err := udnGateway.constructUDNVRFIPRules(false)
 			g.Expect(err).ToNot(HaveOccurred())
 			for i, rule := range rules {
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
@@ -1634,7 +1634,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertised(t *testing.T) {
 			})
 			g.Expect(err).NotTo(HaveOccurred())
 			udnGateway.vrfTableId = test.vrftableID
-			rules, delRules, err := udnGateway.constructUDNVRFIPRules()
+			rules, delRules, err := udnGateway.constructUDNVRFIPRules(true)
 			g.Expect(err).ToNot(HaveOccurred())
 			for i, rule := range rules {
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
