@@ -932,9 +932,12 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 	// add below OpenFlows based on the gateway mode and whether the network is advertised or not:
 	// table=1, n_packets=0, n_bytes=0, priority=16,ip,nw_dst=128.192.0.2 actions=LOCAL (Both gateway modes)
 	// table=1, n_packets=0, n_bytes=0, priority=15,ip,nw_dst=128.192.0.0/14 actions=output:3 (shared gateway mode)
+	// necessary service isolation flows based on whether network is advertised or not
 	if err := udng.openflowManager.updateBridgeFlowCache(udng.nodeIPManager.ListAddresses()); err != nil {
 		return fmt.Errorf("error while updating logical flow for UDN %s: %s", udng.GetNetworkName(), err)
 	}
+	// let's sync these flows immediately
+	udng.openflowManager.requestFlowSync()
 
 	if err := udng.updateAdvertisedUDNIsolationRules(isNetworkAdvertised); err != nil {
 		return fmt.Errorf("error while updating advertised UDN isolation rules for network %s: %w", udng.GetNetworkName(), err)
