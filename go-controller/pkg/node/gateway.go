@@ -241,7 +241,6 @@ func (g *gateway) AddEgressIP(eip *egressipv1.EgressIP) error {
 		if err = g.Reconcile(); err != nil {
 			return fmt.Errorf("failed to sync gateway: %v", err)
 		}
-		g.openflowManager.requestFlowSync()
 	}
 	return nil
 }
@@ -258,7 +257,6 @@ func (g *gateway) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressIP) error {
 		if err = g.Reconcile(); err != nil {
 			return fmt.Errorf("failed to sync gateway: %v", err)
 		}
-		g.openflowManager.requestFlowSync()
 	}
 	return nil
 }
@@ -275,7 +273,6 @@ func (g *gateway) DeleteEgressIP(eip *egressipv1.EgressIP) error {
 		if err = g.Reconcile(); err != nil {
 			return fmt.Errorf("failed to sync gateway: %v", err)
 		}
-		g.openflowManager.requestFlowSync()
 	}
 	return nil
 }
@@ -290,7 +287,6 @@ func (g *gateway) SyncEgressIP(eips []interface{}) error {
 	if err := g.Reconcile(); err != nil {
 		return fmt.Errorf("failed to sync gateway: %v", err)
 	}
-	g.openflowManager.requestFlowSync()
 	return nil
 }
 
@@ -492,6 +488,8 @@ func (g *gateway) Reconcile() error {
 	if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
 		return err
 	}
+	// let's sync these flows immediately
+	g.openflowManager.requestFlowSync()
 	err := g.updateSNATRules()
 	if err != nil {
 		return err
