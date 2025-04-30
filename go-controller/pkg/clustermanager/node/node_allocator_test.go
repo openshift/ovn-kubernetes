@@ -78,7 +78,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			},
 		},
 		{
-			name:          "new node, IPv4 only cluster, the test node is added while node allocator is restarting",
+			name:          "new node, IPv4 only cluster, the test node is added before node allocator starts",
 			networkRanges: []string{"172.16.0.0/16"},
 			networkLens:   []int{24},
 			configIPv4:    true,
@@ -101,6 +101,32 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			},
 		},
 		{
+			name:          "new node, IPv4 only cluster, the test node is added when a hybrid overlay node with overlapped node subnet exists",
+			networkRanges: []string{"172.16.0.0/16"},
+			networkLens:   []int{24},
+			configIPv4:    true,
+			configIPv6:    false,
+			existingNets:  nil,
+			wantStr:       []string{"172.16.1.0/24"},
+			allocated:     1,
+			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ho_node1",
+						Annotations: map[string]string{
+							"k8s.ovn.org/hybrid-overlay-node-subnet": "172.16.0.0/24",
+						},
+						Labels: map[string]string{
+							"hybrid-overlay-node": "true",
+						},
+					},
+					Spec: k8sv1.NodeSpec{},
+				},
+			},
+		},
+		{
 			name:          "new node, IPv6 only cluster",
 			networkRanges: []string{"2001:db2::/56"},
 			networkLens:   []int{64},
@@ -115,7 +141,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			},
 		},
 		{
-			name:          "new node, IPv6 only cluster, the test node is added while node allocator is restarting",
+			name:          "new node, IPv6 only cluster, the test node is added before node allocator starts",
 			networkRanges: []string{"2001:db2::/56"},
 			networkLens:   []int{64},
 			configIPv4:    false,
@@ -131,6 +157,32 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 						Name: "node1",
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-subnets": "{\"default\":[\"2001:db2::/64\"]}",
+						},
+					},
+					Spec: k8sv1.NodeSpec{},
+				},
+			},
+		},
+		{
+			name:          "new node, IPv6 only cluster, the test node is added when a hybrid overlay node with overlapped node subnet exists",
+			networkRanges: []string{"2001:db2::/56"},
+			networkLens:   []int{64},
+			configIPv4:    false,
+			configIPv6:    true,
+			existingNets:  nil,
+			wantStr:       []string{"2001:db2:0:1::/64"},
+			allocated:     1,
+			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ho_node1",
+						Annotations: map[string]string{
+							"k8s.ovn.org/hybrid-overlay-node-subnet": "2001:db2::/64",
+						},
+						Labels: map[string]string{
+							"hybrid-overlay-node": "true",
 						},
 					},
 					Spec: k8sv1.NodeSpec{},
@@ -308,6 +360,12 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			config.HybridOverlay.Enabled = true
+			config.Kubernetes.NoHostSubnetNodes, _ = metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{"hybrid-overlay-node": "true"},
+			})
+			config.HybridOverlay.ClusterSubnets = nil
+
 			ranges, err := rangesFromStrings(tt.networkRanges, tt.networkLens)
 			if err != nil {
 				t.Fatal(err)

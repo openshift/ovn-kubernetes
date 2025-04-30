@@ -282,8 +282,26 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 					klog.Errorf("Failed to parse hybrid overlay for node %s: %v", node.Name, err)
 				} else if hostSubnet != nil {
 					klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
-					if err := na.hybridOverlaySubnetAllocator.ReleaseNetworks(node.Name, hostSubnet); err != nil {
+					if err := na.hybridOverlaySubnetAllocator.MarkAllocatedNetworks(node.Name, hostSubnet); err != nil {
 						klog.Errorf("Failed to mark the subnet %v as allocated in the hybrid subnet allocator for node %s: %v", hostSubnet, node.Name, err)
+					}
+				}
+			} else if config.HybridOverlay.Enabled && config.HybridOverlay.ClusterSubnets == nil {
+				// this is a hybrid overlay node but not managed by the hybrid overlay subnet allocator
+				// so we need to mark the host subnet as allocated in the cluster subnet allocator if it overlaps with the cluste subnets.
+				hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
+				if err != nil {
+					klog.Errorf("Failed to parse hybrid overlay for node %s: %v", node.Name, err)
+				} else if hostSubnet != nil {
+					for _, subnet := range config.Default.ClusterSubnets {
+						maskLength, _ := hostSubnet.Mask.Size()
+						if subnet.CIDR.Contains(hostSubnet.IP) && subnet.HostSubnetLength == maskLength {
+							klog.V(5).Infof("Hybrid overlay node %s contains subnets: %v", node.Name, hostSubnet)
+							if err := na.clusterSubnetAllocator.MarkAllocatedNetworks(node.Name, hostSubnet); err != nil {
+								klog.Errorf("Failed to mark the subnet %v as allocated in the cluster subnet allocator for node %s: %v", hostSubnet, node.Name, err)
+							}
+							break
+						}
 					}
 				}
 			}
