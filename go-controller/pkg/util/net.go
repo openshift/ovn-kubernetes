@@ -267,6 +267,17 @@ func ContainsCIDR(ipnet1, ipnet2 *net.IPNet) bool {
 	return mask1 <= mask2 && ipnet1.Contains(ipnet2.IP)
 }
 
+// IPNetOverlaps returns ipnets that overlap with the ref
+func IPNetOverlaps(ref *net.IPNet, ipnets ...*net.IPNet) []*net.IPNet {
+	var overlaps []*net.IPNet
+	for _, ipnet := range ipnets {
+		if ref.Contains(ipnet.IP) || ipnet.Contains(ref.IP) {
+			overlaps = append(overlaps, ipnet)
+		}
+	}
+	return overlaps
+}
+
 // ParseIPNets parses the provided string formatted CIDRs
 func ParseIPNets(strs []string) ([]*net.IPNet, error) {
 	ipnets := make([]*net.IPNet, len(strs))
