@@ -84,6 +84,23 @@ func (na *NodeAllocator) Init() error {
 		}
 	}
 
+	// initialized the subnet allocator by syncing the existing nodes
+	// this will mark the existing subnets as allocated in the allocator
+	existingNodes, err := na.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("error in retrieving the nodes: %v", err)
+	}
+	if len(existingNodes) > 0 {
+		nodeInterfaces := make([]interface{}, len(existingNodes))
+		for i, node := range existingNodes {
+			nodeInterfaces[i] = node
+		}
+		na.Sync(nodeInterfaces)
+		if err != nil {
+			return fmt.Errorf("error in initial node subnet sync: %v", err)
+		}
+	}
+
 	// update metrics for cluster subnets
 	na.recordSubnetCount()
 
