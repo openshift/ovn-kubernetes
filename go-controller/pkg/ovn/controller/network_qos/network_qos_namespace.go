@@ -56,8 +56,8 @@ func (c *Controller) syncNetworkQoSNamespace(eventData *eventData[*corev1.Namesp
 }
 
 // getNetworkQosForNamespaceChange returns the set of NetworkQoS names that are affected by the namespace change
-func (c *Controller) getNetworkQosForNamespaceChange(eventData *eventData[*corev1.Namespace]) (sets.Set[*nqosv1alpha1.NetworkQoS], error) {
-	networkQoSes := sets.Set[*nqosv1alpha1.NetworkQoS]{}
+func (c *Controller) getNetworkQosForNamespaceChange(eventData *eventData[*corev1.Namespace]) (sets.Set[string], error) {
+	networkQoSes := sets.Set[string]{}
 	nqoses, err := c.getAllNetworkQoSes()
 	if err != nil {
 		return nil, err
@@ -69,12 +69,12 @@ func (c *Controller) getNetworkQosForNamespaceChange(eventData *eventData[*corev
 		}
 		// check if any network selector matches the namespace, or ns label change affects the network selection
 		if namespaceMatchesNetworkSelector(ns, nqos) || networkSelectionChanged(nqos, eventData.new, eventData.old) {
-			networkQoSes.Insert(nqos)
+			networkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 			continue
 		}
 		// check if any egress rule matches the namespace, or ns label change affects the egress selection
 		if namespaceMatchesEgressRule(ns, nqos) || egressSelectionChanged(nqos, eventData.new, eventData.old) {
-			networkQoSes.Insert(nqos)
+			networkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 		}
 	}
 	return networkQoSes, nil
