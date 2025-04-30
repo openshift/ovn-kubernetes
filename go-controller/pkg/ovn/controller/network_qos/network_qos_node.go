@@ -56,7 +56,7 @@ func (c *Controller) syncNetworkQoSNode(key string) error {
 		if nqos, err := c.nqosLister.NetworkQoSes(ns).Get(name); err != nil {
 			klog.Errorf("Failed to get NetworkQoS %s: %v", nqosName, err)
 		} else if nqos != nil {
-			c.nqosQueue.Add(nqos)
+			c.nqosQueue.Add(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 		}
 	}
 	return nil

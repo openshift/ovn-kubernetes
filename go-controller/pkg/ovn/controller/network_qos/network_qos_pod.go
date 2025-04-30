@@ -41,12 +41,12 @@ func (c *Controller) processNextNQOSPodWorkItem(wg *sync.WaitGroup) bool {
 // we dequeue a key from the nqosPodQueue cache
 func (c *Controller) syncNetworkQoSPod(eventData *eventData[*corev1.Pod]) error {
 	startTime := time.Now()
-	networkQoSes, err := c.getNetworkQosForPodChange(eventData)
+	nqosNames, err := c.getNetworkQosForPodChange(eventData)
 	if err != nil {
 		return err
 	}
-	for nqos := range networkQoSes {
-		c.nqosQueue.Add(nqos)
+	for nqosName := range nqosNames {
+		c.nqosQueue.Add(nqosName)
 	}
 	recordPodReconcileDuration(c.controllerName, time.Since(startTime).Milliseconds())
 	return nil
@@ -113,7 +113,7 @@ func reconcilePodForDestinations(nqosState *networkQoSState, podNs *corev1.Names
 	return nil
 }
 
-func (c *Controller) getNetworkQosForPodChange(eventData *eventData[*corev1.Pod]) (sets.Set[*nqosv1alpha1.NetworkQoS], error) {
+func (c *Controller) getNetworkQosForPodChange(eventData *eventData[*corev1.Pod]) (sets.Set[string], error) {
 	var pod *corev1.Pod
 	if eventData.new != nil {
 		pod = eventData.new
@@ -128,21 +128,21 @@ func (c *Controller) getNetworkQosForPodChange(eventData *eventData[*corev1.Pod]
 	if err != nil {
 		return nil, err
 	}
-	affectedNetworkQoSes := sets.Set[*nqosv1alpha1.NetworkQoS]{}
+	affectedNetworkQoSes := sets.Set[string]{}
 	for _, nqos := range nqoses {
 		if podMatchesSourceSelector(pod, nqos) {
-			affectedNetworkQoSes.Insert(nqos)
+			affectedNetworkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 			continue
 		}
 		// check if pod matches any egress
 		for _, egress := range nqos.Spec.Egress {
 			if podMatchesEgressSelector(podNs, pod, nqos, &egress) {
-				affectedNetworkQoSes.Insert(nqos)
+				affectedNetworkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 				continue
 			}
 		}
 		if podSelectionChanged(nqos, eventData.new, eventData.old) {
-			affectedNetworkQoSes.Insert(nqos)
+			affectedNetworkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 		}
 	}
 	return affectedNetworkQoSes, nil
