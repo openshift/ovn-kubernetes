@@ -56,10 +56,11 @@ func (c *Controller) syncNetworkQoS(key string) error {
 		return err
 	}
 	startTime := time.Now()
+	c.nqosCache.LockKey(key)
 	defer func() {
+		c.nqosCache.UnlockKey(key)
 		klog.V(5).Infof("%s - Finished reconciling NetworkQoS %s : %v", c.controllerName, key, time.Since(startTime))
 	}()
-
 	klog.V(5).Infof("%s - reconciling NetworkQoS %s", c.controllerName, key)
 	nqos, err := c.nqosLister.NetworkQoSes(nqosNamespace).Get(nqosName)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -67,35 +68,26 @@ func (c *Controller) syncNetworkQoS(key string) error {
 	}
 	if nqos == nil || !nqos.DeletionTimestamp.IsZero() {
 		klog.V(6).Infof("%s - NetworkQoS %s is being deleted.", c.controllerName, key)
-		return c.nqosCache.DoWithLock(key, func(_ string) error {
-			return c.clearNetworkQos(nqosNamespace, nqosName)
-		})
+		return c.clearNetworkQos(nqosNamespace, nqosName)
 	}
 
 	if networkManagedByMe, err := c.networkManagedByMe(nqos.Spec.NetworkSelectors); err != nil {
 		return err
 	} else if !networkManagedByMe {
 		// maybe NetworkAttachmentName has been changed from this one to other value, try cleanup anyway
-		return c.nqosCache.DoWithLock(key, func(_ string) error {
-			return c.clearNetworkQos(nqos.Namespace, nqos.Name)
-		})
+		return c.clearNetworkQos(nqos.Namespace, nqos.Name)
 	}
 
 	klog.V(5).Infof("%s - Processing NetworkQoS %s/%s", c.controllerName, nqos.Namespace, nqos.Name)
-	// at this stage the NQOS exists in the cluster
-	return c.nqosCache.DoWithLock(key, func(_ string) error {
-		// save key to avoid racing
-		c.nqosCache.Store(key, nil)
-		if err := c.ensureNetworkQos(nqos); err != nil {
-			c.nqosCache.Delete(key)
-			// we can ignore the error if status update doesn't succeed; best effort
-			c.updateNQOSStatusToNotReady(nqos.Namespace, nqos.Name, "failed to reconcile", err)
-			return err
-		}
-		recordNetworkQoSReconcileDuration(c.controllerName, time.Since(startTime).Milliseconds())
-		updateNetworkQoSCount(c.controllerName, len(c.nqosCache.GetKeys()))
-		return nil
-	})
+	if err := c.ensureNetworkQos(nqos); err != nil {
+		c.nqosCache.Delete(key)
+		// we can ignore the error if status update doesn't succeed; best effort
+		c.updateNQOSStatusToNotReady(nqos.Namespace, nqos.Name, "failed to reconcile", err)
+		return err
+	}
+	recordNetworkQoSReconcileDuration(c.controllerName, time.Since(startTime).Milliseconds())
+	updateNetworkQoSCount(c.controllerName, len(c.nqosCache.GetKeys()))
+	return nil
 }
 
 // ensureNetworkQos will handle the main reconcile logic for any given nqos's

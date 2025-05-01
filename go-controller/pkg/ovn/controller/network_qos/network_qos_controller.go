@@ -359,6 +359,9 @@ func (c *Controller) onNQOSUpdate(oldObj, newObj any) {
 		!newNQOS.GetDeletionTimestamp().IsZero() {
 		return
 	}
+	if reflect.DeepEqual(oldNQOS.Spec, newNQOS.Spec) {
+		return
+	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
 		// updates to NQOS object should be very rare, once put in place they usually stay the same
