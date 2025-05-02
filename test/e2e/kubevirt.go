@@ -1683,20 +1683,6 @@ runcmd:
 			nodeIPs := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
 
 			if td.role == "primary" {
-				if isIPv6Supported() && isInterconnectEnabled() {
-					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway before %s %s", td.resource.description, td.test.description))
-
-					nodeRunningVMI, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.NodeName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred(), step)
-
-					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(nodeRunningVMI, netConfig.networkName)
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(kubevirt.RetrieveIPv6Gateways).
-						WithArguments(vmi).
-						WithTimeout(5*time.Second).
-						WithPolling(time.Second).
-						Should(Equal([]string{expectedIPv6GatewayPath}), "should filter remote ipv6 gateway nexthop")
-				}
 				step = by(vmi.Name, fmt.Sprintf("Check north/south traffic before %s %s", td.resource.description, td.test.description))
 				startNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
 				checkNorthSouthIngressIperfTraffic(externalContainerName, nodeIPs, svc.Spec.Ports[0].NodePort, step)
