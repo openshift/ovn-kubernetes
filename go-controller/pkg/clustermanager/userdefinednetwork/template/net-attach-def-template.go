@@ -31,7 +31,6 @@ type SpecGetter interface {
 	GetTopology() userdefinednetworkv1.NetworkTopology
 	GetLayer3() *userdefinednetworkv1.Layer3Config
 	GetLayer2() *userdefinednetworkv1.Layer2Config
-	GetLocalnet() *userdefinednetworkv1.LocalnetConfig
 }
 
 func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*netv1.NetworkAttachmentDefinition, error) {
@@ -110,8 +109,7 @@ func renderNADLabels(obj client.Object) map[string]string {
 
 func validateTopology(spec SpecGetter) error {
 	if spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLayer3 && spec.GetLayer3() == nil ||
-		spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLayer2 && spec.GetLayer2() == nil ||
-		spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLocalnet && spec.GetLocalnet() == nil {
+		spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLayer2 && spec.GetLayer2() == nil {
 		return fmt.Errorf("topology %[1]s is specified but %[1]s config is nil", spec.GetTopology())
 	}
 	return nil
@@ -152,18 +150,6 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		netConfSpec.AllowPersistentIPs = cfg.IPAM != nil && cfg.IPAM.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
 		netConfSpec.Subnets = cidrString(cfg.Subnets)
 		netConfSpec.JoinSubnet = cidrString(renderJoinSubnets(cfg.Role, cfg.JoinSubnets))
-	case userdefinednetworkv1.NetworkTopologyLocalnet:
-		cfg := spec.GetLocalnet()
-		netConfSpec.Role = strings.ToLower(string(cfg.Role))
-		netConfSpec.MTU = int(cfg.MTU)
-		netConfSpec.AllowPersistentIPs = cfg.IPAM != nil && cfg.IPAM.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
-		netConfSpec.Subnets = cidrString(cfg.Subnets)
-		netConfSpec.ExcludeSubnets = cidrString(cfg.ExcludeSubnets)
-		netConfSpec.PhysicalNetworkName = cfg.PhysicalNetworkName
-
-		if cfg.VLAN != nil && cfg.VLAN.Access != nil {
-			netConfSpec.VLANID = int(cfg.VLAN.Access.ID)
-		}
 	}
 
 	if err := util.ValidateNetConf(nadName, netConfSpec); err != nil {
@@ -199,15 +185,7 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 	if netConfSpec.AllowPersistentIPs {
 		cniNetConf["allowPersistentIPs"] = netConfSpec.AllowPersistentIPs
 	}
-	if netConfSpec.PhysicalNetworkName != "" {
-		cniNetConf["physicalNetworkName"] = netConfSpec.PhysicalNetworkName
-	}
-	if len(netConfSpec.ExcludeSubnets) > 0 {
-		cniNetConf["excludeSubnets"] = netConfSpec.ExcludeSubnets
-	}
-	if netConfSpec.VLANID != 0 {
-		cniNetConf["vlanID"] = netConfSpec.VLANID
-	}
+
 	return cniNetConf, nil
 }
 
