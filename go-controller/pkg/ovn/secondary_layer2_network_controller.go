@@ -293,9 +293,6 @@ type SecondaryLayer2NetworkController struct {
 
 	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
 	eIPController *EgressIPController
-
-	// reconcile the virtual machine default gateway sending GARPs and RAs
-	defaultGatewayReconciler *kubevirt.DefaultGatewayReconciler
 }
 
 // NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
@@ -366,7 +363,6 @@ func NewSecondaryLayer2NetworkController(
 		if err != nil {
 			return nil, fmt.Errorf("unable to create new service controller while creating new layer2 network controller: %w", err)
 		}
-		oc.defaultGatewayReconciler = kubevirt.NewDefaultGatewayReconciler(oc.watchFactory, oc.GetNetInfo(), util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID())))
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -912,20 +908,15 @@ func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod)
 }
 
 func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
-	if oc.defaultGatewayReconciler == nil {
+	// Only primary networks has a gateway to reconcile
+	if !oc.IsPrimaryNetwork() {
 		return nil
 	}
-	hasIPv4Subnet, hasIPv6Subnet := oc.IPMode()
-	if hasIPv4Subnet {
-		if err := oc.defaultGatewayReconciler.ReconcileIPv4AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
-			return fmt.Errorf("failed reconciling IPv4 default gw after live migration at target pod '%s/%s': %w",
-				kubevirtLiveMigrationStatus.TargetPod.Namespace, kubevirtLiveMigrationStatus.TargetPod.Name, err)
-		}
-	}
-	if hasIPv6Subnet {
-		if err := oc.defaultGatewayReconciler.ReconcileIPv6AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
-			return fmt.Errorf("failed reconciling IPv6 default gw after live migration at target pod '%s/%s': %w",
-				kubevirtLiveMigrationStatus.TargetPod.Namespace, kubevirtLiveMigrationStatus.TargetPod.Name, err)
+	mgmtInterfaceName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID()))
+
+	if hasIPv4Subnet, _ := oc.IPMode(); hasIPv4Subnet {
+		if err := kubevirt.NewDefaultGatewayReconciler(oc.watchFactory, oc.GetNetInfo(), mgmtInterfaceName).ReconcileIPv4AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
+			return err
 		}
 	}
 	return nil
