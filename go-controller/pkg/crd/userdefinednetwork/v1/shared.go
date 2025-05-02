@@ -25,7 +25,7 @@ const (
 )
 
 // +kubebuilder:validation:XValidation:rule="!has(self.joinSubnets) || has(self.role) && self.role == 'Primary'", message="JoinSubnets is only supported for Primary network"
-// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i, isCIDR(i.cidr) && cidr(i.cidr).ip().family() == 6) || self.mtu >= 1280", message="MTU should be greater than or equal to 1280 when IPv6 subnet is used"
+// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i, isCIDR(i.cidr) && cidr(i.cidr).ip().family() == 6) || self.mtu >= 1280", message="MTU should be greater than or equal to 1280 when IPv6 subent is used"
 type Layer3Config struct {
 	// Role describes the network role in the pod.
 	//
@@ -90,7 +90,7 @@ type Layer3Subnet struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode != 'Disabled' || !has(self.subnets)", message="Subnets must be unset when ipam.mode is Disabled"
 // +kubebuilder:validation:XValidation:rule="!has(self.ipam) || !has(self.ipam.mode) || self.ipam.mode != 'Disabled' || self.role == 'Secondary'", message="Disabled ipam.mode is only supported for Secondary network"
 // +kubebuilder:validation:XValidation:rule="!has(self.joinSubnets) || has(self.role) && self.role == 'Primary'", message="JoinSubnets is only supported for Primary network"
-// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i, isCIDR(i) && cidr(i).ip().family() == 6) || self.mtu >= 1280", message="MTU should be greater than or equal to 1280 when IPv6 subnet is used"
+// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || !has(self.mtu) || !self.subnets.exists_one(i, isCIDR(i) && cidr(i).ip().family() == 6) || self.mtu >= 1280", message="MTU should be greater than or equal to 1280 when IPv6 subent is used"
 type Layer2Config struct {
 	// Role describes the network role in the pod.
 	//
@@ -150,7 +150,7 @@ type IPAMConfig struct {
 
 	// Lifecycle controls IP addresses management lifecycle.
 	//
-	// The only allowed value is Persistent. When set, the IP addresses assigned by OVN Kubernetes will be persisted in an
+	// The only allowed value is Persistent. When set, OVN Kubernetes assigned IP addresses will be persisted in an
 	// `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
 	// Only supported when mode is `Enabled`.
 	//
