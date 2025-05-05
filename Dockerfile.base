@@ -47,5 +47,10 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 # variables to direct operation and configure ovn
 COPY dist/images/ovnkube.sh /root/
 
+# Copy and install custom OVS/OVN RPMs.
+RUN mkdir -p /root/fdp/
+COPY *fdp.*.rpm /root/fdp/
+RUN rpm -Uhv --nodeps --force /root/fdp/*.rpm
+
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
