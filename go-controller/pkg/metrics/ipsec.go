@@ -1,4 +1,4 @@
-package util
+package metrics
 
 import (
 	"fmt"
@@ -8,9 +8,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-func GetAllEstablishedIPsecTunnels() (sets.Set[string], error) {
+type ipsecClient func(args ...string) (string, string, error)
+
+func listEstablishedIPsecTunnels(ipsec ipsecClient) (sets.Set[string], error) {
 	ipsecTunnels := sets.Set[string]{}
-	stdout, stderr, err := RunIPsec("showstates")
+	stdout, stderr, err := ipsec("showstates")
 	if err != nil {
 		return ipsecTunnels, fmt.Errorf("failed to retrieve ipsec states %v: %v", stderr, err)
 	}

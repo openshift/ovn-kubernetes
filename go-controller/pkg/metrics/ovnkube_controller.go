@@ -30,10 +30,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 const (
-	ipSecTunnelStatusQueryWaitTime = 5 * time.Second
+	ipSecTunnelStatusQueryWaitTime = 10 * time.Second
 )
 
 // metricNbE2eTimestamp is the UNIX timestamp value set to NB DB. Northd will eventually copy this
@@ -261,14 +262,12 @@ var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
 })
 
-var metricIPsecTunnelState = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+var metricIPsecTunnelState GaugeVecInterface = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "ipsec_tunnel_state",
 	Help:      "Specifies whether IPSec Child SA is established for the Geneve tunnel(1) or not(0)"},
-	[]string{
-		"local_ip", "remote_ip",
-	},
+	[]string{"remote_ip"},
 )
 
 var metricEgressRoutingViaHost = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -381,6 +380,23 @@ var metricNetworkProgrammingOVN = prometheus.NewHistogram(prometheus.HistogramOp
 		prometheus.LinearBuckets(60, 5, 12),     // 60s, 65s, 70s, ... 115s
 		prometheus.LinearBuckets(120, 30, 11))}, // 2min, 2.5min, 3min, ..., 7min
 )
+
+// GaugeVecInterface interface for GaugeVec metric so that it can be mocked for
+// unit testing. This can be replaced once prometheus library provides such
+// interface for GaugeVec as similar to prometheus.ObserverVec for HistogramVec.
+type GaugeVecInterface interface {
+	GetMetricWithLabelValues(lvs ...string) (prometheus.Gauge, error)
+	GetMetricWith(labels prometheus.Labels) (prometheus.Gauge, error)
+	WithLabelValues(lvs ...string) prometheus.Gauge
+	With(labels prometheus.Labels) prometheus.Gauge
+	MustCurryWith(labels prometheus.Labels) *prometheus.GaugeVec
+	DeleteLabelValues(lvs ...string) bool
+	Delete(labels prometheus.Labels) bool
+	DeletePartialMatch(labels prometheus.Labels) int
+	Describe(chan<- *prometheus.Desc)
+	Collect(chan<- prometheus.Metric)
+	Reset()
+}
 
 const (
 	globalOptionsTimestampField     = "e2e_timestamp"
@@ -615,12 +631,12 @@ func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
 }
 
-func RecordIPsecTunnelStateUpEvent(localIP, remoteIP string) {
-	metricIPsecTunnelState.WithLabelValues(localIP, remoteIP).Set(1)
+func RecordIPsecTunnelStateUpEvent(remoteIP string) {
+	metricIPsecTunnelState.WithLabelValues(remoteIP).Set(1)
 }
 
-func RecordIPsecTunnelStateDownEvent(localIP, remoteIP string) {
-	metricIPsecTunnelState.WithLabelValues(localIP, remoteIP).Set(0)
+func RecordIPsecTunnelStateDownEvent(remoteIP string) {
+	metricIPsecTunnelState.WithLabelValues(remoteIP).Set(0)
 }
 
 // RecordEgressRoutingViaHost records the egress gateway mode of the cluster
@@ -674,9 +690,12 @@ func ipsecMetricHandler(table string, model model.Model) {
 // MontiorIPsecTunnelsState will register a labeled metric for the ipsec tunnel status. It will keep
 // checking ipsec established status for each Geneve tunnel towards other remote node for every 5s
 // and update the metric with tunnel up or down status.
-func MontiorIPsecTunnelsState(stopChan <-chan struct{}, nbClient libovsdbclient.Client) {
+func MontiorIPsecTunnelsState(stopChan <-chan struct{}, wg *sync.WaitGroup, nbClient libovsdbclient.Client,
+	ovsVsctl ovsClient, ipsec ipsecClient) {
 	prometheus.MustRegister(metricIPsecTunnelState)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-stopChan:
@@ -689,23 +708,27 @@ func MontiorIPsecTunnelsState(stopChan <-chan struct{}, nbClient libovsdbclient.
 					return
 				}
 				if !nbGlobal.Ipsec {
-					// IPsec is not enabled, so keep checking for ipsec after wait time.
+					// IPsec is not enabled, it may be enabled a bit later, so check nbdb after a while.
 					time.Sleep(ipSecTunnelStatusQueryWaitTime)
 					continue
 				}
-				geneveTunnels, err := util.GetGeneveTunnels()
+				geneveTunnels, err := listGeneveTunnels(ovsVsctl)
 				if err != nil {
 					klog.Errorf("Error in retrieving Geneve tunnels, err: %v", err)
 				}
-				ipsecTunnels, err := util.GetAllEstablishedIPsecTunnels()
+				ipsecTunnels, err := listEstablishedIPsecTunnels(ipsec)
 				if err != nil {
 					klog.Errorf("Error in retrieving established IPsec tunnels, err: %v", err)
 				}
 				for _, geneveTunnel := range geneveTunnels {
+					if geneveTunnel.AdminState == vswitchd.InterfaceAdminStateDown ||
+						geneveTunnel.OperState == vswitchd.InterfaceLinkStateDown {
+						continue
+					}
 					if ipsecTunnels.Has(fmt.Sprintf("%s-in-1", geneveTunnel.Name)) && ipsecTunnels.Has(fmt.Sprintf("%s-out-1", geneveTunnel.Name)) {
-						RecordIPsecTunnelStateUpEvent(geneveTunnel.LocalIP, geneveTunnel.RemoteIP)
+						RecordIPsecTunnelStateUpEvent(geneveTunnel.RemoteIP)
 					} else {
-						RecordIPsecTunnelStateDownEvent(geneveTunnel.LocalIP, geneveTunnel.RemoteIP)
+						RecordIPsecTunnelStateDownEvent(geneveTunnel.RemoteIP)
 					}
 				}
 			}
