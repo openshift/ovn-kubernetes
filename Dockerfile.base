@@ -24,10 +24,10 @@ RUN INSTALL_PKGS="iptables nftables" && \
 	ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
 	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
-	dnf install -y --nodocs "openvswitch$ovsver_short = $ovsver" "python3-openvswitch$ovsver_short = $ovsver" && \
+	dnf install -y --nodocs "openvswitch$ovsver_short" "python3-openvswitch$ovsver_short" && \
 	dnf install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
 	dnf clean all && rm -rf /var/cache/* && \
-	sed 's/%/"/g' <<<"%openvswitch$ovsver_short-devel = $ovsver% %openvswitch$ovsver_short-ipsec = $ovsver% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
+	sed 's/%/"/g' <<<"%openvswitch$ovsver_short-devel% %openvswitch$ovsver_short-ipsec% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
@@ -47,7 +47,9 @@ COPY dist/images/ovnkube.sh /root/
 # Copy and install custom OVS/OVN RPMs.
 RUN mkdir -p /root/fdp/
 COPY *fdp.*.rpm /root/fdp/
+RUN dnf install -y 'dnf-command(versionlock)'
 RUN dnf install -y /root/fdp/*.rpm
+RUN dnf versionlock add python3-openvswitch* openvswitch* ovn*
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
