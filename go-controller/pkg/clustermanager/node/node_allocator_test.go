@@ -8,6 +8,11 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 
+	k8sv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -35,6 +40,14 @@ type existingAllocation struct {
 	owner  string
 }
 
+var testNode = &k8sv1.Node{
+	ObjectMeta: metav1.ObjectMeta{
+		Name:        "testnode",
+		Annotations: map[string]string{},
+	},
+	Spec: k8sv1.NodeSpec{},
+}
+
 func TestController_allocateNodeSubnets(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -45,9 +58,10 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 		existingNets  []*net.IPNet
 		alreadyOwned  *existingAllocation
 		// to be converted during the test to []*net.IPNet
-		wantStr   []string
-		allocated int
-		wantErr   bool
+		wantStr       []string
+		allocated     int
+		wantErr       bool
+		existingNodes []*k8sv1.Node
 	}{
 		{
 			name:          "new node, IPv4 only cluster",
@@ -59,6 +73,58 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"172.16.0.0/24"},
 			allocated:     1,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
+		},
+		{
+			name:          "new node, IPv4 only cluster, the test node is added before node allocator starts",
+			networkRanges: []string{"172.16.0.0/16"},
+			networkLens:   []int{24},
+			configIPv4:    true,
+			configIPv6:    false,
+			existingNets:  nil,
+			wantStr:       []string{"172.16.1.0/24"},
+			allocated:     1,
+			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-subnets": "{\"default\":[\"172.16.0.0/24\"]}",
+						},
+					},
+					Spec: k8sv1.NodeSpec{},
+				},
+			},
+		},
+		{
+			name:          "new node, IPv4 only cluster, the test node is added when a hybrid overlay node with overlapped node subnet exists",
+			networkRanges: []string{"172.16.0.0/16"},
+			networkLens:   []int{24},
+			configIPv4:    true,
+			configIPv6:    false,
+			existingNets:  nil,
+			wantStr:       []string{"172.16.1.0/24"},
+			allocated:     1,
+			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ho_node1",
+						Annotations: map[string]string{
+							"k8s.ovn.org/hybrid-overlay-node-subnet": "172.16.0.0/24",
+						},
+						Labels: map[string]string{
+							"hybrid-overlay-node": "true",
+						},
+					},
+					Spec: k8sv1.NodeSpec{},
+				},
+			},
 		},
 		{
 			name:          "new node, IPv6 only cluster",
@@ -70,6 +136,58 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"2001:db2::/64"},
 			allocated:     1,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
+		},
+		{
+			name:          "new node, IPv6 only cluster, the test node is added before node allocator starts",
+			networkRanges: []string{"2001:db2::/56"},
+			networkLens:   []int{64},
+			configIPv4:    false,
+			configIPv6:    true,
+			existingNets:  nil,
+			wantStr:       []string{"2001:db2:0:1::/64"},
+			allocated:     1,
+			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-subnets": "{\"default\":[\"2001:db2::/64\"]}",
+						},
+					},
+					Spec: k8sv1.NodeSpec{},
+				},
+			},
+		},
+		{
+			name:          "new node, IPv6 only cluster, the test node is added when a hybrid overlay node with overlapped node subnet exists",
+			networkRanges: []string{"2001:db2::/56"},
+			networkLens:   []int{64},
+			configIPv4:    false,
+			configIPv6:    true,
+			existingNets:  nil,
+			wantStr:       []string{"2001:db2:0:1::/64"},
+			allocated:     1,
+			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ho_node1",
+						Annotations: map[string]string{
+							"k8s.ovn.org/hybrid-overlay-node-subnet": "2001:db2::/64",
+						},
+						Labels: map[string]string{
+							"hybrid-overlay-node": "true",
+						},
+					},
+					Spec: k8sv1.NodeSpec{},
+				},
+			},
 		},
 		{
 			name:          "existing annotated node, IPv4 only cluster",
@@ -81,7 +199,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"172.16.8.0/24"},
 			allocated:     0,
 			wantErr:       false,
-		},
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			}},
 		{
 			name:          "existing annotated node, IPv6 only cluster",
 			networkRanges: []string{"2001:db2::/32"},
@@ -92,7 +212,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"2001:db2:1::/64"},
 			allocated:     0,
 			wantErr:       false,
-		},
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			}},
 		{
 			name:          "new node, dual stack cluster",
 			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
@@ -103,6 +225,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"172.16.0.0/24", "2000::/24"},
 			allocated:     2,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "existing annotated node, dual stack cluster",
@@ -114,6 +239,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"172.16.5.0/24", "2000::/24"},
 			allocated:     0,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "single IPv4 to dual stack cluster",
@@ -125,6 +253,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"172.16.5.0/24", "2000::/24"},
 			allocated:     1,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "single IPv6 to dual stack cluster",
@@ -136,6 +267,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"2000:1::/32", "172.16.0.0/24"},
 			allocated:     1,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "dual stack cluster to single IPv4",
@@ -147,6 +281,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"172.16.5.0/24"},
 			allocated:     0,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "dual stack cluster to single IPv6",
@@ -158,6 +295,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"2001:db2:1:2::/64"},
 			allocated:     0,
 			wantErr:       false,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "new node, OVN wrong configuration: IPv4 only cluster but IPv6 range",
@@ -169,6 +309,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       nil,
 			allocated:     0,
 			wantErr:       true,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "existing annotated node outside cluster CIDR",
@@ -179,6 +322,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			existingNets:  ovntest.MustParseIPNets("10.1.0.0/24"),
 			wantStr:       []string{"172.16.0.0/24"},
 			allocated:     1,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "existing annotated node with too many subnets",
@@ -189,6 +335,9 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			existingNets:  ovntest.MustParseIPNets("172.16.0.0/24", "172.16.1.0/24", "2001:db2:1:2::/64", "2001:db2:1:3::/64"),
 			wantStr:       []string{"172.16.0.0/24", "2001:db2:1:2::/64"},
 			allocated:     0,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 		{
 			name:          "existing annotated node with too many subnets, one of which is already owned",
@@ -203,11 +352,20 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			},
 			wantStr:   []string{"172.16.0.0/24", "2001:db2:1:2::/64"},
 			allocated: 0,
+			existingNodes: []*k8sv1.Node{
+				testNode,
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			config.HybridOverlay.Enabled = true
+			config.Kubernetes.NoHostSubnetNodes, _ = metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{"hybrid-overlay-node": "true"},
+			})
+			config.HybridOverlay.ClusterSubnets = nil
+
 			ranges, err := rangesFromStrings(tt.networkRanges, tt.networkLens)
 			if err != nil {
 				t.Fatal(err)
@@ -226,6 +384,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			na := &NodeAllocator{
 				netInfo:                netInfo,
 				clusterSubnetAllocator: NewSubnetAllocator(),
+				nodeLister:             newFakeNodeLister(tt.existingNodes),
 			}
 
 			if err := na.Init(); err != nil {
@@ -322,4 +481,12 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 	if v6usedAfter != v6usedBefore {
 		t.Fatalf("Expected %d v6 allocated subnets, but got %d", v6usedBefore, v6usedAfter)
 	}
+}
+
+func newFakeNodeLister(nodes []*k8sv1.Node) v1.NodeLister {
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	for _, node := range nodes {
+		_ = indexer.Add(node)
+	}
+	return v1.NewNodeLister(indexer)
 }
