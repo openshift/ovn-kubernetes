@@ -30,10 +30,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
-const (
-	ipSecTunnelStatusQueryWaitTime = 10 * time.Second
-)
-
 // metricNbE2eTimestamp is the UNIX timestamp value set to NB DB. Northd will eventually copy this
 // timestamp from NB DB to SB DB. The metric 'sb_e2e_timestamp' stores the timestamp that is
 // read from SB DB. This is registered within func RunTimestamp in order to allow gathering this
@@ -679,7 +675,7 @@ func MontiorIPsecTunnelsState(stopChan <-chan struct{}, wg *sync.WaitGroup, nbCl
 				}
 				if !nbGlobal.Ipsec {
 					// IPsec is not enabled, it may be enabled a bit later, so check nbdb after a while.
-					time.Sleep(ipSecTunnelStatusQueryWaitTime)
+					time.Sleep(config.Metrics.IPsecMetricPollInterval)
 					continue
 				}
 				geneveTunnels, err := listGeneveTunnels(ovsVsctl)
@@ -702,7 +698,7 @@ func MontiorIPsecTunnelsState(stopChan <-chan struct{}, wg *sync.WaitGroup, nbCl
 					}
 				}
 			}
-			time.Sleep(ipSecTunnelStatusQueryWaitTime)
+			time.Sleep(config.Metrics.IPsecMetricPollInterval)
 		}
 	}()
 }
