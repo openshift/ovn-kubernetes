@@ -224,6 +224,9 @@ localnet network.
   IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
   be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
   sense if the `subnets` attribute is also defined.
+- `physicalNetworkName` (string, optional): the name of the physical network to
+  which the OVN overlay will connect. When omitted, it will default to the value
+  of the localnet network name on the NAD's `.spec.config.name`.
 
 > [!NOTE]
 > when the subnets attribute is omitted, the logical switch implementing the
