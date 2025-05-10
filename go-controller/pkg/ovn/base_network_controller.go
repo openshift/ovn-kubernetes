@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"strconv"
 	"sync"
 	"time"
 
@@ -386,19 +385,10 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		lrpNetworks = append(lrpNetworks, gwIfAddr.String())
 	}
-
-	var lrpOptions map[string]string
-	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
-	if enableGatewayMTU {
-		lrpOptions = map[string]string{
-			"gateway_mtu": strconv.Itoa(config.Default.MTU),
-		}
-	}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     lrpName,
 		MAC:      nodeLRPMAC.String(),
 		Networks: lrpNetworks,
-		Options:  lrpOptions,
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 	gatewayChassis := nbdb.GatewayChassis{
@@ -408,7 +398,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 	}
 
 	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, &logicalRouter, &logicalRouterPort,
-		&gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks, &logicalRouterPort.Options)
+		&gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
 		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
