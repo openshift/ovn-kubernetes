@@ -60,16 +60,6 @@ var (
 		},
 		[]string{"network"},
 	)
-
-	nqosStatusPatchDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: metrics.MetricOvnkubeNamespace,
-			Subsystem: metrics.MetricOvnkubeSubsystemController,
-			Name:      "nqos_status_patch_duration_ms",
-			Help:      "Time spent on patching the status of a NetworkQoS",
-		},
-		[]string{"network"},
-	)
 )
 
 func init() {
@@ -79,7 +69,6 @@ func init() {
 		nqosReconcileDuration,
 		nqosPodReconcileDuration,
 		nqosNamespaceReconcileDuration,
-		nqosStatusPatchDuration,
 	)
 }
 
@@ -110,9 +99,4 @@ func recordNamespaceReconcileDuration(network string, duration int64) {
 // records time spent on an ovn operation
 func recordOvnOperationDuration(operationType string, duration int64) {
 	nqosOvnOperationDuration.WithLabelValues(operationType).Observe(float64(duration))
-}
-
-// records time spent on patching the status of a NetworkQoS
-func recordStatusPatchDuration(network string, duration int64) {
-	nqosStatusPatchDuration.WithLabelValues(network).Observe(float64(duration))
 }
