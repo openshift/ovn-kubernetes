@@ -10,7 +10,6 @@ const (
 	APBRouteErrorMsg       = "failed to apply policy"
 	EgressFirewallErrorMsg = "EgressFirewall Rules not correctly applied"
 	EgressQoSErrorMsg      = "EgressQoS Rules not correctly applied"
-	NetworkQoSErrorMsg     = "NetworkQoS Destinations not correctly applied"
 )
 
 func GetZoneStatus(zoneID, message string) string {

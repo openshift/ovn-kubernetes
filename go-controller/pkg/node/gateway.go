@@ -625,24 +625,19 @@ func bridgeForInterface(intfName, nodeName,
 		if err != nil {
 			return nil, fmt.Errorf("gateway accelerated interface %s is not valid: %w", config.Gateway.GatewayAcceleratedInterface, err)
 		}
-		gwIntf = config.Gateway.GatewayAcceleratedInterface
 		isGWAcclInterface = true
 		klog.Infof("For gateway accelerated interface %s representor: %s", config.Gateway.GatewayAcceleratedInterface, intfRep)
-	} else {
-		intfRep, err = getRepresentor(gwIntf)
-		if err == nil {
-			isGWAcclInterface = true
-		}
 	}
 
 	if isGWAcclInterface {
+		gatewayAcceleratedInterface := config.Gateway.GatewayAcceleratedInterface
 		bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfRep)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find bridge that has port %s: %w", intfRep, err)
 		}
-		link, err := util.GetNetLinkOps().LinkByName(gwIntf)
+		link, err := util.GetNetLinkOps().LinkByName(gatewayAcceleratedInterface)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get netdevice link for %s: %w", gwIntf, err)
+			return nil, fmt.Errorf("failed to get netdevice link for %s: %w", gatewayAcceleratedInterface, err)
 		}
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
@@ -651,7 +646,7 @@ func bridgeForInterface(intfName, nodeName,
 		res.bridgeName = bridgeName
 		res.uplinkName = uplinkName
 		res.gwIfaceRep = intfRep
-		res.gwIface = gwIntf
+		res.gwIface = gatewayAcceleratedInterface
 		res.macAddress = link.Attrs().HardwareAddr
 	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port

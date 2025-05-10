@@ -489,7 +489,6 @@ jobs:
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
       USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
-      OVN_NETWORK_QOS_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
       ENABLE_ROUTE_ADVERTISEMENTS: "${{ matrix.routeadvertisements != '' }}"
       ADVERTISE_DEFAULT_NETWORK:  "${{ matrix.routeadvertisements == 'advertise-default' }}"
@@ -630,9 +629,7 @@ jobs:
           make -C test control-plane WHAT="Kubevirt Virtual Machines"
         elif [ "${{ matrix.target }}" == "control-plane-helm" ]; then
           make -C test control-plane
-          if [ "${{ matrix.ipfamily }}" != "ipv6" ]; then
-            make -C test conformance
-          fi
+          make -C test conformance
         elif [ "${{ matrix.target }}" == "network-segmentation" ]; then
           make -C test control-plane WHAT="Network Segmentation"
         elif [ "${{ matrix.target }}" == "bgp" ]; then
