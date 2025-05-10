@@ -1,9 +1,8 @@
 package networkqos
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Metrics to be exposed
