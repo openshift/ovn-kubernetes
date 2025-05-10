@@ -3,20 +3,18 @@ package networkqos
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	networkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -65,6 +63,7 @@ func (nqosState *networkQoSState) initAddressSets(addressSetFactory addressset.A
 	if err != nil {
 		return fmt.Errorf("failed to init source address set for %s/%s: %w", nqosState.namespace, nqosState.name, err)
 	}
+
 	// ensure destination address sets
 	for ruleIndex, rule := range nqosState.EgressRules {
 		for destIndex, dest := range rule.Classifier.Destinations {
@@ -80,7 +79,7 @@ func (nqosState *networkQoSState) initAddressSets(addressSetFactory addressset.A
 	return nil
 }
 
-func (nqosState *networkQoSState) matchSourceSelector(pod *corev1.Pod) bool {
+func (nqosState *networkQoSState) matchSourceSelector(pod *v1.Pod) bool {
 	if pod.Namespace != nqosState.namespace {
 		return false
 	}
@@ -90,7 +89,7 @@ func (nqosState *networkQoSState) matchSourceSelector(pod *corev1.Pod) bool {
 	return nqosState.PodSelector.Matches(labels.Set(pod.Labels))
 }
 
-func (nqosState *networkQoSState) configureSourcePod(ctrl *Controller, pod *corev1.Pod, addresses []string) error {
+func (nqosState *networkQoSState) configureSourcePod(ctrl *Controller, pod *v1.Pod, addresses []string) error {
 	fullPodName := joinMetaNamespaceAndName(pod.Namespace, pod.Name)
 	if nqosState.PodSelector != nil {
 		// if PodSelector is nil, use namespace's address set, so unnecessary to add ip here
@@ -190,45 +189,6 @@ func (nqosState *networkQoSState) getAddressSetHashNames() []string {
 	return addrsetNames
 }
 
-func (nqosState *networkQoSState) cleanupStaleAddresses(addressSetMap map[string]sets.Set[string]) error {
-	if nqosState.SrcAddrSet != nil {
-		addresses := addressSetMap[nqosState.SrcAddrSet.GetName()]
-		v4Addresses, _ := nqosState.SrcAddrSet.GetAddresses()
-		staleAddresses := []string{}
-		for _, address := range v4Addresses {
-			if !addresses.Has(address) {
-				staleAddresses = append(staleAddresses, address)
-			}
-		}
-		if len(staleAddresses) > 0 {
-			if err := nqosState.SrcAddrSet.DeleteAddresses(staleAddresses); err != nil {
-				return err
-			}
-		}
-	}
-	for _, egress := range nqosState.EgressRules {
-		for _, dest := range egress.Classifier.Destinations {
-			if dest.DestAddrSet == nil {
-				continue
-			}
-			addresses := addressSetMap[dest.DestAddrSet.GetName()]
-			v4Addresses, _ := dest.DestAddrSet.GetAddresses()
-			staleAddresses := []string{}
-			for _, address := range v4Addresses {
-				if !addresses.Has(address) {
-					staleAddresses = append(staleAddresses, address)
-				}
-			}
-			if len(staleAddresses) > 0 {
-				if err := dest.DestAddrSet.DeleteAddresses(staleAddresses); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
 type GressRule struct {
 	Priority   int
 	Dscp       int
@@ -237,6 +197,21 @@ type GressRule struct {
 	// bandwitdh
 	Rate  *int
 	Burst *int
+}
+
+type protocol string
+
+func (p protocol) IsValid() bool {
+	switch p.String() {
+	case "tcp", "udp", "sctp":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p protocol) String() string {
+	return strings.ToLower(string(p))
 }
 
 type trafficDirection string
@@ -248,7 +223,10 @@ const (
 
 type Classifier struct {
 	Destinations []*Destination
-	Ports        []*networkqosv1alpha1.Port
+
+	// port
+	Protocol protocol
+	Port     *int
 }
 
 // ToQosMatchString generates dest and protocol/port part of QoS match string, based on
@@ -297,43 +275,21 @@ func (c *Classifier) ToQosMatchString(ipv4Enabled, ipv6Enabled bool) string {
 	if strings.Contains(output, "||") {
 		output = fmt.Sprintf("(%s)", output)
 	}
-	protoPortMap := map[string][]string{}
-	for _, port := range c.Ports {
-		if port.Protocol == "" {
-			continue
+	if c.Protocol != "" {
+		if c.Port != nil && *c.Port > 0 {
+			match := fmt.Sprintf("%s && %s.dst == %d", c.Protocol.String(), c.Protocol.String(), *c.Port)
+			if output != "" {
+				output = fmt.Sprintf("%s && %s", output, match)
+			} else {
+				output = match
+			}
+		} else {
+			if output != "" {
+				output = fmt.Sprintf("%s && %s", output, c.Protocol.String())
+			} else {
+				output = c.Protocol.String()
+			}
 		}
-		protocol := strings.ToLower(port.Protocol)
-		ports := protoPortMap[protocol]
-		if ports == nil {
-			ports = []string{}
-		}
-		if port.Port != nil {
-			ports = append(ports, fmt.Sprintf("%d", *port.Port))
-		}
-		protoPortMap[protocol] = ports
-	}
-
-	sortedProtocols := make([]string, 0, len(protoPortMap))
-	for protocol := range protoPortMap {
-		sortedProtocols = append(sortedProtocols, protocol)
-	}
-	sort.Strings(sortedProtocols)
-
-	portMatches := []string{}
-	for _, protocol := range sortedProtocols {
-		ports := protoPortMap[protocol]
-		match := protocol
-		if len(ports) == 1 {
-			match = fmt.Sprintf("%s && %s.dst == %s", protocol, protocol, ports[0])
-		} else if len(ports) > 1 {
-			match = fmt.Sprintf("%s && %s.dst == {%s}", protocol, protocol, strings.Join(ports, ","))
-		}
-		portMatches = append(portMatches, match)
-	}
-	if len(portMatches) == 1 {
-		output = fmt.Sprintf("%s && %s", output, portMatches[0])
-	} else if len(portMatches) > 1 {
-		output = fmt.Sprintf("%s && ((%s))", output, strings.Join(portMatches, ") || ("))
 	}
 	return output
 }
@@ -347,7 +303,14 @@ type Destination struct {
 	NamespaceSelector labels.Selector
 }
 
-func (dest *Destination) matchPod(podNs *corev1.Namespace, pod *corev1.Pod, qosNamespace string) bool {
+func (dest *Destination) matchNamespace(podNs *v1.Namespace, qosNamespace string) bool {
+	if dest.NamespaceSelector == nil {
+		return podNs.Name == qosNamespace
+	}
+	return dest.NamespaceSelector.Matches(labels.Set(podNs.Labels))
+}
+
+func (dest *Destination) matchPod(podNs *v1.Namespace, pod *v1.Pod, qosNamespace string) bool {
 	switch {
 	case dest.NamespaceSelector != nil && dest.PodSelector != nil:
 		return dest.NamespaceSelector.Matches(labels.Set(podNs.Labels)) && dest.PodSelector.Matches(labels.Set(pod.Labels))
@@ -380,6 +343,47 @@ func (dest *Destination) removePod(fullPodName string, addresses []string) error
 		return fmt.Errorf("failed to remove addresses (%s): %v", strings.Join(addresses, ","), err)
 	}
 	dest.Pods.Delete(fullPodName)
+	return nil
+}
+
+func (dest *Destination) removePodsInNamespace(namespace string) error {
+	var err error
+	// check for pods in the namespace being cleared
+	dest.Pods.Range(func(key, value any) bool {
+		fullPodName := key.(string)
+		nameParts := strings.Split(fullPodName, "/")
+		if nameParts[0] != namespace {
+			// pod's namespace doesn't match
+			return true
+		}
+		err = dest.removePod(fullPodName, nil)
+		return err == nil
+	})
+	return err
+}
+
+func (dest *Destination) addPodsInNamespace(ctrl *Controller, namespace string) error {
+	podSelector := labels.Everything()
+	if dest.PodSelector != nil {
+		podSelector = dest.PodSelector
+	}
+	pods, err := ctrl.nqosPodLister.Pods(namespace).List(podSelector)
+	if err != nil {
+		if errors.IsNotFound(err) || len(pods) == 0 {
+			return nil
+		}
+		return fmt.Errorf("failed to look up pods in ns %s: %v", namespace, err)
+	}
+	klog.V(5).Infof("Found %d pods in namespace %s by selector %s", len(pods), namespace, podSelector.String())
+	for _, pod := range pods {
+		podAddresses, err := getPodAddresses(pod, ctrl.NetInfo)
+		if err != nil {
+			return fmt.Errorf("failed to parse IPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+		if err := dest.addPod(pod.Namespace, pod.Name, podAddresses); err != nil {
+			return fmt.Errorf("failed to add addresses {%s} to address set %s: %v", strings.Join(podAddresses, ","), dest.DestAddrSet.GetName(), err)
+		}
+	}
 	return nil
 }
 

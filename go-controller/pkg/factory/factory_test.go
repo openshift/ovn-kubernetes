@@ -38,10 +38,10 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
-	networkqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
-	networkqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/fake"
-	crdtypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	networkqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1"
+	networkqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/fake"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -230,16 +230,11 @@ func newNetworkQoS(name, namespace string) *networkqos.NetworkQoS {
 	return &networkqos.NetworkQoS{
 		ObjectMeta: newObjectMeta(name, namespace),
 		Spec: networkqos.Spec{
-			NetworkSelectors: []crdtypes.NetworkSelector{
+			NetworkAttachmentRefs: []v1.ObjectReference{
 				{
-					NetworkSelectionType: crdtypes.NetworkAttachmentDefinitions,
-					NetworkAttachmentDefinitionSelector: &crdtypes.NetworkAttachmentDefinitionSelector{
-						NetworkSelector: metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"name": "stream",
-							},
-						},
-					},
+					Kind:      "NetworkAttachmentDefinition",
+					Namespace: "default",
+					Name:      "stream",
 				},
 			},
 			Priority: 100,
@@ -2164,7 +2159,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				networkQoS := obj.(*networkqos.NetworkQoS)
 				Expect(reflect.DeepEqual(networkQoS, added)).To(BeTrue())
 			},
-			UpdateFunc: func(_, new interface{}) {
+			UpdateFunc: func(old, new interface{}) {
 				newNetworkQoS := new.(*networkqos.NetworkQoS)
 				Expect(reflect.DeepEqual(newNetworkQoS, added)).To(BeTrue())
 				Expect(newNetworkQoS.Spec.Egress[0].DSCP).To(Equal(42))

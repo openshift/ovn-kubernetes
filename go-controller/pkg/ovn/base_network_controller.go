@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	nadinformerv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
-
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1074,11 +1072,6 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 
 func (bnc *BaseNetworkController) newNetworkQoSController() error {
 	var err error
-	var nadInformer nadinformerv1.NetworkAttachmentDefinitionInformer
-
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		nadInformer = bnc.watchFactory.NADInformer()
-	}
 	bnc.nqosController, err = nqoscontroller.NewController(
 		bnc.controllerName,
 		bnc.ReconcilableNetInfo.GetNetInfo(),
@@ -1089,7 +1082,6 @@ func (bnc *BaseNetworkController) newNetworkQoSController() error {
 		bnc.watchFactory.NamespaceCoreInformer(),
 		bnc.watchFactory.PodCoreInformer(),
 		bnc.watchFactory.NodeCoreInformer(),
-		nadInformer,
 		bnc.addressSetFactory,
 		bnc.isPodScheduledinLocalZone,
 		bnc.zone,
