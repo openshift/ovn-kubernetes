@@ -151,7 +151,6 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		udnFactory:           wf.udnFactory,
 		raFactory:            wf.raFactory,
 		frrFactory:           wf.frrFactory,
-		networkQoSFactory:    wf.networkQoSFactory,
 		informers:            wf.informers,
 		stopChan:             wf.stopChan,
 
@@ -515,8 +514,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	}
 
 	if config.OVNKubernetesFeature.EnableNetworkQoS {
-		wf.informers[NetworkQoSType], err = newQueuedInformer(eventQueueSize, NetworkQoSType,
-			wf.networkQoSFactory.K8s().V1().NetworkQoSes().Informer(), wf.stopChan, minNumEventQueues)
+		wf.informers[NetworkQoSType], err = newInformer(NetworkQoSType, wf.networkQoSFactory.K8s().V1().NetworkQoSes().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -623,15 +621,6 @@ func (wf *WatchFactory) Start() error {
 	if wf.nadFactory != nil {
 		wf.nadFactory.Start(wf.stopChan)
 		for oType, synced := range waitForCacheSyncWithTimeout(wf.nadFactory, wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
-	}
-
-	if config.OVNKubernetesFeature.EnableNetworkQoS && wf.networkQoSFactory != nil {
-		wf.networkQoSFactory.Start(wf.stopChan)
-		for oType, synced := range waitForCacheSyncWithTimeout(wf.networkQoSFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -1191,10 +1180,6 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case ClusterUserDefinedNetworkType:
 		if cudn, ok := obj.(*userdefinednetworkapi.ClusterUserDefinedNetwork); ok {
 			return &cudn.ObjectMeta, nil
-		}
-	case NetworkQoSType:
-		if networkQoS, ok := obj.(*networkqosapi.NetworkQoS); ok {
-			return &networkQoS.ObjectMeta, nil
 		}
 	}
 
