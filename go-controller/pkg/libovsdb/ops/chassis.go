@@ -138,33 +138,27 @@ func DeleteChassisWithPredicate(sbClient libovsdbclient.Client, p chassisPredica
 }
 
 // CreateOrUpdateChassis creates or updates the chassis record along with the encap record
-func CreateOrUpdateChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis, encaps ...*sbdb.Encap) error {
+func CreateOrUpdateChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis, encap *sbdb.Encap) error {
 	m := newModelClient(sbClient)
-	opModels := make([]operationModel, 0, len(encaps)+1)
-	for i := range encaps {
-		encap := encaps[i]
-		opModel := operationModel{
+	opModels := []operationModel{
+		{
 			Model: encap,
 			DoAfter: func() {
-				encapsList := append(chassis.Encaps, encap.UUID)
-				chassis.Encaps = sets.New(encapsList...).UnsortedList()
+				chassis.Encaps = []string{encap.UUID}
 			},
-			OnModelUpdates: onModelUpdatesNone(),
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
 			ErrNotFound:    false,
 			BulkOp:         false,
-		}
-		opModels = append(opModels, opModel)
+		},
+		{
+			Model:            chassis,
+			OnModelMutations: []interface{}{&chassis.OtherConfig},
+			OnModelUpdates:   []interface{}{&chassis.Encaps},
+			ErrNotFound:      false,
+			BulkOp:           false,
+		},
 	}
 
-	opModel := operationModel{
-		Model:            chassis,
-		OnModelMutations: []interface{}{&chassis.OtherConfig},
-		OnModelUpdates:   []interface{}{&chassis.Encaps},
-		ErrNotFound:      false,
-		BulkOp:           false,
-	}
-
-	opModels = append(opModels, opModel)
 	if _, err := m.CreateOrUpdate(opModels...); err != nil {
 		return err
 	}
