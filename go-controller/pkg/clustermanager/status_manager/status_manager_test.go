@@ -22,7 +22,6 @@ import (
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	networkqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
-	crdtypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -210,16 +209,11 @@ func newNetworkQoS(namespace string) *networkqosapi.NetworkQoS {
 	return &networkqosapi.NetworkQoS{
 		ObjectMeta: util.NewObjectMeta("default", namespace),
 		Spec: networkqosapi.Spec{
-			NetworkSelectors: []crdtypes.NetworkSelector{
+			NetworkAttachmentRefs: []v1.ObjectReference{
 				{
-					NetworkSelectionType: crdtypes.NetworkAttachmentDefinitions,
-					NetworkAttachmentDefinitionSelector: &crdtypes.NetworkAttachmentDefinitionSelector{
-						NetworkSelector: metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"name": "stream",
-							},
-						},
-					},
+					Kind:      "NetworkAttachmentDefinition",
+					Namespace: "default",
+					Name:      "stream",
 				},
 			},
 			Priority: 100,

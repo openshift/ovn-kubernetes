@@ -19,8 +19,6 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
-	nadinformerv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
-	nadlisterv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	networkqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	networkqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 	networkqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions/networkqos/v1alpha1"
@@ -86,10 +84,6 @@ type Controller struct {
 	nqosNodeLister corev1listers.NodeLister
 	nqosNodeSynced cache.InformerSynced
 	nqosNodeQueue  workqueue.TypedRateLimitingInterface[string]
-
-	// nad lister, only valid for default network controller when multi-network is enabled
-	nadLister nadlisterv1.NetworkAttachmentDefinitionLister
-	nadSynced cache.InformerSynced
 }
 
 // NewController returns a new *Controller.
@@ -103,7 +97,6 @@ func NewController(
 	namespaceInformer corev1informers.NamespaceInformer,
 	podInformer corev1informers.PodInformer,
 	nodeInformer corev1informers.NodeInformer,
-	nadInformer nadinformerv1.NetworkAttachmentDefinitionInformer,
 	addressSetFactory addressset.AddressSetFactory,
 	isPodScheduledinLocalZone func(*v1.Pod) bool,
 	zone string) (*Controller, error) {
@@ -170,7 +163,7 @@ func NewController(
 
 	klog.V(5).Info("Setting up event handlers for Nodes in Network QoS controller")
 	c.nqosNodeLister = nodeInformer.Lister()
-	c.nqosNodeSynced = nodeInformer.Informer().HasSynced
+	c.nqosNodeSynced = podInformer.Informer().HasSynced
 	c.nqosNodeQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
 		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "nqosNodes"},
@@ -180,11 +173,6 @@ func NewController(
 	}))
 	if err != nil {
 		return nil, fmt.Errorf("could not add Event Handler for node Informer during network qos controller initialization, %w", err)
-	}
-
-	if nadInformer != nil {
-		c.nadLister = nadInformer.Lister()
-		c.nadSynced = nadInformer.Informer().HasSynced
 	}
 
 	c.eventRecorder = recorder
@@ -199,17 +187,11 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	klog.Infof("Starting controller %s", c.controllerName)
 
 	// Wait for the caches to be synced
-	klog.V(5).Info("Waiting for informer caches (networkqos,namespace,pod,node) to sync")
+	klog.V(5).Info("Waiting for informer caches to sync")
 	if !util.WaitForInformerCacheSyncWithTimeout(c.controllerName, stopCh, c.nqosCacheSynced, c.nqosNamespaceSynced, c.nqosPodSynced, c.nqosNodeSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for informer caches (networkqos,namespace,pod,node) to sync"))
+		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
+		klog.Errorf("Error syncing caches for network qos")
 		return
-	}
-	if c.nadSynced != nil {
-		klog.V(5).Info("Waiting for net-attach-def informer cache to sync")
-		if !util.WaitForInformerCacheSyncWithTimeout(c.controllerName, stopCh, c.nadSynced) {
-			utilruntime.HandleError(fmt.Errorf("timed out waiting for net-attach-def informer cache to sync"))
-			return
-		}
 	}
 
 	klog.Infof("Repairing Network QoSes")
