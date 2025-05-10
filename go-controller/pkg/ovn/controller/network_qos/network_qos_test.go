@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,9 +32,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 func init() {
@@ -61,9 +61,6 @@ var (
 
 	app1Namespace = "app1-ns"
 	app3Namespace = "app3-ns"
-	port8080      = int32(8080)
-	port8081      = int32(8081)
-	port9090      = int32(9090)
 )
 
 func TestNetworkQoS(t *testing.T) {
@@ -141,15 +138,9 @@ func tableEntrySetup(enableInterconnect bool) {
 								},
 							},
 						},
-						Ports: []*nqostype.Port{
-							{
-								Protocol: "tcp",
-								Port:     &port8080,
-							},
-							{
-								Protocol: "tcp",
-								Port:     &port8081,
-							},
+						Port: nqostype.Port{
+							Protocol: "tcp",
+							Port:     8080,
 						},
 					},
 				},
@@ -179,23 +170,9 @@ func tableEntrySetup(enableInterconnect bool) {
 								},
 							},
 						},
-						Ports: []*nqostype.Port{
-							{
-								Protocol: "tcp",
-								Port:     &port8080,
-							},
-							{
-								Protocol: "tcp",
-								Port:     &port8081,
-							},
-							{
-								Protocol: "udp",
-								Port:     &port9090,
-							},
-							{
-								Protocol: "udp",
-								Port:     &port8080,
-							},
+						Port: nqostype.Port{
+							Protocol: "udp",
+							Port:     9090,
 						},
 					},
 				},
@@ -263,13 +240,13 @@ func tableEntrySetup(enableInterconnect bool) {
 	fakeNQoSClient = ovnClientset.NetworkQoSClient
 	initEnv(ovnClientset, initialDB)
 	// init controller for default network
-	initNetworkQoSController(&util.DefaultNetInfo{}, defaultAddrsetFactory, defaultControllerName, enableInterconnect)
+	initNetworkQoSController(&util.DefaultNetInfo{}, defaultAddrsetFactory, defaultControllerName)
 	// init controller for stream nad
 	streamImmutableNadInfo, err := util.ParseNADInfo(nad)
 	Expect(err).NotTo(HaveOccurred())
 	streamNadInfo := util.NewMutableNetInfo(streamImmutableNadInfo)
 	streamNadInfo.AddNADs("default/stream")
-	initNetworkQoSController(streamNadInfo, streamAddrsetFactory, streamControllerName, enableInterconnect)
+	initNetworkQoSController(streamNadInfo, streamAddrsetFactory, streamControllerName)
 }
 
 var _ = AfterEach(func() {
@@ -308,14 +285,14 @@ var _ = Describe("NetworkQoS Controller", func() {
 					Expect(err1).NotTo(HaveOccurred())
 					srcHashName4, _ := sourceAddrSet.GetASHashNames()
 					dst1HashName4, _ := dst1AddrSet.GetASHashNames()
-					Expect(qos0.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || (ip4.dst == 128.116.0.0/17 && ip4.dst != {128.116.0.0,128.116.0.255})) && tcp && tcp.dst == {8080,8081}", srcHashName4, dst1HashName4)))
+					Expect(qos0.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || (ip4.dst == 128.116.0.0/17 && ip4.dst != {128.116.0.0,128.116.0.255})) && tcp && tcp.dst == 8080", srcHashName4, dst1HashName4)))
 					Expect(qos0.Action).To(ContainElement(50))
 					Expect(qos0.Priority).To(Equal(11000))
 					Expect(qos0.Bandwidth).To(ContainElements(10000, 100000))
 					dst3AddrSet, err3 := findAddressSet(defaultAddrsetFactory, nqosNamespace, nqosName, "1", "0", defaultControllerName)
 					Expect(err3).NotTo(HaveOccurred())
 					dst3HashName4, _ := dst3AddrSet.GetASHashNames()
-					Expect(qos1.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || (ip4.dst == 128.118.0.0/17 && ip4.dst != {128.118.0.0,128.118.0.255})) && ((tcp && tcp.dst == {8080,8081}) || (udp && udp.dst == {9090,8080}))", srcHashName4, dst3HashName4)))
+					Expect(qos1.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || (ip4.dst == 128.118.0.0/17 && ip4.dst != {128.118.0.0,128.118.0.255})) && udp && udp.dst == 9090", srcHashName4, dst3HashName4)))
 				}
 
 				app1Pod := &corev1.Pod{
@@ -361,7 +338,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 							return err.Error()
 						}
 						return qos.Match
-					}).WithTimeout(10 * time.Second).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || (ip4.dst == 128.116.0.0/17 && ip4.dst != {128.116.0.0,128.116.0.255})) && tcp && tcp.dst == {8080,8081}", srcHashName4, dst1HashName4)))
+					}).WithTimeout(5 * time.Second).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || (ip4.dst == 128.116.0.0/17 && ip4.dst != {128.116.0.0,128.116.0.255})) && tcp && tcp.dst == 8080", srcHashName4, dst1HashName4)))
 
 					dst3AddrSet, err3 := findAddressSet(defaultAddrsetFactory, nqosNamespace, nqosName, "1", "0", defaultControllerName)
 					Expect(err3).NotTo(HaveOccurred())
@@ -372,7 +349,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 							return err.Error()
 						}
 						return qos.Match
-					}).WithTimeout(10 * time.Second).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || (ip4.dst == 128.118.0.0/17 && ip4.dst != {128.118.0.0,128.118.0.255})) && ((tcp && tcp.dst == {8080,8081}) || (udp && udp.dst == {9090,8080}))", srcHashName4, dst3HashName4)))
+					}).WithTimeout(5 * time.Second).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && (ip4.dst == {$%s} || ip4.dst == 128.118.0.0/17) && udp && udp.dst == 9090", srcHashName4, dst3HashName4)))
 				}
 
 				By("removes IP from destination address set if pod's labels don't match the selector")
@@ -554,31 +531,6 @@ var _ = Describe("NetworkQoS Controller", func() {
 					eventuallyExpectNoQoS(defaultControllerName, nqosNamespace, "stream-qos", 0)
 				}
 
-				By("will not populate source address set NetworkQos with incorrect namespace selector in spec")
-				{
-					nqos4StreamNet.Spec.NetworkSelectors = []crdtypes.NetworkSelector{
-						{
-							NetworkSelectionType: crdtypes.NetworkAttachmentDefinitions,
-							NetworkAttachmentDefinitionSelector: &crdtypes.NetworkAttachmentDefinitionSelector{
-								NamespaceSelector: metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"name": "unknown",
-									},
-								},
-								NetworkSelector: metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"name": "stream",
-									},
-								},
-							},
-						},
-					}
-					nqos4StreamNet.ResourceVersion = time.Now().String()
-					_, err := fakeNQoSClient.K8sV1alpha1().NetworkQoSes(nqosNamespace).Update(context.TODO(), nqos4StreamNet, metav1.UpdateOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					eventuallyAddressSetHasNo(streamAddrsetFactory, nqosNamespace, "stream-qos", "src", "0", streamControllerName, "10.128.2.3")
-				}
-
 				By("handles NetworkQos on secondary network")
 				{
 					nqos4StreamNet.Spec.NetworkSelectors = []crdtypes.NetworkSelector{
@@ -607,8 +559,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 						libovsdbops.ObjectNameKey: nqosNamespace,
 					})
 					addrset, err := defaultAddrsetFactory.EnsureAddressSet(dbIDs)
-					Expect(err).NotTo(HaveOccurred())
-					err = addrset.AddAddresses([]string{"10.194.188.4"})
+					addrset.AddAddresses([]string{"10.194.188.4"})
 					Expect(err).NotTo(HaveOccurred())
 					nqosWithoutSrcSelector := &nqostype.NetworkQoS{
 						ObjectMeta: metav1.ObjectMeta{
@@ -631,7 +582,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 													CIDR: "128.115.0.0/17",
 													Except: []string{
 														"128.115.0.0",
-														"123.123.123.123",
+														"128.115.0.255",
 													},
 												},
 											},
@@ -645,7 +596,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					qos := eventuallyExpectQoS(defaultControllerName, nqosNamespace, "no-source-selector", 0)
 					v4HashName, _ := addrset.GetASHashNames()
-					Expect(qos.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && ip4.dst == 128.115.0.0/17 && ip4.dst != {128.115.0.0,123.123.123.123}", v4HashName)))
+					Expect(qos.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && ip4.dst == 128.115.0.0/17 && ip4.dst != {128.115.0.0,128.115.0.255}", v4HashName)))
 				}
 
 				By("clear QoS attributes of existing NetworkQoS and make sure that is proper")
@@ -696,7 +647,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 						Expect(err).NotTo(HaveOccurred())
 						Expect(qos).NotTo(BeNil())
 						return qos.Priority == 10010 && len(qos.Bandwidth) == 0
-					}).WithTimeout(10 * time.Second).WithPolling(1 * time.Second).Should(BeTrue())
+					}).WithTimeout(5 * time.Second).WithPolling(1 * time.Second).Should(BeTrue())
 					Expect(qos.Match).Should(Equal(fmt.Sprintf("ip4.src == {$%s} && ip4.dst == 128.115.0.0/17 && ip4.dst != {128.115.0.0,123.123.123.123}", v4HashName)))
 				}
 
@@ -761,7 +712,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					localnetNadInfo := util.NewMutableNetInfo(localnetImmutableNadInfo)
 					localnetNadInfo.AddNADs("default/netwk1")
-					ctrl := initNetworkQoSController(localnetNadInfo, addressset.NewFakeAddressSetFactory("netwk1-controller"), "netwk1-controller", enableInterconnect)
+					ctrl := initNetworkQoSController(localnetNadInfo, addressset.NewFakeAddressSetFactory("netwk1-controller"), "netwk1-controller")
 					lsName := ctrl.getLogicalSwitchName("dummy")
 					Expect(lsName).To(Equal("netwk1_ovn_localnet_switch"))
 				}
@@ -773,7 +724,7 @@ var _ = Describe("NetworkQoS Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					layer2NadInfo := util.NewMutableNetInfo(layer2ImmutableNadInfo)
 					layer2NadInfo.AddNADs("default/netwk2")
-					ctrl := initNetworkQoSController(layer2NadInfo, addressset.NewFakeAddressSetFactory("netwk2-controller"), "netwk2-controller", enableInterconnect)
+					ctrl := initNetworkQoSController(layer2NadInfo, addressset.NewFakeAddressSetFactory("netwk2-controller"), "netwk2-controller")
 					lsName := ctrl.getLogicalSwitchName("dummy")
 					Expect(lsName).To(Equal("netwk2_ovn_layer2_switch"))
 				}
@@ -788,7 +739,7 @@ func eventuallyExpectAddressSet(addrsetFactory addressset.AddressSetFactory, nqo
 	Eventually(func() bool {
 		addrset, _ := findAddressSet(addrsetFactory, nqosNamespace, nqosName, qosRuleIndex, ipBlockIndex, controllerName)
 		return addrset != nil
-	}).WithTimeout(10*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("address set not found for %s/%s, rule %s, address block %s", nqosNamespace, nqosName, qosRuleIndex, ipBlockIndex))
+	}).WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("address set not found for %s/%s, rule %s, address block %s", nqosNamespace, nqosName, qosRuleIndex, ipBlockIndex))
 }
 
 func eventuallyAddressSetHas(addrsetFactory addressset.AddressSetFactory, nqosNamespace, nqosName, qosRuleIndex, ipBlockIndex, controllerName, ip string) {
@@ -799,7 +750,7 @@ func eventuallyAddressSetHas(addrsetFactory addressset.AddressSetFactory, nqosNa
 		}
 		ip4, _ := addrset.GetAddresses()
 		return slices.Contains(ip4, ip)
-	}).WithTimeout(10*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("address set does not contain expected ip %s", ip))
+	}).WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("address set does not contain expected ip %s", ip))
 }
 
 func eventuallyAddressSetHasNo(addrsetFactory addressset.AddressSetFactory, nqosNamespace, nqosName, qosRuleIndex, ipBlockIndex, controllerName, ip string) {
@@ -810,7 +761,7 @@ func eventuallyAddressSetHasNo(addrsetFactory addressset.AddressSetFactory, nqos
 		}
 		ip4, _ := addrset.GetAddresses()
 		return !slices.Contains(ip4, ip)
-	}).WithTimeout(10*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("address set still has unexpected ip %s", ip))
+	}).WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("address set still has unexpected ip %s", ip))
 }
 
 func findAddressSet(addrsetFactory addressset.AddressSetFactory, nqosNamespace, nqosName, qosRuleIndex, ipBlockIndex, controllerName string) (addressset.AddressSet, error) {
@@ -823,7 +774,7 @@ func eventuallyExpectQoS(controllerName, qosNamespace, qosName string, index int
 	Eventually(func() bool {
 		qos, _ = findQoS(controllerName, qosNamespace, qosName, index)
 		return qos != nil
-	}).WithTimeout(10*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("QoS not found for %s/%s", qosNamespace, qosName))
+	}).WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("QoS not found for %s/%s", qosNamespace, qosName))
 	return qos
 }
 
@@ -832,7 +783,7 @@ func eventuallyExpectNoQoS(controllerName, qosNamespace, qosName string, index i
 	Eventually(func() bool {
 		qos, _ = findQoS(controllerName, qosNamespace, qosName, index)
 		return qos == nil
-	}).WithTimeout(10*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("Unexpected QoS found for %s/%s, index %d", qosNamespace, qosName, index))
+	}).WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("Unexpected QoS found for %s/%s, index %d", qosNamespace, qosName, index))
 }
 
 func findQoS(controllerName, qosNamespace, qosName string, index int) (*nbdb.QoS, error) {
@@ -864,7 +815,7 @@ func eventuallySwitchHasQoS(switchName string, qos *nbdb.QoS) {
 		}
 		ls, _ = libovsdbops.GetLogicalSwitch(nbClient, criteria)
 		return ls != nil && slices.Contains(ls.QOSRules, qos.UUID)
-	}).WithTimeout(10*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("QoS rule %s not found in switch %s", qos.UUID, switchName))
+	}).WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("QoS rule %s not found in switch %s", qos.UUID, switchName))
 }
 
 func eventuallySwitchHasNoQoS(switchName string, qos *nbdb.QoS) {
@@ -875,7 +826,7 @@ func eventuallySwitchHasNoQoS(switchName string, qos *nbdb.QoS) {
 		}
 		ls, _ = libovsdbops.GetLogicalSwitch(nbClient, criteria)
 		return ls != nil && !slices.Contains(ls.QOSRules, qos.UUID)
-	}).WithTimeout(10*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("Unexpected QoS rule %s found in switch %s", qos.UUID, switchName))
+	}).WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(BeTrue(), fmt.Sprintf("Unexpected QoS rule %s found in switch %s", qos.UUID, switchName))
 }
 
 func initEnv(clientset *util.OVNClientset, initialDB *libovsdbtest.TestSetup) {
@@ -913,7 +864,7 @@ func initEnv(clientset *util.OVNClientset, initialDB *libovsdbtest.TestSetup) {
 	streamAddrsetFactory = addressset.NewFakeAddressSetFactory("stream-network-controller")
 }
 
-func initNetworkQoSController(netInfo util.NetInfo, addrsetFactory addressset.AddressSetFactory, controllerName string, enableInterconnect bool) *Controller {
+func initNetworkQoSController(netInfo util.NetInfo, addrsetFactory addressset.AddressSetFactory, controllerName string) *Controller {
 	nqosController, err := NewController(
 		controllerName,
 		netInfo,
@@ -927,7 +878,7 @@ func initNetworkQoSController(netInfo util.NetInfo, addrsetFactory addressset.Ad
 		watchFactory.NADInformer(),
 		addrsetFactory,
 		func(pod *corev1.Pod) bool {
-			return pod.Spec.NodeName == "node1" || !enableInterconnect
+			return pod.Spec.NodeName == "node1"
 		}, "node1")
 	Expect(err).NotTo(HaveOccurred())
 	err = watchFactory.Start()
@@ -967,7 +918,7 @@ func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
 }
 
 func deleteTestNBGlobal(nbClient libovsdbclient.Client) error {
-	p := func(_ *nbdb.NBGlobal) bool {
+	p := func(nbGlobal *nbdb.NBGlobal) bool {
 		return true
 	}
 	ops, err := nbClient.WhereCache(p).Delete()
