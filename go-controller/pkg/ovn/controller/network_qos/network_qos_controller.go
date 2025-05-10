@@ -71,7 +71,7 @@ type Controller struct {
 	nqosCache *syncmap.SyncMap[*networkQoSState]
 
 	// queues for the CRDs where incoming work is placed to de-dup
-	nqosQueue workqueue.TypedRateLimitingInterface[string]
+	nqosQueue workqueue.TypedRateLimitingInterface[*networkqosapi.NetworkQoS]
 	// cached access to nqos objects
 	nqosLister      networkqoslister.NetworkQoSLister
 	nqosCacheSynced cache.InformerSynced
@@ -155,8 +155,8 @@ func NewController(
 	c.nqosLister = nqosInformer.Lister()
 	c.nqosCacheSynced = nqosInformer.Informer().HasSynced
 	c.nqosQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
-		workqueue.TypedRateLimitingQueueConfig[string]{Name: "networkQoS"},
+		workqueue.NewTypedItemFastSlowRateLimiter[*networkqosapi.NetworkQoS](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[*networkqosapi.NetworkQoS]{Name: "networkQoS"},
 	)
 	_, err := nqosInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNQOSAdd,
@@ -334,12 +334,12 @@ func (c *Controller) runNQOSNodeWorker(wg *sync.WaitGroup) {
 
 // onNQOSAdd queues the NQOS for processing.
 func (c *Controller) onNQOSAdd(obj any) {
-	key, err := cache.MetaNamespaceKeyFunc(obj)
-	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+	nqos, ok := obj.(*networkqosapi.NetworkQoS)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting NetworkQoS but received %T", obj))
 		return
 	}
-	c.nqosQueue.Add(key)
+	c.nqosQueue.Add(nqos)
 }
 
 // onNQOSUpdate updates the NQOS Selector in the cache and queues the NQOS for processing.
@@ -359,23 +359,30 @@ func (c *Controller) onNQOSUpdate(oldObj, newObj any) {
 		!newNQOS.GetDeletionTimestamp().IsZero() {
 		return
 	}
-	key, err := cache.MetaNamespaceKeyFunc(newObj)
-	if err == nil {
-		// updates to NQOS object should be very rare, once put in place they usually stay the same
-		klog.V(4).Infof("Updating Network QoS %s: nqosSpec %v",
-			key, newNQOS.Spec)
-		c.nqosQueue.Add(key)
+	if reflect.DeepEqual(oldNQOS.Spec, newNQOS.Spec) {
+		return
 	}
+	c.nqosQueue.Add(newNQOS)
 }
 
 // onNQOSDelete queues the NQOS for processing.
 func (c *Controller) onNQOSDelete(obj interface{}) {
-	key, err := cache.MetaNamespaceKeyFunc(obj)
-	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
-		return
+	nqos, ok := obj.(*networkqosapi.NetworkQoS)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
+			return
+		}
+		nqos, ok = tombstone.Obj.(*networkqosapi.NetworkQoS)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a NetworkQoS: %#v", tombstone.Obj))
+			return
+		}
 	}
-	c.nqosQueue.Add(key)
+	if nqos != nil {
+		c.nqosQueue.Add(nqos)
+	}
 }
 
 // onNQOSNamespaceAdd queues the namespace for processing.

@@ -16,7 +16,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	metaapplyv1 "k8s.io/client-go/applyconfigurations/meta/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
@@ -30,45 +29,38 @@ import (
 func (c *Controller) processNextNQOSWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
-	nqosKey, quit := c.nqosQueue.Get()
+	nqos, quit := c.nqosQueue.Get()
 	if quit {
 		return false
 	}
-	defer c.nqosQueue.Done(nqosKey)
+	defer c.nqosQueue.Done(nqos)
 
-	if err := c.syncNetworkQoS(nqosKey); err != nil {
-		if c.nqosQueue.NumRequeues(nqosKey) < maxRetries {
-			c.nqosQueue.AddRateLimited(nqosKey)
+	if err := c.syncNetworkQoS(nqos); err != nil {
+		if c.nqosQueue.NumRequeues(nqos) < maxRetries {
+			c.nqosQueue.AddRateLimited(nqos)
 			return true
 		}
-		klog.Warningf("%s: Failed to reconcile NetworkQoS %s: %v", c.controllerName, nqosKey, err)
-		utilruntime.HandleError(fmt.Errorf("failed to reconcile NetworkQoS %s: %v", nqosKey, err))
+		klog.Warningf("%s: Failed to reconcile NetworkQoS %s/%s: %v", c.controllerName, nqos.Namespace, nqos.Name, err)
+		utilruntime.HandleError(fmt.Errorf("failed to reconcile NetworkQoS %s/%s: %v", nqos.Namespace, nqos.Name, err))
 	}
-	c.nqosQueue.Forget(nqosKey)
+	c.nqosQueue.Forget(nqos)
 	return true
 }
 
 // syncNetworkQoS decides the main logic everytime
 // we dequeue a key from the nqosQueue cache
-func (c *Controller) syncNetworkQoS(key string) error {
-	nqosNamespace, nqosName, err := cache.SplitMetaNamespaceKey(key)
-	if err != nil {
-		return err
-	}
+func (c *Controller) syncNetworkQoS(nqos *networkqosapi.NetworkQoS) error {
 	startTime := time.Now()
+	key := joinMetaNamespaceAndName(nqos.Namespace, nqos.Name)
 	defer func() {
 		klog.V(5).Infof("%s - Finished reconciling NetworkQoS %s : %v", c.controllerName, key, time.Since(startTime))
 	}()
 
 	klog.V(5).Infof("%s - reconciling NetworkQoS %s", c.controllerName, key)
-	nqos, err := c.nqosLister.NetworkQoSes(nqosNamespace).Get(nqosName)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	if nqos == nil || !nqos.DeletionTimestamp.IsZero() {
+	if nqos.DeletionTimestamp != nil {
 		klog.V(6).Infof("%s - NetworkQoS %s is being deleted.", c.controllerName, key)
 		return c.nqosCache.DoWithLock(key, func(_ string) error {
-			return c.clearNetworkQos(nqosNamespace, nqosName)
+			return c.clearNetworkQos(nqos.Namespace, nqos.Name)
 		})
 	}
 
@@ -310,18 +302,6 @@ func (c *Controller) resyncPods(nqosState *networkQoSState) error {
 
 var cudnController = udnv1.SchemeGroupVersion.WithKind("ClusterUserDefinedNetwork")
 
-// networkManagedByMe determines if any of the networks specified in the networkSelectors are managed by this controller.
-// It returns true if:
-// - Multi-network is disabled (nadLister is nil) and this is the default network controller
-// - No selectors are provided and this is the default network controller
-// - Any of the selected networks match one of these criteria:
-//   - The selector is for the default network and this is the default network controller
-//   - The selector is for cluster user defined networks (CUDNs) and any of the matching NADs are controlled by a CUDN
-//   - The selector is for network attachment definitions (NADs) and any of the matching NADs are managed by this controller
-//
-// Returns an error if:
-// - Any of the network selectors are invalid or empty
-// - There is an error listing network attachment definitions
 func (c *Controller) networkManagedByMe(networkSelectors crdtypes.NetworkSelectors) (bool, error) {
 	// return c.IsDefault() if multi-network is disabled or no selectors is provided in spec
 	if c.nadLister == nil || len(networkSelectors) == 0 {
