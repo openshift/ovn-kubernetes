@@ -44,9 +44,6 @@ const (
 	// bridge to move packets between host and external for etp=local traffic.
 	// The hex number 0xe745ecf105, represents etp(e74)-service(5ec)-flows which makes it easier for debugging.
 	etpSvcOpenFlowCookie = "0xe745ecf105"
-	// pmtudOpenFlowCookie identifies the flows used to drop ICMP type (3) destination unreachable,
-	// fragmentation-needed (4)
-	pmtudOpenFlowCookie = "0x0304"
 	// ovsLocalPort is the name of the OVS bridge local port
 	ovsLocalPort = "LOCAL"
 	// ctMarkOVN is the conntrack mark value for OVN traffic
@@ -92,10 +89,6 @@ const (
 	// to the appropriate network.
 	nftablesUDNMarkExternalIPsV4Map = "udn-mark-external-ips-v4"
 	nftablesUDNMarkExternalIPsV6Map = "udn-mark-external-ips-v6"
-
-	// outputPortDrop is used to signify that there is no output port for an openflow action and the
-	// rendered action should result in a drop
-	outputPortDrop = "output-port-drop"
 )
 
 // configureUDNServicesNFTables configures the nftables chains, rules, and verdict maps
@@ -537,7 +530,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service,
 					etpSvcOpenFlowCookie, npw.ofportPhys))
 		} else if config.Gateway.Mode == config.GatewayModeShared {
 			// add the ICMP Fragmentation flow for shared gateway mode.
-			icmpFlow := generateICMPFragmentationFlow(externalIPOrLBIngressIP, netConfig.ofPortPatch, npw.ofportPhys, cookie, 110)
+			icmpFlow := npw.generateICMPFragmentationFlow(nwDst, externalIPOrLBIngressIP, netConfig.ofPortPatch, cookie)
 			externalIPFlows = append(externalIPFlows, icmpFlow)
 			// case2 (see function description for details)
 			externalIPFlows = append(externalIPFlows,
@@ -603,28 +596,20 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ofPortPatch,
 	return arpFlow
 }
 
-func generateICMPFragmentationFlow(ipAddr, outputPort, inPort, cookie string, priority int) string {
+func (npw *nodePortWatcher) generateICMPFragmentationFlow(nwDst, ipAddr string, ofPortPatch, cookie string) string {
 	// we send any ICMP destination unreachable, fragmentation needed to the OVN pipeline too so that
 	// path MTU discovery continues to work.
 	icmpMatch := "icmp"
 	icmpType := 3
 	icmpCode := 4
-	nwDst := "nw_dst"
 	if utilnet.IsIPv6String(ipAddr) {
 		icmpMatch = "icmp6"
 		icmpType = 2
 		icmpCode = 0
-		nwDst = "ipv6_dst"
 	}
-
-	action := fmt.Sprintf("output:%s", outputPort)
-	if outputPort == outputPortDrop {
-		action = "drop"
-	}
-
-	icmpFragmentationFlow := fmt.Sprintf("cookie=%s, priority=%d, in_port=%s, %s, %s=%s, icmp_type=%d, "+
-		"icmp_code=%d, actions=%s",
-		cookie, priority, inPort, icmpMatch, nwDst, ipAddr, icmpType, icmpCode, action)
+	icmpFragmentationFlow := fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, icmp_type=%d, "+
+		"icmp_code=%d, actions=output:%s",
+		cookie, npw.ofportPhys, icmpMatch, nwDst, ipAddr, icmpType, icmpCode, ofPortPatch)
 	return icmpFragmentationFlow
 }
 
@@ -1952,9 +1937,10 @@ func commonFlows(hostSubnets []*net.IPNet, bridge *bridgeConfiguration) ([]strin
 							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone,
 							netConfig.masqCTMark, ofPortPhys))
 
-					// Allow OVN->Host traffic on the same node
+					// Allow (a) OVN->host traffic on the same node
+					// (b) host->host traffic on the same node
 					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
-						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, false)...)
+						dftFlows = append(dftFlows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, false)...)
 					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP
@@ -2048,9 +2034,10 @@ func commonFlows(hostSubnets []*net.IPNet, bridge *bridgeConfiguration) ([]strin
 							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
 							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone, netConfig.masqCTMark, ofPortPhys))
 
-					// Allow OVN->Host traffic on the same node
+					// Allow (a) OVN->host traffic on the same node
+					// (b) host->host traffic on the same node
 					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
-						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, true)...)
+						dftFlows = append(dftFlows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, true)...)
 					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP
@@ -2230,38 +2217,15 @@ func commonFlows(hostSubnets []*net.IPNet, bridge *bridgeConfiguration) ([]strin
 	return dftFlows, nil
 }
 
-func pmtudDropFlows(bridge *bridgeConfiguration, ipAddrs []string) []string {
+// hostNetworkNormalActionFlows returns the flows that allow IP{v4,v6} traffic:
+// a. from pods in the OVN network to pods in a localnet network, on the same node
+// b. from pods on the host to pods in a localnet network, on the same node
+// when the localnet is mapped to breth0.
+// The expected srcMAC is the MAC address of breth0 and the expected hostSubnets is the host subnets found on the node
+// primary interface.
+func hostNetworkNormalActionFlows(netConfig *bridgeUDNConfiguration, srcMAC string, hostSubnets []*net.IPNet, isV6 bool) []string {
 	var flows []string
-	if config.Gateway.Mode != config.GatewayModeShared {
-		return nil
-	}
-	for _, addr := range ipAddrs {
-		for _, netConfig := range bridge.patchedNetConfigs() {
-			flows = append(flows,
-				generateICMPFragmentationFlow(addr, outputPortDrop, netConfig.ofPortPatch, pmtudOpenFlowCookie, 700))
-		}
-	}
-
-	return flows
-}
-
-// ovnToHostNetworkNormalActionFlows returns the flows that allow IP{v4,v6} traffic from the OVN network to the host network
-// when the destination is on the same node as the sender. This is necessary for pods in the default network to reach
-// localnet pods on the same node, when the localnet is mapped to breth0. The expected srcMAC is the MAC address of breth0
-// and the expected hostSubnets is the host subnets found on the node primary interface.
-func ovnToHostNetworkNormalActionFlows(netConfig *bridgeUDNConfiguration, srcMAC string, hostSubnets []*net.IPNet, isV6 bool) []string {
-	var inPort, ctMark, ipFamily, ipFamilyDest string
-	var flows []string
-
-	if config.Gateway.Mode == config.GatewayModeShared {
-		inPort = netConfig.ofPortPatch
-		ctMark = netConfig.masqCTMark
-	} else if config.Gateway.Mode == config.GatewayModeLocal {
-		inPort = "LOCAL"
-		ctMark = ctMarkHost
-	} else {
-		return nil
-	}
+	var ipFamily, ipFamilyDest string
 
 	if isV6 {
 		ipFamily = "ipv6"
@@ -2271,38 +2235,69 @@ func ovnToHostNetworkNormalActionFlows(netConfig *bridgeUDNConfiguration, srcMAC
 		ipFamilyDest = "nw_dst"
 	}
 
+	formatFlow := func(inPort, destIP, ctMark string) string {
+		// Matching IP traffic will be handled by the bridge instead of being output directly
+		// to the NIC by the existing flow at prio=100.
+		flowTemplate := "cookie=%s, priority=102, in_port=%s, dl_src=%s, %s, %s=%s, " +
+			"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL"
+		return fmt.Sprintf(flowTemplate,
+			defaultOpenFlowCookie,
+			inPort,
+			srcMAC,
+			ipFamily,
+			ipFamilyDest,
+			destIP,
+			config.Default.ConntrackZone,
+			ctMark)
+	}
+
+	// Traffic path (a): OVN->localnet for shared gw mode
+	if config.Gateway.Mode == config.GatewayModeShared {
+		for _, hostSubnet := range hostSubnets {
+			if utilnet.IsIPv6(hostSubnet.IP) != isV6 {
+				continue
+			}
+			flows = append(flows, formatFlow(netConfig.ofPortPatch, hostSubnet.String(), netConfig.masqCTMark))
+		}
+	}
+
+	// Traffic path (a): OVN->localnet for local gw mode
+	// Traffic path (b): host->localnet for both gw modes
 	for _, hostSubnet := range hostSubnets {
-		if (hostSubnet.IP.To4() == nil) != isV6 {
+		if utilnet.IsIPv6(hostSubnet.IP) != isV6 {
 			continue
 		}
-		// IP traffic from the OVN network to the host network should be handled normally by the bridge instead of
-		// being output directly to the NIC by the existing flow at prio=100.
-		flows = append(flows,
-			fmt.Sprintf("cookie=%s, priority=102, in_port=%s, dl_src=%s, %s, %s=%s, "+
-				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL",
-				defaultOpenFlowCookie,
-				inPort,
-				srcMAC,
-				ipFamily,
-				ipFamilyDest,
-				hostSubnet.String(),
-				config.Default.ConntrackZone,
-				ctMark))
+		flows = append(flows, formatFlow("LOCAL", hostSubnet.String(), ctMarkHost))
 	}
 
 	if isV6 {
-		// Neighbor discovery in IPv6 happens through ICMPv6 messages to a special destination (ff02::1:ff00:0/104),
-		// which has nothing to do with the host subnets we're matching against in the flow above at prio=102.
-		// Let's allow neighbor discovery by matching against icmp type and in_port.
+		// IPv6 neighbor discovery uses ICMPv6 messages sent to a special destination (ff02::1:ff00:0/104)
+		// that is unrelated to the host subnets matched in the prio=102 flow above.
+		// Allow neighbor discovery by matching against ICMP type and ingress port.
+		formatICMPFlow := func(inPort, ctMark string, icmpType int) string {
+			icmpFlowTemplate := "cookie=%s, priority=102, in_port=%s, dl_src=%s, icmp6, icmpv6_type=%d, " +
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL"
+			return fmt.Sprintf(icmpFlowTemplate,
+				defaultOpenFlowCookie,
+				inPort,
+				srcMAC,
+				icmpType,
+				config.Default.ConntrackZone,
+				ctMark)
+		}
+
 		for _, icmpType := range []int{types.NeighborSolicitationICMPType, types.NeighborAdvertisementICMPType} {
-			flows = append(flows,
-				fmt.Sprintf("cookie=%s, priority=102, in_port=%s, dl_src=%s, icmp6, icmpv6_type=%d, "+
-					"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL",
-					defaultOpenFlowCookie, inPort, srcMAC, icmpType,
-					config.Default.ConntrackZone, ctMark))
+			// Traffic path (a) for ICMP: OVN-> localnet for shared gw mode
+			if config.Gateway.Mode == config.GatewayModeShared {
+				flows = append(flows,
+					formatICMPFlow(netConfig.ofPortPatch, netConfig.masqCTMark, icmpType))
+			}
+
+			// Traffic path (a) for ICMP: OVN->localnet for local gw mode
+			// Traffic path (b) for ICMP: host->localnet for both gw modes
+			flows = append(flows, formatICMPFlow("LOCAL", ctMarkHost, icmpType))
 		}
 	}
-
 	return flows
 }
 

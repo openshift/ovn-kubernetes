@@ -22,11 +22,10 @@ type LinkAddress struct {
 }
 
 type Controller struct {
-	mu          *sync.Mutex
-	name        string
-	ipv4Enabled bool
-	ipv6Enabled bool
-	// map of link name to address
+	mu              *sync.Mutex
+	name            string
+	ipv4Enabled     bool
+	ipv6Enabled     bool
 	store           map[string][]netlink.Addr
 	linkHandlerFunc func(link netlink.Link) error
 }
