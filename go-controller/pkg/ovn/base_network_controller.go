@@ -1232,6 +1232,11 @@ func BuildAdvertisedUDNSubnetsDropACL(advertisedUDNSubnetsAddressSet addressset.
 }
 
 func (bnc *BaseNetworkController) addAdvertisedUDNIsolation(nodeName string) error {
+	if util.IsLooseUDNIsolation() {
+		klog.Infof("The network %s is configured with loose isolation mode, skip adding tier-0 drop ACL rule",
+			bnc.GetNetworkName())
+		return nil
+	}
 	var acceptMatches, cidrs []string
 	var ops []ovsdb.Operation
 
@@ -1291,6 +1296,11 @@ func (bnc *BaseNetworkController) addAdvertisedUDNIsolation(nodeName string) err
 }
 
 func (bnc *BaseNetworkController) deleteAdvertisedUDNIsolation(nodeName string) error {
+	if util.IsLooseUDNIsolation() {
+		klog.Infof("The network %s is configured with loose isolation mode, skip deleting tier-0 drop ACL rule",
+			bnc.GetNetworkName())
+		return nil
+	}
 	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedUDNSubnetsAddressSetDBIDs())
 	if err != nil {
 		return err
