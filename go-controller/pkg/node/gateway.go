@@ -485,7 +485,9 @@ func (g *gateway) Reconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isPodNetworkAdvertised); err != nil {
+
+	nodeIPs, _ := g.nodeIPManager.ListAddresses()
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, nodeIPs, g.isPodNetworkAdvertised); err != nil {
 		return err
 	}
 	err = g.updateSNATRules()
