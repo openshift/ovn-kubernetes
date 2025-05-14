@@ -6,14 +6,14 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 
 - 20 GB of free space in root file system
 - Docker run time or podman
-- [KIND]( https://kubernetes.io/docs/setup/learning-environment/kind/ )
+- [KIND](https://kubernetes.io/docs/setup/learning-environment/kind/)
    - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
    - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.yaml) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
 
       ```
       sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
       ```
-- [kubectl]( https://kubernetes.io/docs/tasks/tools/install-kubectl/ )
+- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - Python and pip
 - jq
 - openssl
