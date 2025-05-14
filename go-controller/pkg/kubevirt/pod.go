@@ -6,12 +6,12 @@ import (
 	"sort"
 	"strings"
 
+	kubevirtv1 "kubevirt.io/api/core/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
-
-	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -61,7 +61,7 @@ func findVMRelatedPods(client *factory.WatchFactory, pod *corev1.Pod) ([]*corev1
 
 // findPodAnnotation will return the the OVN pod
 // annotation from any other pod annotated with the same VM as pod
-func findPodAnnotation(client *factory.WatchFactory, pod *corev1.Pod, netInfo util.NetInfo, nadName string) (*util.PodAnnotation, error) {
+func findPodAnnotation(client *factory.WatchFactory, pod *corev1.Pod, nadName string) (*util.PodAnnotation, error) {
 	vmPods, err := findVMRelatedPods(client, pod)
 	if err != nil {
 		return nil, fmt.Errorf("failed finding related pods for pod %s/%s when looking for network info: %v", pod.Namespace, pod.Name, err)
@@ -86,7 +86,7 @@ func findPodAnnotation(client *factory.WatchFactory, pod *corev1.Pod, netInfo ut
 // to the target vm pod so ip address follow vm during migration. This has to
 // done before creating the LSP to be sure that Address field get configured
 // correctly at the target VM pod LSP.
-func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.KubeOVN, pod *corev1.Pod, netInfo util.NetInfo, nadName string) (*util.PodAnnotation, error) {
+func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.KubeOVN, pod *corev1.Pod, nadName string) (*util.PodAnnotation, error) {
 	if !IsPodLiveMigratable(pod) {
 		return nil, nil
 	}
@@ -95,7 +95,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 		return podAnnotation, nil
 	}
 
-	podAnnotation, err := findPodAnnotation(watchFactory, pod, netInfo, nadName)
+	podAnnotation, err := findPodAnnotation(watchFactory, pod, nadName)
 	if err != nil {
 		return nil, err
 	}
