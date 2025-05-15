@@ -617,7 +617,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 		// No endpoint object exists yet so default to false
 		hasLocalHostNetworkEp = false
 	} else {
-		nodeIPs := npw.nodeIPManager.ListAddresses()
+		nodeIPs, _ := npw.nodeIPManager.ListAddresses()
 		localEndpoints = npw.GetLocalEligibleEndpointAddresses(epSlices, service)
 		hasLocalHostNetworkEp = util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 	}
@@ -703,7 +703,7 @@ func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) err
 	}
 	if util.ServiceTypeHasNodePort(service) {
 		// remove conntrack entries for NodePorts
-		nodeIPs := npw.nodeIPManager.ListAddresses()
+		nodeIPs, _ := npw.nodeIPManager.ListAddresses()
 		for _, nodeIP := range nodeIPs {
 			for _, svcPort := range service.Spec.Ports {
 				if err := util.DeleteConntrackServicePort(nodeIP.String(), svcPort.NodePort, svcPort.Protocol,
@@ -779,7 +779,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			klog.V(5).Infof("No endpointslice found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
-		nodeIPs := npw.nodeIPManager.ListAddresses()
+		nodeIPs, _ := npw.nodeIPManager.ListAddresses()
 		localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, service)
 		hasLocalHostNetworkEp := util.HasLocalHostNetworkEndpoints(localEndpoints, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp, localEndpoints)
@@ -838,7 +838,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	}
 
 	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
-	nodeIPs := npw.nodeIPManager.ListAddresses()
+	nodeIPs, _ := npw.nodeIPManager.ListAddresses()
 	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name, types.DefaultNetworkName)
 	if err != nil {
 		// No need to continue adding the new endpoint slice, if we can't retrieve all slices for this service
@@ -969,7 +969,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	}
 
 	// Update rules and service cache if hasHostNetworkEndpoints status changed or localEndpoints changed
-	nodeIPs := npw.nodeIPManager.ListAddresses()
+	nodeIPs, _ := npw.nodeIPManager.ListAddresses()
 	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(newEpSlice.Namespace, newEpSlice.Labels[discovery.LabelServiceName], types.DefaultNetworkName)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
@@ -1429,6 +1429,11 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
 							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone,
 							netConfig.masqCTMark, ofPortPhys))
+
+					// Allow OVN->Host traffic on the same node
+					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
+						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, subnets, false)...)
+					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP
 					dftFlows = append(dftFlows,
@@ -1504,6 +1509,11 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, ipv6, "+
 							"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
 							defaultOpenFlowCookie, netConfig.ofPortPatch, bridgeMacAddress, config.Default.ConntrackZone, netConfig.masqCTMark, ofPortPhys))
+
+					// Allow OVN->Host traffic on the same node
+					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
+						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, subnets, true)...)
+					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP
 					dftFlows = append(dftFlows,
@@ -1656,6 +1666,67 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 	}
 
 	return dftFlows, nil
+}
+
+// ovnToHostNetworkNormalActionFlows returns the flows that allow IP{v4,v6} traffic from the OVN network to the host network
+// when the destination is on the same node as the sender. This is necessary for pods in the default network to reach
+// localnet pods on the same node, when the localnet is mapped to breth0. The expected srcMAC is the MAC address of breth0
+// and the expected hostSubnets is the host subnets found on the node primary interface.
+func ovnToHostNetworkNormalActionFlows(netConfig *bridgeUDNConfiguration, srcMAC string, hostSubnets []*net.IPNet, isV6 bool) []string {
+	var inPort, ctMark, ipFamily, ipFamilyDest string
+	var flows []string
+
+	if config.Gateway.Mode == config.GatewayModeShared {
+		inPort = netConfig.ofPortPatch
+		ctMark = netConfig.masqCTMark
+	} else if config.Gateway.Mode == config.GatewayModeLocal {
+		inPort = "LOCAL"
+		ctMark = ctMarkHost
+	} else {
+		return nil
+	}
+
+	if isV6 {
+		ipFamily = "ipv6"
+		ipFamilyDest = "ipv6_dst"
+	} else {
+		ipFamily = "ip"
+		ipFamilyDest = "nw_dst"
+	}
+
+	for _, hostSubnet := range hostSubnets {
+		if (hostSubnet.IP.To4() == nil) != isV6 {
+			continue
+		}
+		// IP traffic from the OVN network to the host network should be handled normally by the bridge instead of
+		// being output directly to the NIC by the existing flow at prio=100.
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=102, in_port=%s, dl_src=%s, %s, %s=%s, "+
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL",
+				defaultOpenFlowCookie,
+				inPort,
+				srcMAC,
+				ipFamily,
+				ipFamilyDest,
+				hostSubnet.String(),
+				config.Default.ConntrackZone,
+				ctMark))
+	}
+
+	if isV6 {
+		// Neighbor discovery in IPv6 happens through ICMPv6 messages to a special destination (ff02::1:ff00:0/104),
+		// which has nothing to do with the host subnets we're matching against in the flow above at prio=102.
+		// Let's allow neighbor discovery by matching against icmp type and in_port.
+		for _, icmpType := range []int{types.NeighborSolicitationICMPType, types.NeighborAdvertisementICMPType} {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=102, in_port=%s, dl_src=%s, icmp6, icmpv6_type=%d, "+
+					"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL",
+					defaultOpenFlowCookie, inPort, srcMAC, icmpType,
+					config.Default.ConntrackZone, ctMark))
+		}
+	}
+
+	return flows
 }
 
 func setBridgeOfPorts(bridge *bridgeConfiguration) error {
@@ -1824,7 +1895,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
-		nodeIPs := gw.nodeIPManager.ListAddresses()
+		nodeIPs, _ := gw.nodeIPManager.ListAddresses()
 
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
 			// Delete stale masquerade resources if there are any. This is to make sure that there
@@ -1856,7 +1927,8 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses()); err != nil {
+			nodeIPs, _ := gw.nodeIPManager.ListAddresses()
+			if err := gw.openflowManager.updateBridgeFlowCache(subnets, nodeIPs); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}

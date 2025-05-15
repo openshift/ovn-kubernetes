@@ -129,14 +129,16 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nodeName, err)
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, hostSubnets, gw.nodeIPManager.ListAddresses())
+		nodeIPs, _ := gw.nodeIPManager.ListAddresses()
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, hostSubnets, nodeIPs)
 		if err != nil {
 			return err
 		}
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(hostSubnets, gw.nodeIPManager.ListAddresses()); err != nil {
+			nodeIPs, _ := gw.nodeIPManager.ListAddresses()
+			if err := gw.openflowManager.updateBridgeFlowCache(hostSubnets, nodeIPs); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
