@@ -161,6 +161,8 @@ var AddressSetAdvertisedNetwork = newObjectIDsType(addressSet, AdvertisedNetwork
 var ACLAdvertisedNetwork = newObjectIDsType(acl, AdvertisedNetworkOwnerType, []ExternalIDKey{
 	// ACL name
 	ObjectNameKey,
+	// NetworkID
+	NetworkKey,
 })
 
 var ACLAdminNetworkPolicy = newObjectIDsType(acl, AdminNetworkPolicyOwnerType, []ExternalIDKey{

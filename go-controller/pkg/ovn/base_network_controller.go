@@ -1200,13 +1200,15 @@ func GetAdvertisedNetworkSubnetsDropACLdbIDs() *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: advertisedNetworkSubnetsCtrl,
+			libovsdbops.NetworkKey:    "",
 		})
 }
 
-func GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName string) *libovsdbops.DbObjectIDs {
+func GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName string, networkID int) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: networkName,
+			libovsdbops.NetworkKey:    strconv.Itoa(networkID),
 		})
 }
 
@@ -1258,7 +1260,7 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 
 	if len(passMatches) > 0 {
 		passACL := libovsdbutil.BuildACL(
-			GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName()),
+			GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName(), bnc.GetNetworkID()),
 			types.AdvertisedNetworkPassPriority,
 			strings.Join(passMatches, " || "),
 			nbdb.ACLActionPass,
@@ -1268,7 +1270,7 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, nil, passACL)
 		if err != nil {
-			return fmt.Errorf("failed to create or update network isolation pass ACL %s for network %s: %w", GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName()), bnc.GetNetworkName(), err)
+			return fmt.Errorf("failed to create or update network isolation pass ACL %s for network %s: %w", GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName(), bnc.GetNetworkID()), bnc.GetNetworkName(), err)
 		}
 		ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, bnc.GetNetworkScopedSwitchName(nodeName), passACL)
 		if err != nil {
@@ -1307,7 +1309,7 @@ func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName stri
 		return err
 	}
 
-	passACLIDs := GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName())
+	passACLIDs := GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName(), bnc.GetNetworkID())
 	passACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](passACLIDs, nil)
 	passACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, passACLPredicate)
 	if err != nil {

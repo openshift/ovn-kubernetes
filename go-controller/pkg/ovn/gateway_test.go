@@ -33,7 +33,7 @@ func init() {
 	format.MaxLength = 0
 }
 
-func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, networkName string, clusterIPSubnets []*net.IPNet, nodeSwitch *nbdb.LogicalSwitch, addrSet addressset.AddressSet) []libovsdbtest.TestData {
+func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, networkName string, networkID int, clusterIPSubnets []*net.IPNet, nodeSwitch *nbdb.LogicalSwitch, addrSet addressset.AddressSet) []libovsdbtest.TestData {
 	var passMatches []string
 	for _, subnet := range clusterIPSubnets {
 		ipPrefix := "ip4"
@@ -44,7 +44,7 @@ func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, 
 
 	}
 	passACL := libovsdbutil.BuildACL(
-		GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName),
+		GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName, networkID),
 		types.AdvertisedNetworkPassPriority,
 		strings.Join(passMatches, " || "),
 		nbdb.ACLActionPass,
