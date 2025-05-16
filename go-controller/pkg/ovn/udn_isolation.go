@@ -240,29 +240,28 @@ func (oc *DefaultNetworkController) getUDNOpenPortDbIDs(podNamespacedName string
 		})
 }
 
-const advertisedNetworkIsolationACLID = "advertised-network-isolation"
-const advertisedNetworkSubnetsAddressSet = "advertised-network-subnets"
-const advertisedNetworkSubnetsCtrl = "advertised-network-subnets-controller"
+// advertisedNetworkSubnetsKey is the object name key for the global advertised networks addressset and the global deny ACL
+const advertisedNetworkSubnetsKey = "advertised-network-subnets"
 
 // GetAdvertisedNetworkSubnetsAddressSetDBIDs returns the DB IDs for the advertised network subnets addressset
 func GetAdvertisedNetworkSubnetsAddressSetDBIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdvertisedNetwork, advertisedNetworkSubnetsCtrl, map[libovsdbops.ExternalIDKey]string{
-		libovsdbops.ObjectNameKey: advertisedNetworkSubnetsAddressSet,
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdvertisedNetwork, DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: advertisedNetworkSubnetsKey,
 	})
 }
 
 // GetAdvertisedNetworkSubnetsDropACLdbIDs returns the DB IDs for the advertised network subnets drop ACL
 func GetAdvertisedNetworkSubnetsDropACLdbIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, DefaultNetworkControllerName,
 		map[libovsdbops.ExternalIDKey]string{
-			libovsdbops.ObjectNameKey: advertisedNetworkSubnetsCtrl,
+			libovsdbops.ObjectNameKey: advertisedNetworkSubnetsKey,
 			libovsdbops.NetworkKey:    "",
 		})
 }
 
 // GetAdvertisedNetworkSubnetsPassACLdbIDs returns the DB IDs for the advertised network subnets pass ACL
-func GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName string, networkID int) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
+func GetAdvertisedNetworkSubnetsPassACLdbIDs(controller, networkName string, networkID int) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, controller,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: networkName,
 			libovsdbops.NetworkKey:    strconv.Itoa(networkID),
@@ -327,7 +326,7 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 
 	if len(passMatches) > 0 {
 		passACL := libovsdbutil.BuildACL(
-			GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName(), bnc.GetNetworkID()),
+			GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.controllerName, bnc.GetNetworkName(), bnc.GetNetworkID()),
 			types.AdvertisedNetworkPassPriority,
 			strings.Join(passMatches, " || "),
 			nbdb.ACLActionPass,
@@ -337,7 +336,7 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, nil, passACL)
 		if err != nil {
-			return fmt.Errorf("failed to create or update network isolation pass ACL %s for network %s: %w", GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName(), bnc.GetNetworkID()), bnc.GetNetworkName(), err)
+			return fmt.Errorf("failed to create or update network isolation pass ACL %s for network %s: %w", GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.controllerName, bnc.GetNetworkName(), bnc.GetNetworkID()), bnc.GetNetworkName(), err)
 		}
 		ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, bnc.GetNetworkScopedSwitchName(nodeName), passACL)
 		if err != nil {
@@ -377,7 +376,7 @@ func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName stri
 		return err
 	}
 
-	passACLIDs := GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.GetNetworkName(), bnc.GetNetworkID())
+	passACLIDs := GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.controllerName, bnc.GetNetworkName(), bnc.GetNetworkID())
 	passACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](passACLIDs, nil)
 	passACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, passACLPredicate)
 	if err != nil {
