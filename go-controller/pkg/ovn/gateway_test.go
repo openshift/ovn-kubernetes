@@ -34,28 +34,28 @@ func init() {
 }
 
 func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, networkName string, clusterIPSubnets []*net.IPNet, nodeSwitch *nbdb.LogicalSwitch, addrSet addressset.AddressSet) []libovsdbtest.TestData {
-	var acceptMatches []string
+	var passMatches []string
 	for _, subnet := range clusterIPSubnets {
 		ipPrefix := "ip4"
 		if utilnet.IsIPv6CIDR(subnet) {
 			ipPrefix = "ip6"
 		}
-		acceptMatches = append(acceptMatches, fmt.Sprintf("(%s.src == %s && %s.dst == %s)", ipPrefix, subnet, ipPrefix, subnet))
+		passMatches = append(passMatches, fmt.Sprintf("(%s.src == %s && %s.dst == %s)", ipPrefix, subnet, ipPrefix, subnet))
 
 	}
-	acceptACL := libovsdbutil.BuildACL(
-		GetAdvertisedNetworkSubnetsAcceptACLdbIDs(networkName),
-		types.AdvertisedNetworkAllowPriority,
-		strings.Join(acceptMatches, " || "),
+	passACL := libovsdbutil.BuildACL(
+		GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName),
+		types.AdvertisedNetworkPassPriority,
+		strings.Join(passMatches, " || "),
 		nbdb.ACLActionPass,
 		nil,
 		libovsdbutil.LportEgress)
-	acceptACL.Tier = types.PrimaryACLTier
-	acceptACL.UUID = "advertised-udn-isolation-accept-acl-UUID"
+	passACL.Tier = types.PrimaryACLTier
+	passACL.UUID = "advertised-udn-isolation-pass-acl-UUID"
 	dropACL := BuildAdvertisedNetworkSubnetsDropACL(addrSet)
 	dropACL.UUID = "advertised-udn-isolation-drop-acl-UUID"
-	nodeSwitch.ACLs = append(nodeSwitch.ACLs, acceptACL.UUID, dropACL.UUID)
-	testData = append(testData, acceptACL, dropACL)
+	nodeSwitch.ACLs = append(nodeSwitch.ACLs, passACL.UUID, dropACL.UUID)
+	testData = append(testData, passACL, dropACL)
 
 	return testData
 }
