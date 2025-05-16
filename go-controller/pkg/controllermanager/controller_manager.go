@@ -201,7 +201,7 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
 		advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedUDNSubnetsAddressSetDBIDs())
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedUDNSubnetsAddressSetDBIDs(), err)
 		}
 		v4AdvertisedSubnets, v6AdvertisedSubnets := advertisedSubnets.GetAddresses()
 		var invalidSubnets []string
