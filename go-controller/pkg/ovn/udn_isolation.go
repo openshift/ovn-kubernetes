@@ -244,12 +244,14 @@ const advertisedNetworkIsolationACLID = "advertised-network-isolation"
 const advertisedNetworkSubnetsAddressSet = "advertised-network-subnets"
 const advertisedNetworkSubnetsCtrl = "advertised-network-subnets-controller"
 
+// GetAdvertisedNetworkSubnetsAddressSetDBIDs returns the DB IDs for the advertised network subnets addressset
 func GetAdvertisedNetworkSubnetsAddressSetDBIDs() *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdvertisedNetwork, advertisedNetworkSubnetsCtrl, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey: advertisedNetworkSubnetsAddressSet,
 	})
 }
 
+// GetAdvertisedNetworkSubnetsDropACLdbIDs returns the DB IDs for the advertised network subnets drop ACL
 func GetAdvertisedNetworkSubnetsDropACLdbIDs() *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
 		map[libovsdbops.ExternalIDKey]string{
@@ -258,6 +260,7 @@ func GetAdvertisedNetworkSubnetsDropACLdbIDs() *libovsdbops.DbObjectIDs {
 		})
 }
 
+// GetAdvertisedNetworkSubnetsPassACLdbIDs returns the DB IDs for the advertised network subnets pass ACL
 func GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName string, networkID int) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
 		map[libovsdbops.ExternalIDKey]string{
@@ -266,6 +269,10 @@ func GetAdvertisedNetworkSubnetsPassACLdbIDs(networkName string, networkID int) 
 		})
 }
 
+// BuildAdvertisedNetworkSubnetsDropACL builds the advertised network subnets drop ACL:
+// action match                                                                       priority
+// ------ --------------------------------------------------------------------------- --------
+// drop   "(ip[4|6].src == $<ALL_ADV_SUBNETS> && ip[4|6].dst == $<ALL_ADV_SUBNETS>)"    1050
 func BuildAdvertisedNetworkSubnetsDropACL(advertisedNetworkSubnetsAddressSet addressset.AddressSet) *nbdb.ACL {
 	var dropMatches []string
 	v4AddrSet, v6AddrSet := advertisedNetworkSubnetsAddressSet.GetASHashNames()
@@ -287,6 +294,12 @@ func BuildAdvertisedNetworkSubnetsDropACL(advertisedNetworkSubnetsAddressSet add
 	return dropACL
 }
 
+// addAdvertisedNetworkIsolation adds advertised network isolation rules to the given node.
+// It adds the following ACLs to the node switch:
+// action match                                                                       priority
+// ------ --------------------------------------------------------------------------- --------
+// pass   "(ip[4|6].src == <UDN_SUBNET> && ip[4|6].dst == <UDN_SUBNET>)"                1100
+// drop   "(ip[4|6].src == $<ALL_ADV_SUBNETS> && ip[4|6].dst == $<ALL_ADV_SUBNETS>)"    1050
 func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string) error {
 	var passMatches, cidrs []string
 	var ops []ovsdb.Operation
@@ -348,6 +361,7 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 	return nil
 }
 
+// deleteAdvertisedNetworkIsolation deletes advertised network isolation rules from the given node switch
 func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName string) error {
 	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	if err != nil {
