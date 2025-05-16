@@ -86,6 +86,10 @@ const (
 	DefaultAllowPriority = 1001
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
+	// Allow priority for isolated advertised networks
+	AdvertisedNetworkAllowPriority = 1100
+	// Deny priority for isolated advertised networks
+	AdvertisedNetworkDenyPriority = 1050
 
 	// ACL PlaceHolderACL Tier Priorities
 	PrimaryUDNAllowPriority = 1001

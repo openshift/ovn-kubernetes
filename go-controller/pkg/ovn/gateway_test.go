@@ -45,7 +45,7 @@ func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, 
 	}
 	acceptACL := libovsdbutil.BuildACL(
 		GetAdvertisedUDNSubnetsAcceptACLdbIDs(networkName),
-		types.DefaultAllowPriority,
+		types.AdvertisedNetworkAllowPriority,
 		strings.Join(acceptMatches, " || "),
 		nbdb.ACLActionPass,
 		nil,

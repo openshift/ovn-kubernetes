@@ -1222,7 +1222,7 @@ func BuildAdvertisedUDNSubnetsDropACL(advertisedUDNSubnetsAddressSet addressset.
 
 	dropACL := libovsdbutil.BuildACL(
 		GetAdvertisedUDNSubnetsDropACLdbIDs(),
-		types.DefaultDenyPriority,
+		types.AdvertisedNetworkDenyPriority,
 		strings.Join(dropMatches, " || "),
 		nbdb.ACLActionDrop,
 		nil,
@@ -1259,7 +1259,7 @@ func (bnc *BaseNetworkController) addAdvertisedUDNIsolation(nodeName string) err
 	if len(acceptMatches) > 0 {
 		acceptACL := libovsdbutil.BuildACL(
 			GetAdvertisedUDNSubnetsAcceptACLdbIDs(bnc.GetNetworkName()),
-			types.DefaultAllowPriority,
+			types.AdvertisedNetworkAllowPriority,
 			strings.Join(acceptMatches, " || "),
 			nbdb.ACLActionPass,
 			nil,
