@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -26,6 +27,13 @@ import (
 var (
 	ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
 	ErrorUnsupportedIPAMKey     = errors.New("IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute")
+)
+
+var (
+	// UDNLooseIsolation allows communication between two advertised UDN networks.
+	UDNLooseIsolation string = "loose"
+	// UDNLooseIsolation drops communication between two advertised UDN networks.
+	UDNSecureIsolation string = "secure"
 )
 
 // NetInfo exposes read-only information about a network.
@@ -1553,4 +1561,11 @@ func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
 		return parts[0], parts[1]
 	}
 	return "", ""
+}
+
+// IsLooseUDNIsolation returns true if two UDN networks are not configured to be
+// isolated each other when both networks advertising their pod IPs using BGP over
+// default VRF, otherwise returns false.
+func IsLooseUDNIsolation() bool {
+	return os.Getenv("UDN_ISOLATION_MODE") == UDNLooseIsolation
 }
