@@ -931,7 +931,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 				return nil, err
 			}
 			if util.IsRouteAdvertisementsEnabled() {
-				if err := oc.deleteAdvertisedUDNIsolation(node.Name); err != nil {
+				if err := oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
 					return nil, err
 				}
 			}
@@ -939,7 +939,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 			if err := oc.deleteUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
 				return nil, err
 			}
-			if err := oc.addAdvertisedUDNIsolation(node.Name); err != nil {
+			if err := oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
 				return nil, err
 			}
 		}

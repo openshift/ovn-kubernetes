@@ -1186,33 +1186,33 @@ func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfi
 	return nil
 }
 
-const advertisedUDNIsolationACLID = "advertised-udn-isolation"
-const advertisedUDNSubnetsAddressSet = "advertised-udn-subnets"
-const advertisedUDNSubnetsCtrl = "advertised-udn-subnets-controller"
+const advertisedNetworkIsolationACLID = "advertised-network-isolation"
+const advertisedNetworkSubnetsAddressSet = "advertised-network-subnets"
+const advertisedNetworkSubnetsCtrl = "advertised-network-subnets-controller"
 
-func GetAdvertisedUDNSubnetsAddressSetDBIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdvertisedUDN, advertisedUDNSubnetsCtrl, map[libovsdbops.ExternalIDKey]string{
-		libovsdbops.ObjectNameKey: advertisedUDNSubnetsAddressSet,
+func GetAdvertisedNetworkSubnetsAddressSetDBIDs() *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdvertisedNetwork, advertisedNetworkSubnetsCtrl, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: advertisedNetworkSubnetsAddressSet,
 	})
 }
 
-func GetAdvertisedUDNSubnetsDropACLdbIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedUDN, advertisedUDNIsolationACLID,
+func GetAdvertisedNetworkSubnetsDropACLdbIDs() *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
 		map[libovsdbops.ExternalIDKey]string{
-			libovsdbops.ObjectNameKey: advertisedUDNSubnetsCtrl,
+			libovsdbops.ObjectNameKey: advertisedNetworkSubnetsCtrl,
 		})
 }
 
-func GetAdvertisedUDNSubnetsAcceptACLdbIDs(networkName string) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedUDN, advertisedUDNIsolationACLID,
+func GetAdvertisedNetworkSubnetsAcceptACLdbIDs(networkName string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, advertisedNetworkIsolationACLID,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: networkName,
 		})
 }
 
-func BuildAdvertisedUDNSubnetsDropACL(advertisedUDNSubnetsAddressSet addressset.AddressSet) *nbdb.ACL {
+func BuildAdvertisedNetworkSubnetsDropACL(advertisedNetworkSubnetsAddressSet addressset.AddressSet) *nbdb.ACL {
 	var dropMatches []string
-	v4AddrSet, v6AddrSet := advertisedUDNSubnetsAddressSet.GetASHashNames()
+	v4AddrSet, v6AddrSet := advertisedNetworkSubnetsAddressSet.GetASHashNames()
 	if v4AddrSet != "" {
 		dropMatches = append(dropMatches, fmt.Sprintf("(ip4.src == $%s && ip4.dst == $%s)", v4AddrSet, v4AddrSet))
 	}
@@ -1221,7 +1221,7 @@ func BuildAdvertisedUDNSubnetsDropACL(advertisedUDNSubnetsAddressSet addressset.
 	}
 
 	dropACL := libovsdbutil.BuildACL(
-		GetAdvertisedUDNSubnetsDropACLdbIDs(),
+		GetAdvertisedNetworkSubnetsDropACLdbIDs(),
 		types.AdvertisedNetworkDenyPriority,
 		strings.Join(dropMatches, " || "),
 		nbdb.ACLActionDrop,
@@ -1231,13 +1231,13 @@ func BuildAdvertisedUDNSubnetsDropACL(advertisedUDNSubnetsAddressSet addressset.
 	return dropACL
 }
 
-func (bnc *BaseNetworkController) addAdvertisedUDNIsolation(nodeName string) error {
+func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string) error {
 	var acceptMatches, cidrs []string
 	var ops []ovsdb.Operation
 
-	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedUDNSubnetsAddressSetDBIDs())
+	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	if err != nil {
-		return fmt.Errorf("failed to get advertised subnets addresset %s for network %s: %w", GetAdvertisedUDNSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
+		return fmt.Errorf("failed to get advertised subnets addresset %s for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
 	}
 
 	for _, subnet := range bnc.Subnets() {
@@ -1252,13 +1252,13 @@ func (bnc *BaseNetworkController) addAdvertisedUDNIsolation(nodeName string) err
 
 	addrOps, err := addrSet.AddAddressesReturnOps(cidrs)
 	if err != nil {
-		return fmt.Errorf("failed to add addresses %q to the %s address set for network %s: %w", cidrs, GetAdvertisedUDNSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
+		return fmt.Errorf("failed to add addresses %q to the %s address set for network %s: %w", cidrs, GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
 	}
 	ops = append(ops, addrOps...)
 
 	if len(acceptMatches) > 0 {
 		acceptACL := libovsdbutil.BuildACL(
-			GetAdvertisedUDNSubnetsAcceptACLdbIDs(bnc.GetNetworkName()),
+			GetAdvertisedNetworkSubnetsAcceptACLdbIDs(bnc.GetNetworkName()),
 			types.AdvertisedNetworkAllowPriority,
 			strings.Join(acceptMatches, " || "),
 			nbdb.ACLActionPass,
@@ -1268,34 +1268,34 @@ func (bnc *BaseNetworkController) addAdvertisedUDNIsolation(nodeName string) err
 
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, nil, acceptACL)
 		if err != nil {
-			return fmt.Errorf("failed to create or update udn isolation accept ACL %s for network %s: %w", GetAdvertisedUDNSubnetsAcceptACLdbIDs(bnc.GetNetworkName()), bnc.GetNetworkName(), err)
+			return fmt.Errorf("failed to create or update network isolation accept ACL %s for network %s: %w", GetAdvertisedNetworkSubnetsAcceptACLdbIDs(bnc.GetNetworkName()), bnc.GetNetworkName(), err)
 		}
 		ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, bnc.GetNetworkScopedSwitchName(nodeName), acceptACL)
 		if err != nil {
-			return fmt.Errorf("failed to add udn isolation accept ACL to switch %s for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
+			return fmt.Errorf("failed to add network isolation accept ACL to switch %s for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
 		}
 	}
 
-	dropACL := BuildAdvertisedUDNSubnetsDropACL(addrSet)
+	dropACL := BuildAdvertisedNetworkSubnetsDropACL(addrSet)
 	ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, nil, dropACL)
 	if err != nil {
-		return fmt.Errorf("failed to create or update udn isolation drop ACL %v", err)
+		return fmt.Errorf("failed to create or update network isolation drop ACL %v", err)
 	}
 	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, bnc.GetNetworkScopedSwitchName(nodeName), dropACL)
 	if err != nil {
-		return fmt.Errorf("failed to add udn isolation drop ACL to switch %s for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
+		return fmt.Errorf("failed to add network isolation drop ACL to switch %s for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
 	}
 
 	if _, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops); err != nil {
-		return fmt.Errorf("failed to configure udn isolation OVN rules for network %s: %w", bnc.GetNetworkName(), err)
+		return fmt.Errorf("failed to configure network isolation OVN rules for network %s: %w", bnc.GetNetworkName(), err)
 	}
 	return nil
 }
 
-func (bnc *BaseNetworkController) deleteAdvertisedUDNIsolation(nodeName string) error {
-	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedUDNSubnetsAddressSetDBIDs())
+func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName string) error {
+	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	if err != nil {
-		return fmt.Errorf("failed to get advertised subnets addresset %s for network %s: %w", GetAdvertisedUDNSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
+		return fmt.Errorf("failed to get advertised subnets addresset %s for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
 	}
 
 	var cidrs []string
@@ -1307,18 +1307,18 @@ func (bnc *BaseNetworkController) deleteAdvertisedUDNIsolation(nodeName string) 
 		return err
 	}
 
-	acceptACLIDs := GetAdvertisedUDNSubnetsAcceptACLdbIDs(bnc.GetNetworkName())
+	acceptACLIDs := GetAdvertisedNetworkSubnetsAcceptACLdbIDs(bnc.GetNetworkName())
 	acceptACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](acceptACLIDs, nil)
 	acceptACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, acceptACLPredicate)
 	if err != nil {
-		return fmt.Errorf("unable to find the allow ACL for advertised UDN network %s: %w", bnc.GetNetworkName(), err)
+		return fmt.Errorf("unable to find the allow ACL for advertised network %s: %w", bnc.GetNetworkName(), err)
 	}
 
-	dropACLIDs := GetAdvertisedUDNSubnetsDropACLdbIDs()
+	dropACLIDs := GetAdvertisedNetworkSubnetsDropACLdbIDs()
 	dropACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](dropACLIDs, nil)
 	dropACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, dropACLPredicate)
 	if err != nil {
-		return fmt.Errorf("unable to find the drop ACL for advertised UDN network %s: %w", bnc.GetNetworkName(), err)
+		return fmt.Errorf("unable to find the drop ACL for advertised network %s: %w", bnc.GetNetworkName(), err)
 	}
 
 	// ACLs referenced by the switch will be deleted by db if there are no other references

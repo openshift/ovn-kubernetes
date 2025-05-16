@@ -1274,7 +1274,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 					skipSnat, node1.NodeMgmtPortIP, "1400")
 
 				if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
-					addrSet, err := oc.addressSetFactory.GetAddressSet(GetAdvertisedUDNSubnetsAddressSetDBIDs())
+					addrSet, err := oc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					expectedNBDatabaseState = generateAdvertisedUDNIsolationExpectedNB(expectedNBDatabaseState, oc.GetNetworkName(), clusterSubnets, expectedNodeSwitch, addrSet)
 				}

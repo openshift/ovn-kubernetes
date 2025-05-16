@@ -199,9 +199,9 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 		// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
 		// advertised.
 		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
-		advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedUDNSubnetsAddressSetDBIDs())
+		advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 		if err != nil {
-			return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedUDNSubnetsAddressSetDBIDs(), err)
+			return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
 		}
 		v4AdvertisedSubnets, v6AdvertisedSubnets := advertisedSubnets.GetAddresses()
 		var invalidSubnets []string
@@ -480,8 +480,8 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	}
 
 	if util.IsRouteAdvertisementsEnabled() {
-		if err := cm.configureAdvertisedUDNIsolation(); err != nil {
-			return fmt.Errorf("failed to initialize advertised udn isolation: %w", err)
+		if err := cm.configureAdvertisedNetworkIsolation(); err != nil {
+			return fmt.Errorf("failed to initialize advertised network isolation: %w", err)
 		}
 	}
 	if cm.networkManager != nil {
@@ -529,8 +529,8 @@ func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }
 
-func (cm *ControllerManager) configureAdvertisedUDNIsolation() error {
+func (cm *ControllerManager) configureAdvertisedNetworkIsolation() error {
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
-	_, err := addressSetFactory.EnsureAddressSet(ovn.GetAdvertisedUDNSubnetsAddressSetDBIDs())
+	_, err := addressSetFactory.EnsureAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	return err
 }

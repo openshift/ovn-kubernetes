@@ -44,7 +44,7 @@ func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, 
 
 	}
 	acceptACL := libovsdbutil.BuildACL(
-		GetAdvertisedUDNSubnetsAcceptACLdbIDs(networkName),
+		GetAdvertisedNetworkSubnetsAcceptACLdbIDs(networkName),
 		types.AdvertisedNetworkAllowPriority,
 		strings.Join(acceptMatches, " || "),
 		nbdb.ACLActionPass,
@@ -52,7 +52,7 @@ func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, 
 		libovsdbutil.LportEgress)
 	acceptACL.Tier = types.PrimaryACLTier
 	acceptACL.UUID = "advertised-udn-isolation-accept-acl-UUID"
-	dropACL := BuildAdvertisedUDNSubnetsDropACL(addrSet)
+	dropACL := BuildAdvertisedNetworkSubnetsDropACL(addrSet)
 	dropACL.UUID = "advertised-udn-isolation-drop-acl-UUID"
 	nodeSwitch.ACLs = append(nodeSwitch.ACLs, acceptACL.UUID, dropACL.UUID)
 	testData = append(testData, acceptACL, dropACL)

@@ -404,9 +404,9 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node, hostSubne
 	}
 
 	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
-		return oc.addAdvertisedUDNIsolation(node.Name)
+		return oc.addAdvertisedNetworkIsolation(node.Name)
 	}
-	return oc.deleteAdvertisedUDNIsolation(node.Name)
+	return oc.deleteAdvertisedNetworkIsolation(node.Name)
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
