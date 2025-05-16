@@ -360,7 +360,8 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 	return nil
 }
 
-// deleteAdvertisedNetworkIsolation deletes advertised network isolation rules from the given node switch
+// deleteAdvertisedNetworkIsolation deletes advertised network isolation rules from the given node switch.
+// It removes the network CIDRs from the global advertised networks addresset together with the ACLs on the node switch.
 func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName string) error {
 	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	if err != nil {
@@ -371,9 +372,9 @@ func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName stri
 	for _, subnet := range bnc.Subnets() {
 		cidrs = append(cidrs, subnet.CIDR.String())
 	}
-	err = addrSet.DeleteAddresses(cidrs)
+	ops, err := addrSet.DeleteAddressesReturnOps(cidrs)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create ovsdb ops for deleting the addresses from %s addresset for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
 	}
 
 	passACLIDs := GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.controllerName, bnc.GetNetworkName(), bnc.GetNetworkID())
@@ -392,10 +393,11 @@ func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName stri
 
 	// ACLs referenced by the switch will be deleted by db if there are no other references
 	p := func(sw *nbdb.LogicalSwitch) bool { return sw.Name == bnc.GetNetworkScopedSwitchName(nodeName) }
-	err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(bnc.nbClient, p, append(passACLs, dropACLs...)...)
+	ops, err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicateOps(bnc.nbClient, ops, p, append(passACLs, dropACLs...)...)
 	if err != nil {
-		return fmt.Errorf("failed to remove network isolation ACLs from the %s switch for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
+		return fmt.Errorf("failed to create ovsdb ops for removing network isolation ACLs from the %s switch for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
 	}
 
-	return nil
+	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
+	return err
 }
