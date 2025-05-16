@@ -49,7 +49,7 @@ func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, 
 		strings.Join(passMatches, " || "),
 		nbdb.ACLActionPass,
 		nil,
-		libovsdbutil.LportEgress)
+		libovsdbutil.LportEgressAfterLB)
 	passACL.Tier = types.PrimaryACLTier
 	passACL.UUID = "advertised-udn-isolation-pass-acl-UUID"
 	dropACL := BuildAdvertisedNetworkSubnetsDropACL(addrSet)

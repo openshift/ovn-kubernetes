@@ -1228,7 +1228,7 @@ func BuildAdvertisedNetworkSubnetsDropACL(advertisedNetworkSubnetsAddressSet add
 		strings.Join(dropMatches, " || "),
 		nbdb.ACLActionDrop,
 		nil,
-		libovsdbutil.LportEgress)
+		libovsdbutil.LportEgressAfterLB)
 	dropACL.Tier = types.PrimaryACLTier
 	return dropACL
 }
@@ -1265,7 +1265,7 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 			strings.Join(passMatches, " || "),
 			nbdb.ACLActionPass,
 			nil,
-			libovsdbutil.LportEgress)
+			libovsdbutil.LportEgressAfterLB)
 		passACL.Tier = types.PrimaryACLTier
 
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, nil, passACL)
