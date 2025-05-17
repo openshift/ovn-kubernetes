@@ -71,10 +71,10 @@ networking:
 
 This chart does not use a `values.yaml` by default. You must specify a values file during installation.
 
-- Run `helm install` with propery `k8sAPIServer` image repo and tag
+- Run `helm install` with propery `k8sAPIServer`, `ovnkube-identity.replicas`, image repo and tag
 ```
 # cd helm/ovn-kubernetes
-# helm install ovn-kubernetes . -f values-no-ic.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
+# helm install ovn-kubernetes . -f values-no-ic.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set ovnkube-identity.replicas=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l) --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
 ```
 
 ## Alternative Configurations
@@ -605,6 +605,15 @@ false
 </pre>
 </td>
 			<td>MTU of network interface in a Kubernetes pod</td>
+		</tr>
+		<tr>
+			<td>ovnkube-identity.replicas</td>
+			<td>int</td>
+			<td><pre lang="json">
+1
+</pre>
+</td>
+			<td>number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes</td>
 		</tr>
 		<tr>
 			<td>podNetwork</td>
