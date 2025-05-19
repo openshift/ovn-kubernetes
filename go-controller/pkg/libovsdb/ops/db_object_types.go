@@ -36,6 +36,7 @@ const (
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
 	VirtualMachineOwnerType     ownerType = "VirtualMachine"
 	UDNEnabledServiceOwnerType  ownerType = "UDNEnabledService"
+	AdvertisedNetworkOwnerType  ownerType = "AdvertisedNetwork"
 	// NetworkPolicyPortIndexOwnerType is the old version of NetworkPolicyOwnerType, kept for sync only
 	NetworkPolicyPortIndexOwnerType ownerType = "NetworkPolicyPortIndexOwnerType"
 	// ClusterOwnerType means the object is cluster-scoped and doesn't belong to any k8s objects
@@ -149,6 +150,19 @@ var AddressSetNetworkQoS = newObjectIDsType(addressSet, NetworkQoSOwnerType, []E
 	RuleIndex,
 	IpBlockIndexKey,
 	IPFamilyKey,
+})
+
+var AddressSetAdvertisedNetwork = newObjectIDsType(addressSet, AdvertisedNetworkOwnerType, []ExternalIDKey{
+	// cluster-wide address set name
+	ObjectNameKey,
+	IPFamilyKey,
+})
+
+var ACLAdvertisedNetwork = newObjectIDsType(acl, AdvertisedNetworkOwnerType, []ExternalIDKey{
+	// ACL name
+	ObjectNameKey,
+	// NetworkID
+	NetworkKey,
 })
 
 var ACLAdminNetworkPolicy = newObjectIDsType(acl, AdminNetworkPolicyOwnerType, []ExternalIDKey{
