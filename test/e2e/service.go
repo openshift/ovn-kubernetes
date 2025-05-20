@@ -343,7 +343,16 @@ var _ = ginkgo.Describe("Services", func() {
 			// The payload is transmitted to and echoed from the echo service for both HTTP and UDP tests.
 			ginkgo.When("tests are run towards the agnhost echo service", func() {
 				ginkgo.It("queries to the nodePort service shall work for TCP", func() {
-					for _, size := range []string{"small", "large"} {
+					packetSizes := []string{"small", "large"}
+					if isLocalGWModeEnabled() && hostNetwork {
+						// if local gateway mode the intermediary node will attempt to fragment the packet, if the DF
+						// bit is not set. However, the decision on setting DF bit is left up to the kernel, and
+						// is unpredictable. If the DF bit is set, the iptables rule that DNATs nodeport -> cluster IP
+						// will then attempt to route the packet, and hit our 1400 byte MTU route. This will cause:
+						// 172.18.0.2:37755->10.96.141.254:9881(udp) sk_skb_reason_drop(SKB_DROP_REASON_PKT_TOO_BIG)
+						packetSizes = []string{"small"}
+					}
+					for _, size := range packetSizes {
 						for _, serviceNodeIP := range serviceNodeInternalIPs {
 							targetIP := serviceNodeIP
 							if IsIPv6Cluster(f.ClientSet) {
@@ -395,7 +404,26 @@ var _ = ginkgo.Describe("Services", func() {
 				//                0.0.0.0/0                172.18.0.1 dst-ip rtoe-GR_ovn-worker
 				// This time, the packet will leave the rtoj port and it will be fragmented.
 				ginkgo.It("queries to the nodePort service shall work for UDP", func() {
-					for _, size := range []string{"small", "large"} {
+					packetSizes := []string{"small", "large"}
+					// If gateway mode is shared, and endpoint is OVN networked, host networked originated packets
+					// exceeding pod MTU will not be delivered. This is because ICMP needs frag will be sent back to the original
+					// Kubernetes node by OVN (even if DF bit is not set) and the node will refuse to install an MTU cache route.
+					// To fix this later we can install ip rules that match on nodeport and lower the MTU from the originator
+					// but for now we consider nodeport access from a k8s node as not a practical use case. See
+					// https://issues.redhat.com/browse/OCPBUGS-7609
+					// Furthermore, in local gateway mode, if the DF bit was not set the packet will go into the host of
+					// intermediary node, where nodeport will be DNAT'ed to cluster IP service, and then hit the MTU 1400 route.
+					// Netcat will not set Don't Fragment (DF) bit, so packet will be fragmented at intermediary
+					// node and sent to server. However, it is up to the kernel to decide whether to set the DF bit,
+					// and it is not predictable. Therefore, we have to skip large packet size for local gateway mode
+					// as well. This is true when the endpoint is host or ovn networked, because the route for the cluster
+					// cidr service is set to 1400, which causes:
+					// 172.18.0.2:37755->10.96.141.254:9881(udp) sk_skb_reason_drop(SKB_DROP_REASON_PKT_TOO_BIG)
+					if !hostNetwork || isLocalGWModeEnabled() {
+						packetSizes = []string{"small"}
+					}
+
+					for _, size := range packetSizes {
 						for _, serviceNodeIP := range serviceNodeInternalIPs {
 							flushCmd := "ip route flush cache"
 							if utilnet.IsIPv6String(serviceNodeIP) {
@@ -462,23 +490,9 @@ var _ = ginkgo.Describe("Services", func() {
 									if err != nil {
 										return fmt.Errorf("could not list IP route cache, err: %q", err)
 									}
-									if !hostNetwork || isLocalGWModeEnabled() {
-										// with local gateway mode the packet will be sent:
-										// client -> intermediary node -> server
-										// With local gw mode, the packet will go into the host of intermediary node, where
-										// nodeport will be DNAT'ed to cluster IP service, and then hit the MTU 1400 route
-										// and trigger ICMP needs frag.
-										// MTU 1400 should be removed after bumping to OVS with https://bugzilla.redhat.com/show_bug.cgi?id=2170920
-										// fixed.
-										ginkgo.By("Making sure that the ip route cache contains an MTU route")
-										if !echoMtuRegex.Match([]byte(stdout)) {
-											return fmt.Errorf("cannot find MTU cache entry in route: %s", stdout)
-										}
-									} else {
-										ginkgo.By("Making sure that the ip route cache does NOT contain an MTU route")
-										if echoMtuRegex.Match([]byte(stdout)) {
-											framework.Failf("found unexpected MTU cache route: %s", stdout)
-										}
+									ginkgo.By("Making sure that the ip route cache does NOT contain an MTU route")
+									if echoMtuRegex.Match([]byte(stdout)) {
+										framework.Failf("found unexpected MTU cache route: %s", stdout)
 									}
 								}
 								return nil
@@ -1601,15 +1615,15 @@ metadata:
 		if !utilnet.IsIPv6String(svcLoadBalancerIP) {
 			ginkgo.By("Setting up external IPv4 client with an intermediate node")
 			defer func() {
-				cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP)
+				cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP, endpointHTTPPort)
 			}()
-			setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP)
+			setupIPv4NetworkForExternalClient(svcLoadBalancerIP, endpointHTTPPort, nodeIP)
 		} else {
 			ginkgo.By("Setting up external IPv6 client with an intermediate node")
 			defer func() {
-				cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP)
+				cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP, endpointHTTPPort)
 			}()
-			setupIPv6NetworkForExternalClient(svcLoadBalancerIP, nodeIP)
+			setupIPv6NetworkForExternalClient(svcLoadBalancerIP, endpointHTTPPort, nodeIP)
 			svcIPforCurl = fmt.Sprintf("[%s]", svcLoadBalancerIP)
 		}
 
@@ -2211,7 +2225,7 @@ func getServiceLoadBalancerIP(c clientset.Interface, namespace, serviceName stri
 	return svc.Status.LoadBalancer.Ingress[0].IP, nil
 }
 
-func setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
+func setupIPv4NetworkForExternalClient(svcLoadBalancerIP string, svcLoadBalancerPort int, nodeIP string) {
 	// The external client configuration done in install_metallb can not be used because routes for external client
 	// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
 	// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
@@ -2234,6 +2248,7 @@ func setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
 	//                   |                                  172.18.0.1                                  |
 	//                   |                                                     ip route add 192.168.223.0/24 via 192.168.222.2
 	//                   |                                                     ip route add <svc-ip> via|<endpoint-node-ip>
+	//                   |                                                     iptables -t filter -I FORWARD -d <svc-ip> -p tcp -m tcp --dport <svc-port> -j ACCEPT
 	//                   |                                                                              |
 	//                   |  vm                                    192.168.222.1                         |
 	//                   +----------------------------------------+-------------------------------------+
@@ -2264,17 +2279,21 @@ func setupIPv4NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
 	err = buildAndRunCommand("sudo ip route add 192.168.223.0/24 via 192.168.222.2")
 	framework.ExpectNoError(err, "failed to add route for client to handle reverse service traffic")
 
+	err = buildAndRunCommand(fmt.Sprintf("sudo iptables -t filter -I FORWARD -d %s -p tcp -m tcp --dport %d -j ACCEPT", svcLoadBalancerIP, svcLoadBalancerPort))
+	framework.ExpectNoError(err, "failed to add iptables rule for service")
+
 	err = buildAndRunCommand(fmt.Sprintf("sudo ip route add %s via %s", svcLoadBalancerIP, nodeIP))
 	framework.ExpectNoError(err, "failed to add route for external load balancer service")
 }
 
-func cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP string) {
+func cleanupIPv4NetworkForExternalClient(svcLoadBalancerIP string, svcLoadBalancerPort int) {
 	cleanupNetNamespace()
 	buildAndRunCommand("sudo ip route delete 192.168.223.0/24 via 192.168.222.2")
 	buildAndRunCommand(fmt.Sprintf("sudo ip route delete %s", svcLoadBalancerIP))
+	buildAndRunCommand(fmt.Sprintf("sudo iptables -t filter -D FORWARD -d %s -p tcp -m tcp --dport %d -j ACCEPT", svcLoadBalancerIP, svcLoadBalancerPort))
 }
 
-func setupIPv6NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
+func setupIPv6NetworkForExternalClient(svcLoadBalancerIP string, svcLoadBalancerPort int, nodeIP string) {
 	// The external client configuration done in install_metallb can not be used because routes for external client
 	// installed in K8s node https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh#L1045-L1047
 	// are ignored in shared gateway mode and traffic coming back from pod is put on the docker bridge directly by
@@ -2325,12 +2344,16 @@ func setupIPv6NetworkForExternalClient(svcLoadBalancerIP, nodeIP string) {
 
 	err = buildAndRunCommand(fmt.Sprintf("sudo ip -6 route add %s via %s", svcLoadBalancerIP, nodeIP))
 	framework.ExpectNoError(err, "failed to add route for external load balancer service")
+
+	err = buildAndRunCommand(fmt.Sprintf("sudo ip6tables -t filter -I FORWARD -d %s -p tcp -m tcp --dport %d -j ACCEPT", svcLoadBalancerIP, svcLoadBalancerPort))
+	framework.ExpectNoError(err, "failed to add iptables rule for service")
 }
 
-func cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP string) {
+func cleanupIPv6NetworkForExternalClient(svcLoadBalancerIP string, svcLoadBalancerPort int) {
 	cleanupNetNamespace()
 	buildAndRunCommand("sudo ip -6 route delete fc00:f853:ccd:e223::2")
 	buildAndRunCommand(fmt.Sprintf("sudo ip -6 route delete %s", svcLoadBalancerIP))
+	buildAndRunCommand(fmt.Sprintf("sudo ip6tables -t filter -D FORWARD -d %s -p tcp -m tcp --dport %d -j ACCEPT", svcLoadBalancerIP, svcLoadBalancerPort))
 }
 
 func setupNetNamespaceAndLinks() {
