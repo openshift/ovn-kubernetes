@@ -284,6 +284,8 @@ jobs:
       OVN_HA: "false"
       PLATFORM_IPV4_SUPPORT: "true"
       PLATFORM_IPV6_SUPPORT: "false"
+      KIND_IPV4_SUPPORT: "true"
+      KIND_IPV6_SUPPORT: "false"
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
