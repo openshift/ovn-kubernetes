@@ -302,6 +302,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	c.nqosQueue.ShutDown()
 	c.nqosNamespaceQueue.ShutDown()
 	c.nqosPodQueue.ShutDown()
+	c.nqosNodeQueue.ShutDown()
 	c.teardownMetricsCollector()
 	wg.Wait()
 }
