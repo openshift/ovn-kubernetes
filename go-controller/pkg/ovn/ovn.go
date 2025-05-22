@@ -431,6 +431,10 @@ func nodeSubnetChanged(oldNode, node *corev1.Node, netName string) bool {
 func joinCIDRChanged(oldNode, node *corev1.Node, netName string) bool {
 	var oldCIDRs, newCIDRs map[string]json.RawMessage
 
+	if oldNode.Annotations[util.OVNNodeGRLRPAddrs] == node.Annotations[util.OVNNodeGRLRPAddrs] {
+		return false
+	}
+
 	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OVNNodeGRLRPAddrs]), &oldCIDRs); err != nil {
 		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
 		return false
