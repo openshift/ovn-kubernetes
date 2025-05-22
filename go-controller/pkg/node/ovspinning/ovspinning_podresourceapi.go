@@ -3,6 +3,7 @@ package ovspinning
 import (
 	"context"
 	"fmt"
+	"google.golang.org/grpc/credentials/insecure"
 	"path/filepath"
 
 	"google.golang.org/grpc"
@@ -20,7 +21,7 @@ type PodResClient struct {
 func New(socket string) (*PodResClient, error) {
 	socketPath := fmt.Sprintf("unix://%s", filepath.Clean(socket))
 
-	conn, err := grpc.NewClient(socketPath)
+	conn, err := grpc.NewClient(socketPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to podresources socket: %w", err)
 	}

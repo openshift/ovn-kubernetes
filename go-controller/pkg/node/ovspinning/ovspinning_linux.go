@@ -18,8 +18,13 @@ import (
 	"golang.org/x/sys/unix"
 
 	"k8s.io/klog/v2"
+	"k8s.io/utils/cpuset"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+)
+
+const (
+	kubeletSocketPath = "/var/lib/kubelet/pod-resources/kubelet.sock"
 )
 
 // These variables are meant to be used in unit tests
@@ -63,6 +68,11 @@ func Run(ctx context.Context, stopCh <-chan struct{}) {
 		defer fileWatcher.Close()
 	}
 
+	podResClient, err := New(kubeletSocketPath)
+	if err != nil {
+		klog.Warningf("Failed to initialize PodeResourceAPI client: %v", err)
+		return
+	}
 	ticker := time.NewTicker(tickDuration)
 	defer ticker.Stop()
 
@@ -102,13 +112,16 @@ func Run(ctx context.Context, stopCh <-chan struct{}) {
 			if !isFeatureEnabled {
 				continue
 			}
-
-			err := setOvsVSwitchdCPUAffinity()
+			cpus, err := podResClient.GetNonPinnedCPUs(ctx)
+			if err != nil {
+				klog.Warningf("Error while trying to get system non pinned CPUs: %v", err)
+			}
+			err = setOvsVSwitchdCPUAffinity(&cpus)
 			if err != nil {
 				klog.Warningf("Error while aligning ovs-vswitchd CPUs to current process: %v", err)
 			}
 
-			err = setOvsDBServerCPUAffinity()
+			err = setOvsDBServerCPUAffinity(&cpus)
 			if err != nil {
 				klog.Warningf("Error while aligning ovsdb-server CPUs to current process: %v", err)
 			}
@@ -143,7 +156,7 @@ func isFileNotEmpty(filename string) (bool, error) {
 	return f.Size() > 0, nil
 }
 
-func setOvsVSwitchdCPUAffinity() error {
+func setOvsVSwitchdCPUAffinity(set *cpuset.CPUSet) error {
 
 	ovsVSwitchdPID, err := getOvsVSwitchdPIDFn()
 	if err != nil {
@@ -151,10 +164,10 @@ func setOvsVSwitchdCPUAffinity() error {
 	}
 
 	klog.V(5).Infof("Managing ovs-vswitchd[%s] daemon CPU affinity", ovsVSwitchdPID)
-	return setProcessCPUAffinity(ovsVSwitchdPID)
+	return setProcessCPUAffinity(ovsVSwitchdPID, set)
 }
 
-func setOvsDBServerCPUAffinity() error {
+func setOvsDBServerCPUAffinity(set *cpuset.CPUSet) error {
 
 	ovsDBserverPID, err := getOvsDBServerPIDFn()
 	if err != nil {
@@ -162,21 +175,25 @@ func setOvsDBServerCPUAffinity() error {
 	}
 
 	klog.V(5).Infof("Managing ovsdb-server[%s] daemon CPU affinity", ovsDBserverPID)
-	return setProcessCPUAffinity(ovsDBserverPID)
+	return setProcessCPUAffinity(ovsDBserverPID, set)
 }
 
 // setProcessCPUAffinity sets the CPU affinity of the given process to the same affinity as the current process
-func setProcessCPUAffinity(targetPIDStr string) error {
+func setProcessCPUAffinity(targetPIDStr string, set *cpuset.CPUSet) error {
 
 	targetPID, err := strconv.Atoi(targetPIDStr)
 	if err != nil {
 		return fmt.Errorf("can't convert PID[%s] to integer: %w", targetPIDStr, err)
 	}
 
-	var currentProcessCPUs unix.CPUSet
-	err = unix.SchedGetaffinity(os.Getpid(), &currentProcessCPUs)
-	if err != nil {
-		return fmt.Errorf("can't get own CPU affinity")
+	desiredProcessCPUs := convertCPUSet(set)
+	if set.IsEmpty() {
+		selfPID := os.Getpid()
+		klog.V(4).InfoS("Given CPU set is empty, setting self CPU affinity", "selfPID", selfPID, "targetPID", targetPID)
+		err = unix.SchedGetaffinity(selfPID, &desiredProcessCPUs)
+		if err != nil {
+			return fmt.Errorf("can't get own CPU affinity")
+		}
 	}
 
 	var targetProcessCPUs unix.CPUSet
@@ -185,8 +202,8 @@ func setProcessCPUAffinity(targetPIDStr string) error {
 		return fmt.Errorf("can't get process (PID:%d) CPU affinity: %w", targetPID, err)
 	}
 
-	if currentProcessCPUs == targetProcessCPUs {
-		klog.V(5).Infof("Process[%d] CPU affinity already match current process's affinity %s", targetPID, printCPUSet(currentProcessCPUs))
+	if desiredProcessCPUs == targetProcessCPUs {
+		klog.V(5).Infof("Process[%d] CPU affinity already match desired process's affinity %s", targetPID, printCPUSet(desiredProcessCPUs))
 		return nil
 	}
 
@@ -195,12 +212,12 @@ func setProcessCPUAffinity(targetPIDStr string) error {
 		return fmt.Errorf("can't get tasks of PID(%d):%w", targetPID, err)
 	}
 
-	klog.Infof("Setting CPU affinity of PID(%d) (ntasks=%d) to %s, was %s", targetPID, len(taskIDs), printCPUSet(currentProcessCPUs), printCPUSet(targetProcessCPUs))
+	klog.Infof("Setting CPU affinity of PID(%d) (ntasks=%d) to %s, was %s", targetPID, len(taskIDs), printCPUSet(desiredProcessCPUs), printCPUSet(targetProcessCPUs))
 	for _, taskID := range taskIDs {
-		err = unix.SchedSetaffinity(taskID, &currentProcessCPUs)
+		err = unix.SchedSetaffinity(taskID, &desiredProcessCPUs)
 		if err != nil {
 			// The task may have been stopped, don't break the loop and continue setting CPU affinity on other tasks.
-			klog.Warningf("Error while setting CPU affinity of task(%d) PID(%d) to %s: %v", taskID, targetPID, printCPUSet(currentProcessCPUs), err)
+			klog.Warningf("Error while setting CPU affinity of task(%d) PID(%d) to %s: %v", taskID, targetPID, printCPUSet(desiredProcessCPUs), err)
 		}
 	}
 
@@ -271,4 +288,12 @@ func getThreadsOfProcess(pid int) ([]int, error) {
 	}
 
 	return ret, nil
+}
+
+func convertCPUSet(k8sSet *cpuset.CPUSet) unix.CPUSet {
+	var uSet unix.CPUSet
+	for _, cpu := range k8sSet.List() {
+		uSet.Set(cpu)
+	}
+	return uSet
 }
