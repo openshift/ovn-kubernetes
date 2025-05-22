@@ -591,15 +591,16 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 				if err != nil {
 					return err
 				}
-				if !isUDNAdvertised {
-					if util.IsRouteAdvertisementsEnabled() {
+				shouldIsolate := isUDNAdvertised && config.OVNKubernetesFeature.RoutedUDNIsolation == config.RoutedUDNIsolationEnabled
+				if util.IsRouteAdvertisementsEnabled() {
+					if shouldIsolate {
+						if err = oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
+							return err
+						}
+					} else {
 						if err = oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
 							return err
 						}
-					}
-				} else {
-					if err = oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
-						return err
 					}
 				}
 				oc.gatewaysFailed.Delete(node.Name)
