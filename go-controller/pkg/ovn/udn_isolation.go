@@ -300,6 +300,11 @@ func BuildAdvertisedNetworkSubnetsDropACL(advertisedNetworkSubnetsAddressSet add
 // pass   "(ip[4|6].src == <UDN_SUBNET> && ip[4|6].dst == <UDN_SUBNET>)"                1100
 // drop   "(ip[4|6].src == $<ALL_ADV_SUBNETS> && ip[4|6].dst == $<ALL_ADV_SUBNETS>)"    1050
 func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string) error {
+	if util.IsLooseUDNIsolation() {
+		klog.Infof("The network %s is configured with loose isolation mode, skip adding tier-0 drop ACL rule",
+			bnc.GetNetworkName())
+		return nil
+	}
 	var passMatches, cidrs []string
 	var ops []ovsdb.Operation
 
@@ -363,6 +368,11 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 // deleteAdvertisedNetworkIsolation deletes advertised network isolation rules from the given node switch.
 // It removes the network CIDRs from the global advertised networks addresset together with the ACLs on the node switch.
 func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName string) error {
+	if util.IsLooseUDNIsolation() {
+		klog.Infof("The network %s is configured with loose isolation mode, skip deleting tier-0 drop ACL rule",
+			bnc.GetNetworkName())
+		return nil
+	}
 	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	if err != nil {
 		return fmt.Errorf("failed to get advertised subnets addresset %s for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
