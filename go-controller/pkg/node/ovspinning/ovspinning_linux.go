@@ -20,11 +20,16 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
-	kubeletSocketPath = "/var/lib/kubelet/pod-resources/kubelet.sock"
+	kubeletSocketPath     = "/var/lib/kubelet/pod-resources/kubelet.sock"
+	kubeletConfigFilePath = "/host/etc/kubernetes/kubelet.conf"
 )
 
 // These variables are meant to be used in unit tests
@@ -73,6 +78,16 @@ func Run(ctx context.Context, stopCh <-chan struct{}) {
 		klog.Warningf("Failed to initialize PodeResourceAPI client: %v", err)
 		return
 	}
+	// we only need to check reservedSystemCPUs once at startup.
+	// any change to KubeletConfig file triggers a node reboot, which also restarts the ovnkube-node pod.
+	// as a result, this logic is re-executed automatically after every change.
+	reservedCPUs, err := getReservedCPUs(kubeletConfigFilePath)
+	if err != nil {
+		klog.Warningf("Failed to get reservedSystemCPUs: %v", err)
+		return
+	}
+	klog.Infof("OVS CPU dynamic pinning reservedSystemCPUs set: %s", reservedCPUs)
+
 	ticker := time.NewTicker(tickDuration)
 	defer ticker.Stop()
 
@@ -116,6 +131,8 @@ func Run(ctx context.Context, stopCh <-chan struct{}) {
 			if err != nil {
 				klog.Warningf("Error while trying to get system non pinned CPUs: %v", err)
 			}
+			// add reservedSystemCPUs as well, because PodResourcesAPI does not count for them.
+			cpus = cpus.Union(reservedCPUs)
 			err = setOvsVSwitchdCPUAffinity(&cpus)
 			if err != nil {
 				klog.Warningf("Error while aligning ovs-vswitchd CPUs to current process: %v", err)
@@ -296,4 +313,36 @@ func convertCPUSet(k8sSet *cpuset.CPUSet) unix.CPUSet {
 		uSet.Set(cpu)
 	}
 	return uSet
+}
+
+func getReservedCPUs(path string) (cpuset.CPUSet, error) {
+	scheme := runtime.NewScheme()
+	codecs := serializer.NewCodecFactory(scheme)
+
+	if err := kubeletconfigv1beta1.AddToScheme(scheme); err != nil {
+		return cpuset.CPUSet{}, fmt.Errorf("failed to add kubelet config scheme: %w", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return cpuset.CPUSet{}, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	obj, _, err := codecs.UniversalDecoder(kubeletconfigv1beta1.SchemeGroupVersion).Decode(data, nil, nil)
+	if err != nil {
+		return cpuset.CPUSet{}, fmt.Errorf("failed to decode kubelet config: %w", err)
+	}
+
+	kc, ok := obj.(*kubeletconfigv1beta1.KubeletConfiguration)
+	if !ok {
+		return cpuset.CPUSet{}, fmt.Errorf("decoded object is not a KubeletConfiguration")
+	}
+
+	// kc.ReservedSystemCPUs could be empty. it's not a desired state, but not considered as an error either.
+	cset, err := cpuset.Parse(kc.ReservedSystemCPUs)
+	if err != nil {
+		return cpuset.CPUSet{}, fmt.Errorf("failed to parse reservedSystemCPUs: %w", err)
+	}
+
+	return cset, nil
 }
