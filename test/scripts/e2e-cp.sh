@@ -184,13 +184,18 @@ export NUM_NODES=2
 
 FOCUS=$(echo ${@:1} | sed 's/ /\\s/g')
 
+# Ginkgo test timeout needs to be lower than both github's timeout and go test
+# timeout to be able to get proper Ginkgo output when it happens.
+TEST_TIMEOUT=${TEST_TIMEOUT:-180}
+GO_TEST_TIMEOUT=$((TEST_TIMEOUT + 5))
+
 pushd e2e
 
 go mod download
-go test -test.timeout 180m -v . \
+go test -test.timeout ${GO_TEST_TIMEOUT}m -v . \
         -ginkgo.v \
         -ginkgo.focus ${FOCUS:-.} \
-        -ginkgo.timeout 3h \
+        -ginkgo.timeout ${TEST_TIMEOUT}m \
         -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
         -ginkgo.junit-report=${E2E_REPORT_DIR}/junit_${E2E_REPORT_PREFIX}report.xml \
