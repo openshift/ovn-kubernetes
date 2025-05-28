@@ -313,4 +313,17 @@ const (
 	// NFTNoPMTUDRemoteNodeIPsv6 is a set used to track remote node IPs that do not belong to
 	// the local node's subnet.
 	NFTNoPMTUDRemoteNodeIPsv6 = "no-pmtud-remote-node-ips-v6"
+
+	// Metrics
+	MetricOvnkubeNamespace               = "ovnkube"
+	MetricOvnkubeSubsystemController     = "controller"
+	MetricOvnkubeSubsystemClusterManager = "clustermanager"
+	MetricOvnkubeSubsystemNode           = "node"
+	MetricOvnNamespace                   = "ovn"
+	MetricOvnSubsystemDB                 = "db"
+	MetricOvnSubsystemNorthd             = "northd"
+	MetricOvnSubsystemController         = "controller"
+	MetricOvsNamespace                   = "ovs"
+	MetricOvsSubsystemVswitchd           = "vswitchd"
+	MetricOvsSubsystemDB                 = "db"
 )
