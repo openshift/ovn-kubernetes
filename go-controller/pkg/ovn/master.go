@@ -730,7 +730,7 @@ func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *corev1.Node) erro
 		return err
 	}
 
-	nodes, err := oc.kube.GetNodes()
+	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		return err
 	}
