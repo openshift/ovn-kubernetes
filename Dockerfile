@@ -13,7 +13,7 @@ RUN cd go-controller; CGO_ENABLED=1 make
 RUN cd go-controller; CGO_ENABLED=1 make windows
 
 # Build RHEL-8 binaries (for upgrades from 4.12 and earlier)
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.19-openshift-4.14 AS rhel8
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.14 AS rhel8
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
 RUN cd go-controller; CGO_ENABLED=1 make
