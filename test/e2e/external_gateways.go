@@ -448,14 +448,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		// The traffic will get proxied through an annotated pod in the serving namespace.
 		var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", func() {
 			const (
-				svcname              string = "externalgw-pod-novxlan"
-				gwContainer1Template string = "ex-gw-container1-%d"
-				gwContainer2Template string = "ex-gw-container2-%d"
-				srcPingPodName       string = "e2e-exgw-src-ping-pod"
-				gatewayPodName1      string = "e2e-gateway-pod1"
-				gatewayPodName2      string = "e2e-gateway-pod2"
-				ecmpRetry            int    = 20
-				testTimeout          string = "20"
+				svcname              string        = "externalgw-pod-novxlan"
+				gwContainer1Template string        = "ex-gw-container1-%d"
+				gwContainer2Template string        = "ex-gw-container2-%d"
+				srcPingPodName       string        = "e2e-exgw-src-ping-pod"
+				gatewayPodName1      string        = "e2e-gateway-pod1"
+				gatewayPodName2      string        = "e2e-gateway-pod2"
+				ecmpRetry            int           = 20
+				testTimeout          time.Duration = 20 * time.Second
 			)
 
 			var (
@@ -508,8 +508,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 					for _, gwContainer := range gwContainers {
 						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-						_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+						gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+							WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 					}
 
 					tcpDumpSync := sync.WaitGroup{}
@@ -528,8 +530,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						go func(target string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-							framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
+							gomega.Eventually(e2ekubectl.RunKubectl).
+								WithArguments(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c1", "-W1", target).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 						}(t)
 					}
 					pingSync.Wait()
@@ -605,12 +609,12 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		// The test checks that both hostnames are collected at least once.
 		var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			const (
-				svcname              string = "novxlan-externalgw-ecmp"
-				gwContainer1Template string = "gw-test-container1-%d"
-				gwContainer2Template string = "gw-test-container2-%d"
-				testTimeout          string = "30"
-				ecmpRetry            int    = 20
-				srcPodName                  = "e2e-exgw-src-pod"
+				svcname              string        = "novxlan-externalgw-ecmp"
+				gwContainer1Template string        = "gw-test-container1-%d"
+				gwContainer2Template string        = "gw-test-container2-%d"
+				testTimeout          time.Duration = 300 * time.Second
+				ecmpRetry            int           = 20
+				srcPodName                         = "e2e-exgw-src-pod"
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -656,14 +660,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Verifying connectivity to the pod from external gateways")
 				for _, gwContainer := range gwContainers {
 					// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-					_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-					framework.ExpectNoError(err, "Failed to ping %s from container (%s)", addresses.srcPodIP, gwContainer)
+					gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+						WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+						WithTimeout(testTimeout).
+						ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 				}
 
 				ginkgo.By("Verifying connectivity to the pod from external gateways with large packets > pod MTU")
 				for _, gwContainer := range gwContainers {
-					_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-s", "1420", "-c", testTimeout, addresses.srcPodIP})
-					framework.ExpectNoError(err, "Failed to ping %s from container (%s)", addresses.srcPodIP, gwContainer)
+					gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+						WithArguments(gwContainer, []string{"ping", "-s", "1420", "-c1", "-W1", addresses.srcPodIP}).
+						WithTimeout(testTimeout).
+						ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 				}
 
 				// Verify the gateways and remote loopback addresses are reachable from the pod.
@@ -692,10 +700,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					go func(target string) {
 						defer ginkgo.GinkgoRecover()
 						defer pingSync.Done()
-						_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c", testTimeout, target)
-						if err != nil {
-							framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
-						}
+						gomega.Eventually(e2ekubectl.RunKubectl).
+							WithArguments(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c1", "-W1", target).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPodName)
 					}(address)
 				}
 				pingSync.Wait()
@@ -979,14 +987,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		var _ = ginkgo.Context("BFD", func() {
 			var _ = ginkgo.Describe("e2e non-vxlan external gateway through an annotated gateway pod", func() {
 				const (
-					svcname              string = "externalgw-pod-novxlan"
-					gwContainer1Template string = "ex-gw-container1-%d"
-					gwContainer2Template string = "ex-gw-container2-%d"
-					srcPingPodName       string = "e2e-exgw-src-ping-pod"
-					gatewayPodName1      string = "e2e-gateway-pod1"
-					gatewayPodName2      string = "e2e-gateway-pod2"
-					ecmpRetry            int    = 20
-					testTimeout          string = "20"
+					svcname              string        = "externalgw-pod-novxlan"
+					gwContainer1Template string        = "ex-gw-container1-%d"
+					gwContainer2Template string        = "ex-gw-container2-%d"
+					srcPingPodName       string        = "e2e-exgw-src-ping-pod"
+					gatewayPodName1      string        = "e2e-gateway-pod1"
+					gatewayPodName2      string        = "e2e-gateway-pod2"
+					ecmpRetry            int           = 20
+					testTimeout          time.Duration = 20 * time.Second
 				)
 
 				var (
@@ -1038,15 +1046,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						ginkgo.By("Verifying connectivity to the pod from external gateways")
 						for _, gwContainer := range gwContainers {
 							// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-							_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-							framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+							gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+								WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 						}
 
-						// This is needed for bfd to sync up
-						time.Sleep(3 * time.Second)
-
 						for _, gwContainer := range gwContainers {
-							gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
+							gomega.Eventually(isBFDPaired).
+								WithArguments(gwContainer, addresses.nodeIP).
+								WithTimeout(time.Minute).
+								WithPolling(5*time.Second).
+								Should(gomega.BeTrue(), "Bfd not paired")
 						}
 
 						tcpDumpSync := sync.WaitGroup{}
@@ -1067,10 +1078,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 							go func(target string) {
 								defer ginkgo.GinkgoRecover()
 								defer pingSync.Done()
-								_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-								if err != nil {
-									framework.Logf("error generating a ping from the test pod %s: %v", srcPingPodName, err)
-								}
+								gomega.Eventually(e2ekubectl.RunKubectl).
+									WithArguments(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c1", "-W1", target).
+									WithTimeout(testTimeout).
+									ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 							}(address)
 						}
 
@@ -1097,8 +1108,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 								go func(target string) {
 									defer ginkgo.GinkgoRecover()
 									defer pingSync.Done()
-									_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-									framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
+									gomega.Eventually(e2ekubectl.RunKubectl).
+										WithArguments(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c1", "-W1", target).
+										WithTimeout(testTimeout).
+										ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 								}(t)
 							}
 							pingSync.Wait()
@@ -1115,12 +1128,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						}
 
 						for _, gwContainer := range gwContainers {
-							_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-c", testTimeout, addresses.srcPodIP})
-							framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+							gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+								WithArguments(gwContainer, []string{"ping", "-c1", "-W1", addresses.srcPodIP}).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 						}
 
 						for _, gwContainer := range gwContainers {
-							gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
+							gomega.Eventually(isBFDPaired).
+								WithArguments(gwContainer, addresses.nodeIP).
+								WithTimeout(time.Minute).
+								WithPolling(5*time.Second).
+								Should(gomega.BeTrue(), "Bfd not paired")
 						}
 
 						expectedHostNames := hostNamesForExternalContainers(gwContainers)
@@ -1180,12 +1199,12 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			// The test checks that both hostnames are collected at least once.
 			var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 				const (
-					svcname              string = "novxlan-externalgw-ecmp"
-					gwContainer1Template string = "gw-test-container1-%d"
-					gwContainer2Template string = "gw-test-container2-%d"
-					testTimeout          string = "30"
-					ecmpRetry            int    = 20
-					srcPodName                  = "e2e-exgw-src-pod"
+					svcname              string        = "novxlan-externalgw-ecmp"
+					gwContainer1Template string        = "gw-test-container1-%d"
+					gwContainer2Template string        = "gw-test-container2-%d"
+					testTimeout          time.Duration = 30 * time.Second
+					ecmpRetry            int           = 20
+					srcPodName                         = "e2e-exgw-src-pod"
 				)
 
 				var (
@@ -1234,15 +1253,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					annotateNamespaceForGateway(f.Namespace.Name, true, addresses.gatewayIPs[:]...)
 					for _, gwContainer := range gwContainers {
 						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-						_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+						gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+							WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 					}
 
-					// This is needed for bfd to sync up
-					time.Sleep(3 * time.Second)
-
 					for _, gwContainer := range gwContainers {
-						gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
+						gomega.Eventually(isBFDPaired).
+							WithArguments(gwContainer, addresses.nodeIP).
+							WithTimeout(time.Minute).
+							WithPolling(5*time.Second).
+							Should(gomega.BeTrue(), "Bfd not paired")
 					}
 
 					// Verify the gateways and remote loopback addresses are reachable from the pod.
@@ -1274,10 +1296,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						go func(target string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
-							if err != nil {
-								framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
-							}
+							gomega.Eventually(e2ekubectl.RunKubectl).
+								WithArguments(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c1", "-W1", target).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPodName)
 						}(address)
 					}
 
@@ -1302,10 +1324,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						go func(target string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
-							if err != nil {
-								framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
-							}
+							gomega.Eventually(e2ekubectl.RunKubectl).
+								WithArguments(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c1", "-W1", target).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPodName)
 						}(address)
 					}
 
@@ -1325,15 +1347,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					annotateNamespaceForGateway(f.Namespace.Name, true, addresses.gatewayIPs[:]...)
 
 					for _, gwContainer := range gwContainers {
-						_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-c", testTimeout, addresses.srcPodIP})
-						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+						gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+							WithArguments(gwContainer, []string{"ping", "-c1", "-W1", addresses.srcPodIP}).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 					}
 
-					// This is needed for bfd to sync up
-					time.Sleep(3 * time.Second)
-
 					for _, gwContainer := range gwContainers {
-						gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
+						gomega.Eventually(isBFDPaired).
+							WithArguments(gwContainer, addresses.nodeIP).
+							WithTimeout(time.Minute).
+							WithPolling(5*time.Second).
+							Should(gomega.BeTrue(), "Bfd not paired")
 					}
 
 					expectedHostNames := hostNamesForExternalContainers(gwContainers)
@@ -1391,14 +1416,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		// The traffic will get proxied through an annotated pod in the serving namespace.
 		var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", func() {
 			const (
-				svcname              string = "externalgw-pod-novxlan"
-				gwContainer1Template string = "ex-gw-container1-%d"
-				gwContainer2Template string = "ex-gw-container2-%d"
-				srcPingPodName       string = "e2e-exgw-src-ping-pod"
-				gatewayPodName1      string = "e2e-gateway-pod1"
-				gatewayPodName2      string = "e2e-gateway-pod2"
-				ecmpRetry            int    = 20
-				testTimeout          string = "20"
+				svcname              string        = "externalgw-pod-novxlan"
+				gwContainer1Template string        = "ex-gw-container1-%d"
+				gwContainer2Template string        = "ex-gw-container2-%d"
+				srcPingPodName       string        = "e2e-exgw-src-ping-pod"
+				gatewayPodName1      string        = "e2e-gateway-pod1"
+				gatewayPodName2      string        = "e2e-gateway-pod2"
+				ecmpRetry            int           = 20
+				testTimeout          time.Duration = 20 * time.Second
 			)
 
 			var (
@@ -1451,8 +1476,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 					for _, gwContainer := range gwContainers {
 						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-						_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+						gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+							WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 					}
 
 					tcpDumpSync := sync.WaitGroup{}
@@ -1471,8 +1498,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						go func(target string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-							framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
+							gomega.Eventually(e2ekubectl.RunKubectl).
+								WithArguments(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c1", "-W1", target).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 						}(t)
 					}
 					pingSync.Wait()
@@ -1677,12 +1706,12 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		// The test checks that both hostnames are collected at least once.
 		var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			const (
-				svcname              string = "novxlan-externalgw-ecmp"
-				gwContainer1Template string = "gw-test-container1-%d"
-				gwContainer2Template string = "gw-test-container2-%d"
-				testTimeout          string = "30"
-				ecmpRetry            int    = 20
-				srcPodName                  = "e2e-exgw-src-pod"
+				svcname              string        = "novxlan-externalgw-ecmp"
+				gwContainer1Template string        = "gw-test-container1-%d"
+				gwContainer2Template string        = "gw-test-container2-%d"
+				testTimeout          time.Duration = 30 * time.Second
+				ecmpRetry            int           = 20
+				srcPodName                         = "e2e-exgw-src-pod"
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -1730,14 +1759,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Verifying connectivity to the pod from external gateways")
 				for _, gwContainer := range gwContainers {
 					// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-					_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-					framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+					gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+						WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+						WithTimeout(testTimeout).
+						ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 				}
 
 				ginkgo.By("Verifying connectivity to the pod from external gateways with large packets > pod MTU")
 				for _, gwContainer := range gwContainers {
-					_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-s", "1420", "-c", testTimeout, addresses.srcPodIP})
-					framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+					gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+						WithArguments(gwContainer, []string{"ping", "-s", "1420", "-c1", "-W1", addresses.srcPodIP}).
+						WithTimeout(testTimeout).
+						ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 				}
 
 				// Verify the gateways and remote loopback addresses are reachable from the pod.
@@ -1766,10 +1799,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					go func(target string) {
 						defer ginkgo.GinkgoRecover()
 						defer pingSync.Done()
-						_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c", testTimeout, target)
-						if err != nil {
-							framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
-						}
+						gomega.Eventually(e2ekubectl.RunKubectl).
+							WithArguments(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c1", "-W1", target).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPodName)
 					}(address)
 				}
 				pingSync.Wait()
@@ -2040,15 +2073,15 @@ var _ = ginkgo.Describe("External Gateway", func() {
 
 			var _ = ginkgo.Describe("e2e non-vxlan external gateway through a dynamic hop", func() {
 				const (
-					svcname              string = "externalgw-pod-novxlan"
-					gwContainer1Template string = "ex-gw-container1-%d"
-					gwContainer2Template string = "ex-gw-container2-%d"
-					srcPingPodName       string = "e2e-exgw-src-ping-pod"
-					gatewayPodName1      string = "e2e-gateway-pod1"
-					gatewayPodName2      string = "e2e-gateway-pod2"
-					ecmpRetry            int    = 20
-					testTimeout          string = "20"
-					defaultPolicyName           = "default-route-policy"
+					svcname              string        = "externalgw-pod-novxlan"
+					gwContainer1Template string        = "ex-gw-container1-%d"
+					gwContainer2Template string        = "ex-gw-container2-%d"
+					srcPingPodName       string        = "e2e-exgw-src-ping-pod"
+					gatewayPodName1      string        = "e2e-gateway-pod1"
+					gatewayPodName2      string        = "e2e-gateway-pod2"
+					ecmpRetry            int           = 20
+					testTimeout          time.Duration = 20 * time.Second
+					defaultPolicyName                  = "default-route-policy"
 				)
 
 				var (
@@ -2104,15 +2137,19 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						ginkgo.By("Verifying connectivity to the pod from external gateways")
 						for _, gwContainer := range gwContainers {
 							// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-							_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-							framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+							gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+								WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 						}
 
 						// This is needed for bfd to sync up
 						for _, gwContainer := range gwContainers {
-							gomega.Eventually(func() bool {
-								return isBFDPaired(gwContainer, addresses.nodeIP)
-							}, time.Minute, 5).Should(gomega.BeTrue(), "Bfd not paired")
+							gomega.Eventually(isBFDPaired).
+								WithArguments(gwContainer, addresses.nodeIP).
+								WithTimeout(time.Minute).
+								WithPolling(5*time.Second).
+								Should(gomega.BeTrue(), "Bfd not paired")
 						}
 
 						tcpDumpSync := sync.WaitGroup{}
@@ -2133,10 +2170,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 							go func(target string) {
 								defer ginkgo.GinkgoRecover()
 								defer pingSync.Done()
-								_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-								if err != nil {
-									framework.Logf("error generating a ping from the test pod %s: %v", srcPingPodName, err)
-								}
+								gomega.Eventually(e2ekubectl.RunKubectl).
+									WithArguments(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c1", "-W1", target).
+									WithTimeout(testTimeout).
+									ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 							}(address)
 						}
 
@@ -2164,8 +2201,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 								go func(target string) {
 									defer ginkgo.GinkgoRecover()
 									defer pingSync.Done()
-									_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-									framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
+									gomega.Eventually(e2ekubectl.RunKubectl).
+										WithArguments(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c1", "-W1", target).
+										WithTimeout(testTimeout).
+										ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 								}(t)
 							}
 							pingSync.Wait()
@@ -2184,14 +2223,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						createAPBExternalRouteCRWithDynamicHop(defaultPolicyName, f.Namespace.Name, servingNamespace, true, addressesv4.gatewayIPs)
 
 						for _, gwContainer := range gwContainers {
-							_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-							framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+							gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+								WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 						}
 
 						for _, gwContainer := range gwContainers {
-							gomega.Eventually(func() bool {
-								return isBFDPaired(gwContainer, addresses.nodeIP)
-							}, 10, 1).Should(gomega.BeTrue(), "Bfd not paired")
+							gomega.Eventually(isBFDPaired).
+								WithArguments(gwContainer, addresses.nodeIP).
+								WithTimeout(time.Minute).
+								WithPolling(5*time.Second).
+								Should(gomega.BeTrue(), "Bfd not paired")
 						}
 
 						expectedHostNames := hostNamesForExternalContainers(gwContainers)
@@ -2252,12 +2295,12 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			// The test checks that both hostnames are collected at least once.
 			var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 				const (
-					svcname              string = "novxlan-externalgw-ecmp"
-					gwContainer1Template string = "gw-test-container1-%d"
-					gwContainer2Template string = "gw-test-container2-%d"
-					testTimeout          string = "30"
-					ecmpRetry            int    = 20
-					srcPodName                  = "e2e-exgw-src-pod"
+					svcname              string        = "novxlan-externalgw-ecmp"
+					gwContainer1Template string        = "gw-test-container1-%d"
+					gwContainer2Template string        = "gw-test-container2-%d"
+					testTimeout          time.Duration = 30 * time.Second
+					ecmpRetry            int           = 20
+					srcPodName                         = "e2e-exgw-src-pod"
 				)
 
 				var (
@@ -2303,14 +2346,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					createAPBExternalRouteCRWithStaticHop(defaultPolicyName, f.Namespace.Name, true, addresses.gatewayIPs...)
 
 					for _, gwContainer := range gwContainers {
-						_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-c", testTimeout, addresses.srcPodIP})
-						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+						gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+							WithArguments(gwContainer, []string{"ping", "-c1", "-W1", addresses.srcPodIP}).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 					}
 
 					for _, gwContainer := range gwContainers {
-						gomega.Eventually(func() bool {
-							return isBFDPaired(gwContainer, addresses.nodeIP)
-						}, 5).Should(gomega.BeTrue(), "Bfd not paired")
+						gomega.Eventually(isBFDPaired).
+							WithArguments(gwContainer, addresses.nodeIP).
+							WithTimeout(time.Minute).
+							WithPolling(5*time.Second).
+							Should(gomega.BeTrue(), "Bfd not paired")
 					}
 
 					// Verify the gateways and remote loopback addresses are reachable from the pod.
@@ -2342,10 +2389,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						go func(target string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
-							if err != nil {
-								framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
-							}
+							gomega.Eventually(e2ekubectl.RunKubectl).
+								WithArguments(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c1", "-W1", target).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPodName)
 						}(address)
 					}
 
@@ -2370,10 +2417,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						go func(target string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
-							if err != nil {
-								framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
-							}
+							gomega.Eventually(e2ekubectl.RunKubectl).
+								WithArguments(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c1", "-W1", target).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", target, srcPodName)
 						}(address)
 					}
 
@@ -2392,15 +2439,18 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					createAPBExternalRouteCRWithStaticHop(defaultPolicyName, f.Namespace.Name, true, addresses.gatewayIPs...)
 
 					for _, gwContainer := range gwContainers {
-						_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-c", testTimeout, addresses.srcPodIP})
-						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+						gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+							WithArguments(gwContainer, []string{"ping", "-c1", "-W1", addresses.srcPodIP}).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 					}
 
-					// This is needed for bfd to sync up
-					time.Sleep(3 * time.Second)
-
 					for _, gwContainer := range gwContainers {
-						gomega.Expect(isBFDPaired(gwContainer, addresses.nodeIP)).To(gomega.Equal(true), "Bfd not paired")
+						gomega.Eventually(isBFDPaired).
+							WithArguments(gwContainer, addresses.nodeIP).
+							WithTimeout(time.Minute).
+							WithPolling(5*time.Second).
+							Should(gomega.BeTrue(), "Bfd not paired")
 					}
 
 					expectedHostNames := hostNamesForExternalContainers(gwContainers)
@@ -2456,14 +2506,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 		// The traffic will get proxied through an annotated pod in the serving namespace.
 		var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", func() {
 			const (
-				svcname              string = "externalgw-pod-novxlan"
-				gwContainer1Template string = "ex-gw-container1-%d"
-				gwContainer2Template string = "ex-gw-container2-%d"
-				srcPingPodName       string = "e2e-exgw-src-ping-pod"
-				gatewayPodName1      string = "e2e-gateway-pod1"
-				gatewayPodName2      string = "e2e-gateway-pod2"
-				ecmpRetry            int    = 20
-				testTimeout          string = "20"
+				svcname              string        = "externalgw-pod-novxlan"
+				gwContainer1Template string        = "ex-gw-container1-%d"
+				gwContainer2Template string        = "ex-gw-container2-%d"
+				srcPingPodName       string        = "e2e-exgw-src-ping-pod"
+				gatewayPodName1      string        = "e2e-gateway-pod1"
+				gatewayPodName2      string        = "e2e-gateway-pod2"
+				ecmpRetry            int           = 20
+				testTimeout          time.Duration = 20 * time.Second
 			)
 
 			var (
@@ -2521,8 +2571,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 					for _, gwContainer := range gwContainers {
 						// Ping from a common IP address that exists on both gateways to ensure test coverage where ingress reply goes back to the same host.
-						_, err := infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-B", "-c", testTimeout, "-I", addresses.targetIPs[0], addresses.srcPodIP})
-						framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer)
+						gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
+							WithArguments(gwContainer, []string{"ping", "-B", "-c1", "-W1", "-I", addresses.targetIPs[0], addresses.srcPodIP}).
+							WithTimeout(testTimeout).
+							ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
 					}
 					tcpDumpSync := sync.WaitGroup{}
 					tcpDumpSync.Add(len(gwContainers))
@@ -2540,8 +2592,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 						go func(gwIP string) {
 							defer ginkgo.GinkgoRecover()
 							defer pingSync.Done()
-							_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, gwIP)
-							framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", gwIP, srcPingPodName)
+							gomega.Eventually(e2ekubectl.RunKubectl).
+								WithArguments(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c1", "-W1", gwIP).
+								WithTimeout(testTimeout).
+								ShouldNot(gomega.BeEmpty(), "Failed to ping remote gateway %s from pod %s", gwIP, srcPingPodName)
 						}(t)
 					}
 					pingSync.Wait()
@@ -2960,41 +3014,50 @@ func setupGatewayContainers(f *framework.Framework, providerCtx infraapi.Context
 	// A route back to the src pod must be set in order for the ping reply to work.
 	for _, gwContainer := range gwContainers {
 		if testIPv4 {
-			ginkgo.By(fmt.Sprintf("Setting up the destination ips to %s", gwContainer))
+			ginkgo.By(fmt.Sprintf("Setting up the destination ips to %s", gwContainer.Name))
 			for _, address := range addressesv4.targetIPs {
 				framework.Logf("adding IP %q to gateway container %q", address, gwContainer.Name)
 				_, err = infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ip", "address", "add", address + "/32", "dev", "lo"})
-				framework.ExpectNoError(err, "failed to add the loopback ip to dev lo on the test container %s", gwContainer)
+				framework.ExpectNoError(err, "failed to add the loopback ip to dev lo on the test container %s", gwContainer.Name)
 				providerCtx.AddCleanUpFn(func() error {
 					infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ip", "address", "del", address + "/32", "dev", "lo"})
 					return nil
 				})
 			}
 
-			ginkgo.By(fmt.Sprintf("Adding a route from %s to the src pod", gwContainer))
+			ginkgo.By(fmt.Sprintf("Adding a route from %s to the src pod", gwContainer.Name))
 			_, err = infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ip", "route", "add", addressesv4.srcPodIP, "via", addressesv4.nodeIP})
-			framework.ExpectNoError(err, "failed to add the pod host route on the test container %s", gwContainer)
+			framework.ExpectNoError(err, "failed to add the pod host route on the test container %s", gwContainer.Name)
 			providerCtx.AddCleanUpFn(func() error {
 				infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ip", "route", "del", addressesv4.srcPodIP, "via", addressesv4.nodeIP})
 				return nil
 			})
 
+			// cluster nodes don't know where to send ARP replies to requests
+			// from the IPs that we just added to the containers so force an
+			// entry on the neighbor table with a ping. This speeds up the tests
+			// which would otherwise eventually discover the neighbor through
+			// other link layer protocols.
+			ginkgo.By(fmt.Sprintf("Adding node %s as neighbor of %s", addressesv4.nodeIP, gwContainer.Name))
+			_, err = infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ping", "-c1", addressesv4.nodeIP})
+			framework.ExpectNoError(err, "failed to add node %s as neighbor of %s", addressesv4.nodeIP, gwContainer.Name)
+
 			ginkgo.By("Setting up the listeners on the gateway")
 			setupListenersOrDie(gwContainer, addressesv4.targetIPs[0])
 		}
 		if testIPv6 {
-			ginkgo.By(fmt.Sprintf("Setting up the destination ips to %s (ipv6)", gwContainer))
+			ginkgo.By(fmt.Sprintf("Setting up the destination ips to %s (ipv6)", gwContainer.Name))
 			for _, address := range addressesv6.targetIPs {
 				_, err = infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ip", "address", "add", address + "/128", "dev", "lo"})
-				framework.ExpectNoError(err, "ipv6: failed to add the loopback ip to dev lo on the test container %s", gwContainer)
+				framework.ExpectNoError(err, "ipv6: failed to add the loopback ip to dev lo on the test container %s", gwContainer.Name)
 				providerCtx.AddCleanUpFn(func() error {
 					infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ip", "address", "del", address + "/128", "dev", "lo"})
 					return nil
 				})
 			}
-			ginkgo.By(fmt.Sprintf("Adding a route from %s to the src pod (ipv6)", gwContainer))
+			ginkgo.By(fmt.Sprintf("Adding a route from %s to the src pod (ipv6)", gwContainer.Name))
 			_, err = infraprovider.Get().ExecExternalContainerCommand(gwContainer, []string{"ip", "-6", "route", "add", addressesv6.srcPodIP, "via", addressesv6.nodeIP})
-			framework.ExpectNoError(err, "ipv6: failed to add the pod host route on the test container %s", gwContainer)
+			framework.ExpectNoError(err, "ipv6: failed to add the pod host route on the test container %s", gwContainer.Name)
 
 			ginkgo.By("Setting up the listeners on the gateway (v6)")
 			setupListenersOrDie(gwContainer, addressesv6.targetIPs[0])
@@ -3494,10 +3557,12 @@ EOF
 	framework.ExpectNoError(err, "failed to start frr in %s", container)
 }
 
-func isBFDPaired(container infraapi.ExternalContainer, peer string) bool {
+func isBFDPaired(container infraapi.ExternalContainer, peer string) (bool, error) {
 	res, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", fmt.Sprintf("vtysh -c \"show bfd peer %s\"", peer)})
-	framework.ExpectNoError(err, "failed to check bfd status in %s", container)
-	return strings.Contains(res, "Status: up")
+	if err != nil {
+		return false, fmt.Errorf("failed to check bfd status in %s: %w", container, err)
+	}
+	return strings.Contains(res, "Status: up"), nil
 }
 
 func checkReceivedPacketsOnExternalContainer(container infraapi.ExternalContainer, srcPodName, link string, filter []string, wg *sync.WaitGroup) {
