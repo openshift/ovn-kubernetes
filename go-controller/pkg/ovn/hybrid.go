@@ -171,7 +171,7 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 			// In cases of OpenShift SDN live migration, where config.HybridOverlay.ClusterSubnets is not provided, we
 			// use the host subnets allocated by OpenShiftSDN as the hybrid-overlay-node-subnet and set up hybrid
 			// overlay routes/policies to these subnets.
-			nodes, err := oc.kube.GetNodes()
+			nodes, err := oc.watchFactory.GetNodes()
 			if err != nil {
 				return err
 			}
@@ -407,7 +407,7 @@ func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeName string, 
 	}
 
 	// Delete routes to HO subnet from GRs
-	nodes, err := oc.kube.GetNodes()
+	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		return err
 	}
