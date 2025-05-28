@@ -4179,14 +4179,14 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 	name := "foo"
 	namespace := "testns"
 
-	defaultService := &v1.Service{
+	defaultService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: v1.ServiceSpec{
-			Type: v1.ServiceTypeClusterIP,
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
 		},
 	}
 
-	addFallbackAnnotationToService := func(s *v1.Service) *v1.Service {
+	addFallbackAnnotationToService := func(s *corev1.Service) *corev1.Service {
 		s.Annotations = map[string]string{localWithFallbackAnnotation: ""}
 		return s
 	}
@@ -4194,7 +4194,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 
 	tc := []struct {
 		name                string
-		service             *v1.Service
+		service             *corev1.Service
 		config              *lbConfig
 		node                string
 		expectedTargetIPsV4 []string
@@ -4310,7 +4310,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			service: addFallbackAnnotationToService(getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp)),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
-				protocol: v1.ProtocolTCP,
+				protocol: corev1.ProtocolTCP,
 				inport:   80,
 				clusterEndpoints: lbEndpoints{
 					V4IPs: []string{"192.168.1.1"},     // on nodeB

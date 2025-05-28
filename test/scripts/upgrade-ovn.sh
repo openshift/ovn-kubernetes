@@ -6,6 +6,13 @@ set -ex
 export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-fedora:pr}
 
+set -ex
+ARCH=""
+case $(uname -m) in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64"   ;;
+esac
+
 kubectl_wait_pods() {
   # Check that everything is fine and running. IPv6 cluster seems to take a little
   # longer to come up, so extend the wait time.
@@ -38,7 +45,7 @@ kubectl_wait_daemonset(){
     READY_REPLICAS=$(run_kubectl get daemonsets.apps $1 -n ovn-kubernetes -o=jsonpath='{.status.numberReady}')
     echo "CURRENT READY REPLICAS: $READY_REPLICAS, CURRENT DESIRED REPLICAS: $DESIRED_REPLICAS for the DaemonSet $1"
     if [[ $READY_REPLICAS -eq $DESIRED_REPLICAS ]]; then
-      UP_TO_DATE_REPLICAS=$(run_kubectl get daemonsets.apps ovnkube-node -n ovn-kubernetes  -o=jsonpath='{.status.updatedNumberScheduled}')
+      UP_TO_DATE_REPLICAS=$(run_kubectl get daemonsets.apps $1 -n ovn-kubernetes  -o=jsonpath='{.status.updatedNumberScheduled}')
       echo "CURRENT UP TO DATE REPLICAS: $UP_TO_DATE_REPLICAS for the Deployment $1"
       if [[ $READY_REPLICAS -eq $UP_TO_DATE_REPLICAS ]]; then
         break
@@ -281,7 +288,7 @@ run_kubectl apply -f rbac-ovnkube-db.yaml
 
 if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
   run_kubectl apply -f ovnkube-identity.yaml
-  kubectl_wait_deployment ovnkube-identity
+  kubectl_wait_daemonset ovnkube-identity
 fi
 
 
@@ -337,14 +344,14 @@ for node in $MASTER_NODES; do
 done
 
 # redownload the e2e test binaries if their version differs
-K8S_VERSION="v1.31.0"
+K8S_VERSION="v1.32.3"
 E2E_VERSION=$(/usr/local/bin/e2e.test --version)
 if [[ "$E2E_VERSION" != "$K8S_VERSION" ]]; then
    echo "found version $E2E_VERSION of e2e binary, need version $K8S_VERSION ; will download it."
    # Install e2e test binary and ginkgo
-   curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
-   tar xvzf kubernetes-test-linux-amd64.tar.gz
+   curl -LO https://dl.k8s.io/${K8S_VERSION}/kubernetes-test-linux-${ARCH}.tar.gz
+   tar xvzf kubernetes-test-linux-${ARCH}.tar.gz
    sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
    sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
-   rm kubernetes-test-linux-amd64.tar.gz
+   rm kubernetes-test-linux-${ARCH}.tar.gz
 fi

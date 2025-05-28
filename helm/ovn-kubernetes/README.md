@@ -84,7 +84,7 @@ networking:
 - Optional: build local image and load it into Kind nodes
 ```
 # cd dist/images
-# make ubuntu
+# make ubuntu-image
 # docker tag ovn-kube-ubuntu:latest ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master
 # kind load docker-image ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master
 ```
@@ -332,6 +332,15 @@ false
 </pre>
 </td>
 			<td>Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes</td>
+		</tr>
+		<tr>
+			<td>global.enableNetworkSegmentation</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Configure to use user defined networks (UDN) feature with ovn-kubernetes</td>
 		</tr>
 		<tr>
 			<td>global.enableMulticast</td>

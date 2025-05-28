@@ -5,7 +5,7 @@
 # The standard name for this image is ovn-kube
 
 # Build RHEL-9 binaries
-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.22-openshift-4.17 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -13,7 +13,7 @@ RUN cd go-controller; CGO_ENABLED=1 make
 RUN cd go-controller; CGO_ENABLED=0 make windows
 
 # Build RHEL-8 binaries (for upgrades from 4.12 and earlier)
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.22-openshift-4.17 AS rhel8
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.23-openshift-4.19 AS rhel8
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
 RUN cd go-controller; CGO_ENABLED=1 make
@@ -26,7 +26,7 @@ RUN cd go-controller; CGO_ENABLED=1 make
 # - creating directories required by ovn-kubernetes
 # - git commit number
 # - ovnkube.sh script
-FROM registry.ci.openshift.org/ocp/4.17:ovn-kubernetes-base
+FROM registry.ci.openshift.org/ocp/4.19:ovn-kubernetes-base
 
 USER root
 
@@ -41,7 +41,7 @@ RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	tcpdump iputils \
-	libreswan-4.6-3.el9_0.3 \
+	libreswan \
 	ethtool conntrack-tools \
 	openshift-clients \
 	" && \
