@@ -33,6 +33,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
@@ -317,7 +318,7 @@ func (bnc *BaseNetworkController) GetLogicalPortName(pod *corev1.Pod, nadName st
 func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
 	[]ovsdb.Operation, func(), time.Time, error) {
 	if !bnc.IsSecondary() {
-		return metrics.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
+		return recorders.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
 	}
 	// TBD: no op for secondary network for now
 	return []ovsdb.Operation{}, func() {}, time.Time{}, nil

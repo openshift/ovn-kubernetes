@@ -22,6 +22,7 @@ import (
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -356,7 +357,7 @@ func (oc *DefaultNetworkController) Stop() {
 //
 //	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *DefaultNetworkController) init() error {
-	existingNodes, err := oc.kube.GetNodes()
+	existingNodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
@@ -657,11 +658,11 @@ func (h *defaultNetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
 		pod := obj.(*corev1.Pod)
 		klog.V(5).Infof("Recording add event on pod %s/%s", pod.Namespace, pod.Name)
 		h.oc.podRecorder.AddPod(pod.UID)
-		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+		recorders.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording add event on network policy %s/%s", np.Namespace, np.Name)
-		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
+		recorders.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
@@ -671,11 +672,11 @@ func (h *defaultNetworkControllerEventHandler) RecordUpdateEvent(obj interface{}
 	case factory.PodType:
 		pod := obj.(*corev1.Pod)
 		klog.V(5).Infof("Recording update event on pod %s/%s", pod.Namespace, pod.Name)
-		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+		recorders.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording update event on network policy %s/%s", np.Namespace, np.Name)
-		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
+		recorders.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
@@ -686,11 +687,11 @@ func (h *defaultNetworkControllerEventHandler) RecordDeleteEvent(obj interface{}
 		pod := obj.(*corev1.Pod)
 		klog.V(5).Infof("Recording delete event on pod %s/%s", pod.Namespace, pod.Name)
 		h.oc.podRecorder.CleanPod(pod.UID)
-		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+		recorders.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording delete event on network policy %s/%s", np.Namespace, np.Name)
-		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
+		recorders.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
@@ -700,11 +701,11 @@ func (h *defaultNetworkControllerEventHandler) RecordSuccessEvent(obj interface{
 	case factory.PodType:
 		pod := obj.(*corev1.Pod)
 		klog.V(5).Infof("Recording success event on pod %s/%s", pod.Namespace, pod.Name)
-		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
+		recorders.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording success event on network policy %s/%s", np.Namespace, np.Name)
-		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
+		recorders.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
