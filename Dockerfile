@@ -4,7 +4,7 @@
 #
 # The standard name for this image is ovn-kube
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.12 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.19-openshift-4.12 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
