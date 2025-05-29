@@ -194,7 +194,7 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 		}
 	}
 
-	if util.IsRouteAdvertisementsEnabled() {
+	if util.IsRouteAdvertisementsEnabled() && !util.IsLooseUDNIsolation() {
 		// Remove stale subnets from the advertised networks address set used for isolation
 		// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
 		// advertised.
@@ -530,6 +530,10 @@ func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 }
 
 func (cm *ControllerManager) configureAdvertisedNetworkIsolation() error {
+	if util.IsLooseUDNIsolation() {
+		klog.Infof("Skip creating global advertised networks addressset in loose UDN isolation mode")
+		return nil
+	}
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
 	_, err := addressSetFactory.EnsureAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	return err
