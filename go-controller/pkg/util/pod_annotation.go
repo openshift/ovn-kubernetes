@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -64,6 +65,7 @@ const (
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
 var ErrOverridePodIPs = errors.New("requested pod IPs trying to override IPs exists in pod annotation")
+var joinAddrCache sync.Map
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
 // actual annotation may include the equivalent of multiple PodAnnotations.)
@@ -595,14 +597,28 @@ func AddRoutesGatewayIP(
 			// Until https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4876 is fixed, it is limited to IC only
 			if config.OVNKubernetesFeature.EnableInterconnect {
 				if _, isIPv6Mode := netinfo.IPMode(); isIPv6Mode {
-					joinAddrs, err := ParseNodeGatewayRouterJoinAddrs(node, netinfo.GetNetworkName())
-					if err != nil {
-						if IsAnnotationNotSetError(err) {
-							return types.NewSuppressedError(err)
+					key := node.Name + "|" + netinfo.GetNetworkName()
+
+					// Try the cache first to avoid ParseNodeGatewayRouterJoinAddrs() every time
+					v, ok := joinAddrCache.Load(key)
+					var addrs []*net.IPNet
+					if ok {
+						addrs = v.([]*net.IPNet)
+					} else {
+						var err error
+						addrs, err = ParseNodeGatewayRouterJoinAddrs(node, netinfo.GetNetworkName())
+						if err != nil {
+							if IsAnnotationNotSetError(err) {
+								return types.NewSuppressedError(err)
+							}
+							return fmt.Errorf("failed parsing node gateway router join addresses, network %q, %w", netinfo.GetNetworkName(), err)
 						}
-						return fmt.Errorf("failed parsing node gateway router join addresses, network %q, %w", netinfo.GetNetworkName(), err)
+						joinAddrCache.Store(key, addrs)
 					}
-					podAnnotation.GatewayIPv6LLA = HWAddrToIPv6LLA(IPAddrToHWAddr(joinAddrs[0].IP))
+
+					podAnnotation.GatewayIPv6LLA = HWAddrToIPv6LLA(
+						IPAddrToHWAddr(addrs[0].IP),
+					)
 				}
 			}
 			return nil
