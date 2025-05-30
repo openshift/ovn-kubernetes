@@ -3,15 +3,15 @@ package networkqos
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // Metrics to be exposed
 var (
 	nqosCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: metrics.MetricOvnkubeNamespace,
-			Subsystem: metrics.MetricOvnkubeSubsystemController,
+			Namespace: types.MetricOvnkubeNamespace,
+			Subsystem: types.MetricOvnkubeSubsystemController,
 			Name:      "num_network_qoses",
 			Help:      "The total number of network qoses in the cluster",
 		},
@@ -20,8 +20,8 @@ var (
 
 	nqosOvnOperationDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: metrics.MetricOvnkubeNamespace,
-			Subsystem: metrics.MetricOvnkubeSubsystemController,
+			Namespace: types.MetricOvnkubeNamespace,
+			Subsystem: types.MetricOvnkubeSubsystemController,
 			Name:      "nqos_ovn_operation_duration_ms",
 			Help:      "Time spent on reconciling a NetworkQoS event",
 			Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
@@ -31,8 +31,8 @@ var (
 
 	nqosReconcileDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: metrics.MetricOvnkubeNamespace,
-			Subsystem: metrics.MetricOvnkubeSubsystemController,
+			Namespace: types.MetricOvnkubeNamespace,
+			Subsystem: types.MetricOvnkubeSubsystemController,
 			Name:      "nqos_creation_duration_ms",
 			Help:      "Time spent on reconciling a NetworkQoS event",
 			Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
@@ -42,8 +42,8 @@ var (
 
 	nqosPodReconcileDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: metrics.MetricOvnkubeNamespace,
-			Subsystem: metrics.MetricOvnkubeSubsystemController,
+			Namespace: types.MetricOvnkubeNamespace,
+			Subsystem: types.MetricOvnkubeSubsystemController,
 			Name:      "nqos_deletion_duration_ms",
 			Help:      "Time spent on reconciling a Pod event",
 			Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
@@ -53,8 +53,8 @@ var (
 
 	nqosNamespaceReconcileDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: metrics.MetricOvnkubeNamespace,
-			Subsystem: metrics.MetricOvnkubeSubsystemController,
+			Namespace: types.MetricOvnkubeNamespace,
+			Subsystem: types.MetricOvnkubeSubsystemController,
 			Name:      "nqos_ns_reconcile_duration_ms",
 			Help:      "Time spent on reconciling Namespace change for all Pods related to NetworkQoSes",
 			Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
@@ -64,8 +64,8 @@ var (
 
 	nqosStatusPatchDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: metrics.MetricOvnkubeNamespace,
-			Subsystem: metrics.MetricOvnkubeSubsystemController,
+			Namespace: types.MetricOvnkubeNamespace,
+			Subsystem: types.MetricOvnkubeSubsystemController,
 			Name:      "nqos_status_patch_duration_ms",
 			Help:      "Time spent on patching the status of a NetworkQoS",
 		},
