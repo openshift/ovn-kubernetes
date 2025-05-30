@@ -23,8 +23,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	utiltesting "k8s.io/client-go/util/testing"
 
-	"github.com/ovn-org/libovsdb/client"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -53,7 +51,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest, _ *ClientSet, _ *KubeAPIAuth, _ networkmanager.Interface, _ client.Client) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, _ *ClientSet, _ *KubeAPIAuth, _ networkmanager.Interface) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {
@@ -95,11 +93,7 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to start watch factory: %v", err)
 	}
 
-	ovsClient, err := newOVSClientWithExternalIDs(map[string]string{})
-	if err != nil {
-		t.Fatalf("failed to call newOVSClientWithExternalIDs: %v", err)
-	}
-	s, err := NewCNIServer(wf, fakeClient, networkmanager.Default().Interface(), ovsClient)
+	s, err := NewCNIServer(wf, fakeClient, networkmanager.Default().Interface())
 	if err != nil {
 		t.Fatalf("error creating CNI server: %v", err)
 	}
