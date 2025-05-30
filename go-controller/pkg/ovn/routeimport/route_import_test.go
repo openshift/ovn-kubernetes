@@ -369,7 +369,7 @@ func Test_controller_syncLinkUpdate(t *testing.T) {
 			expectTables: map[int]int{1000: 1},
 		},
 		{
-			name: "does reconcile on link updates with actual changes for generated VRF names",
+			name: "does reconcile on link updates with actual changes",
 			fields: fields{
 				networkIDs: map[int]string{1: "udn"},
 				networks:   map[string]util.NetInfo{"udn": udn},
@@ -381,20 +381,6 @@ func Test_controller_syncLinkUpdate(t *testing.T) {
 			},
 			expectTables:     map[int]int{1001: 1},
 			expectReconciles: []string{"udn"},
-		},
-		{
-			name: "does reconcile on link updates with actual changes for network VRF names",
-			fields: fields{
-				networkIDs: map[int]string{1: types.CUDNPrefix + "udn"},
-				networks:   map[string]util.NetInfo{types.CUDNPrefix + "udn": udn},
-				tables:     map[int]int{1000: 1},
-			},
-			args: args{&netlink.LinkUpdate{
-				Header: unix.NlMsghdr{Type: unix.RTM_NEWLINK},
-				Link:   &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "udn"}, Table: 1001}},
-			},
-			expectTables:     map[int]int{1001: 1},
-			expectReconciles: []string{types.CUDNPrefix + "udn"},
 		},
 	}
 	for _, tt := range tests {

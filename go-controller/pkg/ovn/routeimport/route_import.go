@@ -36,7 +36,7 @@ const (
 )
 
 type Manager interface {
-	// AddNetwork instructs the manager to continuously reconcile BGP routes from
+	// AddNetwork instructs the manager to continously reconcile BGP routes from
 	// the network host vrf to the network gateway router. A network can only be
 	// added once otherwise an error will be returned.
 	AddNetwork(network util.NetInfo) error
@@ -264,8 +264,8 @@ func (c *controller) syncLinkUpdate(update *netlink.LinkUpdate) {
 	c.Lock()
 	defer c.Unlock()
 
-	// for CUDNs, VRF name equals network name sans prefix
-	network := c.networks[util.GenerateCUDNNetworkName(vrf.Name)]
+	// for CUDNs, VRF name equals network name
+	network := c.networks[vrf.Name]
 	// but if we got an ID, this can't be a CUDN, it's a UDN.
 	if networkID != types.InvalidID {
 		network = c.networks[c.networkIDs[networkID]]
