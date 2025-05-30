@@ -127,9 +127,9 @@ func (phu *proxierHealthUpdater) Start(stopChan chan struct{}, wg *sync.WaitGrou
 			if errors.Is(err, http.ErrServerClosed) {
 				return
 			}
-			err = fmt.Errorf("serving healthz on %s failed: %v", phu.address, err)
-			phu.recorder.Eventf(phu.nodeRef, corev1.EventTypeWarning, "FailedToStartProxierHealthcheck", "StartOVNKubernetesNode", err.Error())
-			klog.Errorf("Error running proxy healthz server: %v", err)
+			msg := fmt.Sprintf("serving healthz on %s failed: %v", phu.address, err)
+			phu.recorder.Eventf(phu.nodeRef, corev1.EventTypeWarning, "FailedToStartProxierHealthcheck", "StartOVNKubernetesNode", msg)
+			klog.Errorf(msg)
 			time.Sleep(5 * time.Second)
 		}
 	}()

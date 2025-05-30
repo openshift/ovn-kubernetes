@@ -263,10 +263,6 @@ func (h *Handle) RouteAppend(route *Route) error {
 	return ErrNotImplemented
 }
 
-func (h *Handle) RouteChange(route *Route) error {
-	return ErrNotImplemented
-}
-
 func (h *Handle) RouteDel(route *Route) error {
 	return ErrNotImplemented
 }

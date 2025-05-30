@@ -21,6 +21,7 @@ import (
 // magic string used in vips to indicate that the node's physical
 // ips should be substituted in
 const placeholderNodeIPs = "node"
+const localWithFallbackAnnotation = "traffic-policy.network.alpha.openshift.io/local-with-fallback"
 
 // lbConfig is the abstract desired load balancer configuration.
 // vips and endpoints are mixed families.
@@ -49,7 +50,7 @@ type lbEndpoints struct {
 	V6IPs []string
 }
 
-func makeNodeSwitchTargetIPs(node string, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
+func makeNodeSwitchTargetIPs(service *corev1.Service, node string, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
 	targetIPsV4 = c.clusterEndpoints.V4IPs
 	targetIPsV6 = c.clusterEndpoints.V6IPs
 
@@ -67,6 +68,19 @@ func makeNodeSwitchTargetIPs(node string, c *lbConfig) (targetIPsV4, targetIPsV6
 		targetIPsV6 = localIPsV6
 	}
 
+	// OCP HACK BEGIN
+	if _, set := service.Annotations[localWithFallbackAnnotation]; set && c.externalTrafficLocal {
+		// if service is annotated and is ETP=local, fallback to ETP=cluster on nodes with no local endpoints:
+		// include endpoints from other nodes
+		if len(targetIPsV4) == 0 {
+			targetIPsV4 = c.clusterEndpoints.V4IPs
+		}
+		if len(targetIPsV6) == 0 {
+			targetIPsV6 = c.clusterEndpoints.V6IPs
+		}
+	}
+	// OCP HACK END
+
 	// Local endpoints are a subset of cluster endpoints, so it is enough to compare their length
 	v4Changed = len(targetIPsV4) != len(c.clusterEndpoints.V4IPs)
 	v6Changed = len(targetIPsV6) != len(c.clusterEndpoints.V6IPs)
@@ -74,7 +88,7 @@ func makeNodeSwitchTargetIPs(node string, c *lbConfig) (targetIPsV4, targetIPsV6
 	return
 }
 
-func makeNodeRouterTargetIPs(node *nodeInfo, c *lbConfig, hostMasqueradeIPV4, hostMasqueradeIPV6 string) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
+func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, c *lbConfig, hostMasqueradeIPV4, hostMasqueradeIPV6 string) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool, zeroRouterLocalEndpointsV4, zeroRouterLocalEndpointsV6 bool) {
 	targetIPsV4 = c.clusterEndpoints.V4IPs
 	targetIPsV6 = c.clusterEndpoints.V6IPs
 
@@ -90,6 +104,21 @@ func makeNodeRouterTargetIPs(node *nodeInfo, c *lbConfig, hostMasqueradeIPV4, ho
 		targetIPsV4 = localIPsV4
 		targetIPsV6 = localIPsV6
 	}
+
+	// OCP HACK BEGIN
+	if _, set := service.Annotations[localWithFallbackAnnotation]; set && c.externalTrafficLocal {
+		// if service is annotated and is ETP=local, fallback to ETP=cluster on nodes with no local endpoints:
+		// include endpoints from other nodes
+		if len(targetIPsV4) == 0 {
+			zeroRouterLocalEndpointsV4 = true
+			targetIPsV4 = c.clusterEndpoints.V4IPs
+		}
+		if len(targetIPsV6) == 0 {
+			zeroRouterLocalEndpointsV6 = true
+			targetIPsV6 = c.clusterEndpoints.V6IPs
+		}
+	}
+	// OCP HACK END
 
 	// Any targets local to the node need to have a special
 	// harpin IP added, but only for the router LB
@@ -215,9 +244,13 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 		// unless any of the following are true:
 		// - Any of the endpoints are host-network
 		// - ETP=local service backed by non-local-host-networked endpoints
+		// - OCP only HACK: It's an openshift-dns:default-dns service
 		//
 		// In that case, we need to create per-node LBs.
-		if hasHostEndpoints(clusterEndpoints.V4IPs) || hasHostEndpoints(clusterEndpoints.V6IPs) || internalTrafficLocal {
+		if hasHostEndpoints(clusterEndpoints.V4IPs) || hasHostEndpoints(clusterEndpoints.V6IPs) || internalTrafficLocal ||
+			// OCP only hack begin
+			(service.Namespace == "openshift-dns" && service.Name == "dns-default") {
+			// OCP only hack end
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -412,7 +445,7 @@ func buildTemplateLBs(service *corev1.Service, configs []lbConfig, nodes []nodeI
 
 				for _, node := range nodes {
 
-					switchV4TargetIPs, switchV6TargetIPs, v4Changed, v6Changed := makeNodeSwitchTargetIPs(node.name, &cfg)
+					switchV4TargetIPs, switchV6TargetIPs, v4Changed, v6Changed := makeNodeSwitchTargetIPs(service, node.name, &cfg)
 					if !switchV4TargetNeedsTemplate && v4Changed {
 						switchV4TargetNeedsTemplate = true
 					}
@@ -420,7 +453,8 @@ func buildTemplateLBs(service *corev1.Service, configs []lbConfig, nodes []nodeI
 						switchV6TargetNeedsTemplate = true
 					}
 
-					routerV4TargetIPs, routerV6TargetIPs, v4Changed, v6Changed := makeNodeRouterTargetIPs(
+					routerV4TargetIPs, routerV6TargetIPs, v4Changed, v6Changed, _, _ := makeNodeRouterTargetIPs(
+						service,
 						&node,
 						&cfg,
 						config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String(),
@@ -611,9 +645,10 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 
 			for _, cfg := range configs {
 
-				switchV4TargetIPs, switchV6TargetIPs, _, _ := makeNodeSwitchTargetIPs(node.name, &cfg)
+				switchV4TargetIPs, switchV6TargetIPs, _, _ := makeNodeSwitchTargetIPs(service, node.name, &cfg)
 
-				routerV4TargetIPs, routerV6TargetIPs, _, _ := makeNodeRouterTargetIPs(
+				routerV4TargetIPs, routerV6TargetIPs, _, _, zeroRouterV4LocalEndpoints, zeroRouterV6LocalEndpoints := makeNodeRouterTargetIPs(
+					service,
 					&node,
 					&cfg,
 					config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String(),
@@ -624,6 +659,25 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 
 				switchV4targets := joinHostsPort(cfg.clusterEndpoints.V4IPs, cfg.clusterEndpoints.Port)
 				switchV6targets := joinHostsPort(cfg.clusterEndpoints.V6IPs, cfg.clusterEndpoints.Port)
+
+				// OCP HACK begin
+				// TODO: Remove this hack once we add support for ITP:preferLocal and DNS operator starts using it.
+				if service.Namespace == "openshift-dns" && service.Name == "dns-default" {
+					// Select endpoints that are local to this node.
+					switchV4targetDNSips := util.FilterIPsSlice(cfg.clusterEndpoints.V4IPs, node.podSubnets, true)
+					switchV6targetDNSips := util.FilterIPsSlice(cfg.clusterEndpoints.V6IPs, node.podSubnets, true)
+
+					// If no local endpoints were found, add all the endpoints as targets.
+					if len(switchV4targetDNSips) == 0 {
+						switchV4targetDNSips = cfg.clusterEndpoints.V4IPs
+					}
+					if len(switchV6targetDNSips) == 0 {
+						switchV6targetDNSips = cfg.clusterEndpoints.V6IPs
+					}
+					switchV4targets = joinHostsPort(switchV4targetDNSips, cfg.clusterEndpoints.Port)
+					switchV6targets = joinHostsPort(switchV6targetDNSips, cfg.clusterEndpoints.Port)
+				}
+				// OCP HACK end
 
 				// Substitute the special vip "node" for the node's physical ips
 				// This is used for nodeport
@@ -686,10 +740,12 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 						Targets: targets,
 					}
 
+					localWithFallback := (isv6 && zeroRouterV6LocalEndpoints) || (!isv6 && zeroRouterV4LocalEndpoints)
+
 					// in other words, is this ExternalTrafficPolicy=local?
 					// if so, this gets a separate load balancer with SNAT disabled
 					// (but there's no need to do this if the list of targets is empty)
-					if cfg.externalTrafficLocal && len(targets) > 0 {
+					if cfg.externalTrafficLocal && len(targets) > 0 && !localWithFallback {
 						noSNATRouterRules = append(noSNATRouterRules, rule)
 					} else {
 						routerRules = append(routerRules, rule)

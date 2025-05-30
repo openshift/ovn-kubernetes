@@ -15,7 +15,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -191,7 +190,7 @@ func getITPLocalIPTRules(svcPort corev1.ServicePort, clusterIP string, svcHasLoc
 				"-d", string(clusterIP),
 				"--dport", fmt.Sprintf("%d", svcPort.Port),
 				"-j", "MARK",
-				"--set-xmark", string(types.OVNKubeITPMark),
+				"--set-xmark", string(ovnkubeITPMark),
 			},
 			Protocol: getIPTablesProtocol(clusterIP),
 		},

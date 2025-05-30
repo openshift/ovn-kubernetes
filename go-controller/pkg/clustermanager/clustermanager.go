@@ -25,6 +25,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// ID of the default network.
+	defaultNetworkID = 0
+)
+
 // ClusterManager structure is the object which manages the cluster nodes.
 // It creates a default network controller for the default network and a
 // secondary network cluster controller manager to manage the multi networks.

@@ -335,9 +335,6 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		MAC:            node.NodeLRPMAC,
 		Networks:       []string{node.NodeGWIP},
 		GatewayChassis: []string{chassisName + "-UUID"},
-		Options: map[string]string{
-			"gateway_mtu": "1400",
-		},
 	})
 	if serviceControllerEnabled {
 		testData = append(testData, &nbdb.ChassisTemplateVar{
@@ -399,7 +396,7 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 /* FIXME for updated local gw
 
 func populatePortAddresses(nodeName, lsp, mac, ips string, ovnClient goovn.Client) {
-	cmd, err := ovnClient.LSPAdd(nodeName, lsp)
+	cmd, err := ovnClient.LSPAdd(nodeName, "", lsp)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = cmd.Execute()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1273,11 +1270,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 					[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
 					skipSnat, node1.NodeMgmtPortIP, "1400")
 
-				if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
-					addrSet, err := oc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					expectedNBDatabaseState = generateAdvertisedUDNIsolationExpectedNB(expectedNBDatabaseState, oc.GetNetworkName(), oc.GetNetworkID(), clusterSubnets, expectedNodeSwitch, addrSet)
-				}
 				GR = nil
 				for _, testObj := range expectedNBDatabaseState {
 					if router, ok := testObj.(*nbdb.LogicalRouter); ok && router.UUID == types.GWRouterPrefix+node1.Name+"-UUID" {

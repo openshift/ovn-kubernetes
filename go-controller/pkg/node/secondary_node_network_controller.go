@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -21,6 +22,8 @@ type SecondaryNodeNetworkController struct {
 	BaseNodeNetworkController
 	// pod events factory handler
 	podHandler *factory.Handler
+	// stores the networkID of this network
+	networkID *int
 	// responsible for programing gateway elements for this network
 	gateway *UserDefinedNetworkGateway
 }
@@ -50,8 +53,12 @@ func NewSecondaryNodeNetworkController(
 			return nil, fmt.Errorf("error retrieving node %s while creating node network controller for network %s: %v",
 				snnc.name, netInfo.GetNetworkName(), err)
 		}
+		networkID, err := snnc.getNetworkID()
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving network id for network %s: %v", netInfo.GetNetworkName(), err)
+		}
 
-		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.GetNetInfo(), node,
+		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.GetNetInfo(), networkID, node,
 			snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, ruleManager, defaultNetworkGateway)
 		if err != nil {
 			return nil, fmt.Errorf("error creating UDN gateway for network %s: %v", netInfo.GetNetworkName(), err)
@@ -100,9 +107,29 @@ func (nc *SecondaryNodeNetworkController) Cleanup() error {
 	return nil
 }
 
-func (nc *SecondaryNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
-	wasUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, nc.name)
-	isUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, nc.name)
+func (oc *SecondaryNodeNetworkController) getNetworkID() (int, error) {
+	if oc.networkID == nil || *oc.networkID == util.InvalidID {
+		oc.networkID = ptr.To(util.InvalidID)
+		if netID := oc.GetNetworkID(); netID != util.InvalidID {
+			*oc.networkID = netID
+			return *oc.networkID, nil
+		}
+
+		nodes, err := oc.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidID, err
+		}
+		*oc.networkID, err = util.GetNetworkID(nodes, oc.GetNetInfo())
+		if err != nil {
+			return util.InvalidID, err
+		}
+	}
+	return *oc.networkID, nil
+}
+
+func (oc *SecondaryNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	wasUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, oc.name)
+	isUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
 	return wasUDNNetworkAdvertisedAtNode != isUDNNetworkAdvertisedAtNode
 }
 
@@ -110,17 +137,17 @@ func (nc *SecondaryNodeNetworkController) shouldReconcileNetworkChange(old, new 
 // and the gateway mode:
 // 1. IP rules
 // 2. OpenFlows on br-ex bridge to forward traffic to correct ofports
-func (nc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
-	reconcilePodNetwork := nc.shouldReconcileNetworkChange(nc.ReconcilableNetInfo, netInfo)
+func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
 
-	err := util.ReconcileNetInfo(nc.ReconcilableNetInfo, netInfo)
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
 	if err != nil {
-		klog.Errorf("Failed to reconcile network information for network %s: %v", nc.GetNetworkName(), err)
+		klog.Errorf("Failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
 
 	if reconcilePodNetwork {
-		if nc.gateway != nil {
-			nc.gateway.Reconcile()
+		if oc.gateway != nil {
+			oc.gateway.Reconcile()
 		}
 	}
 

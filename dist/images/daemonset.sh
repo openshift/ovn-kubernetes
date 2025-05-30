@@ -72,7 +72,6 @@ OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_MULTI_NETWORK_ENABLE=
 OVN_NETWORK_SEGMENTATION_ENABLE=
 OVN_ROUTE_ADVERTISEMENTS_ENABLE=
-OVN_ADVERTISE_DEFAULT_NETWORK=
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
@@ -95,7 +94,6 @@ OVN_ENABLE_INTERCONNECT=
 OVN_ENABLE_OVNKUBE_IDENTITY="true"
 OVN_ENABLE_PERSISTENT_IPS=
 OVN_ENABLE_SVC_TEMPLATE_SUPPORT="true"
-OVN_NETWORK_QOS_ENABLE=
 OVN_ENABLE_DNSNAMERESOLVER="false"
 OVN_NOHOSTSUBNET_LABEL=""
 OVN_DISABLE_REQUESTEDCHASSIS="false"
@@ -276,9 +274,6 @@ while [ "$1" != "" ]; do
   --route-advertisements-enable)
     OVN_ROUTE_ADVERTISEMENTS_ENABLE=$VALUE
     ;;
-  --advertise-default-network)
-    OVN_ADVERTISE_DEFAULT_NETWORK=$VALUE
-    ;;
   --egress-service-enable)
     OVN_EGRESSSERVICE_ENABLE=$VALUE
     ;;
@@ -362,9 +357,6 @@ while [ "$1" != "" ]; do
     ;;
   --enable-svc-template-support)
     OVN_ENABLE_SVC_TEMPLATE_SUPPORT=$VALUE
-    ;;
-  --network-qos-enable)
-    OVN_NETWORK_QOS_ENABLE=$VALUE
     ;;
   --enable-dnsnameresolver)
     OVN_ENABLE_DNSNAMERESOLVER=$VALUE
@@ -470,8 +462,6 @@ ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE}
 echo "ovn_network_segmentation_enable: ${ovn_network_segmentation_enable}"
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE}
 echo "ovn_route_advertisements_enable: ${ovn_route_advertisements_enable}"
-ovn_advertise_default_network=${OVN_ADVERTISE_DEFAULT_NETWORK}
-echo "ovn_advertise_default_network: ${ovn_advertise_default_network}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -569,9 +559,6 @@ echo "ovn_enable_persistent_ips: ${ovn_enable_persistent_ips}"
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT}
 echo "ovn_enable_svc_template_support: ${ovn_enable_svc_template_support}"
 
-ovn_network_qos_enable=${OVN_NETWORK_QOS_ENABLE}
-echo "ovn_network_qos_enable: ${ovn_network_qos_enable}"
-
 ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER}
 echo "ovn_enable_dnsnameresolver: ${ovn_enable_dnsnameresolver}"
 
@@ -634,7 +621,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_observ_enable=${ovn_observ_enable} \
-  ovn_network_qos_enable=${ovn_network_qos_enable} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -688,7 +674,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_observ_enable=${ovn_observ_enable} \
-  ovn_network_qos_enable=${ovn_network_qos_enable} \
   ovnkube_app_name=ovnkube-node-dpu \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu.yaml
 
@@ -731,7 +716,6 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_network_qos_enable=${ovn_network_qos_enable} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
@@ -778,7 +762,6 @@ ovn_image=${ovnkube_image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_network_qos_enable=${ovn_network_qos_enable} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
@@ -823,7 +806,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_network_qos_enable=${ovn_network_qos_enable} \
   ovn_v4_transit_switch_subnet=${ovn_v4_transit_switch_subnet} \
   ovn_v6_transit_switch_subnet=${ovn_v6_transit_switch_subnet} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
@@ -921,7 +903,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_network_qos_enable=${ovn_network_qos_enable} \
   ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
@@ -987,7 +968,6 @@ ovn_image=${ovnkube_image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_network_qos_enable=${ovn_network_qos_enable} \
   ovn_northd_backoff_interval=${ovn_enable_backoff_interval} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
@@ -1048,7 +1028,6 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   mtu_value=${mtu} k8s_apiserver=${k8s_apiserver} \
   host_network_namespace=${host_network_namespace} \
   in_upgrade=${in_upgrade} \
-  advertise_default_network=${ovn_advertise_default_network} \
   jinjanate ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
 ovn_enable_interconnect=${ovn_enable_interconnect} \
@@ -1074,7 +1053,6 @@ cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressip
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
-cp ../templates/k8s.ovn.org_networkqoses.yaml.j2 ${output_dir}/k8s.ovn.org_networkqoses.yaml
 cp ../templates/k8s.ovn.org_userdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_userdefinednetworks.yaml
 cp ../templates/k8s.ovn.org_clusteruserdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_clusteruserdefinednetworks.yaml
 cp ../templates/k8s.ovn.org_routeadvertisements.yaml.j2 ${output_dir}/k8s.ovn.org_routeadvertisements.yaml

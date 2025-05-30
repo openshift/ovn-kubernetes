@@ -1,22 +1,20 @@
 reviewers:
-  - aserdean
-  - bpickard22
-  - cathy-zhou
+  - abhat
   - dcbw
-  - flavio-fernandes
-  - girishmg
+  - JacobTanenbaum
   - jcaamano
-  - kyrtapz
-  - martinkennelly
-  - npinaeva
-  - pperiyasamy
-  - ricky-rav
+  - trozet
+  - tssurya
+approvers:
+  - abhat
+  - danwinship
+  - dcbw
+  - JacobTanenbaum
+  - jcaamano
+  - knobunc
   - trozet
   - tssurya
 
-approvers:
-  - dcbw
-  - girishmg
-  - jcaamano
-  - trozet
-  - tssurya
+# Bugzilla info
+component: Networking
+subcomponent: ovn-kubernetes

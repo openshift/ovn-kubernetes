@@ -45,9 +45,6 @@ delete() {
   if [ "$KIND_INSTALL_METALLB" == true ]; then
     destroy_metallb
   fi
-  if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
-    destroy_bgp
-  fi
   timeout 5 kubectl --kubeconfig "${KUBECONFIG}" delete namespace ovn-kubernetes || true
   sleep 5
   kind delete cluster --name "${KIND_CLUSTER_NAME:-ovn}"
@@ -81,8 +78,6 @@ usage() {
     echo "                 [-cm | --compact-mode]"
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [-rae | --enable-route-advertisements]"
-    echo "                 [-adv | --advertise-default-network]"
-    echo "                 [-nqe | --network-qos-enable]"
     echo "                 [--isolated]"
     echo "                 [-dns | --enable-dnsnameresolver]"
     echo "                 [-obs | --observability]"
@@ -142,7 +137,6 @@ usage() {
     echo "-sm  | --scale-metrics                Enable scale metrics"
     echo "-cm  | --compact-mode                 Enable compact mode, ovnkube master and node run in the same process."
     echo "-ic  | --enable-interconnect          Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
-    echo "-nqe | --network-qos-enable           Enable network QoS. DEFAULT: Disabled."
     echo "--disable-ovnkube-identity            Disable per-node cert and ovnkube-identity webhook"
     echo "-npz | --nodes-per-zone               If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
     echo "-mtu                                  Define the overlay mtu"
@@ -153,7 +147,6 @@ usage() {
     echo "-dns | --enable-dnsnameresolver       Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
     echo "-obs | --observability                Enable OVN Observability feature."
     echo "-rae | --enable-route-advertisements  Enable route advertisements"
-    echo "-adv | --advertise-default-network    Applies a RouteAdvertisements configuration to advertise the default network on all nodes"
     echo ""
 }
 
@@ -220,9 +213,9 @@ parse_args() {
                                                 ;;
             -kt | --keep-taint )                KIND_REMOVE_TAINT=false
                                                 ;;
-            -n4 | --no-ipv4 )                   PLATFORM_IPV4_SUPPORT=false
+            -n4 | --no-ipv4 )                   KIND_IPV4_SUPPORT=false
                                                 ;;
-            -i6 | --ipv6 )                      PLATFORM_IPV6_SUPPORT=true
+            -i6 | --ipv6 )                      KIND_IPV6_SUPPORT=true
                                                 ;;
             -is | --ipsec )                     ENABLE_IPSEC=true
                                                 ;;
@@ -339,16 +332,12 @@ parse_args() {
                                                   ;;
             -rae | --route-advertisements-enable) ENABLE_ROUTE_ADVERTISEMENTS=true
                                                   ;;
-            -adv | --advertise-default-network) ADVERTISE_DEFAULT_NETWORK=true
-                                                  ;;
             -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
                                                 ;;
             --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
                                                 ;;
             -mtu  )                             shift
                                                 OVN_MTU=$1
-                                                ;;
-            -nqe | --network-qos-enable )       OVN_NETWORK_QOS_ENABLE=true
                                                 ;;
             --delete )                          delete
                                                 exit
@@ -390,8 +379,8 @@ print_params() {
      echo "KIND_DNS_DOMAIN = $KIND_DNS_DOMAIN"
      echo "KIND_CONFIG_FILE = $KIND_CONFIG"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
-     echo "PLATFORM_IPV4_SUPPORT = $PLATFORM_IPV4_SUPPORT"
-     echo "PLATFORM_IPV6_SUPPORT = $PLATFORM_IPV6_SUPPORT"
+     echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
+     echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "ENABLE_IPSEC = $ENABLE_IPSEC"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
@@ -433,7 +422,6 @@ print_params() {
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "ENABLE_NETWORK_SEGMENTATION= $ENABLE_NETWORK_SEGMENTATION"
      echo "ENABLE_ROUTE_ADVERTISEMENTS= $ENABLE_ROUTE_ADVERTISEMENTS"
-     echo "ADVERTISE_DEFAULT_NETWORK = $ADVERTISE_DEFAULT_NETWORK"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
@@ -443,7 +431,6 @@ print_params() {
        fi
      fi
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
-     echo "OVN_NETWORK_QOS_ENABLE = $OVN_NETWORK_QOS_ENABLE"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_MTU= $OVN_MTU"
      echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
@@ -470,14 +457,6 @@ check_dependencies() {
 
   if ! command_exists kind ; then
     echo "Dependency not met: Command not found 'kind'"
-    exit 1
-  fi
-
-  local kind_min="0.27.0"
-  local kind_cur
-  kind_cur=$(kind version -q)
-  if [ "$(echo -e "$kind_min\n$kind_cur" | sort -V | head -1)" != "$kind_min" ]; then
-    echo "Dependency not met: expected kind version >= $kind_min but have $kind_cur"
     exit 1
   fi
 
@@ -525,8 +504,6 @@ set_openssl_binary() {
 }
 
 set_default_params() {
-  set_common_default_params
-
   # Set default values
   # Used for multi cluster setups
   KIND_CREATE=${KIND_CREATE:-true}
@@ -543,6 +520,8 @@ set_default_params() {
     MANIFEST_OUTPUT_DIR="${DIR}/../dist/yaml/${KIND_CLUSTER_NAME}"
   fi
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
+  KIND_IMAGE=${KIND_IMAGE:-kindest/node}
+  K8S_VERSION=${K8S_VERSION:-v1.31.1}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
@@ -556,8 +535,8 @@ set_default_params() {
   KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-"cluster.local"}
   KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
-  PLATFORM_IPV4_SUPPORT=${PLATFORM_IPV4_SUPPORT:-true}
-  PLATFORM_IPV6_SUPPORT=${PLATFORM_IPV6_SUPPORT:-false}
+  KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
+  KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
   ENABLE_IPSEC=${ENABLE_IPSEC:-false}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
@@ -602,13 +581,10 @@ set_default_params() {
   TRANSIT_SWITCH_SUBNET_IPV6=${TRANSIT_SWITCH_SUBNET_IPV6:-fd97::/64}
   METALLB_CLIENT_NET_SUBNET_IPV4=${METALLB_CLIENT_NET_SUBNET_IPV4:-172.22.0.0/16}
   METALLB_CLIENT_NET_SUBNET_IPV6=${METALLB_CLIENT_NET_SUBNET_IPV6:-fc00:f853:ccd:e792::/64}
-  BGP_SERVER_NET_SUBNET_IPV4=${BGP_SERVER_NET_SUBNET_IPV4:-172.26.0.0/16}
-  BGP_SERVER_NET_SUBNET_IPV6=${BGP_SERVER_NET_SUBNET_IPV6:-fc00:f853:ccd:e796::/64}
 
   KIND_NUM_MASTER=1
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
   OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
-  OVN_NETWORK_QOS_ENABLE=${OVN_NETWORK_QOS_ENABLE:-false}
 
 
   if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
@@ -658,7 +634,6 @@ set_default_params() {
     echo "Route advertisements requires interconnect to be enabled (-ic)"
     exit 1
   fi
-  ADVERTISE_DEFAULT_NETWORK=${ADVERTISE_DEFAULT_NETWORK:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
@@ -669,7 +644,7 @@ set_default_params() {
 }
 
 check_ipv6() {
-  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
     # Collect additional IPv6 data on test environment
     ERROR_FOUND=false
     TMPVAR=$(sysctl net.ipv6.conf.all.forwarding | awk '{print $3}')
@@ -705,23 +680,23 @@ check_ipv6() {
 }
 
 set_cluster_cidr_ip_families() {
-  if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
+  if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == false ]; then
     IP_FAMILY=""
     NET_CIDR=$NET_CIDR_IPV4
     SVC_CIDR=$SVC_CIDR_IPV4
     echo "IPv4 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  elif [ "$PLATFORM_IPV4_SUPPORT" == false ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+  elif [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
     IP_FAMILY="ipv6"
     NET_CIDR=$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV6
     echo "IPv6 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  elif [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+  elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
     IP_FAMILY="dual"
     NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
     echo "Dual Stack Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   else
-    echo "Invalid setup. PLATFORM_IPV4_SUPPORT and/or PLATFORM_IPV6_SUPPORT must be true."
+    echo "Invalid setup. KIND_IPV4_SUPPORT and/or KIND_IPV6_SUPPORT must be true."
     exit 1
   fi
 }
@@ -900,14 +875,12 @@ create_ovn_kube_manifests() {
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --network-segmentation-enable="${ENABLE_NETWORK_SEGMENTATION}" \
     --route-advertisements-enable="${ENABLE_ROUTE_ADVERTISEMENTS}" \
-    --advertise-default-network="${ADVERTISE_DEFAULT_NETWORK}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --enable-multi-external-gateway=true \
     --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
     --enable-persistent-ips=true \
-    --network-qos-enable="${OVN_NETWORK_QOS_ENABLE}" \
     --mtu="${OVN_MTU}" \
     --enable-dnsnameresolver="${OVN_ENABLE_DNSNAMERESOLVER}" \
     --mtu="${OVN_MTU}" \
@@ -992,7 +965,6 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   run_kubectl apply -f k8s.ovn.org_egressservices.yaml
   run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
-  run_kubectl apply -f k8s.ovn.org_networkqoses.yaml
   run_kubectl apply -f k8s.ovn.org_userdefinednetworks.yaml
   run_kubectl apply -f k8s.ovn.org_clusteruserdefinednetworks.yaml
   run_kubectl apply -f k8s.ovn.org_routeadvertisements.yaml
@@ -1096,11 +1068,11 @@ docker_create_second_interface() {
   echo "adding second interfaces to nodes"
 
   # Create the network as dual stack, regardless of the type of the deployment. Ignore if already exists.
-  "$OCI_BIN" network create --ipv6 --driver=bridge xgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
+  "$OCI_BIN" network create --ipv6 --driver=bridge kindexgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
 
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    "$OCI_BIN" network connect xgw "$n"
+    "$OCI_BIN" network connect kindexgw "$n"
   done
 }
 
@@ -1108,7 +1080,7 @@ docker_create_second_interface() {
 # and makes sure the control-plane node is reachable by substituting 127.0.0.1
 # with the control-plane container's IP
 run_script_in_container() {
-  if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
+  if [ "$KIND_IPV4_SUPPORT" == true ]; then
     local master_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${KIND_CLUSTER_NAME}-control-plane | head -n 1)
     sed -i -- "s/server: .*/server: https:\/\/$master_ip:6443/g" $KUBECONFIG
   else
@@ -1204,7 +1176,6 @@ if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
 fi
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
   deploy_frr_external_container
-  deploy_bgp_external_server
 fi
 build_ovn_image
 detect_apiserver_url
@@ -1236,6 +1207,8 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
+  deploy_kubevirt_binding
+  deploy_passt_binary
 
   install_cert_manager
   if [ "$KIND_OPT_OUT_KUBEVIRT_IPAM" != true ]; then

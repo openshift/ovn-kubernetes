@@ -2,8 +2,9 @@ package routeimport
 
 import (
 	"fmt"
-	"maps"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,7 +37,7 @@ const (
 )
 
 type Manager interface {
-	// AddNetwork instructs the manager to continuously reconcile BGP routes from
+	// AddNetwork instructs the manager to continously reconcile BGP routes from
 	// the network host vrf to the network gateway router. A network can only be
 	// added once otherwise an error will be returned.
 	AddNetwork(network util.NetInfo) error
@@ -67,7 +68,7 @@ func New(node string, nbClient client.Client) Controller {
 		node:       node,
 		nbClient:   nbClient,
 		networkIDs: map[int]string{},
-		networks:   map[string]util.NetInfo{},
+		networks:   map[string]*netInfo{},
 		tables:     map[int]int{},
 		log:        klog.LoggerWithName(klog.Background(), controllerName),
 		netlink:    util.GetNetLinkOps(),
@@ -85,6 +86,12 @@ func New(node string, nbClient client.Client) Controller {
 	return c
 }
 
+type netInfo struct {
+	util.NetInfo
+	id    int
+	table int
+}
+
 type controller struct {
 	ctx        util.CancelableContext
 	nbClient   client.Client
@@ -94,11 +101,9 @@ type controller struct {
 	netlink    util.NetLinkOps
 
 	sync.RWMutex
-	networks map[string]util.NetInfo
-	// network IDs to names
 	networkIDs map[int]string
-	// tables to network IDs, hint for syncRouteUpdate
-	tables map[int]int
+	networks   map[string]*netInfo
+	tables     map[int]int
 }
 
 func (c *controller) AddNetwork(network util.NetInfo) error {
@@ -121,11 +126,13 @@ func (c *controller) AddNetwork(network util.NetInfo) error {
 		return fmt.Errorf("already tracking network name %q", name)
 	}
 
-	c.networkIDs[networkID] = name
-	c.networks[name] = network
+	info := &netInfo{NetInfo: network, id: networkID, table: noTable}
 	if network.IsDefault() {
 		c.tables[unix.RT_TABLE_MAIN] = networkID
+		info.table = unix.RT_TABLE_MAIN
 	}
+	c.networkIDs[networkID] = name
+	c.networks[name] = info
 
 	c.log.V(5).Info("Started tracking network", "name", name, "id", networkID)
 	c.reconcile(name)
@@ -142,9 +149,8 @@ func (c *controller) ForgetNetwork(name string) {
 		return
 	}
 
-	delete(c.networkIDs, network.GetNetworkID())
+	delete(c.networkIDs, network.id)
 	delete(c.networks, name)
-	c.setTableForNetworkUnlocked(network.GetNetworkID(), noTable)
 
 	c.log.V(5).Info("Stopped tracking network", "name", name)
 }
@@ -259,39 +265,56 @@ func (c *controller) syncLinkUpdate(update *netlink.LinkUpdate) {
 		return
 	}
 
-	networkID := util.ParseNetworkIDFromVRFName(vrf.Name)
+	name := vrf.Name
+	if !strings.HasPrefix(name, types.UDNVRFDevicePrefix) {
+		return
+	}
+	if !strings.HasSuffix(name, types.UDNVRFDeviceSuffix) {
+		return
+	}
+
+	id, err := strconv.Atoi(name[len(types.UDNVRFDevicePrefix) : len(name)-len(types.UDNVRFDeviceSuffix)])
+	if err != nil {
+		c.log.Error(err, "Failed to parse network ID from device name", "name", name)
+		return
+	}
 
 	c.Lock()
 	defer c.Unlock()
 
-	// for CUDNs, VRF name equals network name sans prefix
-	network := c.networks[util.GenerateCUDNNetworkName(vrf.Name)]
-	// but if we got an ID, this can't be a CUDN, it's a UDN.
-	if networkID != types.InvalidID {
-		network = c.networks[c.networkIDs[networkID]]
-	}
-
-	// if the network is unknown do nothing for now and wait for the
-	// reconciliation after AddNetwork to handle things
-	if network == nil {
-		c.log.V(5).Info("Ignoring VRF event of unknown network", "vrf", vrf.Name)
-		return
-	}
-
-	// we only care about VRF updates. If a VRF is deleted we assume the network
-	// itself is being deleted and that will be handled through ForgetNetwork
-	if update.Header.Type != unix.RTM_NEWLINK {
-		return
-	}
-
 	table := int(vrf.Table)
-	networkID = network.GetNetworkID()
-	needsReconcile := c.tables[table] != networkID
+	network := c.networkIDs[id]
+	info := c.networks[network]
+	current := c.tables[table] == id
+	var old int
+	if info != nil {
+		old = info.table
+	}
+
+	switch update.IfInfomsg.Type {
+	case unix.RTM_DELLINK:
+		if !current {
+			c.log.Info("Ignoring VRF delete for old network", "network", id)
+			return
+		}
+		delete(c.tables, table)
+		table = noTable
+	case unix.RTM_NEWLINK:
+		delete(c.tables, old)
+		c.tables[table] = id
+	default:
+		c.log.Info("Unexpected VRF update event type", "type", update.IfInfomsg.Type)
+		return
+	}
+	if info != nil {
+		info.table = table
+	}
+
+	needsReconcile := info != nil && table != noTable && !current
+
+	c.log.V(5).Info("Associated table with network", "table", table, "network", id, "needsReconcile", needsReconcile)
 	if needsReconcile {
-		c.setTableForNetworkUnlocked(networkID, table)
-		networkName := network.GetNetworkName()
-		c.log.V(5).Info("Associated table with network", "table", table, "network", networkName)
-		c.reconcile(networkName)
+		c.reconcile(network)
 	}
 }
 
@@ -320,28 +343,7 @@ func (c *controller) syncNetwork(network string) error {
 	if info == nil {
 		return nil
 	}
-
-	// get the table from the network VRF. Note we go to netlink for this as
-	// source of truth instead of using c.tables cache which is just a hint for
-	// syncRouteUpdate. This avoids implementing a more complicated logic to
-	// mantain c.tables
-	table, err := c.getRoutingTableForNetwork(network)
-	if err != nil {
-		return fmt.Errorf("failed to get VRF table from network: %w", err)
-	}
-	if table == noTable {
-		// no VRF exists yet for the network
-		return nil
-	}
-
-	// sneakily set the hint for syncRouteUpdate. Handles this sequence of events:
-	// 1. link create event
-	// 2. add Network
-	// 3. Route update event <- we wouldn't know the network of a table to add
-	//    routes to
-	c.Lock()
-	c.setTableForNetworkUnlocked(info.GetNetworkID(), table)
-	c.Unlock()
+	router := info.GetNetworkScopedGWRouterName(c.node)
 
 	// skip routes in the pod network
 	// TODO do not skip these routes in no overlay mode
@@ -350,14 +352,16 @@ func (c *controller) syncNetwork(network string) error {
 		ignoreSubnets[i] = subnet.CIDR
 	}
 
+	table := c.getTableForNetwork(info.id)
+	if table == noTable {
+		return nil
+	}
+
 	expected, err := c.getBGPRoutes(table, ignoreSubnets)
 	if err != nil {
 		return err
 	}
 
-	router := info.GetNetworkScopedGWRouterName(c.node)
-	// we set the outport incase our IPv6 next hops are link local addresses
-	outport := types.GWRouterToExtSwitchPrefix + router
 	actual, uuids, err := c.getOVNRoutes(router)
 	if err != nil {
 		return fmt.Errorf("failed to get routes from OVN: %w", err)
@@ -382,11 +386,10 @@ func (c *controller) syncNetwork(network string) error {
 			UUID:        uuids[add],
 			IPPrefix:    add.dst,
 			Nexthop:     add.gw,
-			OutputPort:  &outport,
 			ExternalIDs: map[string]string{controllerExternalIDKey: controllerName},
 		}
 		p := func(db *nbdb.LogicalRouterStaticRoute) bool { return p(lrsr, db) }
-		ops, err = nbdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicateOps(c.nbClient, ops, router, lrsr, p)
+		ops, err = nbdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, router, lrsr, p)
 		if err != nil {
 			err := fmt.Errorf("failed to add routes on router %s: %w", router, err)
 			errs = append(errs, err)
@@ -463,57 +466,28 @@ func (c *controller) getOVNRoutes(router string) (sets.Set[route], map[route]str
 	return routes, uuids, nil
 }
 
-func (c *controller) getNetwork(network string) util.NetInfo {
+func (c *controller) getNetwork(network string) *netInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.networks[network]
 }
 
-func (c *controller) getRoutingTableForNetwork(name string) (int, error) {
-	network := c.getNetwork(name)
-	if network == nil {
-		// unknown network, shouldn't happen but in any case will reconcile
-		// later if network is added
-		return noTable, nil
+func (c *controller) getTableForNetwork(network int) int {
+	c.RLock()
+	defer c.RUnlock()
+	if info := c.networks[c.networkIDs[network]]; info != nil {
+		return info.table
 	}
-	if network.IsDefault() {
-		return unix.RT_TABLE_MAIN, nil
-	}
-	vrf := util.GetNetworkVRFName(network)
-	link, err := c.netlink.LinkByName(vrf)
-	if c.netlink.IsLinkNotFoundError(err) {
-		// unknown link, will reconcile later if link is updated
-		return noTable, nil
-	}
-	if err != nil {
-		return noTable, err
-	}
-	vrfLink, isVrf := link.(*netlink.Vrf)
-	if !isVrf {
-		// unexpected type, log error, will reconcile later if link is updated
-		c.log.Error(nil, "Expected a VRF but got a different device type", "name", vrf, "type", link.Type())
-		return noTable, nil
-	}
-
-	return int(vrfLink.Table), nil
+	return noTable
 }
 
-func (c *controller) getNetworkForTable(table int) util.NetInfo {
+func (c *controller) getNetworkForTable(table int) *netInfo {
 	c.RLock()
 	defer c.RUnlock()
 	if network, known := c.tables[table]; known {
 		return c.networks[c.networkIDs[network]]
 	}
 	return nil
-}
-
-// setTableForNetworkUnlocked needs to be called with lock
-func (c *controller) setTableForNetworkUnlocked(networkID, table int) {
-	maps.DeleteFunc(c.tables, func(_, id int) bool { return id == networkID })
-	if table == noTable {
-		return
-	}
-	c.tables[table] = networkID
 }
 
 func routesFromNetlinkRoute(r *netlink.Route) []route {

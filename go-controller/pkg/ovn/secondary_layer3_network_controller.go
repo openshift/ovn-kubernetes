@@ -25,7 +25,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -327,7 +326,6 @@ func NewSecondaryLayer3NetworkController(
 	cnci *CommonNetworkControllerInfo,
 	netInfo util.NetInfo,
 	networkManager networkmanager.Interface,
-	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
 ) (*SecondaryLayer3NetworkController, error) {
@@ -356,7 +354,6 @@ func NewSecondaryLayer3NetworkController(
 				localZoneNodes:              &sync.Map{},
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
-				routeImportManager:          routeImportManager,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -453,9 +450,14 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(_ context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
-	if err := oc.init(); err != nil {
+	_, err := oc.getNetworkID()
+	if err != nil {
+		return fmt.Errorf("unable to set networkID on secondary L3 controller for network %s, err: %w", oc.GetNetworkName(), err)
+	}
+	if err = oc.init(); err != nil {
 		return err
 	}
+
 	return oc.run()
 }
 
@@ -480,9 +482,6 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 	}
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
-	}
-	if oc.routeImportManager != nil {
-		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
 	}
 }
 
@@ -600,28 +599,6 @@ func (oc *SecondaryLayer3NetworkController) run() error {
 		if err := oc.WatchNetworkPolicy(); err != nil {
 			return err
 		}
-	}
-
-	// Add ourselves to the route import manager
-	if oc.routeImportManager != nil {
-		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo())
-		if err != nil {
-			return fmt.Errorf("failed to add network %s to the route import manager: %v", oc.GetNetworkName(), err)
-		}
-	}
-
-	// start NetworkQoS controller if feature is enabled
-	if config.OVNKubernetesFeature.EnableNetworkQoS {
-		err := oc.newNetworkQoSController()
-		if err != nil {
-			return fmt.Errorf("unable to create network qos controller, err: %w", err)
-		}
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			// Until we have scale issues in future let's spawn only one thread
-			oc.nqosController.Run(1, oc.stopChan)
-		}()
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
@@ -930,16 +907,8 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 			if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
 				return nil, err
 			}
-			if util.IsRouteAdvertisementsEnabled() {
-				if err := oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
-					return nil, err
-				}
-			}
 		} else {
 			if err := oc.deleteUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
-				return nil, err
-			}
-			if err := oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
 				return nil, err
 			}
 		}
@@ -1058,7 +1027,10 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node)
 	}
 
 	networkName := oc.GetNetworkName()
-	networkID := oc.GetNetworkID()
+	networkID, err := oc.getNetworkID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get networkID for network %q: %v", networkName, err)
+	}
 
 	masqIPs, err := udn.GetUDNGatewayMasqueradeIPs(networkID)
 	if err != nil {

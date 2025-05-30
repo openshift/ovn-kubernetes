@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -20,7 +21,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/knftables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -251,13 +251,6 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		// to generate the unique host interface name, postfix it with the podInterface index for non-default network
 		if ifInfo.NetName != types.DefaultNetworkName {
 			ifnameSuffix = fmt.Sprintf("_%d", containerVeth.Index)
-		}
-
-		// If we have the ipv6 gateway LLA then this is a primary layer2 UDN
-		if len(ifInfo.GatewayIPv6LLA) > 0 {
-			if err = setupIngressFilter(ifName, ifInfo.GatewayIPv6LLA.String()); err != nil {
-				return err
-			}
 		}
 
 		return nil
@@ -605,13 +598,22 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
 				"device ID must be provided")
 		}
-
 		// General case
 		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, ifInfo)
 	}
 	if err != nil {
 		return nil, err
 	}
+
+	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
+	var wg sync.WaitGroup
+	var iptErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		iptErr = setupIPTablesBlocks(netns)
+	}()
+	// END OCP HACK
 
 	if !ifInfo.IsDPUHostMode {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, pr.CNIConf.DeviceID, getter)
@@ -620,6 +622,13 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 			return nil, err
 		}
 	}
+
+	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
+	wg.Wait()
+	if iptErr != nil {
+		return nil, iptErr
+	}
+	// END OCP HACK
 
 	// Only configure IPv6 specific stuff and wait for addresses to become usable
 	// if there are any IPv6 addresses to assign. v4 doesn't have the concept
@@ -731,7 +740,7 @@ func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInf
 			return nil
 		})
 		if err != nil {
-			klog.Errorf("Error in UnconfigureInterface: %v", err)
+			klog.Errorf(err.Error())
 		}
 	}
 
@@ -826,69 +835,4 @@ func (pr *PodRequest) deletePorts(ifaces []string, podNamespace, podName string)
 	for _, iface := range ifaces {
 		pr.deletePort(iface, podNamespace, podName)
 	}
-}
-
-// setupIngressFilter sets up an ingress filter using nftables to block
-// unwanted ICMPv6 Router Advertisement (RA) packets on a specific device.
-// It creates a new nftables table, chain, and rule to drop RA packets
-// that do not match the specified gateway link-local address (gwLLA) and
-// have a Router Advertisement (RA) lifetime not equal to 0.
-//
-// The nftables rule created by this function looks like:
-// `icmpv6 type nd-router-advert ip6 saddr != <gwLLA> @th,48,16 != 0 drop`
-//
-// Parameters:
-//   - ifaceName: The name of the network interface where the ingress filter
-//     should be applied.
-//   - gwLLA: The gateway link-local address to match against in the RA packets.
-//
-// Returns:
-// - error: An error if the nftables setup fails, otherwise nil.
-func setupIngressFilter(ifaceName, gwLLA string) error {
-	const (
-		tableName   = "ingress_filter" // Name of the nftables table to be created
-		rasLifetime = "@th,48,16"      // Offset for RA lifetime field in ICMPv6 packets
-	)
-
-	// Initialize a new nftables table for the ingress filter
-	nft, err := knftables.New(knftables.NetDevFamily, tableName)
-	if err != nil {
-		return fmt.Errorf("failed to initialize table: %w", err)
-	}
-
-	// Delegate the setup of the filter with the specified table and lifetime matcher
-	return setupIngressFilterWithTableAndLifetimeMatcher(nft, ifaceName, gwLLA, rasLifetime)
-}
-
-func setupIngressFilterWithTableAndLifetimeMatcher(nft knftables.Interface, ifaceName, gwLLA, rasLifetime string) error {
-	const (
-		chainName = "input"
-	)
-
-	tx := nft.NewTransaction()
-
-	tx.Add(&knftables.Table{})
-
-	tx.Add(&knftables.Chain{
-		Name:     chainName,
-		Type:     knftables.PtrTo(knftables.FilterType),
-		Hook:     knftables.PtrTo(knftables.IngressHook),
-		Priority: knftables.PtrTo(knftables.FilterPriority),
-		Device:   knftables.PtrTo(ifaceName),
-	})
-
-	tx.Add(&knftables.Rule{
-		Chain: chainName,
-		Rule: knftables.Concat(
-			"icmpv6", "type", "nd-router-advert", "ip6", "saddr", "!=", gwLLA, rasLifetime, "!=", "0", "drop",
-		),
-	})
-
-	// Execute the transaction
-	if err := nft.Run(context.Background(), tx); err != nil {
-		return fmt.Errorf("could not update netdev nftables: %v", err)
-	}
-
-	return nil
-
 }

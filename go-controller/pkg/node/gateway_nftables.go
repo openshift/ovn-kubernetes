@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/knftables"
 
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -32,7 +31,7 @@ import (
 func getNoSNATNodePortRules(svcPort corev1.ServicePort) []*knftables.Element {
 	return []*knftables.Element{
 		{
-			Set: types.NFTMgmtPortNoSNATNodePorts,
+			Set: nftablesMgmtPortNoSNATNodePorts,
 			Key: []string{
 				strings.ToLower(string(svcPort.Protocol)),
 				fmt.Sprintf("%d", svcPort.NodePort),
@@ -50,9 +49,9 @@ func getNoSNATLoadBalancerIPRules(svcPort corev1.ServicePort, localEndpoints []s
 	protocol := strings.ToLower(string(svcPort.Protocol))
 	port := fmt.Sprintf("%v", svcPort.TargetPort.IntValue())
 	for _, ip := range localEndpoints {
-		setName := types.NFTMgmtPortNoSNATServicesV4
+		setName := nftablesMgmtPortNoSNATServicesV4
 		if utilnet.IsIPv6String(ip) {
-			setName = types.NFTMgmtPortNoSNATServicesV6
+			setName = nftablesMgmtPortNoSNATServicesV6
 		}
 
 		nftRules = append(nftRules,
@@ -122,12 +121,7 @@ func recreateNFTSet(setName string, keepNFTElems []*knftables.Element) error {
 			tx.Add(elem)
 		}
 	}
-	err = nft.Run(context.TODO(), tx)
-	// no error if set is not created and we desire zero NFT elements
-	if knftables.IsNotFound(err) && len(keepNFTElems) == 0 {
-		return nil
-	}
-	return err
+	return nft.Run(context.TODO(), tx)
 }
 
 func recreateNFTMap(mapName string, keepNFTElems []*knftables.Element) error {
@@ -144,12 +138,7 @@ func recreateNFTMap(mapName string, keepNFTElems []*knftables.Element) error {
 			tx.Add(elem)
 		}
 	}
-	err = nft.Run(context.TODO(), tx)
-	// no error if set is not created and we desire zero NFT elements
-	if knftables.IsNotFound(err) && len(keepNFTElems) == 0 {
-		return nil
-	}
-	return err
+	return nft.Run(context.TODO(), tx)
 }
 
 // getGatewayNFTRules returns nftables rules for service. This must be used in conjunction

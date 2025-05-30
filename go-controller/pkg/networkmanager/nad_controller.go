@@ -70,7 +70,7 @@ type nadController struct {
 	// nads to network mapping
 	nads map[string]string
 
-	// primaryNADs holds a mapping of namespace to NAD of primary UDNs
+	// primaryNADs holds a mapping of namespace to primary NAD names
 	primaryNADs map[string]string
 
 	networkIDAllocator id.Allocator
@@ -104,7 +104,7 @@ func newController(
 	if zone == "" && node == "" {
 		c.networkIDAllocator = id.NewIDAllocator("NetworkIDs", MaxNetworks)
 		// Reserve the ID of the default network
-		err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
+		err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, DefaultNetworkID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to allocate default network ID: %w", err)
 		}
@@ -359,7 +359,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 	// if network ID has not been set and this is not the well known default
 	// network, need to wait until cluster nad controller allocates an ID for
 	// the network
-	if ensureNetwork.GetNetworkID() == types.InvalidID {
+	if ensureNetwork.GetNetworkID() == util.InvalidID {
 		klog.V(4).Infof("%s: will wait for cluster manager to allocate an ID before ensuring network %s", c.name, nadNetworkName)
 		return nil
 	}
@@ -425,15 +425,26 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 		return &util.DefaultNetInfo{}, nil
 	}
 
-	network, nad := c.getActiveNetworkForNamespace(namespace)
-	if network != nil && network.IsPrimaryNetwork() {
-		// primary UDN found
-		copy := util.NewMutableNetInfo(network)
-		copy.SetNADs(nad)
-		return copy, nil
+	c.RLock()
+	defer c.RUnlock()
+	primaryNAD := c.primaryNADs[namespace]
+	if primaryNAD != "" {
+		// we have a primary NAD, no need to check for NS UDN annotation because NAD would not have existed otherwise
+		// get the network
+		netName := c.nads[primaryNAD]
+		if netName == "" {
+			// this should never happen where we have a nad keyed in the primaryNADs
+			// map, but it doesn't exist in the nads map
+			panic("NAD Controller broken consistency between primary NADs and cached NADs")
+		}
+		network := c.networkController.getNetwork(netName)
+		n := util.NewMutableNetInfo(network)
+		// update the returned netInfo copy to only have the primary NAD for this namespace
+		n.SetNADs(primaryNAD)
+		return n, nil
 	}
 
-	// no primary UDN found, make sure we just haven't processed it yet and no UDN / CUDN exists
+	// no primary network found, make sure we just haven't processed it yet and no UDN / CUDN exists
 	udns, err := c.udnLister.UserDefinedNetworks(namespace).List(labels.Everything())
 	if err != nil {
 		return nil, fmt.Errorf("error getting user defined networks: %w", err)
@@ -469,38 +480,6 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 
 	// namespace has required UDN label, but no UDN was found
 	return nil, util.NewInvalidPrimaryNetworkError(namespace)
-}
-
-func (c *nadController) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
-	network, _ := c.getActiveNetworkForNamespace(namespace)
-	return network
-}
-
-func (c *nadController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, string) {
-	c.RLock()
-	defer c.RUnlock()
-
-	var network util.NetInfo
-	primaryNAD := c.primaryNADs[namespace]
-	switch primaryNAD {
-	case "":
-		// default network
-		network = c.networkController.getNetwork(types.DefaultNetworkName)
-		if network == nil {
-			network = &util.DefaultNetInfo{}
-		}
-	default:
-		// we have a primary network
-		netName := c.nads[primaryNAD]
-		if netName == "" {
-			// this should never happen where we have a nad keyed in the primaryNADs
-			// map, but it doesn't exist in the nads map
-			panic("NAD Controller broken consistency between primary NADs and cached NADs")
-		}
-		network = c.networkController.getNetwork(netName)
-	}
-
-	return network, primaryNAD
 }
 
 func (c *nadController) GetNetwork(name string) util.NetInfo {
@@ -574,7 +553,7 @@ func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInf
 	}
 
 	var err error
-	id := types.InvalidID
+	id := util.InvalidID
 
 	// check what ID is currently annotated
 	if nad != nil && nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
@@ -606,16 +585,16 @@ func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInf
 	name := new.GetNetworkName()
 
 	// an ID was annotated, check if it is free to use or stale
-	if id != types.InvalidID {
+	if id != util.InvalidID {
 		err = c.networkIDAllocator.ReserveID(name, id)
 		if err != nil {
 			// already reserved for a different network, allocate a new id
-			id = types.InvalidID
+			id = util.InvalidID
 		}
 	}
 
 	// we don't have an ID, allocate a new one
-	if id == types.InvalidID {
+	if id == util.InvalidID {
 		id, err = c.networkIDAllocator.AllocateID(name)
 		if err != nil {
 			return fmt.Errorf("failed to allocate network ID: %w", err)

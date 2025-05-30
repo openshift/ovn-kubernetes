@@ -20,17 +20,16 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type addressManager struct {
-	nodeName      string
-	watchFactory  factory.NodeWatchFactory
-	cidrs         sets.Set[string]
-	nodeAnnotator kube.Annotator
-	mgmtPort      managementport.Interface
+	nodeName       string
+	watchFactory   factory.NodeWatchFactory
+	cidrs          sets.Set[string]
+	nodeAnnotator  kube.Annotator
+	mgmtPortConfig *managementPortConfig
 	// useNetlink indicates the addressManager should use machine
 	// information from netlink. Set to false for testcases.
 	useNetlink bool
@@ -44,23 +43,23 @@ type addressManager struct {
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration) *addressManager {
-	return newAddressManagerInternal(nodeName, k, mgmtPort, watchFactory, gwBridge, true)
+func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration) *addressManager {
+	return newAddressManagerInternal(nodeName, k, config, watchFactory, gwBridge, true)
 }
 
 // newAddressManagerInternal creates a new address manager; this function is
 // only expose for testcases to disable netlink subscription to ensure
 // reproducibility of unit tests.
-func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
+func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtConfig *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
 	mgr := &addressManager{
-		nodeName:      nodeName,
-		watchFactory:  watchFactory,
-		cidrs:         sets.New[string](),
-		mgmtPort:      mgmtPort,
-		gatewayBridge: gwBridge,
-		OnChanged:     func() {},
-		useNetlink:    useNetlink,
-		syncPeriod:    30 * time.Second,
+		nodeName:       nodeName,
+		watchFactory:   watchFactory,
+		cidrs:          sets.New[string](),
+		mgmtPortConfig: mgmtConfig,
+		gatewayBridge:  gwBridge,
+		OnChanged:      func() {},
+		useNetlink:     useNetlink,
+		syncPeriod:     30 * time.Second,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
@@ -124,22 +123,20 @@ func (c *addressManager) delAddr(ipnet net.IPNet, linkIndex int) bool {
 }
 
 // ListAddresses returns all the addresses we know about
-func (c *addressManager) ListAddresses() ([]net.IP, []*net.IPNet) {
+func (c *addressManager) ListAddresses() []net.IP {
 	c.Lock()
 	defer c.Unlock()
 	addrs := sets.List(c.cidrs)
-	addresses := make([]net.IP, 0, len(addrs))
-	networkAddresses := make([]*net.IPNet, 0, len(addrs))
+	out := make([]net.IP, 0, len(addrs))
 	for _, addr := range addrs {
-		ip, networkAddress, err := net.ParseCIDR(addr)
+		ip, _, err := net.ParseCIDR(addr)
 		if err != nil {
 			klog.Errorf("Failed to parse %s: %v", addr, err)
 			continue
 		}
-		addresses = append(addresses, ip)
-		networkAddresses = append(networkAddresses, networkAddress)
+		out = append(out, ip)
 	}
-	return addresses, networkAddresses
+	return out
 }
 
 type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
@@ -260,7 +257,7 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 	}
 	if nodePrimaryAddrChanged && config.Default.EncapIP == "" {
 		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-		c.updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
+		updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 	}
 }
 
@@ -413,11 +410,15 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 		return false
 	}
 	// check CDN management port
-	mgmtPortAddress, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6(addr), c.mgmtPort.GetAddresses())
-	if mgmtPortAddress != nil && addr.Equal(mgmtPortAddress.IP) {
-		return false
+	if utilnet.IsIPv4(addr) {
+		if c.mgmtPortConfig.ipv4 != nil && c.mgmtPortConfig.ipv4.ifAddr.IP.Equal(addr) {
+			return false
+		}
+	} else if utilnet.IsIPv6(addr) {
+		if c.mgmtPortConfig.ipv6 != nil && c.mgmtPortConfig.ipv6.ifAddr.IP.Equal(addr) {
+			return false
+		}
 	}
-
 	if util.IsNetworkSegmentationSupportEnabled() {
 		// check CDN + UDN management ports
 		if mpLink, err := util.GetNetLinkOps().LinkByIndex(linkIndex); err != nil {
@@ -544,7 +545,7 @@ func (c *addressManager) getPrimaryHostEgressIPs() (sets.Set[string], error) {
 }
 
 // updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.
-func (c *addressManager) updateOVNEncapIPAndReconnect(newIP net.IP) {
+func updateOVNEncapIPAndReconnect(newIP net.IP) {
 	checkCmd := []string{
 		"get",
 		"Open_vSwitch",
@@ -582,18 +583,6 @@ func (c *addressManager) updateOVNEncapIPAndReconnect(newIP net.IP) {
 	_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart")
 	if err != nil {
 		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
-		return
-	}
-
-	// Update node-encap-ips annotation
-	encapIPList := sets.New[string](config.Default.EffectiveEncapIP)
-	if err := util.SetNodeEncapIPs(c.nodeAnnotator, encapIPList); err != nil {
-		klog.Errorf("Failed to set node-encap-ips annotation for node %s: %v", c.nodeName, err)
-		return
-	}
-
-	if err := c.nodeAnnotator.Run(); err != nil {
-		klog.Errorf("Failed to set node %s annotations: %v", c.nodeName, err)
 		return
 	}
 }

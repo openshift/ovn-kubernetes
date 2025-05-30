@@ -6,45 +6,38 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
-
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
-	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 )
 
 const (
-	defaultOvsBridge = "breth0"
-	secondaryBridge  = "ovsbr1"
-	add              = "add-br"
-	del              = "del-br"
+	bridgeName = "ovsbr1"
+	add        = "add-br"
+	del        = "del-br"
 )
 
-func setupUnderlay(ovsPods []v1.Pod, bridgeName, portName, networkName string, vlanID int) error {
+func setupUnderlay(ovsPods []v1.Pod, portName string, nadConfig networkAttachmentConfig) error {
 	for _, ovsPod := range ovsPods {
-		if bridgeName != defaultOvsBridge {
-			if err := addOVSBridge(ovsPod.Namespace, ovsPod.Name, bridgeName); err != nil {
+		if err := addOVSBridge(ovsPod.Name, bridgeName); err != nil {
+			return err
+		}
+
+		if nadConfig.vlanID > 0 {
+			if err := ovsEnableVLANAccessPort(ovsPod.Name, bridgeName, portName, nadConfig.vlanID); err != nil {
 				return err
 			}
-
-			if vlanID > 0 {
-				if err := ovsEnableVLANAccessPort(ovsPod.Namespace, ovsPod.Name, bridgeName, portName, vlanID); err != nil {
-					return err
-				}
-			} else {
-				if err := ovsAttachPortToBridge(ovsPod.Namespace, ovsPod.Name, bridgeName, portName); err != nil {
-					return err
-				}
+		} else {
+			if err := ovsAttachPortToBridge(ovsPod.Name, bridgeName, portName); err != nil {
+				return err
 			}
 		}
+
 		if err := configureBridgeMappings(
-			ovsPod.Namespace,
 			ovsPod.Name,
 			defaultNetworkBridgeMapping(),
-			bridgeMapping(networkName, bridgeName),
+			bridgeMapping(nadConfig.networkName, bridgeName),
 		); err != nil {
 			return err
 		}
@@ -52,33 +45,9 @@ func setupUnderlay(ovsPods []v1.Pod, bridgeName, portName, networkName string, v
 	return nil
 }
 
-func ovsRemoveSwitchPort(ovsPods []v1.Pod, portName string, newVLANID int) error {
+func teardownUnderlay(ovsPods []v1.Pod) error {
 	for _, ovsPod := range ovsPods {
-		if err := ovsRemoveVLANAccessPort(ovsPod.Namespace, ovsPod.Name, secondaryBridge, portName); err != nil {
-			return fmt.Errorf("failed to remove old VLAN port: %v", err)
-		}
-
-		if err := ovsEnableVLANAccessPort(ovsPod.Namespace, ovsPod.Name, secondaryBridge, portName, newVLANID); err != nil {
-			return fmt.Errorf("failed to add new VLAN port: %v", err)
-		}
-	}
-
-	return nil
-}
-
-func teardownUnderlay(ovsPods []v1.Pod, bridgeName string) error {
-	for _, ovsPod := range ovsPods {
-		if bridgeName != defaultOvsBridge {
-			if err := removeOVSBridge(ovsPod.Namespace, ovsPod.Name, bridgeName); err != nil {
-				return err
-			}
-		}
-		// restore default bridge mapping
-		if err := configureBridgeMappings(
-			ovsPod.Namespace,
-			ovsPod.Name,
-			defaultNetworkBridgeMapping(),
-		); err != nil {
+		if err := removeOVSBridge(ovsPod.Name, bridgeName); err != nil {
 			return err
 		}
 	}
@@ -89,7 +58,7 @@ func ovsPods(clientSet clientset.Interface) []v1.Pod {
 	const (
 		ovsNodeLabel = "app=ovs-node"
 	)
-	pods, err := clientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(
+	pods, err := clientSet.CoreV1().Pods(ovnNamespace).List(
 		context.Background(),
 		metav1.ListOptions{LabelSelector: ovsNodeLabel},
 	)
@@ -99,49 +68,52 @@ func ovsPods(clientSet clientset.Interface) []v1.Pod {
 	return pods.Items
 }
 
-func addOVSBridge(podNamespace, podName string, bridgeName string) error {
-	cmd := strings.Join([]string{"ovs-vsctl", add, bridgeName}, " ")
-	if _, err := e2epodoutput.RunHostCmdWithRetries(podNamespace, podName, cmd, time.Second, time.Second*5); err != nil {
-		return fmt.Errorf("failed to add ovs bridge %q: %v", bridgeName, err)
+func addOVSBridge(ovnNodeName string, bridgeName string) error {
+	_, err := runCommand(ovsBridgeCommand(ovnNodeName, add, bridgeName)...)
+	if err != nil {
+		return fmt.Errorf("failed to ADD OVS bridge %s: %v", bridgeName, err)
 	}
 	return nil
 }
 
-func removeOVSBridge(podNamespace, podName string, bridgeName string) error {
-	cmd := strings.Join([]string{"ovs-vsctl", del, bridgeName}, " ")
-	if _, err := e2epodoutput.RunHostCmdWithRetries(podNamespace, podName, cmd, time.Second, time.Second*5); err != nil {
-		return fmt.Errorf("failed to add ovs bridge %q: %v", bridgeName, err)
+func removeOVSBridge(ovnNodeName string, bridgeName string) error {
+	_, err := runCommand(ovsBridgeCommand(ovnNodeName, del, bridgeName)...)
+	if err != nil {
+		return fmt.Errorf("failed to DELETE OVS bridge %s: %v", bridgeName, err)
 	}
 	return nil
 }
 
-func ovsAttachPortToBridge(podNamespace, podName string, bridgeName string, portName string) error {
-	cmd := strings.Join([]string{
+func ovsBridgeCommand(ovnNodeName string, addOrDeleteCmd string, bridgeName string) []string {
+	return []string{
+		"kubectl", "-n", ovnNamespace, "exec", ovnNodeName, "--",
+		"ovs-vsctl", addOrDeleteCmd, bridgeName,
+	}
+}
+
+func ovsAttachPortToBridge(ovsNodeName string, bridgeName string, portName string) error {
+	cmd := []string{
+		"kubectl", "-n", ovnNamespace, "exec", ovsNodeName, "--",
 		"ovs-vsctl", "add-port", bridgeName, portName,
-	}, " ")
-	if _, err := e2epodoutput.RunHostCmdWithRetries(podNamespace, podName, cmd, time.Second, time.Second*5); err != nil {
-		return fmt.Errorf("failed to remove port %s from OVS bridge %s: %v", portName, bridgeName, err)
 	}
+
+	if _, err := runCommand(cmd...); err != nil {
+		return fmt.Errorf("failed to add port %s to OVS bridge %s: %v", portName, bridgeName, err)
+	}
+
 	return nil
 }
 
-func ovsEnableVLANAccessPort(podNamespace, podName string, bridgeName string, portName string, vlanID int) error {
-	cmd := strings.Join([]string{
+func ovsEnableVLANAccessPort(ovsNodeName string, bridgeName string, portName string, vlanID int) error {
+	cmd := []string{
+		"kubectl", "-n", ovnNamespace, "exec", ovsNodeName, "--",
 		"ovs-vsctl", "add-port", bridgeName, portName, fmt.Sprintf("tag=%d", vlanID), "vlan_mode=access",
-	}, " ")
-	if _, err := e2epodoutput.RunHostCmdWithRetries(podNamespace, podName, cmd, time.Second, time.Second*5); err != nil {
-		return fmt.Errorf("failed to remove port %s from OVS bridge %s: %v", portName, bridgeName, err)
 	}
-	return nil
-}
 
-func ovsRemoveVLANAccessPort(podNamespace, podName string, bridgeName string, portName string) error {
-	cmd := strings.Join([]string{
-		"ovs-vsctl", "del-port", bridgeName, portName,
-	}, " ")
-	if _, err := e2epodoutput.RunHostCmdWithRetries(podNamespace, podName, cmd, time.Second, time.Second*5); err != nil {
-		return fmt.Errorf("failed to remove port %s from OVS bridge %s: %v", portName, bridgeName, err)
+	if _, err := runCommand(cmd...); err != nil {
+		return fmt.Errorf("failed to add port %s to OVS bridge %s: %v", portName, bridgeName, err)
 	}
+
 	return nil
 }
 
@@ -168,13 +140,13 @@ func Map[T, V any](items []T, fn func(T) V) []V {
 	return result
 }
 
-func configureBridgeMappings(podNamespace, podName string, mappings ...BridgeMapping) error {
+func configureBridgeMappings(ovnNodeName string, mappings ...BridgeMapping) error {
 	mappingsString := fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", BridgeMappings(mappings).String())
-	cmd := strings.Join([]string{"ovs-vsctl", "set", "open", ".", mappingsString}, " ")
-	if _, err := e2epodoutput.RunHostCmdWithRetries(podNamespace, podName, cmd, time.Second, time.Second*5); err != nil {
-		return fmt.Errorf("failed to configure bridge mappings %q: %v", mappingsString, err)
+	cmd := []string{"kubectl", "-n", ovnNamespace, "exec", ovnNodeName,
+		"--", "ovs-vsctl", "set", "open", ".", mappingsString,
 	}
-	return nil
+	_, err := runCommand(cmd...)
+	return err
 }
 
 func defaultNetworkBridgeMapping() BridgeMapping {

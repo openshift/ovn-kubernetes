@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
-	"github.com/vishvananda/netlink"
 
 	utilnet "k8s.io/utils/net"
 )
@@ -285,17 +284,6 @@ func ContainsCIDR(ipnet1, ipnet2 *net.IPNet) bool {
 	return mask1 <= mask2 && ipnet1.Contains(ipnet2.IP)
 }
 
-// IPNetOverlaps returns ipnets that overlap with the ref
-func IPNetOverlaps(ref *net.IPNet, ipnets ...*net.IPNet) []*net.IPNet {
-	var overlaps []*net.IPNet
-	for _, ipnet := range ipnets {
-		if ref.Contains(ipnet.IP) || ipnet.Contains(ref.IP) {
-			overlaps = append(overlaps, ipnet)
-		}
-	}
-	return overlaps
-}
-
 // ParseIPNets parses the provided string formatted CIDRs
 func ParseIPNets(strs []string) ([]*net.IPNet, error) {
 	ipnets := make([]*net.IPNet, len(strs))
@@ -358,34 +346,4 @@ func IPNetsIPToStringSlice(ips []*net.IPNet) []string {
 // interface index
 func CalculateRouteTableID(ifIndex int) int {
 	return ifIndex + RoutingTableIDStart
-}
-
-// RouteEqual compare two routes
-func RouteEqual(l, r *netlink.Route) bool {
-	if (l == nil) != (r == nil) {
-		return false
-	}
-	if l == r {
-		return true
-	}
-	if !l.Equal(*r) {
-		return false
-	}
-	return l.Family == r.Family &&
-		l.MTU == r.MTU &&
-		l.Window == r.Window &&
-		l.Rtt == r.Rtt &&
-		l.RttVar == r.RttVar &&
-		l.Ssthresh == r.Ssthresh &&
-		l.Cwnd == r.Cwnd &&
-		l.AdvMSS == r.AdvMSS &&
-		l.Reordering == r.Reordering &&
-		l.Hoplimit == r.Hoplimit &&
-		l.InitCwnd == r.InitCwnd &&
-		l.Features == r.Features &&
-		l.RtoMin == r.RtoMin &&
-		l.InitRwnd == r.InitRwnd &&
-		l.QuickACK == r.QuickACK &&
-		l.Congctl == r.Congctl &&
-		l.FastOpenNoCookie == r.FastOpenNoCookie
 }

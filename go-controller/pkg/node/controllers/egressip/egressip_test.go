@@ -19,7 +19,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1134,7 +1133,7 @@ var _ = ginkgo.Describe("VRF", func() {
 		ginkgo.By("create VRF and add link")
 		gomega.Expect(createVRFAndEnslaveLink(testNS, dummyLink1Name, vrfName, vrfTable)).Should(gomega.Succeed())
 		ginkgo.By("add route to routing table associated with VRF")
-		vrfRoute := getV4DstRouteForTable(getLinkIndex(dummyLink1Name), int(vrfTable), dummy3IPv4CIDR)
+		vrfRoute := getDstRouteForTable(getLinkIndex(dummyLink1Name), int(vrfTable), dummy3IPv4CIDR)
 		gomega.Expect(testNS.Do(func(ns.NetNS) error {
 			return netlink.RouteAdd(&vrfRoute)
 		})).Should(gomega.Succeed())
@@ -1643,49 +1642,31 @@ func isIPTableRuleArgIPV6(ruleArgs []string) bool {
 	panic("unable to determine IP version of IPTable rule")
 }
 
-// For any IPV4 or IPV6 route, default type is unicast if not mentioned explicitly
-// Ref: https://www.man7.org/linux/man-pages/man8/ip-route.8.html
 func getDefaultIPv4Route(linkIndex int) netlink.Route {
 	// dst is nil because netlink represents a default route as nil
-	return netlink.Route{LinkIndex: linkIndex, Table: util.CalculateRouteTableID(linkIndex), Dst: defaultV4AnyCIDR, Type: unix.RTN_UNICAST}
+	return netlink.Route{LinkIndex: linkIndex, Table: util.CalculateRouteTableID(linkIndex), Dst: defaultV4AnyCIDR}
 }
 
 func getDefaultIPv6Route(linkIndex int) netlink.Route {
 	// dst is nil because netlink represents a default route as nil
-	// Priority for a default IPv6 route gets set to 1024
-	// Ref : https://access.redhat.com/solutions/3659171
-	return netlink.Route{LinkIndex: linkIndex, Table: util.CalculateRouteTableID(linkIndex), Dst: defaultV6AnyCIDR, Type: unix.RTN_UNICAST, Priority: 1024}
+	return netlink.Route{LinkIndex: linkIndex, Table: util.CalculateRouteTableID(linkIndex), Dst: defaultV6AnyCIDR}
 }
 
 func getDstRoute(linkIndex int, dst string) netlink.Route {
-	if utilnet.IsIPv6CIDRString(dst) {
-		return getV6DstRouteForTable(linkIndex, util.CalculateRouteTableID(linkIndex), dst)
-	} else {
-		return getV4DstRouteForTable(linkIndex, util.CalculateRouteTableID(linkIndex), dst)
-	}
+	return getDstRouteForTable(linkIndex, util.CalculateRouteTableID(linkIndex), dst)
 
 }
 
-// Default scope is link for direct unicast routes
-// Ref: https://www.man7.org/linux/man-pages/man8/ip-route.8.html
-func getV4DstRouteForTable(linkIndex, table int, dst string) netlink.Route {
+func getDstRouteForTable(linkIndex, table int, dst string) netlink.Route {
 	_, dstIPNet, err := net.ParseCIDR(dst)
 	if err != nil {
 		panic(err.Error())
 	}
-	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Table: table, Type: unix.RTN_UNICAST, Scope: netlink.SCOPE_LINK}
-}
-
-func getV6DstRouteForTable(linkIndex, table int, dst string) netlink.Route {
-	_, dstIPNet, err := net.ParseCIDR(dst)
-	if err != nil {
-		panic(err.Error())
-	}
-	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Table: table, Type: unix.RTN_UNICAST, Priority: 256}
+	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Table: table}
 }
 
 func getLinkLocalRoute(linkIndex int) netlink.Route {
-	return netlink.Route{LinkIndex: linkIndex, Dst: linkLocalCIDR, Table: util.CalculateRouteTableID(linkIndex), Type: unix.RTN_UNICAST, Priority: 256}
+	return netlink.Route{LinkIndex: linkIndex, Dst: linkLocalCIDR, Table: util.CalculateRouteTableID(linkIndex)}
 }
 
 func getNetlinkAddr(ip, netmask string) *netlink.Addr {
@@ -1699,21 +1680,10 @@ func getNetlinkAddr(ip, netmask string) *netlink.Addr {
 // containsRoutes returns true if routes in routes1 are presents in routes routes2
 func containsRoutes(routes1 []netlink.Route, routes2 []netlink.Route) bool {
 	var found bool
-	eq := func(route1, route2 netlink.Route) bool {
-		// normalize fields that we don't set explicitly and just get set once
-		// the route is installed
-		if route1.Family == netlink.FAMILY_ALL {
-			route1.Family = route2.Family
-		}
-		if route1.Protocol == unix.RTPROT_UNSPEC {
-			route1.Protocol = route2.Protocol
-		}
-		return util.RouteEqual(&route1, &route2)
-	}
 	for _, route1 := range routes1 {
 		found = false
 		for _, route2 := range routes2 {
-			if eq(route1, route2) {
+			if routemanager.RoutePartiallyEqual(route1, route2) {
 				found = true
 				break
 			}

@@ -16,8 +16,6 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/libovsdb/client"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -56,7 +54,6 @@ func NewCNIServer(
 	factory factory.NodeWatchFactory,
 	kclient kubernetes.Interface,
 	networkManager networkmanager.Interface,
-	ovsClient client.Client,
 ) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
@@ -80,7 +77,6 @@ func NewCNIServer(
 		},
 		handlePodRequestFunc: HandlePodRequest,
 		networkManager:       networkManager,
-		ovsClient:            ovsClient,
 	}
 
 	if len(config.Kubernetes.CAData) > 0 {
@@ -226,7 +222,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	}
 	defer req.cancel()
 
-	result, err := s.handlePodRequestFunc(req, s.clientSet, s.kubeAuth, s.networkManager, s.ovsClient)
+	result, err := s.handlePodRequestFunc(req, s.clientSet, s.kubeAuth, s.networkManager)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)

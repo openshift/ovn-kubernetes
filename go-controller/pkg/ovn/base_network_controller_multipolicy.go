@@ -77,7 +77,6 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowP
 			ingress.Ports[j] = knet.NetworkPolicyPort{
 				Protocol: mport.Protocol,
 				Port:     mport.Port,
-				EndPort:  mport.EndPort,
 			}
 		}
 		ingress.From = make([]knet.NetworkPolicyPeer, len(mingress.From))
@@ -105,7 +104,6 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowP
 			egress.Ports[j] = knet.NetworkPolicyPort{
 				Protocol: mport.Protocol,
 				Port:     mport.Port,
-				EndPort:  mport.EndPort,
 			}
 		}
 		egress.To = make([]knet.NetworkPolicyPeer, len(megress.To))

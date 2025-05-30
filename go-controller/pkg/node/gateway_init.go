@@ -15,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -320,12 +319,8 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 // once OVN controller is ready and the patch port exists for this node.
 // It is split from initGatewayMainStart to allow for the gateway object and openflow manager to be created
 // before the rest of the gateway functionality is started.
-func (nc *DefaultNodeNetworkController) initGatewayPreStart(
-	subnets []*net.IPNet,
-	nodeAnnotator kube.Annotator,
-	mgmtPort managementport.Interface,
-	kubeNodeIP net.IP,
-) (*gateway, error) {
+func (nc *DefaultNodeNetworkController) initGatewayPreStart(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
+	managementPortConfig *managementPortConfig, kubeNodeIP net.IP) (*gateway, error) {
 
 	klog.Info("Initializing Gateway Functionality for Gateway PreStart")
 	var err error
@@ -373,7 +368,7 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 			egressGWInterface,
 			ifAddrs,
 			nodeAnnotator,
-			mgmtPort,
+			managementPortConfig,
 			nc.Kube,
 			nc.watchFactory,
 			nc.routeManager,
@@ -592,7 +587,7 @@ func CleanupClusterNode(name string) error {
 	}
 
 	// Clean up legacy IPTables rules for management port
-	managementport.DelLegacyMgtPortIptRules()
+	DelLegacyMgtPortIptRules()
 
 	// Delete nftables rules
 	nodenft.CleanupNFTables()
@@ -608,7 +603,7 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 		return nil
 	}
 
-	if nc.Gateway.GetGatewayIface() != link.Attrs().Name {
+	if nc.Gateway.GetGatewayBridgeIface() != link.Attrs().Name {
 		return nil
 	}
 
