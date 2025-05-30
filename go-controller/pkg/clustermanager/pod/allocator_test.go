@@ -549,7 +549,6 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			idallocator := &idAllocatorStub{}
 
 			podListerMock := &v1mocks.PodLister{}
-			nodeListerMock := &v1mocks.NodeLister{}
 			kubeMock := &kubemocks.InterfaceOVN{}
 			podNamespaceLister := &v1mocks.PodNamespaceLister{}
 
@@ -566,8 +565,6 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				"UpdateIPAMClaimIPs",
 				mock.AnythingOfType(fmt.Sprintf("%T", &ipamclaimsapi.IPAMClaim{})),
 			).Return(nil)
-
-			nodeListerMock.On("Get", mock.AnythingOfType("string")).Return(&corev1.Node{}, nil)
 
 			netConf := &ovncnitypes.NetConf{
 				Topology:           types.Layer2Topology,
@@ -643,7 +640,6 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				ipamClaimsReconciler:   ipamClaimsReconciler,
 				networkManager:         fakeNetworkManager,
 				recorder:               fakeRecorder,
-				nodeLister:             nodeListerMock,
 			}
 
 			var old, new *corev1.Pod
