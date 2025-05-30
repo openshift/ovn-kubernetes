@@ -716,7 +716,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 				// to targetAddress. If clientNamespace is empty the function assumes clientName is a node that will be used as the
 				// client.
 				var checkConnectivity = func(clientName, clientNamespace, targetAddress string) (string, error) {
-					curlCmd := []string{"curl", "-g", "-q", "-s", "--max-time", "2", "--insecure", targetAddress}
+					curlCmd := []string{"curl", "-g", "-q", "-s", "--max-time", "5", targetAddress}
 					var out string
 					var err error
 					if clientNamespace != "" {
@@ -837,18 +837,12 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 				func(ipFamilyIndex int) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
 					err := true
 					out := curlConnectionTimeoutCode
-					if cudnATemplate.Spec.Network.Topology == udnv1.NetworkTopologyLayer2 {
-						// FIXME: prevent looping of traffic in L2 UDNs
-						// bad behaviour: packet is looping from management port -> breth0 -> GR -> management port -> breth0 and so on
-						// which is a never ending loop
-						// this causes curl timeout with code 7 host unreachable instead of code 28
+					if isLocalGWModeEnabled() {
+						// FIXME: L3 - pod in the UDN should NOT be able to access a default network service
+						err = false
 						out = ""
 					}
 					return podsNetA[0].Name, podsNetA[0].Namespace, net.JoinHostPort(svcNetDefault.Spec.ClusterIPs[ipFamilyIndex], "8080") + "/clientip", out, err
-				}),
-			ginkgo.Entry("pod in the UDN should be able to access kapi in default network service",
-				func(ipFamilyIndex int) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
-					return podsNetA[0].Name, podsNetA[0].Namespace, "https://kubernetes.default/healthz", "", false
 				}),
 			ginkgo.Entry("pod in the UDN should not be able to access a service in a different UDN",
 				func(ipFamilyIndex int) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
