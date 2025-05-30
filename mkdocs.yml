@@ -7,7 +7,6 @@ extra_css:
   - stylesheets/extra.css
 site_dir: site
 docs_dir: docs
-copyright: The Linux Foundation® (TLF) has registered trademarks and uses trademarks. For a list of TLF trademarks, see <a href="https://www.linuxfoundation.org/legal/trademark-usage">Trademark Usage</a>.
 theme:
   name: material
   icon:
@@ -37,7 +36,7 @@ theme:
     - navigation.instant.preview
 plugins:
   - search
-  - awesome-pages
+  - awesome-nav
   - mike
   - macros:
       #include_dir: examples
@@ -137,6 +136,5 @@ nav:
   - Enhancement Proposals:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md
-    - Localnet API: okeps/okep-5085-localnet-api.md
   - Blog:
     - blog/index.md

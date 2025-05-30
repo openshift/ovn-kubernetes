@@ -359,22 +359,11 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	if err = udng.vrfManager.AddVRFRoutes(vrfDeviceName, routes); err != nil {
 		return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
 	}
-
-	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
-
 	// create the iprules for this network
-	if err = udng.updateUDNVRFIPRules(isNetworkAdvertised); err != nil {
+	err = udng.updateUDNVRFIPRule()
+	if err != nil {
 		return fmt.Errorf("failed to update IP rules for network %s: %w", udng.GetNetworkName(), err)
 	}
-
-	if err = udng.updateAdvertisedUDNIsolationRules(isNetworkAdvertised); err != nil {
-		return fmt.Errorf("failed to update isolation rules for network %s: %w", udng.GetNetworkName(), err)
-	}
-
-	if err := udng.updateUDNVRFIPRoute(isNetworkAdvertised); err != nil {
-		return fmt.Errorf("failed to update ip routes for network %s: %w", udng.GetNetworkName(), err)
-	}
-
 	// add loose mode for rp filter on management port
 	mgmtPortName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.GetNetworkID()))
 	if err := addRPFilterLooseModeForManagementPort(mgmtPortName); err != nil {
@@ -448,14 +437,6 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 			return fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err)
 		}
 	}
-
-	if util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name) {
-		err := udng.updateAdvertisedUDNIsolationRules(false)
-		if err != nil {
-			return fmt.Errorf("failed to remove advertised UDN isolation rules for network %s: %w", udng.GetNetworkName(), err)
-		}
-	}
-
 	if err := udng.delMarkChain(); err != nil {
 		return err
 	}
@@ -788,11 +769,12 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 // 2000:	from all to 10.132.0.0/14 lookup 1007
 // 2000:	from all fwmark 0x1001 lookup 1009
 // 2000:	from all to 10.134.0.0/14 lookup 1009
-func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(isNetworkAdvertised bool) ([]netlink.Rule, []netlink.Rule, error) {
+func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]netlink.Rule, []netlink.Rule, error) {
 	var addIPRules []netlink.Rule
 	var delIPRules []netlink.Rule
 	var masqIPRules []netlink.Rule
 	var subnetIPRules []netlink.Rule
+	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
 	masqIPv4, err := udng.getV4MasqueradeIP()
 	if err != nil {
 		return nil, nil, err
@@ -921,7 +903,7 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 	isNetworkAdvertised := util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
 	udng.openflowManager.defaultBridge.netConfig[udng.GetNetworkName()].advertised.Store(isNetworkAdvertised)
 
-	if err := udng.updateUDNVRFIPRules(isNetworkAdvertised); err != nil {
+	if err := udng.updateUDNVRFIPRule(); err != nil {
 		return fmt.Errorf("error while updating ip rule for UDN %s: %s", udng.GetNetworkName(), err)
 	}
 
@@ -932,23 +914,17 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 	// add below OpenFlows based on the gateway mode and whether the network is advertised or not:
 	// table=1, n_packets=0, n_bytes=0, priority=16,ip,nw_dst=128.192.0.2 actions=LOCAL (Both gateway modes)
 	// table=1, n_packets=0, n_bytes=0, priority=15,ip,nw_dst=128.192.0.0/14 actions=output:3 (shared gateway mode)
-	// necessary service isolation flows based on whether network is advertised or not
 	if err := udng.openflowManager.updateBridgeFlowCache(udng.nodeIPManager.ListAddresses()); err != nil {
 		return fmt.Errorf("error while updating logical flow for UDN %s: %s", udng.GetNetworkName(), err)
 	}
-	// let's sync these flows immediately
-	udng.openflowManager.requestFlowSync()
 
-	if err := udng.updateAdvertisedUDNIsolationRules(isNetworkAdvertised); err != nil {
-		return fmt.Errorf("error while updating advertised UDN isolation rules for network %s: %w", udng.GetNetworkName(), err)
-	}
 	return nil
 }
 
-// updateUDNVRFIPRules updates IP rules for a network depending on whether the
+// updateUDNVRFIPRule updates IP rules for a network depending on whether the
 // network is advertised or not
-func (udng *UserDefinedNetworkGateway) updateUDNVRFIPRules(isNetworkAdvertised bool) error {
-	addIPRules, deleteIPRules, err := udng.constructUDNVRFIPRules(isNetworkAdvertised)
+func (udng *UserDefinedNetworkGateway) updateUDNVRFIPRule() error {
+	addIPRules, deleteIPRules, err := udng.constructUDNVRFIPRules()
 	if err != nil {
 		return fmt.Errorf("unable to get iprules for network %s, err: %v", udng.GetNetworkName(), err)
 	}
@@ -998,75 +974,4 @@ func (udng *UserDefinedNetworkGateway) removeDefaultRouteFromVRF() error {
 		return fmt.Errorf("unable to delete routes for network %s, err: %v", udng.GetNetworkName(), err)
 	}
 	return nil
-}
-
-// updateAdvertisedUDNIsolationRules adds the full UDN subnets to nftablesAdvertisedUDNsSetV[4|6] nft set that is used
-// in the following chain/rules to drop locally generated traffic towards a UDN network:
-//
-//	chain udn-bgp-drop {
-//	  comment "Drop traffic generated locally towards advertised UDN subnets"
-//	  type filter hook output priority filter; policy accept;
-//	  ip daddr @advertised-udn-subnets-v4 counter packets 0 bytes 0 drop
-//	  ip6 daddr @advertised-udn-subnets-v6 counter packets 0 bytes 0 drop
-//	}
-//
-// It blocks access to the full UDN subnet to handle a case in L3 when a node tries to access
-// a host subnet available on a different node. Example set entries:
-//
-//	 set advertised-udn-subnets-v4 {
-//	   type ipv4_addr
-//	   flags interval
-//	   comment "advertised UDNs V4 subnets"
-//	   elements = { 10.10.0.0/16 comment "cluster_udn_l3network" }
-//	}
-func (udng *UserDefinedNetworkGateway) updateAdvertisedUDNIsolationRules(isNetworkAdvertised bool) error {
-	nft, err := nodenft.GetNFTablesHelper()
-	if err != nil {
-		return fmt.Errorf("failed to get nftables helper: %v", err)
-	}
-	tx := nft.NewTransaction()
-
-	if !isNetworkAdvertised {
-		existingV4, err := nft.ListElements(context.TODO(), "set", nftablesAdvertisedUDNsSetV4)
-		if err != nil {
-			if !knftables.IsNotFound(err) {
-				return fmt.Errorf("could not list existing items in %s set: %w", nftablesAdvertisedUDNsSetV4, err)
-			}
-		}
-		existingV6, err := nft.ListElements(context.TODO(), "set", nftablesAdvertisedUDNsSetV6)
-		if err != nil {
-			if !knftables.IsNotFound(err) {
-				return fmt.Errorf("could not list existing items in %s set: %w", nftablesAdvertisedUDNsSetV6, err)
-			}
-		}
-
-		for _, elem := range append(existingV4, existingV6...) {
-			if elem.Comment != nil && *elem.Comment == udng.GetNetworkName() {
-				tx.Delete(elem)
-			}
-		}
-
-		if tx.NumOperations() == 0 {
-			return nil
-		}
-		return nft.Run(context.TODO(), tx)
-	}
-
-	for _, udnNet := range udng.Subnets() {
-		set := nftablesAdvertisedUDNsSetV4
-		if utilnet.IsIPv6CIDR(udnNet.CIDR) {
-			set = nftablesAdvertisedUDNsSetV6
-		}
-		tx.Add(&knftables.Element{
-			Set:     set,
-			Key:     []string{udnNet.CIDR.String()},
-			Comment: knftables.PtrTo(udng.GetNetworkName()),
-		})
-
-	}
-
-	if tx.NumOperations() == 0 {
-		return nil
-	}
-	return nft.Run(context.TODO(), tx)
 }
