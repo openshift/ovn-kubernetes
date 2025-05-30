@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
@@ -23,10 +21,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/knftables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	rafakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
@@ -274,42 +270,6 @@ func checkDefaultSvcIsolationOVSFlows(flows []string, defaultConfig *bridgeUDNCo
 	Expect(nTable0DefaultFlows).To(Equal(1))
 	Expect(nTable0UDNMasqFlows).To(Equal(1))
 	Expect(nTable2Flows).To(Equal(1))
-}
-
-func checkAdvertisedUDNSvcIsolationOVSFlows(flows []string, netConfig *bridgeUDNConfiguration, netName, bridgeMAC string, svcCIDR *net.IPNet, expectedNFlows int) {
-	By(fmt.Sprintf("Checking advertsised UDN %s service isolation flows for %s; expected %d flows",
-		netName, svcCIDR.String(), expectedNFlows))
-
-	var matchingIPFamilySubnet *net.IPNet
-	var protoPrefix string
-	var udnAdvertisedSubnets []*net.IPNet
-	var err error
-	for _, clusterEntry := range netConfig.subnets {
-		udnAdvertisedSubnets = append(udnAdvertisedSubnets, clusterEntry.CIDR)
-	}
-	if utilnet.IsIPv4CIDR(svcCIDR) {
-		matchingIPFamilySubnet, err = util.MatchFirstIPNetFamily(false, udnAdvertisedSubnets)
-		Expect(err).ToNot(HaveOccurred())
-		protoPrefix = "ip"
-	} else {
-		matchingIPFamilySubnet, err = util.MatchFirstIPNetFamily(false, udnAdvertisedSubnets)
-		Expect(err).ToNot(HaveOccurred())
-		protoPrefix = "ip6"
-	}
-
-	var nFlows int
-	for _, flow := range flows {
-		if strings.Contains(flow, fmt.Sprintf("priority=200, table=2, %s, %s_src=%s, actions=set_field:%s->eth_dst,output:%s",
-			protoPrefix, protoPrefix, matchingIPFamilySubnet, bridgeMAC, netConfig.ofPortPatch)) {
-			nFlows++
-		}
-		if strings.Contains(flow, fmt.Sprintf("priority=550, in_port=LOCAL, %s, %s_src=%s, %s_dst=%s, actions=ct(commit,zone=64001,table=2)",
-			protoPrefix, protoPrefix, matchingIPFamilySubnet, protoPrefix, svcCIDR)) {
-			nFlows++
-		}
-	}
-
-	Expect(nFlows).To(Equal(expectedNFlows))
 }
 
 func checkUDNSvcIsolationOVSFlows(flows []string, netConfig *bridgeUDNConfiguration, netName, bridgeMAC string, svcCIDR *net.IPNet, expectedNFlows int) {
@@ -1061,247 +1021,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
-	// TODO: There is opportunity to fold some of these tests into describetables to cut down code duplication and test plumbing
-	ovntest.OnSupportedPlatformsIt("should create and delete correct openflows on breth0 for an advertised L3 user defined network", func() {
-		config.IPv4Mode = true
-		config.IPv6Mode = true
-		config.Gateway.Interface = "eth0"
-		config.Gateway.NodeportEnable = true
-		config.OVNKubernetesFeature.EnableMultiNetwork = true
-		config.OVNKubernetesFeature.EnableRouteAdvertisements = true
-		ifAddrs := ovntest.MustParseIPNets(v4NodeIP, v6NodeIP)
-		node := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: nodeName,
-				Annotations: map[string]string{
-					"k8s.ovn.org/network-ids":       fmt.Sprintf("{\"%s\": \"%s\"}", netName, netID),
-					"k8s.ovn.org/node-subnets":      fmt.Sprintf("{\"default\":[\"%s\"],\"%s\":[\"%s\", \"%s\"]}", v4NodeSubnet, netName, v4NodeSubnet, v6NodeSubnet),
-					"k8s.ovn.org/host-cidrs":        fmt.Sprintf("[\"%s\", \"%s\"]", v4NodeIP, v6NodeIP),
-					"k8s.ovn.org/l3-gateway-config": "{\"default\": {}}",
-				},
-			},
-			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
-				{Type: corev1.NodeInternalIP, Address: strings.Split(v4NodeIP, "/")[0]},
-				{Type: corev1.NodeInternalIP, Address: strings.Split(v6NodeIP, "/")[0]}},
-			},
-		}
-		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
-			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
-		ovntest.AnnotateNADWithNetworkID(netID, nad)
-		netInfo, err := util.ParseNADInfo(nad)
-		Expect(err).NotTo(HaveOccurred())
-		mutableNetInfo := util.NewMutableNetInfo(netInfo)
-		mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{node.Name: {netName}})
-		// need this for getGatewayNextHops
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 port-to-br eth0",
-			Output: "breth0",
-		})
-
-		setManagementPortFakeCommands(fexec, nodeName)
-		setUpGatewayFakeOVSCommands(fexec)
-		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
-		Expect(err).NotTo(HaveOccurred())
-		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
-		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, mutableNetInfo.MTU())
-		getRPFilterLooseModeFakeCommands(fexec)
-		setUpUDNOpenflowManagerFakeOVSCommands(fexec)
-		setUpUDNOpenflowManagerCheckPortsFakeOVSCommands(fexec)
-		getDeletionFakeOVSCommands(fexec, mgtPort)
-		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		kubeFakeClient := fake.NewSimpleClientset(
-			&corev1.NodeList{
-				Items: []corev1.Node{*node},
-			},
-		)
-		fakeClient := &util.OVNNodeClientset{
-			KubeClient:                kubeFakeClient,
-			NetworkAttchDefClient:     nadfake.NewSimpleClientset(),
-			UserDefinedNetworkClient:  udnfakeclient.NewSimpleClientset(),
-			RouteAdvertisementsClient: rafakeclient.NewSimpleClientset(),
-		}
-
-		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
-		Expect(err).NotTo(HaveOccurred())
-		defer func() {
-			close(stop)
-			wf.Shutdown()
-		}()
-		err = wf.Start()
-		Expect(err).NotTo(HaveOccurred())
-
-		_, _ = util.SetFakeIPTablesHelpers()
-		_ = nodenft.SetFakeNFTablesHelper()
-
-		// Make Management port
-		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, mutableNetInfo)
-		Expect(err).NotTo(HaveOccurred())
-
-		nodeAnnotatorMock := &kubemocks.Annotator{}
-		nodeAnnotatorMock.On("Delete", mock.Anything).Return(nil)
-		nodeAnnotatorMock.On("Set", mock.Anything, map[string]*util.L3GatewayConfig{
-			types.DefaultNetworkName: {
-				ChassisID:   "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
-				BridgeID:    "breth0",
-				InterfaceID: "breth0_worker1",
-				MACAddress:  ovntest.MustParseMAC("00:00:00:55:66:99"),
-				IPAddresses: ifAddrs,
-				VLANID:      ptr.To(uint(0)),
-			}}).Return(nil)
-		nodeAnnotatorMock.On("Set", mock.Anything, mock.Anything).Return(nil)
-		nodeAnnotatorMock.On("Run").Return(nil)
-		kubeMock.On("SetAnnotationsOnNode", node.Name, map[string]interface{}{
-			"k8s.ovn.org/node-masquerade-subnet": "{\"ipv4\":\"169.254.0.0/17\",\"ipv6\":\"fd69::/112\"}",
-		}).Return(nil)
-		kubeMock.On("SetAnnotationsOnNode", node.Name, map[string]interface{}{
-			"k8s.ovn.org/host-cidrs":          "[\"192.168.1.10/24\",\"fc00:f853:ccd:e793::3/64\"]",
-			"k8s.ovn.org/l3-gateway-config":   "{\"default\":{\"mode\":\"\"}}",
-			"k8s.ovn.org/node-primary-ifaddr": "{\"ipv4\":\"192.168.1.10/24\",\"ipv6\":\"fc00:f853:ccd:e793::3/64\"}",
-		}).Return(nil)
-
-		wg.Add(1)
-		go func() {
-			defer GinkgoRecover()
-			defer wg.Done()
-			err := testNS.Do(func(ns.NetNS) error {
-				rm.Run(stop, 10*time.Second)
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
-		}()
-		err = testNS.Do(func(ns.NetNS) error {
-			defer GinkgoRecover()
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			Expect(err).NotTo(HaveOccurred())
-
-			// create dummy management interface
-			err = netlink.LinkAdd(&netlink.Dummy{
-				LinkAttrs: netlink.LinkAttrs{
-					Name: types.K8sMgmtIntfName,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			err = mp.Start(stop)
-			Expect(err).NotTo(HaveOccurred())
-
-			// make preparations for creating openflow manager in DNCC which can be used for SNCC
-			localGw, err := newGateway(
-				nodeName,
-				nodeSubnets,
-				gatewayNextHops,
-				gatewayIntf,
-				"",
-				ifAddrs,
-				nodeAnnotatorMock,
-				mp,
-				&kubeMock,
-				wf,
-				rm,
-				nil,
-				networkmanager.Default().Interface(),
-				config.GatewayModeLocal,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			stop := make(chan struct{})
-			wg := &sync.WaitGroup{}
-			err = localGw.initFunc()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(localGw.Init(stop, wg)).To(Succeed())
-			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
-			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
-			//sharedGw.Start()
-			localGw.nodeIPManager.sync()
-			// we cannot start openflow manager directly because it spawns a go routine
-			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
-			err = localGw.openflowManager.updateBridgeFlowCache(localGw.nodeIPManager.ListAddresses())
-			Expect(err).NotTo(HaveOccurred())
-			localGw.openflowManager.syncFlows()
-
-			udnGateway, err := NewUserDefinedNetworkGateway(mutableNetInfo, node, wf.NodeCoreInformer().Lister(),
-				&kubeMock, vrf, ipRulesManager, localGw)
-			Expect(err).NotTo(HaveOccurred())
-			flowMap := udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(46))
-
-			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
-			var udnFlows int
-			for _, flows := range flowMap {
-				for _, flow := range flows {
-					mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
-					if strings.Contains(flow, mark) {
-						// UDN Flow
-						udnFlows++
-					}
-				}
-			}
-			Expect(udnFlows).To(Equal(0))
-			Expect(udnGateway.openflowManager.defaultBridge.netConfig).To(HaveLen(1)) // only default network
-
-			Expect(udnGateway.AddNetwork()).To(Succeed())
-			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(69))                                // 18 UDN Flows and 5 advertisedUDN flows are added by default
-			Expect(udnGateway.openflowManager.defaultBridge.netConfig).To(HaveLen(2)) // default network + UDN network
-			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["default"]
-			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["bluenet"]
-			bridgeMAC := udnGateway.openflowManager.defaultBridge.macAddress.String()
-			ofPortHost := udnGateway.openflowManager.defaultBridge.ofPortHost
-			for _, flows := range flowMap {
-				for _, flow := range flows {
-					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-						// UDN Flow
-						udnFlows++
-					} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", bridgeUdnConfig.ofPortPatch)) {
-						udnFlows++
-					}
-				}
-			}
-			Expect(udnFlows).To(Equal(14))
-			openflowManagerCheckPorts(udnGateway.openflowManager)
-
-			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
-				// Check flows for default network service CIDR.
-				checkDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
-
-				// Expect exactly one flow per advertised UDN for table 2 and table 0 for service isolation.
-				checkAdvertisedUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", bridgeMAC, svcCIDR, 2)
-			}
-
-			// The second call to checkPorts() will return no ofPort for the UDN - simulating a deletion that already was
-			// processed by ovn-northd/ovn-controller.  We should not be panicking on that.
-			// See setUpUDNOpenflowManagerCheckPortsFakeOVSCommands() for the order of ofPort query results.
-			openflowManagerCheckPorts(udnGateway.openflowManager)
-
-			cnode := node.DeepCopy()
-			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
-			Expect(udnGateway.DelNetwork()).To(Succeed())
-			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(46))                                // only default network flows are present
-			Expect(udnGateway.openflowManager.defaultBridge.netConfig).To(HaveLen(1)) // default network only
-			udnFlows = 0
-			for _, flows := range flowMap {
-				for _, flow := range flows {
-					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-						// UDN Flow
-						udnFlows++
-					}
-				}
-			}
-			Expect(udnFlows).To(Equal(0))
-
-			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
-				// Check flows for default network service CIDR.
-				checkDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
-
-				// Expect no more flows per UDN for table 2 and table0 for service isolation.
-				checkAdvertisedUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", bridgeMAC, svcCIDR, 0)
-			}
-			return nil
-		})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-	})
 	ovntest.OnSupportedPlatformsIt("should compute correct masquerade reply traffic routes for a user defined network", func() {
 		config.Gateway.Interface = "eth0"
 		config.IPv4Mode = true
@@ -1725,7 +1444,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 			})
 			g.Expect(err).NotTo(HaveOccurred())
 			udnGateway.vrfTableId = test.vrftableID
-			rules, delRules, err := udnGateway.constructUDNVRFIPRules(false)
+			rules, delRules, err := udnGateway.constructUDNVRFIPRules()
 			g.Expect(err).ToNot(HaveOccurred())
 			for i, rule := range rules {
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
@@ -1912,7 +1631,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertised(t *testing.T) {
 			})
 			g.Expect(err).NotTo(HaveOccurred())
 			udnGateway.vrfTableId = test.vrftableID
-			rules, delRules, err := udnGateway.constructUDNVRFIPRules(true)
+			rules, delRules, err := udnGateway.constructUDNVRFIPRules()
 			g.Expect(err).ToNot(HaveOccurred())
 			for i, rule := range rules {
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
@@ -1929,140 +1648,6 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertised(t *testing.T) {
 				g.Expect(rule.Table).To(Equal(test.deleteRules[i].table))
 				g.Expect(rule.Family).To(Equal(test.deleteRules[i].family))
 				g.Expect(*rule.Dst).To(Equal(test.deleteRules[i].dst))
-			}
-		})
-	}
-}
-
-func TestUserDefinedNetworkGateway_updateAdvertisedUDNIsolationRules(t *testing.T) {
-	tests := []struct {
-		name                string
-		nad                 *nadapi.NetworkAttachmentDefinition
-		isNetworkAdvertised bool
-		initialElements     []*knftables.Element
-		expectedV4Elements  []*knftables.Element
-		expectedV6Elements  []*knftables.Element
-	}{
-		{
-			name: "Should add V4 and V6 entries to the set for advertised L3 network",
-			nad: ovntest.GenerateNAD("test", "rednad", "greenamespace",
-				types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary),
-			isNetworkAdvertised: true,
-			expectedV4Elements: []*knftables.Element{{
-				Set:     nftablesAdvertisedUDNsSetV4,
-				Key:     []string{"100.128.0.0/16"},
-				Comment: knftables.PtrTo[string]("test"),
-			}},
-			expectedV6Elements: []*knftables.Element{{
-				Set:     nftablesAdvertisedUDNsSetV6,
-				Key:     []string{"ae70::/60"},
-				Comment: knftables.PtrTo[string]("test"),
-			}},
-		},
-		{
-			name: "Should add V4 and V6 entries to the set for advertised L2 network",
-			nad: ovntest.GenerateNAD("test", "rednad", "greenamespace",
-				types.Layer2Topology, "100.128.0.0/16,ae70::/60", types.NetworkRolePrimary),
-			isNetworkAdvertised: true,
-			expectedV4Elements: []*knftables.Element{{
-				Set:     nftablesAdvertisedUDNsSetV4,
-				Key:     []string{"100.128.0.0/16"},
-				Comment: knftables.PtrTo[string]("test"),
-			}},
-			expectedV6Elements: []*knftables.Element{{
-				Set:     nftablesAdvertisedUDNsSetV6,
-				Key:     []string{"ae70::/60"},
-				Comment: knftables.PtrTo[string]("test"),
-			}},
-		},
-		{
-			name: "Should not add duplicate V4 and V6 entries to the for advertised network",
-			nad: ovntest.GenerateNAD("test", "rednad", "greenamespace",
-				types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary),
-			isNetworkAdvertised: true,
-			initialElements: []*knftables.Element{
-				{
-					Set:     nftablesAdvertisedUDNsSetV4,
-					Key:     []string{"100.128.0.0/16"},
-					Comment: knftables.PtrTo[string]("test"),
-				}, {
-					Set:     nftablesAdvertisedUDNsSetV6,
-					Key:     []string{"ae70::/60"},
-					Comment: knftables.PtrTo[string]("test"),
-				},
-			},
-			expectedV4Elements: []*knftables.Element{{
-				Set:     nftablesAdvertisedUDNsSetV4,
-				Key:     []string{"100.128.0.0/16"},
-				Comment: knftables.PtrTo[string]("test"),
-			}},
-			expectedV6Elements: []*knftables.Element{{
-				Set:     nftablesAdvertisedUDNsSetV6,
-				Key:     []string{"ae70::/60"},
-				Comment: knftables.PtrTo[string]("test"),
-			}},
-		},
-		{
-			name: "Should remove V4 and V6 entries from the set when network for not advertised network",
-			nad: ovntest.GenerateNAD("test", "rednad", "greenamespace",
-				types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary),
-			isNetworkAdvertised: false,
-			initialElements: []*knftables.Element{
-				{
-					Set:     nftablesAdvertisedUDNsSetV4,
-					Key:     []string{"100.128.0.0/16"},
-					Comment: knftables.PtrTo[string]("test"),
-				}, {
-					Set:     nftablesAdvertisedUDNsSetV6,
-					Key:     []string{"ae70::/60"},
-					Comment: knftables.PtrTo[string]("test"),
-				},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := NewWithT(t)
-			nft := nodenft.SetFakeNFTablesHelper()
-			config.IPv4Mode = true
-			config.IPv6Mode = true
-
-			netInfo, err := util.ParseNADInfo(tt.nad)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			err = configureAdvertisedUDNIsolationNFTables()
-			g.Expect(err).ToNot(HaveOccurred())
-			tx := nft.NewTransaction()
-			for _, element := range tt.initialElements {
-				tx.Add(element)
-			}
-			if tx.NumOperations() > 0 {
-				err = nft.Run(context.TODO(), tx)
-				g.Expect(err).NotTo(HaveOccurred())
-			}
-			udng := &UserDefinedNetworkGateway{
-				NetInfo: netInfo,
-			}
-			err = udng.updateAdvertisedUDNIsolationRules(tt.isNetworkAdvertised)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			v4Elems, err := nft.ListElements(context.TODO(), "set", nftablesAdvertisedUDNsSetV4)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(v4Elems).To(HaveLen(len(tt.expectedV4Elements)))
-
-			v6Elems, err := nft.ListElements(context.TODO(), "set", nftablesAdvertisedUDNsSetV6)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(v6Elems).To(HaveLen(len(tt.expectedV6Elements)))
-
-			for i, element := range tt.expectedV4Elements {
-				g.Expect(element.Key).To(HaveLen(len(v4Elems[i].Key)))
-				g.Expect(element.Key[0]).To(BeEquivalentTo(v4Elems[i].Key[0]))
-				g.Expect(element.Comment).To(BeEquivalentTo(v4Elems[i].Comment))
-			}
-			for i, element := range tt.expectedV6Elements {
-				g.Expect(element.Key).To(HaveLen(len(v6Elems[i].Key)))
-				g.Expect(element.Key[0]).To(BeEquivalentTo(v6Elems[i].Key[0]))
-				g.Expect(element.Comment).To(BeEquivalentTo(v6Elems[i].Comment))
 			}
 		})
 	}

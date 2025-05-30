@@ -22,8 +22,6 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
-	"github.com/ovn-org/libovsdb/client"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controllermanager"
@@ -531,7 +529,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		}()
 	}
 
-	var ovsClient client.Client
 	if runMode.node {
 		wg.Add(1)
 		go func() {
@@ -546,20 +543,13 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			// register ovnkube node specific prometheus metrics exported by the node
 			metrics.RegisterNodeMetrics(ctx.Done())
 
-			ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
-			if err != nil {
-				nodeErr = fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
-				return
-			}
 			nodeControllerManager, err := controllermanager.NewNodeControllerManager(
 				ovnClientset,
 				watchFactory,
 				runMode.identity,
 				wg,
 				eventRecorder,
-				routemanager.NewController(),
-				ovsClient,
-			)
+				routemanager.NewController())
 			if err != nil {
 				nodeErr = fmt.Errorf("failed to create node network controller: %w", err)
 				return
@@ -585,11 +575,9 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		metricsScrapeInterval := 30
 		defer cancel()
 
-		if ovsClient == nil {
-			ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
-			if err != nil {
-				return fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
-			}
+		ovsClient, err := libovsdb.NewOVSClient(ctx.Done())
+		if err != nil {
+			return fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
 		}
 		if config.Metrics.ExportOVSMetrics {
 			metrics.RegisterOvsMetricsWithOvnMetrics(ovsClient, metricsScrapeInterval, ctx.Done())
