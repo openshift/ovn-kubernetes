@@ -764,6 +764,70 @@ func TestParseNodeGatewayMTUSupport(t *testing.T) {
 	}
 }
 
+func TestGetNetworkID(t *testing.T) {
+	tests := []struct {
+		desc              string
+		nodes             []*corev1.Node
+		netInfo           NetInfo
+		expectedError     error
+		expectedNetworkID int
+	}{
+		{
+			desc:              "with no nodes should return and error and invalid network ID",
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedError:     fmt.Errorf("missing network id for network 'bluenet'"),
+			expectedNetworkID: InvalidID,
+		},
+		{
+			desc: "with bad network ID annotations should return and error and invalid network ID",
+			nodes: []*corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": "not a map",
+						},
+					},
+				},
+			},
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedError:     fmt.Errorf("could not parse"),
+			expectedNetworkID: InvalidID,
+		},
+		{
+			desc: "with multiple networks annotation should return expected network ID and no error",
+			nodes: []*corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": `{"rednet": "5"}`,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"k8s.ovn.org/network-ids": `{"yellownet": "6", "bluenet": "3"}`,
+						},
+					},
+				},
+			},
+			netInfo:           newDummyNetInfo("rednamespace", "bluenet"),
+			expectedNetworkID: 3,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			obtainedNetworkID, obtainedError := GetNetworkID(tc.nodes, tc.netInfo)
+			if tc.expectedError != nil {
+				assert.Contains(t, obtainedError.Error(), tc.expectedError.Error())
+			} else {
+				require.NoError(t, obtainedError)
+			}
+			assert.Equal(t, tc.expectedNetworkID, obtainedNetworkID)
+		})
+	}
+}
+
 func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
 	tests := []struct {
 		desc        string

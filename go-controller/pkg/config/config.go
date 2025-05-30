@@ -67,7 +67,7 @@ var (
 		EncapIP:                      "",
 		EncapPort:                    DefaultEncapPort,
 		InactivityProbe:              100000, // in Milliseconds
-		OpenFlowProbe:                0,      // in Milliseconds
+		OpenFlowProbe:                180,    // in Seconds
 		OfctrlWaitBeforeClear:        0,      // in Milliseconds
 		MonitorAll:                   true,
 		OVSDBTxnTimeout:              DefaultDBTxnTimeout,
@@ -432,7 +432,6 @@ type OVNKubernetesFeatureConfig struct {
 	EnableDNSNameResolver        bool `gcfg:"enable-dns-name-resolver"`
 	EnableServiceTemplateSupport bool `gcfg:"enable-svc-template-support"`
 	EnableObservability          bool `gcfg:"enable-observability"`
-	EnableNetworkQoS             bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -453,12 +452,7 @@ type GatewayConfig struct {
 	Mode GatewayMode `gcfg:"mode"`
 	// Interface is the network interface to use for the gateway in "shared" mode
 	Interface string `gcfg:"interface"`
-	// GatewayAcceleratedInterface is the optional network interface to use for gateway traffic acceleration.
-	// This is typically a VF or SF device. When specified it would be used as the in_port for Openflow rules
-	// on the external bridge. The Host IP would be on this device.
-	// Should be used mutually exclusive to the `--gateway-interface` flag.
-	GatewayAcceleratedInterface string `gcfg:"gateway-accelerated-interface"`
-	// Egress gateway interface is the optional network interface to use for external gw pods traffic.
+	// Exgress gateway interface is the optional network interface to use for external gw pods traffic.
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
@@ -1142,12 +1136,6 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableObservability,
 		Value:       OVNKubernetesFeature.EnableObservability,
 	},
-	&cli.BoolFlag{
-		Name:        "enable-network-qos",
-		Usage:       "Configure to use NetworkQoS CRD feature with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkQoS,
-		Value:       OVNKubernetesFeature.EnableNetworkQoS,
-	},
 }
 
 // K8sFlags capture Kubernetes-related options
@@ -1417,13 +1405,6 @@ var OVNGatewayFlags = []cli.Flag{
 			"default gateway is configured will be used as the gateway " +
 			"interface. Only useful with \"init-gateways\"",
 		Destination: &cliConfig.Gateway.Interface,
-	},
-	&cli.StringFlag{
-		Name: "gateway-accelerated-interface",
-		Usage: "The optional network interface to use for gateway traffic acceleration. " +
-			"This is typically a VF or SF device. When specified it would be used as the in_port for Openflow rules " +
-			"on the external bridge. The Host IP would be on this device.",
-		Destination: &cliConfig.Gateway.GatewayAcceleratedInterface,
 	},
 	&cli.StringFlag{
 		Name: "exgw-interface",

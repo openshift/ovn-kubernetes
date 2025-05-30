@@ -131,23 +131,6 @@ func (zcc *zoneClusterController) Stop() {
 	}
 }
 
-func needsZoneAllocation(node *corev1.Node) bool {
-	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
-		// skip hybrid overlay nodes
-		return false
-	}
-
-	if _, ok := node.Annotations[util.OvnNodeID]; !ok {
-		return true
-	}
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		if _, ok := node.Annotations[util.OvnTransitSwitchPortAddr]; !ok {
-			return true
-		}
-	}
-	return false
-}
-
 // handleAddUpdateNodeEvent handles the add or update node event
 func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) error {
 	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
@@ -243,8 +226,6 @@ type zoneClusterControllerEventHandler struct {
 	objType  reflect.Type
 	zcc      *zoneClusterController
 	syncFunc func([]interface{}) error
-
-	nodeSyncFailed sync.Map
 }
 
 func (h *zoneClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
@@ -265,11 +246,9 @@ func (h *zoneClusterControllerEventHandler) AddResource(obj interface{}, _ bool)
 			return fmt.Errorf("could not cast %T object to *corev1.Node", obj)
 		}
 		if err = h.zcc.handleAddUpdateNodeEvent(node); err != nil {
-			h.nodeSyncFailed.Store(node.Name, true)
 			return fmt.Errorf("node add failed for %s, will try again later: %w",
 				node.Name, err)
 		}
-		h.nodeSyncFailed.Delete(node.Name)
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
 	}
@@ -288,16 +267,10 @@ func (h *zoneClusterControllerEventHandler) UpdateResource(_, newObj interface{}
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Node", newObj)
 		}
-		_, nodeFailed := h.nodeSyncFailed.Load(node.GetName())
-		if !nodeFailed && !needsZoneAllocation(node) {
-			// node ID and transit switch IP are assigned by us and cannot change
-			return nil
-		}
 		if err = h.zcc.handleAddUpdateNodeEvent(node); err != nil {
 			return fmt.Errorf("node update failed for %s, will try again later: %w",
 				node.Name, err)
 		}
-		h.nodeSyncFailed.Delete(node.GetName())
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -313,11 +286,7 @@ func (h *zoneClusterControllerEventHandler) DeleteResource(obj, _ interface{}) e
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
-		err := h.zcc.handleDeleteNode(node)
-		if err != nil {
-			return err
-		}
-		h.nodeSyncFailed.Delete(node.GetName())
+		return h.zcc.handleDeleteNode(node)
 	}
 	return nil
 }

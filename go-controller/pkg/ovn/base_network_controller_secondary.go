@@ -802,6 +802,21 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 		util.AllowsPersistentIPs(oc.GetNetInfo())
 }
 
+func (oc *BaseSecondaryNetworkController) getNetworkID() (int, error) {
+	if oc.networkID == nil || *oc.networkID == util.InvalidID {
+		oc.networkID = ptr.To(util.InvalidID)
+		nodes, err := oc.watchFactory.GetNodes()
+		if err != nil {
+			return util.InvalidID, err
+		}
+		*oc.networkID, err = util.GetNetworkID(nodes, oc.GetNetInfo())
+		if err != nil {
+			return util.InvalidID, err
+		}
+	}
+	return *oc.networkID, nil
+}
+
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
 func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string) ([]*nbdb.NAT, error) {
@@ -811,7 +826,10 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 	var snats []*nbdb.NAT
 	var masqIP *udn.MasqueradeIPs
 	var err error
-	networkID := bsnc.GetNetworkID()
+	networkID, err := bsnc.getNetworkID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get networkID for network %q: %v", bsnc.GetNetworkName(), err)
+	}
 	// calculate MAC
 	dstMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(localPodSubnets[0]).IP)
 

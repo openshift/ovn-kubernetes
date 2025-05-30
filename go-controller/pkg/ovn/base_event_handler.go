@@ -68,7 +68,11 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 		}
 
 		// when shouldUpdateNode is false, the hostsubnet is not assigned by ovn-kubernetes
-		return !shouldUpdateNode(node2, node1), nil
+		shouldUpdate, err := shouldUpdateNode(node2, node1)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+		return !shouldUpdate, nil
 
 	case factory.PodType,
 		factory.EgressIPPodType:

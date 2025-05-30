@@ -34,8 +34,8 @@ ipv4 pod"
 
 SKIPPED_TESTS=""
 
-if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
-    if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+if [ "$KIND_IPV4_SUPPORT" == true ]; then
+    if  [ "$KIND_IPV6_SUPPORT" == true ]; then
 	# No support for these features in dual-stack yet
 	SKIPPED_TESTS="hybrid.overlay"
     else
@@ -45,7 +45,7 @@ if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
     fi
 fi
 
-if [ "$PLATFORM_IPV4_SUPPORT" == false ]; then
+if [ "$KIND_IPV4_SUPPORT" == false ]; then
   SKIPPED_TESTS+="\[IPv4\]"
 fi
 
@@ -66,7 +66,7 @@ else
   e2e br-int NetFlow export validation"
 fi
 
-if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
   	SKIPPED_TESTS+="|"
   fi
@@ -91,7 +91,7 @@ fi
 
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
   # See https://github.com/ovn-org/ovn-kubernetes/labels/ci-ipv6 for details:
-  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
     if [ "$SKIPPED_TESTS" != "" ]; then
         SKIPPED_TESTS+="|"
     fi
@@ -113,13 +113,6 @@ if [ "$ENABLE_MULTI_NET" != "true" ]; then
     SKIPPED_TESTS+="|"
   fi
   SKIPPED_TESTS+="Multi Homing"
-fi
-
-if [ "$OVN_NETWORK_QOS_ENABLE" != "true" ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-    SKIPPED_TESTS+="|"
-  fi
-  SKIPPED_TESTS+="e2e NetworkQoS validation"
 fi
 
 # Only run Node IP/MAC address migration tests if they are explicitly requested
@@ -165,15 +158,6 @@ if [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
 	SKIPPED_TESTS+="|"
   fi
   SKIPPED_TESTS+=$NETWORK_SEGMENTATION_TESTS
-fi
-
-# Only run bgp tests if they are explicitly requested
-BGP_TESTS="BGP"
-if [[ "${WHAT}" != "${BGP_TESTS}"* ]]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-	SKIPPED_TESTS+="|"
-  fi
-  SKIPPED_TESTS+=$BGP_TESTS
 fi
 
 # setting these is required to make RuntimeClass tests work ... :/

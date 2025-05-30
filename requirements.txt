@@ -1,5 +1,5 @@
 Click
-minify-html
+htmlmin
 Jinja2
 jsmin
 livereload

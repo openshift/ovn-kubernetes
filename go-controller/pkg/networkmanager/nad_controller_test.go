@@ -492,7 +492,7 @@ func TestNADController(t *testing.T) {
 				nadClient:          fakeClient.NetworkAttchDefClient,
 				namespaceLister:    &fakeNamespaceLister{},
 			}
-			err = nadController.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
+			err = nadController.networkIDAllocator.ReserveID(types.DefaultNetworkName, DefaultNetworkID)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			netController := nadController.networkController
 
@@ -749,7 +749,7 @@ func TestSyncAll(t *testing.T) {
 			for name, network := range expectedNetworks {
 				g.Expect(actualNetworks).To(gomega.HaveKey(name))
 				g.Expect(util.AreNetworksCompatible(actualNetworks[name], network)).To(gomega.BeTrue())
-				if network.GetNetworkID() != types.InvalidID {
+				if network.GetNetworkID() != util.InvalidID {
 					g.Expect(actualNetworks[name].GetNetworkID()).To(gomega.Equal(network.GetNetworkID()))
 				}
 			}
