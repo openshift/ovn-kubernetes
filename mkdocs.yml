@@ -121,6 +121,7 @@ nav:
       - MultiNetworkPolicies: features/multiple-networks/multi-network-policies.md
       - MultiNetworkRails: features/multiple-networks/multi-vtep.md
     - Multicast: features/multicast.md
+    - NetworkQoS: features/network-qos.md
     - LiveMigration: features/live-migration.md
     - HybridOverlay: features/hybrid-overlay.md
     - Hardware Acceleration:
@@ -138,5 +139,7 @@ nav:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md
     - Localnet API: okeps/okep-5085-localnet-api.md
+    - Network QoS: okeps/okep-4380-network-qos.md
+    - User Defined Networks: okeps/okep-5193-user-defined-networks.md
   - Blog:
     - blog/index.md

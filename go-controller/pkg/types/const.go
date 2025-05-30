@@ -86,6 +86,10 @@ const (
 	DefaultAllowPriority = 1001
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
+	// Pass priority for isolated advertised networks
+	AdvertisedNetworkPassPriority = 1100
+	// Deny priority for isolated advertised networks
+	AdvertisedNetworkDenyPriority = 1050
 
 	// ACL PlaceHolderACL Tier Priorities
 	PrimaryUDNAllowPriority = 1001
@@ -254,8 +258,12 @@ const (
 
 	// InformerSyncTimeout is used when waiting for the initial informer cache sync
 	// (i.e. all existing objects should be listed by the informer).
-	// It allows ~4 list() retries with the default reflector exponential backoff config
-	InformerSyncTimeout = 20 * time.Second
+	// It allows ~5 list() retries with the default reflector exponential backoff config
+	// Also considers listing a high number of items on high load scenarios
+	// (last observed 4k egress firewall taking > 30s)
+	// TODO: consider not using a timeout, potentially shifting to configurable
+	// readiness probe
+	InformerSyncTimeout = 60 * time.Second
 
 	// HandlerSyncTimeout is used when waiting for initial object handler sync.
 	// (i.e. all the ADD events should be processed for the existing objects by the event handler)
@@ -301,4 +309,12 @@ const (
 
 	// CUDNPrefix of all CUDN network names
 	CUDNPrefix = "cluster_udn_"
+
+	// NFTNoPMTUDRemoteNodeIPsv4 is a set used to track remote node IPs that do not belong to
+	// the local node's subnet.
+	NFTNoPMTUDRemoteNodeIPsv4 = "no-pmtud-remote-node-ips-v4"
+
+	// NFTNoPMTUDRemoteNodeIPsv6 is a set used to track remote node IPs that do not belong to
+	// the local node's subnet.
+	NFTNoPMTUDRemoteNodeIPsv6 = "no-pmtud-remote-node-ips-v6"
 )
