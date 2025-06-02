@@ -207,7 +207,6 @@ func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 // // See createRemoteZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	start := time.Now()
-	klog.Infof("Creating interconnect resources for remote zone node %s for the network %s", node.Name, zic.GetNetworkName())
 
 	nodeID := util.GetNodeID(node)
 	if nodeID == -1 {
@@ -215,7 +214,50 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
 	}
 
-	if err := zic.createRemoteZoneNodeResources(node, nodeID); err != nil {
+	nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, zic.GetNetworkName())
+	if err != nil {
+		err = fmt.Errorf("failed to parse node %s subnets annotation %w", node.Name, err)
+		if util.IsAnnotationNotSetError(err) {
+			// remote node may not have the annotation yet, suppress it
+			return types.NewSuppressedError(err)
+		}
+		return err
+	}
+
+	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
+		err = fmt.Errorf("failed to get the node transit switch port IP addresses : %w", err)
+		if util.IsAnnotationNotSetError(err) {
+			return types.NewSuppressedError(err)
+		}
+		return err
+	}
+
+	var nodeGRPIPs []*net.IPNet
+	// only primary networks have cluster router connected to join switch+GR
+	// used for adding routes to GR
+	if !zic.IsSecondary() || (util.IsNetworkSegmentationSupportEnabled() && zic.IsPrimaryNetwork()) {
+		nodeGRPIPs, err = util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				// FIXME(tssurya): This is present for backwards compatibility
+				// Remove me a few months from now
+				var err1 error
+				nodeGRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
+				if err1 != nil {
+					err1 = fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
+					if util.IsAnnotationNotSetError(err1) {
+						return types.NewSuppressedError(err1)
+					}
+					return err1
+				}
+			}
+		}
+	}
+
+	klog.Infof("Creating interconnect resources for remote zone node %s for the network %s", node.Name, zic.GetNetworkName())
+
+	if err := zic.createRemoteZoneNodeResources(node, nodeID, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs); err != nil {
 		return fmt.Errorf("creating interconnect resources for remote zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
 	klog.Infof("Creating Interconnect resources for node %q on network %q took: %s", node.Name, zic.GetNetworkName(), time.Since(start))
@@ -403,16 +445,7 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 //     if the node name is ovn-worker and the network name is blue, the logical port name would be - blue.tstor.ovn-worker
 //   - binds the remote port to the node remote chassis in SBDB
 //   - adds static routes for the remote node via the remote port ip in the ovn_cluster_router
-func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int) error {
-	nodeTransitSwitchPortIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
-	if err != nil || len(nodeTransitSwitchPortIPs) == 0 {
-		err = fmt.Errorf("failed to get the node transit switch port IP addresses : %w", err)
-		if util.IsAnnotationNotSetError(err) {
-			return types.NewSuppressedError(err)
-		}
-		return err
-	}
-
+func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.Node, nodeID int, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs []*net.IPNet) error {
 	transitRouterPortMac := util.IPAddrToHWAddr(nodeTransitSwitchPortIPs[0].IP)
 	var transitRouterPortNetworks []string
 	for _, ip := range nodeTransitSwitchPortIPs {
@@ -438,7 +471,7 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 		return err
 	}
 
-	if err := zic.addRemoteNodeStaticRoutes(node, nodeTransitSwitchPortIPs); err != nil {
+	if err := zic.addRemoteNodeStaticRoutes(node, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs); err != nil {
 		return err
 	}
 
@@ -534,7 +567,7 @@ func (zic *ZoneInterconnectHandler) cleanupNodeTransitSwitchPort(nodeName string
 // Then the below static routes are added
 // ip4.dst == 10.244.0.0/24 , nexthop = 100.88.0.2
 // ip4.dst == 100.64.0.2/16 , nexthop = 100.88.0.2  (only for default primary network)
-func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node, nodeTransitSwitchPortIPs []*net.IPNet) error {
+func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs []*net.IPNet) error {
 	addRoute := func(prefix, nexthop string) error {
 		logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
 			ExternalIDs: map[string]string{
@@ -554,16 +587,6 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 		return nil
 	}
 
-	nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, zic.GetNetworkName())
-	if err != nil {
-		err = fmt.Errorf("failed to parse node %s subnets annotation %w", node.Name, err)
-		if util.IsAnnotationNotSetError(err) {
-			// remote node may not have the annotation yet, suppress it
-			return types.NewSuppressedError(err)
-		}
-		return err
-	}
-
 	nodeSubnetStaticRoutes := zic.getStaticRoutes(nodeSubnets, nodeTransitSwitchPortIPs, false)
 	for _, staticRoute := range nodeSubnetStaticRoutes {
 		// Possible optimization: Add all the routes in one transaction
@@ -578,23 +601,6 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 		//
 		// Except for UDN primary L3 networks.
 		return nil
-	}
-
-	nodeGRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
-	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// FIXME(tssurya): This is present for backwards compatibility
-			// Remove me a few months from now
-			var err1 error
-			nodeGRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err1 != nil {
-				err1 = fmt.Errorf("failed to parse node %s Gateway router LRP Addrs annotation %w", node.Name, err1)
-				if util.IsAnnotationNotSetError(err1) {
-					return types.NewSuppressedError(err1)
-				}
-				return err1
-			}
-		}
 	}
 
 	nodeGRPIPStaticRoutes := zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true)
