@@ -194,7 +194,9 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 		}
 	}
 
+	// OCP HACK BEGIN
 	if util.IsRouteAdvertisementsEnabled() && !util.IsLooseUDNIsolation() {
+		// OCP HACK END
 		// Remove stale subnets from the advertised networks address set used for isolation
 		// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
 		// advertised.
@@ -530,11 +532,27 @@ func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 }
 
 func (cm *ControllerManager) configureAdvertisedNetworkIsolation() error {
-	if util.IsLooseUDNIsolation() {
-		klog.Infof("Skip creating global advertised networks addressset in loose UDN isolation mode")
+	// OCP HACK BEGIN
+	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+	if !util.IsLooseUDNIsolation() {
+		_, err := addressSetFactory.EnsureAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+		return err
+	}
+	klog.Infof("Ensure global advertised networks addressset and tier-0 drop ACLs are removed in loose UDN isolation mode")
+	addrSet, _ := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+	if addrSet == nil {
 		return nil
 	}
-	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
-	_, err := addressSetFactory.EnsureAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
-	return err
+	dropACLIDs := ovn.GetAdvertisedNetworkSubnetsDropACLdbIDs()
+	dropACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](dropACLIDs, nil)
+	dropACLs, _ := libovsdbops.FindACLsWithPredicate(cm.nbClient, dropACLPredicate)
+	if len(dropACLs) > 0 {
+		p := func(_ *nbdb.LogicalSwitch) bool { return true }
+		err := libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(cm.nbClient, p, dropACLs...)
+		if err != nil {
+			return err
+		}
+	}
+	return addrSet.Destroy()
+	// OCP HACK END
 }

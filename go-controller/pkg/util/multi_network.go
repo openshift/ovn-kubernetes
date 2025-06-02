@@ -1556,9 +1556,12 @@ func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
 	return "", ""
 }
 
+// OCP HACK BEGIN
 // IsLooseUDNIsolation returns true of `UDN_ISOLATION_MODE` env variable is set to "loose" value.
 // In "loose" mode, the network controller skips programming network isolation rules for advertised
 // UDN networks and this will allow pod to pod communication among advertised UDN networks.
 func IsLooseUDNIsolation() bool {
 	return os.Getenv("UDN_ISOLATION_MODE") == "loose"
 }
+
+// OCP HACK END
