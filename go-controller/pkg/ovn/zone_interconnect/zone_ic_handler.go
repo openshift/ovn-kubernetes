@@ -218,7 +218,7 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	if err := zic.createRemoteZoneNodeResources(node, nodeID); err != nil {
 		return fmt.Errorf("creating interconnect resources for remote zone node %s for the network %s failed : err - %w", node.Name, zic.GetNetworkName(), err)
 	}
-	klog.Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
+	klog.Infof("Creating Interconnect resources for node %q on network %q took: %s", node.Name, zic.GetNetworkName(), time.Since(start))
 	return nil
 }
 
