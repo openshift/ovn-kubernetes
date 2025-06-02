@@ -13,6 +13,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -568,6 +569,7 @@ func (zic *ZoneInterconnectHandler) cleanupNodeTransitSwitchPort(nodeName string
 // ip4.dst == 10.244.0.0/24 , nexthop = 100.88.0.2
 // ip4.dst == 100.64.0.2/16 , nexthop = 100.88.0.2  (only for default primary network)
 func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs []*net.IPNet) error {
+	ops := make([]ovsdb.Operation, 0, 2)
 	addRoute := func(prefix, nexthop string) error {
 		logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
 			ExternalIDs: map[string]string{
@@ -581,37 +583,32 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 				lrsr.Nexthop == nexthop &&
 				lrsr.ExternalIDs["ic-node"] == node.Name
 		}
-		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(zic.nbClient, zic.networkClusterRouterName, &logicalRouterStaticRoute, p); err != nil {
-			return fmt.Errorf("failed to create static route: %w", err)
+		var err error
+		ops, err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicateOps(zic.nbClient, ops, zic.networkClusterRouterName, &logicalRouterStaticRoute, p)
+		if err != nil {
+			return fmt.Errorf("failed to create static route ops: %w", err)
 		}
 		return nil
 	}
 
 	nodeSubnetStaticRoutes := zic.getStaticRoutes(nodeSubnets, nodeTransitSwitchPortIPs, false)
 	for _, staticRoute := range nodeSubnetStaticRoutes {
-		// Possible optimization: Add all the routes in one transaction
 		if err := addRoute(staticRoute.prefix, staticRoute.nexthop); err != nil {
 			return fmt.Errorf("error adding static route %s - %s to the router %s : %w", staticRoute.prefix, staticRoute.nexthop, zic.networkClusterRouterName, err)
 		}
 	}
 
-	if zic.IsSecondary() && !(util.IsNetworkSegmentationSupportEnabled() && zic.IsPrimaryNetwork()) {
-		// Secondary network cluster router doesn't connect to a join switch
-		// or to a Gateway router.
-		//
-		// Except for UDN primary L3 networks.
-		return nil
-	}
-
-	nodeGRPIPStaticRoutes := zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true)
-	for _, staticRoute := range nodeGRPIPStaticRoutes {
-		// Possible optimization: Add all the routes in one transaction
-		if err := addRoute(staticRoute.prefix, staticRoute.nexthop); err != nil {
-			return fmt.Errorf("error adding static route %s - %s to the router %s : %w", staticRoute.prefix, staticRoute.nexthop, zic.networkClusterRouterName, err)
+	if len(nodeGRPIPs) > 0 {
+		nodeGRPIPStaticRoutes := zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true)
+		for _, staticRoute := range nodeGRPIPStaticRoutes {
+			if err := addRoute(staticRoute.prefix, staticRoute.nexthop); err != nil {
+				return fmt.Errorf("error adding static route %s - %s to the router %s : %w", staticRoute.prefix, staticRoute.nexthop, zic.networkClusterRouterName, err)
+			}
 		}
 	}
 
-	return nil
+	_, err := libovsdbops.TransactAndCheck(zic.nbClient, ops)
+	return err
 }
 
 // deleteLocalNodeStaticRoutes deletes the static routes added by the function addRemoteNodeStaticRoutes
