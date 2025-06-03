@@ -100,9 +100,9 @@ func (nc *SecondaryNodeNetworkController) Cleanup() error {
 	return nil
 }
 
-func (nc *SecondaryNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
-	wasUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, nc.name)
-	isUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, nc.name)
+func (oc *SecondaryNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	wasUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, oc.name)
+	isUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
 	return wasUDNNetworkAdvertisedAtNode != isUDNNetworkAdvertisedAtNode
 }
 
@@ -110,17 +110,17 @@ func (nc *SecondaryNodeNetworkController) shouldReconcileNetworkChange(old, new 
 // and the gateway mode:
 // 1. IP rules
 // 2. OpenFlows on br-ex bridge to forward traffic to correct ofports
-func (nc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
-	reconcilePodNetwork := nc.shouldReconcileNetworkChange(nc.ReconcilableNetInfo, netInfo)
+func (oc *SecondaryNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
 
-	err := util.ReconcileNetInfo(nc.ReconcilableNetInfo, netInfo)
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
 	if err != nil {
-		klog.Errorf("Failed to reconcile network information for network %s: %v", nc.GetNetworkName(), err)
+		klog.Errorf("Failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
 
 	if reconcilePodNetwork {
-		if nc.gateway != nil {
-			nc.gateway.Reconcile()
+		if oc.gateway != nil {
+			oc.gateway.Reconcile()
 		}
 	}
 

@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
@@ -70,8 +68,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 		// Add a backend pod to the service in one node
 		ginkgo.By("creating a backend pod for the service " + serviceName)
-		serverPodPort := infraprovider.Get().GetK8HostPort()
-		serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: int32(serverPodPort)}}, "serve-hostname")
+		serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: 9376}}, "serve-hostname")
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.NodeName = nodeName
 		e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)

@@ -11,11 +11,10 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func initLocalGateway(hostSubnets []*net.IPNet, mgmtPort managementport.Interface) error {
+func initLocalGateway(hostSubnets []*net.IPNet, cfg *managementPortConfig) error {
 	klog.Info("Adding iptables masquerading rules for new local gateway")
 	if util.IsNetworkSegmentationSupportEnabled() {
 		if err := ensureChain("nat", iptableUDNMasqueradeChain); err != nil {
@@ -24,17 +23,18 @@ func initLocalGateway(hostSubnets []*net.IPNet, mgmtPort managementport.Interfac
 	}
 	for _, hostSubnet := range hostSubnets {
 		// local gateway mode uses mp0 as default path for all ingress traffic into OVN
-		nextHop, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(hostSubnet), mgmtPort.GetAddresses())
-		if err != nil {
-			return fmt.Errorf("failed to find management port address: %w", err)
+		var nextHop *net.IPNet
+		if utilnet.IsIPv6CIDR(hostSubnet) {
+			nextHop = cfg.ipv6.ifAddr
+		} else {
+			nextHop = cfg.ipv4.ifAddr
 		}
 
 		// add iptables masquerading for mp0 to exit the host for egress
 		cidr := nextHop.IP.Mask(nextHop.Mask)
 		cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
-		ifName := mgmtPort.GetInterfaceName()
-		if err := initLocalGatewayNATRules(ifName, cidrNet); err != nil {
-			return fmt.Errorf("failed to add local NAT rules for: %s, err: %v", ifName, err)
+		if err := initLocalGatewayNATRules(cfg.ifName, cidrNet); err != nil {
+			return fmt.Errorf("failed to add local NAT rules for: %s, err: %v", cfg.ifName, err)
 		}
 	}
 	return nil

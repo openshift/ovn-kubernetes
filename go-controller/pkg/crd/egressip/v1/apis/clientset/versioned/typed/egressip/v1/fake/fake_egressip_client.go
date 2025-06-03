@@ -28,7 +28,7 @@ type FakeK8sV1 struct {
 }
 
 func (c *FakeK8sV1) EgressIPs() v1.EgressIPInterface {
-	return newFakeEgressIPs(c)
+	return &FakeEgressIPs{c}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
