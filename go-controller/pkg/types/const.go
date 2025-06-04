@@ -254,8 +254,12 @@ const (
 
 	// InformerSyncTimeout is used when waiting for the initial informer cache sync
 	// (i.e. all existing objects should be listed by the informer).
-	// It allows ~4 list() retries with the default reflector exponential backoff config
-	InformerSyncTimeout = 20 * time.Second
+	// It allows ~5 list() retries with the default reflector exponential backoff config
+	// Also considers listing a high number of items on high load scenarios
+	// (last observed 4k egress firewall taking > 30s)
+	// TODO: consider not using a timeout, potentially shifting to configurable
+	// readiness probe
+	InformerSyncTimeout = 60 * time.Second
 
 	// HandlerSyncTimeout is used when waiting for initial object handler sync.
 	// (i.e. all the ADD events should be processed for the existing objects by the event handler)
