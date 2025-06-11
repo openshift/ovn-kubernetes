@@ -1,11 +1,12 @@
 package node
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"net"
 	"sync"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"

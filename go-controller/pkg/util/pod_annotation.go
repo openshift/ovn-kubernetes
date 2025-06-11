@@ -1,10 +1,11 @@
 package util
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+
+	json "github.com/json-iterator/go"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"

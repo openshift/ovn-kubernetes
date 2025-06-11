@@ -2,7 +2,8 @@ package kube
 
 import (
 	"context"
-	"encoding/json"
+
+	json "github.com/json-iterator/go"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"

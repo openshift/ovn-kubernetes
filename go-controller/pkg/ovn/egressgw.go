@@ -1,12 +1,13 @@
 package ovn
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"regexp"
 	"strings"
+
+	json "github.com/json-iterator/go"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 

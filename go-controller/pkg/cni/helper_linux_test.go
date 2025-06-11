@@ -2,12 +2,13 @@ package cni
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"

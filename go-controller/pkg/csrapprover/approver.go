@@ -3,13 +3,14 @@ package csrapprover
 import (
 	"context"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"reflect"
 	"strings"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"

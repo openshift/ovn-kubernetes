@@ -1,10 +1,11 @@
 package template
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"strings"
+
+	json "github.com/json-iterator/go"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"

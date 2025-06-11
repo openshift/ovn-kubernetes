@@ -1,10 +1,11 @@
 package kube
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"sync"
+
+	json "github.com/json-iterator/go"
 )
 
 // Annotator represents the exported methods for handling node annotations

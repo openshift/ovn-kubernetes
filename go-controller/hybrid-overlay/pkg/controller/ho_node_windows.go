@@ -1,9 +1,10 @@
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/Microsoft/hcsshim/hcn"
 	ps "github.com/bhendo/go-powershell"

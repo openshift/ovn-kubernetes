@@ -1,8 +1,9 @@
 package util
 
 import (
-	"encoding/json"
 	"fmt"
+
+	json "github.com/json-iterator/go"
 
 	corev1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"

@@ -2,12 +2,13 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"

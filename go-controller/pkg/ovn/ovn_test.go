@@ -2,9 +2,10 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
+
+	json "github.com/json-iterator/go"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"

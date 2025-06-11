@@ -1,10 +1,11 @@
 package ovn
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
+
+	json "github.com/json-iterator/go"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kubevirtv1 "kubevirt.io/api/core/v1"
