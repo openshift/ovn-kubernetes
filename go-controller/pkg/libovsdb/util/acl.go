@@ -135,8 +135,7 @@ func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string
 }
 
 func BuildANPACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, aclT ACLPipelineType, logLevels *ACLLoggingLevels) *nbdb.ACL {
-	anpACL := BuildACLWithDefaultTier(dbIDs, priority, match, action, logLevels, aclT)
-	anpACL.Tier = GetACLTier(dbIDs)
+	anpACL := BuildACL(dbIDs, priority, match, action, logLevels, aclT, GetACLTier(dbIDs))
 	return anpACL
 }
 
