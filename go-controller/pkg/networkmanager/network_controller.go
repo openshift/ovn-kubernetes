@@ -2,12 +2,13 @@ package networkmanager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"sync"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 

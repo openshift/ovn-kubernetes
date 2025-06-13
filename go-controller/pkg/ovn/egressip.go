@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 

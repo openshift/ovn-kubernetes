@@ -3,12 +3,13 @@ package cni
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/gorilla/mux"
 

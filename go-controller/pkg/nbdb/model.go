@@ -4,7 +4,7 @@
 package nbdb
 
 import (
-	"encoding/json"
+	json "github.com/json-iterator/go"
 
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"

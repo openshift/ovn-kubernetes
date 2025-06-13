@@ -2,9 +2,10 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
+
+	json "github.com/json-iterator/go"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"

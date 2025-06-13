@@ -17,11 +17,12 @@ limitations under the License.
 package healthcheck
 
 import (
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	json "github.com/json-iterator/go"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"

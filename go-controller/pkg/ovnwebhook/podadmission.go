@@ -2,9 +2,10 @@ package ovnwebhook
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
+
+	json "github.com/json-iterator/go"
 
 	"golang.org/x/exp/maps"
 

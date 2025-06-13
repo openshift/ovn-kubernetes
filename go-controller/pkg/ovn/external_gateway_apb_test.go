@@ -2,11 +2,12 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"

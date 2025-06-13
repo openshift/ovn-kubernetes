@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +16,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"

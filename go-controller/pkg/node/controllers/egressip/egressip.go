@@ -2,7 +2,6 @@ package egressip
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/gaissmai/cidrtree"
 	"github.com/vishvananda/netlink"

@@ -3,7 +3,6 @@ package clustermanager
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 

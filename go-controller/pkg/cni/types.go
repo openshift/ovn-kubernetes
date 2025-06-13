@@ -2,9 +2,10 @@ package cni
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"

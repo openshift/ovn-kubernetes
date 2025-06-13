@@ -5,7 +5,6 @@ package cni
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +14,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	json "github.com/json-iterator/go"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	cni020 "github.com/containernetworking/cni/pkg/types/020"

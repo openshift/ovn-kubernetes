@@ -2,13 +2,14 @@ package util
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/spf13/afero"
 

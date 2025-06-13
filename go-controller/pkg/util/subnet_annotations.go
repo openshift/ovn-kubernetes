@@ -2,9 +2,10 @@ package util
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
+
+	json "github.com/json-iterator/go"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"

@@ -3,7 +3,6 @@ package libovsdb
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	json "github.com/json-iterator/go"
 
 	"github.com/alexflint/go-filemutex"
 	guuid "github.com/google/uuid"
