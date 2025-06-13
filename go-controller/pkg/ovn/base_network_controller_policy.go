@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -23,6 +24,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -162,6 +164,8 @@ type networkPolicy struct {
 	localPodHandler *factory.Handler
 	// peer namespace handlers
 	nsHandlerList []*factory.Handler
+	// peer namespace reconcilers
+	reconcilePeerNamespaces []*reconcilePeerNamespaces
 	// peerAddressSets stores PodSelectorAddressSet keys for peers that this network policy was successfully added to.
 	// Required for cleanup.
 	peerAddressSets []string
@@ -186,17 +190,23 @@ type networkPolicy struct {
 	cancelableContext *util.CancelableContext
 }
 
+type reconcilePeerNamespaces struct {
+	retryNamespaces   *retry.RetryFramework
+	namespaceSelector *metav1.LabelSelector
+}
+
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	policyTypeIngress, policyTypeEgress := getPolicyType(policy)
 	np := &networkPolicy{
-		name:            policy.Name,
-		namespace:       policy.Namespace,
-		ingressPolicies: make([]*gressPolicy, 0),
-		egressPolicies:  make([]*gressPolicy, 0),
-		isIngress:       policyTypeIngress,
-		isEgress:        policyTypeEgress,
-		nsHandlerList:   make([]*factory.Handler, 0),
-		localPods:       sync.Map{},
+		name:                    policy.Name,
+		namespace:               policy.Namespace,
+		ingressPolicies:         make([]*gressPolicy, 0),
+		egressPolicies:          make([]*gressPolicy, 0),
+		isIngress:               policyTypeIngress,
+		isEgress:                policyTypeEgress,
+		nsHandlerList:           make([]*factory.Handler, 0),
+		reconcilePeerNamespaces: make([]*reconcilePeerNamespaces, 0),
+		localPods:               sync.Map{},
 	}
 	return np
 }
@@ -1490,6 +1500,63 @@ func (bnc *BaseNetworkController) peerNamespaceUpdate(np *networkPolicy, gp *gre
 	return err
 }
 
+// requeuePeerNamespaces enqueues the namespace into network policy peer namespace
+// retry framework object(s) which need to be retried immediately with add event.
+func (bnc *BaseNetworkController) requeuePeerNamespaces(namespaces []string) error {
+	npKeys := bnc.networkPolicies.GetKeys()
+	var errors []error
+	for _, npKey := range npKeys {
+		err := bnc.networkPolicies.DoWithLock(npKey, func(npKey string) error {
+			np, ok := bnc.networkPolicies.Load(npKey)
+			if !ok {
+				return nil
+			}
+			np.RLock()
+			defer np.RUnlock()
+			var errors []error
+			for _, reconcilePeerNamespace := range np.reconcilePeerNamespaces {
+				namespaceAdded := false
+				for _, ns := range namespaces {
+					namespace, err := bnc.watchFactory.GetNamespace(ns)
+					if err != nil {
+						errors = append(errors, fmt.Errorf("failed to retrieve peer namespace %s for network policy %s on network %s: %w",
+							ns, npKey, bnc.GetNetworkName(), err))
+						continue
+					}
+					namespaceLabels := labels.Set(namespace.Labels)
+					peerNamespaceSelector, err := metav1.LabelSelectorAsSelector(reconcilePeerNamespace.namespaceSelector)
+					if err != nil {
+						errors = append(errors, fmt.Errorf("failed to parse peer namespace %s selector for network policy %s on network %s: %w",
+							ns, npKey, bnc.GetNetworkName(), err))
+						continue
+					}
+					// Filter out namespace when it's labels not matching with network policy peer namespace
+					// selector.
+					if !peerNamespaceSelector.Matches(namespaceLabels) {
+						continue
+					}
+					err = reconcilePeerNamespace.retryNamespaces.AddRetryObjWithAddNoBackoff(namespace)
+					if err != nil {
+						errors = append(errors, fmt.Errorf("failed to retry peer namespace %s for network policy %s on network %s: %w",
+							ns, npKey, bnc.GetNetworkName(), err))
+						continue
+					}
+					namespaceAdded = true
+				}
+				if namespaceAdded {
+					reconcilePeerNamespace.retryNamespaces.RequestRetryObjs()
+				}
+			}
+			return utilerrors.Join(errors...)
+		})
+		if err != nil {
+			errors = append(errors, fmt.Errorf("failed to retry peer namespaces for network policy %s on network %s: %w",
+				npKey, bnc.GetNetworkName(), err))
+		}
+	}
+	return utilerrors.Join(errors...)
+}
+
 // addPeerNamespaceHandler starts a watcher for PeerNamespaceSelectorType.
 // Sync function and Add event for every existing namespace will be executed sequentially first, and an error will be
 // returned if something fails.
@@ -1522,7 +1589,17 @@ func (bnc *BaseNetworkController) addPeerNamespaceHandler(
 		klog.Errorf("WatchResource failed for addPeerNamespaceHandler: %v", err)
 		return err
 	}
-
+	// Add peer namespace retry framework object into np.retryPeerNamespaces list so that
+	// when a new peer namespace is newly created later under UDN network, it gets reconciled
+	// and address set is created for the namespace. so we must reconcile it for network policy
+	// as well to update gress policy ACL with matching peer namespace address set.
+	if util.IsNetworkSegmentationSupportEnabled() && bnc.IsPrimaryNetwork() {
+		np.Lock()
+		np.reconcilePeerNamespaces = append(np.reconcilePeerNamespaces,
+			&reconcilePeerNamespaces{retryNamespaces: retryPeerNamespaces,
+				namespaceSelector: namespaceSelector})
+		np.Unlock()
+	}
 	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
 	return nil
 }
@@ -1540,6 +1617,7 @@ func (bnc *BaseNetworkController) shutdownHandlers(np *networkPolicy) {
 	for _, handler := range np.nsHandlerList {
 		bnc.watchFactory.RemoveNamespaceHandler(handler)
 	}
+	np.reconcilePeerNamespaces = make([]*reconcilePeerNamespaces, 0)
 	np.nsHandlerList = make([]*factory.Handler, 0)
 }
 
