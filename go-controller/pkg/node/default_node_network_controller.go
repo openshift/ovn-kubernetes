@@ -953,8 +953,9 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
 
-	// Connect ovn-controller to SBDB
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	// If IC disabled, connect ovn-controller to SB/NB DB. If IC, OVNKube-controller will start it post sync to ensure
+	// ovn-controller doesn't consume stale SB DB data.
+	if !config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
 				return fmt.Errorf("unable to set the authentication towards OVN local dbs")

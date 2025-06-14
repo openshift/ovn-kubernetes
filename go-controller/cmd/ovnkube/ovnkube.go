@@ -522,6 +522,26 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				controllerErr = fmt.Errorf("failed to start network controller: %w", err)
 				return
 			}
+			// HACK
+			out, stdErr, err := util.RunOVSVsctl(
+				"get",
+				"Open_vSwitch",
+				".",
+				"external_ids")
+			if err != nil {
+				klog.Errorf("error getting OVS external ID: err %w, out %v, stderr %s", err, out, stdErr)
+			}
+			klog.Infof("## martin: externalids is before setting is:\nOUT: %q", out)
+			// END HACK
+
+			// SB DB maybe stale if IC is enabled and ovn-controller will only be allowed to connect here.
+			if config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+				for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+					if err := auth.SetDBAuth(); err != nil {
+						controllerErr = fmt.Errorf("unable to set the authentication towards OVN local dbs")
+					}
+				}
+			}
 
 			// record delay until ready
 			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
