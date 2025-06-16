@@ -1947,7 +1947,7 @@ ip route add %[3]s via %[4]s
 				if td.ingress != "" {
 					ingress = td.ingress
 				}
-				return fmt.Sprintf("after %s of %s with %s/%s with %q ingress", td.test.description, td.resource.description, role, td.topology, ingress)
+				return fmt.Sprintf("after %s of %s with %s/%s with %s ingress", td.test.description, td.resource.description, role, td.topology, ingress)
 			},
 			Entry(nil, testData{
 				resource: virtualMachine,
