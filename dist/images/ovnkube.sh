@@ -324,15 +324,14 @@ ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 # should be set to true when dpu nodes are in the cluster
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
 
-# external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube pod
-# should function on behalf of a different host than external_ids:host
+# external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube stack
+# should function on behalf of a different host than external_ids:hostname. This includes
+# all the components that belond in an ovnkube stack (i.e. NB DB, SB DB, ovnkube etc)
 # overwrite the K8S_NODE env var with the one found within the OVS metadata in this case
-if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-  K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
-  if [[ ${K8S_NODE} == "" ]]; then
-    echo "Trying to run in DPU mode and couldn't get the required Host K8s Nodename. Exiting..."
-    exit 1
-  fi
+ovn_k8s_node=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+if [[ ! -z $ovn_k8s_node ]]; then
+  echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
+  K8S_NODE=$ovn_k8s_node
 fi
 
 # Determine the ovn rundir.
@@ -2423,10 +2422,12 @@ ovn-node() {
     wait_for_event ovs_ready
   fi
 
-  if [[ ${ovnkube_node_mode} != "dpu-host" ]] && [[ ${ovn_enable_interconnect} != "true" ]]; then
+  if [[ ${ovnkube_node_mode} == "dpu-host" ]] && [[ ${ovn_enable_interconnect} == "true" ]]; then
     # ready_to_start_node checks for the NB/SB readiness state.
     # This is not available on the DPU host when interconnect is enabled,
     # because the DBs will run locally on the DPU
+    echo "skipping ready_to_start_node on DPU Host and when interconnect is true"
+  else
     echo "=============== ovn-node - (wait for ready_to_start_node)"
     wait_for_event ready_to_start_node
   fi
