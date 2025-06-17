@@ -402,7 +402,11 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node, hostSubne
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
-	return nil
+
+	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
+		return oc.addAdvertisedNetworkIsolation(node.Name)
+	}
+	return oc.deleteAdvertisedNetworkIsolation(node.Name)
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
@@ -426,6 +430,10 @@ func nodeSubnetChanged(oldNode, node *corev1.Node, netName string) bool {
 
 func joinCIDRChanged(oldNode, node *corev1.Node, netName string) bool {
 	var oldCIDRs, newCIDRs map[string]json.RawMessage
+
+	if oldNode.Annotations[util.OVNNodeGRLRPAddrs] == node.Annotations[util.OVNNodeGRLRPAddrs] {
+		return false
+	}
 
 	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OVNNodeGRLRPAddrs]), &oldCIDRs); err != nil {
 		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
@@ -489,7 +497,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		return nil
 	}
 	// used only when IC=true
-	createDefaultNodeRouteToExternal := func(_ libovsdbclient.Client, _, _ string, _ []config.CIDRNetworkEntry) error {
+	createDefaultNodeRouteToExternal := func(_ libovsdbclient.Client, _, _ string, _ []config.CIDRNetworkEntry, _ []*net.IPNet) error {
 		return nil
 	}
 

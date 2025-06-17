@@ -180,7 +180,8 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, syncRerouteFailed := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
-				shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+				shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
+					joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName())
 				nodeSyncsParam = &nodeSyncs{
 					syncMgmtPort: shouldSyncMgmtPort,
 					syncGw:       shouldSyncGW,
@@ -594,8 +595,14 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 				} else {
 					if !util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
 						err = oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName)
+						if err == nil && util.IsRouteAdvertisementsEnabled() {
+							err = oc.deleteAdvertisedNetworkIsolation(node.Name)
+						}
 					} else {
 						err = oc.deleteUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName)
+						if err == nil {
+							err = oc.addAdvertisedNetworkIsolation(node.Name)
+						}
 					}
 					if err != nil {
 						errs = append(errs, err)
@@ -627,7 +634,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 
 		if config.OVNKubernetesFeature.EnableEgressIP && nSyncs.syncReroute {
 			rerouteFailed := false
-			if err := oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+			if err := oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo(), node); err != nil {
 				errs = append(errs, fmt.Errorf("failed to ensure EgressIP router policies for network %s: %v", oc.GetNetworkName(), err))
 				rerouteFailed = true
 			}

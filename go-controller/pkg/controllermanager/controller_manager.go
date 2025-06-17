@@ -8,6 +8,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -22,6 +23,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
@@ -139,8 +141,12 @@ func (cm *ControllerManager) GetDefaultNetworkController() networkmanager.Reconc
 
 func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	existingNetworksMap := map[string]string{}
+	validNetworksSubnets := sets.New[string]()
 	for _, network := range validNetworks {
 		existingNetworksMap[network.GetNetworkName()] = network.TopologyType()
+		for _, subnet := range network.Subnets() {
+			validNetworksSubnets.Insert(subnet.CIDR.String())
+		}
 	}
 
 	// Get all the existing secondary networks and its logical entities
@@ -188,6 +194,29 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 			klog.Errorf("Failed to delete stale OVN logical entities for network %s: %v", netName, err)
 		}
 	}
+
+	if util.IsRouteAdvertisementsEnabled() {
+		// Remove stale subnets from the advertised networks address set used for isolation
+		// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
+		// advertised.
+		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+		advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+		if err != nil {
+			return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
+		}
+		v4AdvertisedSubnets, v6AdvertisedSubnets := advertisedSubnets.GetAddresses()
+		var invalidSubnets []string
+		for _, subnet := range append(v4AdvertisedSubnets, v6AdvertisedSubnets...) {
+			if !validNetworksSubnets.Has(subnet) {
+				klog.Infof("Cleanup stale advertised subnet: %q", subnet)
+				invalidSubnets = append(invalidSubnets, subnet)
+			}
+		}
+
+		if err := advertisedSubnets.DeleteAddresses(invalidSubnets); err != nil {
+			klog.Errorf("Failed to delete stale advertised subnets: %v", invalidSubnets)
+		}
+	}
 	return nil
 }
 
@@ -210,6 +239,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 			EgressQoSClient:      ovnClient.EgressQoSClient,
 			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
+			NetworkQoSClient:     ovnClient.NetworkQoSClient,
 		},
 		stopChan:         stopCh,
 		watchFactory:     wf,
@@ -409,7 +439,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		// with k=10,
 		//  for a cluster with 10 nodes, measurement of 1 in every 100 requests
 		//  for a cluster with 100 nodes, measurement of 1 in every 1000 requests
-		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
+		recorders.GetConfigDurationRecorder().Run(cm.nbClient, cm.watchFactory, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
 
@@ -450,6 +480,11 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
 
+	if util.IsRouteAdvertisementsEnabled() {
+		if err := cm.configureAdvertisedNetworkIsolation(); err != nil {
+			return fmt.Errorf("failed to initialize advertised network isolation: %w", err)
+		}
+	}
 	if cm.networkManager != nil {
 		if err = cm.networkManager.Start(); err != nil {
 			return fmt.Errorf("failed to start NAD Controller :%v", err)
@@ -493,4 +528,10 @@ func (cm *ControllerManager) Stop() {
 
 func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
+}
+
+func (cm *ControllerManager) configureAdvertisedNetworkIsolation() error {
+	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+	_, err := addressSetFactory.EnsureAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+	return err
 }

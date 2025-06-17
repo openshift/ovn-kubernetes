@@ -129,18 +129,18 @@ RA_SKIPPED_TESTS="
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
 
 # Either single stack IPV6 or dualstack
-if [ "$KIND_IPV6_SUPPORT" == true ]; then
+if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
   SKIPPED_TESTS=$SKIPPED_TESTS$SINGLESTACK_IPV4_ONLY_TESTS
 fi
 
 # IPv6 Only, skip any IPv4 Only Tests
-if [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+if [ "$PLATFORM_IPV4_SUPPORT" == false ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
 	echo "IPv6 Only"
 	SKIPPED_TESTS=$SKIPPED_TESTS$IPV4_ONLY_TESTS
 fi
 
 # If not DualStack, skip DualStack tests
-if [ "$KIND_IPV4_SUPPORT" == false ] || [ "$KIND_IPV6_SUPPORT" == false ]; then
+if [ "$PLATFORM_IPV4_SUPPORT" == false ] || [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
 	SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_ONLY_TESTS
 fi
 
@@ -200,7 +200,7 @@ fi
 # timeout needs to be lower than github's timeout. Otherwise github terminates
 # the job and doesn't give ginkgo a chance to print status so that we know why
 # the timeout happened.
-TEST_TIMEOUT=${TEST_TIMEOUT:-100m}
+TEST_TIMEOUT=${TEST_TIMEOUT:-120m}
 
 ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \

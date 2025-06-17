@@ -34,6 +34,7 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.OvnNodeMasqCIDR:                   nil,
 	util.OvnNodeGatewayMtuSupport:          nil,
 	util.OvnNodeManagementPort:             nil,
+	util.OvnNodeDontSNATSubnets:            nil,
 	util.OvnNodeChassisID: func(v annotationChange, _ string) error {
 		if v.action == removed {
 			return fmt.Errorf("%s cannot be removed", util.OvnNodeChassisID)
@@ -52,6 +53,7 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 
 		return fmt.Errorf("%s can only be set to %s or %s, it cannot be removed", util.OvnNodeZoneName, types.OvnDefaultZone, nodeName)
 	},
+	util.OVNNodeEncapIPs: nil,
 }
 
 // interconnectNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in IC environments

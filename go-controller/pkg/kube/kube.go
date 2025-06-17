@@ -12,7 +12,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -29,6 +28,7 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
+	networkqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 )
 
 // InterfaceOVN represents the exported methods for dealing with getting/setting
@@ -61,12 +61,11 @@ type Interface interface {
 	PatchNode(old, new *corev1.Node) error
 	UpdateNodeStatus(node *corev1.Node) error
 	UpdatePodStatus(pod *corev1.Pod) error
-	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
-	GetNodes() ([]*corev1.Node, error)
-	GetNamespaces(labelSelector metav1.LabelSelector) ([]*corev1.Namespace, error)
-	GetPods(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error)
-	GetPod(namespace, name string) (*corev1.Pod, error)
-	GetNode(name string) (*corev1.Node, error)
+	// GetPodsForDBChecker should only be used by legacy DB checker. Use watchFactory instead to get pods.
+	GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error)
+	// GetNodeForWindows should only be used for windows hybrid overlay binary and never in linux code
+	GetNodeForWindows(name string) (*corev1.Node, error)
+	GetNodesForWindows() ([]*corev1.Node, error)
 	Events() kv1core.EventInterface
 }
 
@@ -89,6 +88,7 @@ type KubeOVN struct {
 	EgressQoSClient      egressqosclientset.Interface
 	IPAMClaimsClient     ipamclaimssclientset.Interface
 	NADClient            nadclientset.Interface
+	NetworkQoSClient     networkqosclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -199,7 +199,7 @@ func (k *Kube) SetAnnotationsOnService(namespace, name string, annotations map[s
 
 // SetTaintOnNode tries to add a new taint to the node. If the taint already exists, it doesn't do anything.
 func (k *Kube) SetTaintOnNode(nodeName string, taint *corev1.Taint) error {
-	node, err := k.GetNode(nodeName)
+	node, err := k.GetNodeForWindows(nodeName)
 	if err != nil {
 		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
 		return err
@@ -232,7 +232,7 @@ func (k *Kube) SetTaintOnNode(nodeName string, taint *corev1.Taint) error {
 // RemoveTaintFromNode removes all the taints that have the same key and effect from the node.
 // If the taint doesn't exist, it doesn't do anything.
 func (k *Kube) RemoveTaintFromNode(nodeName string, taint *corev1.Taint) error {
-	node, err := k.GetNode(nodeName)
+	node, err := k.GetNodeForWindows(nodeName)
 	if err != nil {
 		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
 		return err
@@ -322,32 +322,8 @@ func (k *Kube) UpdatePodStatus(pod *corev1.Pod) error {
 	return err
 }
 
-// GetAnnotationsOnPod obtains the pod annotations from kubernetes apiserver, given the name and namespace
-func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, error) {
-	pod, err := k.KClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return pod.ObjectMeta.Annotations, nil
-}
-
-// GetNamespaces returns the list of all Namespace objects matching the labelSelector
-func (k *Kube) GetNamespaces(labelSelector metav1.LabelSelector) ([]*corev1.Namespace, error) {
-	list := []*corev1.Namespace{}
-	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
-		return k.KClient.CoreV1().Namespaces().List(ctx, opts)
-	}).EachListItem(context.TODO(), metav1.ListOptions{
-		LabelSelector:   labels.Set(labelSelector.MatchLabels).String(),
-		ResourceVersion: "0",
-	}, func(obj runtime.Object) error {
-		list = append(list, obj.(*corev1.Namespace))
-		return nil
-	})
-	return list, err
-}
-
-// GetPods returns the list of all Pod objects in a namespace matching the options
-func (k *Kube) GetPods(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error) {
+// GetPodsForDBChecker returns the list of all Pod objects in a namespace matching the options. Only used by the legacy db checker.
+func (k *Kube) GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error) {
 	list := []*corev1.Pod{}
 	opts.ResourceVersion = "0"
 	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
@@ -359,13 +335,8 @@ func (k *Kube) GetPods(namespace string, opts metav1.ListOptions) ([]*corev1.Pod
 	return list, err
 }
 
-// GetPod obtains the pod from kubernetes apiserver, given the name and namespace
-func (k *Kube) GetPod(namespace, name string) (*corev1.Pod, error) {
-	return k.KClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
-}
-
-// GetNodes returns the list of all Node objects from kubernetes
-func (k *Kube) GetNodes() ([]*corev1.Node, error) {
+// GetNodesForWindows returns the list of all Node objects from kubernetes. Only used by windows binary.
+func (k *Kube) GetNodesForWindows() ([]*corev1.Node, error) {
 	list := []*corev1.Node{}
 	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 		return k.KClient.CoreV1().Nodes().List(ctx, opts)
@@ -378,8 +349,8 @@ func (k *Kube) GetNodes() ([]*corev1.Node, error) {
 	return list, err
 }
 
-// GetNode returns the Node resource from kubernetes apiserver, given its name
-func (k *Kube) GetNode(name string) (*corev1.Node, error) {
+// GetNodeForWindows returns the Node resource from kubernetes apiserver, given its name. Only used by windows binary.
+func (k *Kube) GetNodeForWindows(name string) (*corev1.Node, error) {
 	return k.KClient.CoreV1().Nodes().Get(context.TODO(), name, metav1.GetOptions{})
 }
 

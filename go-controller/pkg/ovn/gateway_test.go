@@ -14,7 +14,9 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -29,6 +31,33 @@ func init() {
 	// libovsdb matcher might produce a lengthy output that will be cropped by
 	// default gomega output limit, set to 0 to unlimit.
 	format.MaxLength = 0
+}
+
+func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, networkName string, networkID int, clusterIPSubnets []*net.IPNet, nodeSwitch *nbdb.LogicalSwitch, addrSet addressset.AddressSet) []libovsdbtest.TestData {
+	var passMatches []string
+	for _, subnet := range clusterIPSubnets {
+		ipPrefix := "ip4"
+		if utilnet.IsIPv6CIDR(subnet) {
+			ipPrefix = "ip6"
+		}
+		passMatches = append(passMatches, fmt.Sprintf("(%s.src == %s && %s.dst == %s)", ipPrefix, subnet, ipPrefix, subnet))
+
+	}
+	passACL := libovsdbutil.BuildACL(
+		GetAdvertisedNetworkSubnetsPassACLdbIDs(DefaultNetworkControllerName, networkName, networkID),
+		types.AdvertisedNetworkPassPriority,
+		strings.Join(passMatches, " || "),
+		nbdb.ACLActionPass,
+		nil,
+		libovsdbutil.LportEgressAfterLB)
+	passACL.Tier = types.PrimaryACLTier
+	passACL.UUID = "advertised-udn-isolation-pass-acl-UUID"
+	dropACL := BuildAdvertisedNetworkSubnetsDropACL(addrSet)
+	dropACL.UUID = "advertised-udn-isolation-drop-acl-UUID"
+	nodeSwitch.ACLs = append(nodeSwitch.ACLs, passACL.UUID, dropACL.UUID)
+	testData = append(testData, passACL, dropACL)
+
+	return testData
 }
 
 func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
@@ -191,13 +220,17 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			natUUID := fmt.Sprintf("nat-%d-UUID", i)
 			natUUIDs = append(natUUIDs, natUUID)
 			physicalIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
-			testData = append(testData, &nbdb.NAT{
+			nat := nbdb.NAT{
 				UUID:       natUUID,
 				ExternalIP: physicalIP.IP.String(),
 				LogicalIP:  subnet.String(),
 				Options:    map[string]string{"stateless": "false"},
 				Type:       nbdb.NATTypeSNAT,
-			})
+			}
+			if config.Gateway.Mode != config.GatewayModeDisabled {
+				nat.ExternalPortRange = config.DefaultEphemeralPortRange
+			}
+			testData = append(testData, &nat)
 		}
 	}
 
@@ -205,13 +238,17 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 		natUUID := fmt.Sprintf("nat-join-%d-UUID", i)
 		natUUIDs = append(natUUIDs, natUUID)
 		joinLRPIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(physicalIP), joinLRPIPs)
-		testData = append(testData, &nbdb.NAT{
+		nat := nbdb.NAT{
 			UUID:       natUUID,
 			ExternalIP: physicalIP.IP.String(),
 			LogicalIP:  joinLRPIP.IP.String(),
 			Options:    map[string]string{"stateless": "false"},
 			Type:       nbdb.NATTypeSNAT,
-		})
+		}
+		if config.Gateway.Mode != config.GatewayModeDisabled {
+			nat.ExternalPortRange = config.DefaultEphemeralPortRange
+		}
+		testData = append(testData, &nat)
 	}
 
 	testData = append(testData, &nbdb.MeterBand{
@@ -365,6 +402,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.Context("Gateway Creation Operations Shared Gateway Mode", func() {
 		ginkgo.BeforeEach(func() {
 			config.Gateway.Mode = config.GatewayModeShared
+			config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
 		})
 
 		ginkgo.It("creates an IPv4 gateway in OVN", func() {
@@ -1412,6 +1450,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		ginkgo.BeforeEach(func() {
 			config.Gateway.Mode = config.GatewayModeLocal
 			config.IPv6Mode = false
+			config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
 		})
 
 		ginkgo.It("creates a dual-stack gateway in OVN", func() {

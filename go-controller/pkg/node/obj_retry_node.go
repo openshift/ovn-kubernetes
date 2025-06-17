@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -70,7 +72,8 @@ func (nc *DefaultNodeNetworkController) newRetryFrameworkNode(objectType reflect
 func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 	switch objType {
 	case factory.NamespaceExGwType,
-		factory.EndpointSliceForStaleConntrackRemovalType:
+		factory.EndpointSliceForStaleConntrackRemovalType,
+		factory.NodeType:
 		return true
 	}
 	return false
@@ -80,7 +83,8 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 func needsUpdateDuringRetry(objType reflect.Type) bool {
 	switch objType {
 	case factory.NamespaceExGwType,
-		factory.EndpointSliceForStaleConntrackRemovalType:
+		factory.EndpointSliceForStaleConntrackRemovalType,
+		factory.NodeType:
 		return true
 	}
 	return false
@@ -109,6 +113,17 @@ func (h *nodeEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, erro
 		// always run update code
 		return false, nil
 
+	case factory.NodeType:
+		node1, ok := obj1.(*corev1.Node)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Node", obj1)
+		}
+		node2, ok := obj2.(*corev1.Node)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Node", obj2)
+		}
+		return reflect.DeepEqual(node1.Status.Addresses, node2.Status.Addresses) && reflect.DeepEqual(node1.Annotations, node2.Annotations), nil
+
 	default:
 		return false, fmt.Errorf("no object comparison for type %s", h.objType)
 	}
@@ -135,6 +150,9 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		obj, err = h.nc.watchFactory.GetEndpointSlice(namespace, name)
 
+	case factory.NodeType:
+		obj, err = h.nc.watchFactory.GetNode(name)
+
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
 			h.objType)
@@ -147,12 +165,27 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 // the function was executed from iterateRetryResources, AddResource adds the
 // specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
-func (h *nodeEventHandler) AddResource(_ interface{}, _ bool) error {
+func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.NamespaceExGwType,
 		factory.EndpointSliceForStaleConntrackRemovalType:
 		// no action needed upon add event
 		return nil
+
+	case factory.NodeType:
+		node := obj.(*corev1.Node)
+		// if it's our node that is changing, then nothing to do as we dont add our own IP to the nftables rules
+		if node.Name == h.nc.name {
+			if util.NodeDontSNATSubnetAnnotationExist(node) {
+				err := managementport.UpdateNoSNATSubnetsSets(node, util.ParseNodeDontSNATSubnetsList)
+				if err != nil {
+					return fmt.Errorf("error updating no snat subnets sets: %w", err)
+				}
+			}
+
+			return nil
+		}
+		return h.nc.addOrUpdateNode(node)
 
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
@@ -187,6 +220,55 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 		return h.nc.reconcileConntrackUponEndpointSliceEvents(
 			oldEndpointSlice, newEndpointSlice)
 
+	case factory.NodeType:
+		oldNode := oldObj.(*corev1.Node)
+		newNode := newObj.(*corev1.Node)
+
+		// if it's our node that is changing, then nothing to do as we dont add our own IP to the nftables rules
+		if newNode.Name == h.nc.name {
+
+			// if node's dont SNAT subnet annotation changed sync nftables
+			if !reflect.DeepEqual(oldNode.Annotations, newNode.Annotations) &&
+				util.NodeDontSNATSubnetAnnotationChanged(oldNode, newNode) {
+				err := managementport.UpdateNoSNATSubnetsSets(newNode, util.ParseNodeDontSNATSubnetsList)
+				if err != nil {
+					return fmt.Errorf("error updating no snat subnets sets: %w", err)
+				}
+			}
+			return nil
+		}
+
+		// remote node that is changing
+		ipsToKeep := map[string]bool{}
+		for _, address := range newNode.Status.Addresses {
+			if address.Type != corev1.NodeInternalIP {
+				continue
+			}
+			nodeIP := net.ParseIP(address.Address)
+			if nodeIP == nil {
+				continue
+			}
+			ipsToKeep[nodeIP.String()] = true
+		}
+		ipsToRemove := make([]net.IP, 0)
+		for _, address := range oldNode.Status.Addresses {
+			if address.Type != corev1.NodeInternalIP {
+				continue
+			}
+			nodeIP := net.ParseIP(address.Address)
+			if nodeIP == nil {
+				continue
+			}
+			if _, exists := ipsToKeep[nodeIP.String()]; !exists {
+				ipsToRemove = append(ipsToRemove, nodeIP)
+			}
+		}
+
+		if err := removePMTUDNodeNFTRules(ipsToRemove); err != nil {
+			return fmt.Errorf("error removing node %q stale NFT rules during update: %w", oldNode.Name, err)
+		}
+		return h.nc.addOrUpdateNode(newNode)
+
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -206,6 +288,14 @@ func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 		endpointslice := obj.(*discovery.EndpointSlice)
 		return h.nc.reconcileConntrackUponEndpointSliceEvents(endpointslice, nil)
 
+	case factory.NodeType:
+		h.nc.deleteNode(obj.(*corev1.Node))
+		_ = managementport.UpdateNoSNATSubnetsSets(obj.(*corev1.Node), func(_ *corev1.Node) ([]string, error) {
+			return []string{}, nil
+		})
+
+		return nil
+
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
 	}
@@ -224,6 +314,8 @@ func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
 			factory.EndpointSliceForStaleConntrackRemovalType:
 			// no sync needed
 			syncFunc = nil
+		case factory.NodeType:
+			syncFunc = h.nc.syncNodes
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)

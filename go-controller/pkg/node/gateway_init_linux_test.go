@@ -56,11 +56,14 @@ add table inet ovn-kubernetes
 add set inet ovn-kubernetes mgmtport-no-snat-nodeports { type inet_proto . inet_service ; comment "NodePorts not subject to management port SNAT" ; }
 add set inet ovn-kubernetes mgmtport-no-snat-services-v4 { type ipv4_addr . inet_proto . inet_service ; comment "eTP:Local short-circuit not subject to management port SNAT (IPv4)" ; }
 add set inet ovn-kubernetes mgmtport-no-snat-services-v6 { type ipv6_addr . inet_proto . inet_service ; comment "eTP:Local short-circuit not subject to management port SNAT (IPv6)" ; }
+add set inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { type ipv4_addr ; flags interval ; comment "subnets not subject to management port SNAT (IPv4)" ; }
+add set inet ovn-kubernetes mgmtport-no-snat-subnets-v6 { type ipv6_addr ; flags interval ; comment "subnets not subject to management port SNAT (IPv6)" ; }
 add chain inet ovn-kubernetes mgmtport-snat { type nat hook postrouting priority 100 ; comment "OVN SNAT to Management Port" ; }
 add rule inet ovn-kubernetes mgmtport-snat oifname != %s return
 add rule inet ovn-kubernetes mgmtport-snat meta nfproto ipv4 ip saddr 10.1.1.2 counter return
 add rule inet ovn-kubernetes mgmtport-snat meta l4proto . th dport @mgmtport-no-snat-nodeports counter return
 add rule inet ovn-kubernetes mgmtport-snat ip daddr . meta l4proto . th dport @mgmtport-no-snat-services-v4 counter return
+add rule inet ovn-kubernetes mgmtport-snat ip saddr @mgmtport-no-snat-subnets-v4 counter return
 add rule inet ovn-kubernetes mgmtport-snat counter snat ip to 10.1.1.2
 `
 
@@ -1772,8 +1775,7 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
 			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-			netlinkMock.On("RouteAdd", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			netlinkMock.On("RouteReplace", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
 			util.SetNetLinkOpMockInst(netlinkMock)
@@ -1802,15 +1804,6 @@ var _ = Describe("Gateway unit tests", func() {
 				Name:  "ens1f0",
 				Index: 5,
 			}
-			previousRoute := &netlink.Route{
-				Dst:       ipnet,
-				LinkIndex: 5,
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        gwIPs[0],
-				MTU:       config.Default.MTU - 100,
-				Src:       srcIP,
-			}
-
 			expectedRoute := &netlink.Route{
 				Dst:       ipnet,
 				LinkIndex: 5,
@@ -1818,13 +1811,13 @@ var _ = Describe("Gateway unit tests", func() {
 				Gw:        gwIPs[0],
 				MTU:       config.Default.MTU,
 				Src:       srcIP,
+				Table:     syscall.RT_TABLE_MAIN,
 			}
 
 			lnk.On("Attrs").Return(lnkAttr)
 			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
 			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()

@@ -335,6 +335,9 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		MAC:            node.NodeLRPMAC,
 		Networks:       []string{node.NodeGWIP},
 		GatewayChassis: []string{chassisName + "-UUID"},
+		Options: map[string]string{
+			"gateway_mtu": "1400",
+		},
 	})
 	if serviceControllerEnabled {
 		testData = append(testData, &nbdb.ChassisTemplateVar{
@@ -1164,7 +1167,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				types.OVNClusterRouter, badRoute, p)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Syncing node with OVNK")
-			node, err := oc.kube.GetNode(testNode.Name)
+			node, err := oc.kube.GetNodeForWindows(testNode.Name)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = oc.syncNodeManagementPortDefault(node, node.Name, []*net.IPNet{subnet})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1270,6 +1273,11 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 					[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
 					skipSnat, node1.NodeMgmtPortIP, "1400")
 
+				if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
+					addrSet, err := oc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					expectedNBDatabaseState = generateAdvertisedUDNIsolationExpectedNB(expectedNBDatabaseState, oc.GetNetworkName(), oc.GetNetworkID(), clusterSubnets, expectedNodeSwitch, addrSet)
+				}
 				GR = nil
 				for _, testObj := range expectedNBDatabaseState {
 					if router, ok := testObj.(*nbdb.LogicalRouter); ok && router.UUID == types.GWRouterPrefix+node1.Name+"-UUID" {
@@ -1631,7 +1639,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			ginkgo.By("adding the node becomes possible")
-			gomega.Expect(oc.retryNodes.ResourceHandler.AddResource(&testNode, false)).To(gomega.Succeed())
+			gomega.Eventually(oc.retryNodes.ResourceHandler.AddResource).WithArguments(&testNode, false).Should(gomega.Succeed())
 
 			return nil
 		}

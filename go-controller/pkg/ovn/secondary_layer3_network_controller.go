@@ -107,7 +107,6 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -187,7 +186,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, failed = h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
-				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
+					joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName())
 				nodeSyncsParam = &nodeSyncs{
 					syncNode:              nodeSync,
 					syncClusterRouterPort: clusterRtrSync,
@@ -610,6 +610,20 @@ func (oc *SecondaryLayer3NetworkController) run() error {
 		}
 	}
 
+	// start NetworkQoS controller if feature is enabled
+	if config.OVNKubernetesFeature.EnableNetworkQoS {
+		err := oc.newNetworkQoSController()
+		if err != nil {
+			return fmt.Errorf("unable to create network qos controller, err: %w", err)
+		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			oc.nqosController.Run(1, oc.stopChan)
+		}()
+	}
+
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	return nil
@@ -690,7 +704,6 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
-
 	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
@@ -701,7 +714,11 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 		return nil
 	}
 
-	klog.Infof("Adding or Updating Node %q for network %s", node.Name, oc.GetNetworkName())
+	if !nodeNeedsSync(nSyncs) {
+		return nil
+	}
+
+	klog.Infof("Adding or Updating local node %q for network %q", node.Name, oc.GetNetworkName())
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
@@ -803,7 +820,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 
 	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() && nSyncs.syncReroute {
 		rerouteFailed := false
-		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo(), node); err != nil {
 			errs = append(errs, fmt.Errorf("failed to ensure EgressIP router polices for network %s: %v", oc.GetNetworkName(), err))
 			rerouteFailed = true
 		}
@@ -916,8 +933,16 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 			if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
 				return nil, err
 			}
+			if util.IsRouteAdvertisementsEnabled() {
+				if err := oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
+					return nil, err
+				}
+			}
 		} else {
 			if err := oc.deleteUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
+				return nil, err
+			}
+			if err := oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
 				return nil, err
 			}
 		}
