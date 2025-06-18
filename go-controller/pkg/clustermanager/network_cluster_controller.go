@@ -475,7 +475,7 @@ func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
 		klog.Errorf("Failed to reconcile network %s: %v", ncc.GetNetworkName(), err)
 	}
 	if reconcilePendingPods && ncc.retryPods != nil {
-		if err := objretry.RequeuePendingPods(ncc.kube, ncc.GetNetInfo(), ncc.retryPods); err != nil {
+		if err := objretry.RequeuePendingPods(ncc.watchFactory, ncc.GetNetInfo(), ncc.retryPods); err != nil {
 			klog.Errorf("Failed to requeue pending pods for network %s: %v", ncc.GetNetworkName(), err)
 		}
 	}
@@ -576,7 +576,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		// 1. we missed an add event (bug in kapi informer code)
 		// 2. a user removed the annotation on the node
 		// Either way to play it safe for now do a partial json unmarshal check
-		if !nodeFailed && util.NoHostSubnet(oldNode) != util.NoHostSubnet(newNode) && !h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) {
+		if !nodeFailed && util.NoHostSubnet(oldNode) == util.NoHostSubnet(newNode) && !h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) {
 			// no other node updates would require us to reconcile again
 			return nil
 		}
