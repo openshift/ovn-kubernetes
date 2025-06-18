@@ -226,12 +226,12 @@ func podNetworkStatus(pod *v1.Pod, predicates ...func(nadapi.NetworkStatus) bool
 	return netStatusMeetingPredicates, nil
 }
 
-func podNetworkStatusByNetConfigPredicate(netConfig networkAttachmentConfig) func(nadapi.NetworkStatus) bool {
+func podNetworkStatusByNetConfigPredicate(namespace, name, role string) func(nadapi.NetworkStatus) bool {
 	return func(networkStatus nadapi.NetworkStatus) bool {
-		if netConfig.role == "primary" {
+		if role == "primary" {
 			return networkStatus.Default
 		} else {
-			return networkStatus.Name == netConfig.namespace+"/"+netConfig.name
+			return networkStatus.Name == namespace+"/"+name
 		}
 	}
 }
@@ -253,7 +253,7 @@ func inRange(cidr string, ip string) error {
 	return fmt.Errorf("ip [%s] is NOT in range %s", ip, cidr)
 }
 
-func connectToServer(clientPodConfig podConfiguration, serverIP string, port int) error {
+func connectToServer(clientPodConfig podConfiguration, serverIP string, port uint16) error {
 	_, err := e2ekubectl.RunKubectl(
 		clientPodConfig.namespace,
 		"exec",
@@ -610,7 +610,11 @@ func allowedTCPPortsForPolicy(allowPorts ...int) []mnpapi.MultiNetworkPolicyPort
 	return portAllowlist
 }
 
+<<<<<<< HEAD
 func reachServerPodFromClient(cs clientset.Interface, serverConfig podConfiguration, clientConfig podConfiguration, serverIP string, serverPort int) error {
+=======
+func reachServerPodFromClient(cs clientset.Interface, serverConfig podConfiguration, clientConfig podConfiguration, serverIP string, serverPort uint16) error {
+>>>>>>> downstream/release-4.20
 	updatedPod, err := cs.CoreV1().Pods(serverConfig.namespace).Get(context.Background(), serverConfig.name, metav1.GetOptions{})
 	if err != nil {
 		return err
