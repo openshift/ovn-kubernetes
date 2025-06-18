@@ -37,72 +37,12 @@ func (_m *Interface) Events() v1.EventInterface {
 	return r0
 }
 
-// GetAnnotationsOnPod provides a mock function with given fields: namespace, name
-func (_m *Interface) GetAnnotationsOnPod(namespace string, name string) (map[string]string, error) {
-	ret := _m.Called(namespace, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetAnnotationsOnPod")
-	}
-
-	var r0 map[string]string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (map[string]string, error)); ok {
-		return rf(namespace, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) map[string]string); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]string)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetNamespaces provides a mock function with given fields: labelSelector
-func (_m *Interface) GetNamespaces(labelSelector metav1.LabelSelector) ([]*corev1.Namespace, error) {
-	ret := _m.Called(labelSelector)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetNamespaces")
-	}
-
-	var r0 []*corev1.Namespace
-	var r1 error
-	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) ([]*corev1.Namespace, error)); ok {
-		return rf(labelSelector)
-	}
-	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) []*corev1.Namespace); ok {
-		r0 = rf(labelSelector)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Namespace)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(metav1.LabelSelector) error); ok {
-		r1 = rf(labelSelector)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetNode provides a mock function with given fields: name
-func (_m *Interface) GetNode(name string) (*corev1.Node, error) {
+func (_m *Interface) GetNodeForWindows(name string) (*corev1.Node, error) {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetNode")
+		panic("no return value specified for GetNodeForWindows")
 	}
 
 	var r0 *corev1.Node
@@ -127,12 +67,12 @@ func (_m *Interface) GetNode(name string) (*corev1.Node, error) {
 	return r0, r1
 }
 
-// GetNodes provides a mock function with given fields:
-func (_m *Interface) GetNodes() ([]*corev1.Node, error) {
+// GetNodesForWindows provides a mock function with given fields:
+func (_m *Interface) GetNodesForWindows() ([]*corev1.Node, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetNodes")
+		panic("no return value specified for GetNodesForWindows")
 	}
 
 	var r0 []*corev1.Node
@@ -157,42 +97,12 @@ func (_m *Interface) GetNodes() ([]*corev1.Node, error) {
 	return r0, r1
 }
 
-// GetPod provides a mock function with given fields: namespace, name
-func (_m *Interface) GetPod(namespace string, name string) (*corev1.Pod, error) {
-	ret := _m.Called(namespace, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPod")
-	}
-
-	var r0 *corev1.Pod
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*corev1.Pod, error)); ok {
-		return rf(namespace, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) *corev1.Pod); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.Pod)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetPods provides a mock function with given fields: namespace, opts
-func (_m *Interface) GetPods(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error) {
+func (_m *Interface) GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error) {
 	ret := _m.Called(namespace, opts)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetPods")
+		panic("no return value specified for GetPodsForDBChecker")
 	}
 
 	var r0 []*corev1.Pod

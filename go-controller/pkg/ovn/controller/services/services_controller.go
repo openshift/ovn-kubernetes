@@ -36,6 +36,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -282,7 +283,7 @@ func (c *Controller) handleErr(err error, key string) {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
 	if err == nil {
-		metrics.GetConfigDurationRecorder().End("service", ns, name)
+		recorders.GetConfigDurationRecorder().End("service", ns, name)
 		c.queue.Forget(key)
 		return
 	}
@@ -296,7 +297,7 @@ func (c *Controller) handleErr(err error, key string) {
 	}
 
 	klog.Warningf("Dropping service %q out of the queue for network=%s: %v", key, c.netInfo.GetNetworkName(), err)
-	metrics.GetConfigDurationRecorder().End("service", ns, name)
+	recorders.GetConfigDurationRecorder().End("service", ns, name)
 	c.queue.Forget(key)
 	utilruntime.HandleError(err)
 }
@@ -609,7 +610,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 	if c.skipService(service.Name, service.Namespace) {
 		return
 	}
-	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
+	recorders.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	klog.V(5).Infof("Adding service %s for network=%s", key, c.netInfo.GetNetworkName())
 	c.queue.Add(key)
 }
@@ -631,7 +632,7 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 			return
 		}
 
-		metrics.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name)
+		recorders.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name)
 		c.queue.Add(key)
 	}
 }
@@ -651,7 +652,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 
 	klog.V(4).Infof("Deleting service %s for network=%s", key, c.netInfo.GetNetworkName())
 
-	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
+	recorders.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
 }
 
