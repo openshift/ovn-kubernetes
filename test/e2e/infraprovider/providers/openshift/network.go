@@ -6,23 +6,23 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
 )
 
-type baremetaldsNetwork struct {
+type openshiftNetwork struct {
 	name                 string
 	containerNetworkName string
-	ipv4                 *baremetaldsNetworkConfig
-	ipv6                 *baremetaldsNetworkConfig
+	ipv4                 *openshiftNetworkConfig
+	ipv6                 *openshiftNetworkConfig
 }
 
-type baremetaldsNetworkConfig struct {
+type openshiftNetworkConfig struct {
 	Subnet  string `json:"Subnet"`
 	Gateway string `json:"Gateway"`
 }
 
-func (n baremetaldsNetwork) Name() string {
+func (n openshiftNetwork) Name() string {
 	return n.name
 }
 
-func (n baremetaldsNetwork) IPv4IPv6Subnets() (string, string, error) {
+func (n openshiftNetwork) IPv4IPv6Subnets() (string, string, error) {
 	if n.ipv4 == nil && n.ipv6 == nil {
 		return "", "", fmt.Errorf("failed to get IPV4/V6 because network doesnt contain configuration")
 	}
@@ -42,13 +42,13 @@ func (n baremetaldsNetwork) IPv4IPv6Subnets() (string, string, error) {
 	return v4, v6, nil
 }
 
-func (n baremetaldsNetwork) Equal(candidate api.Network) bool {
+func (n openshiftNetwork) Equal(candidate api.Network) bool {
 	if n.name != candidate.Name() {
 		return false
 	}
 	return true
 }
 
-func (n baremetaldsNetwork) String() string {
+func (n openshiftNetwork) String() string {
 	return n.name
 }

@@ -223,7 +223,7 @@ func (c *contextBaremetalds) CreateNetwork(name string, subnets ...string) (api.
 func (c *contextBaremetalds) createNetwork(name string, subnets ...string) (api.Network, error) {
 	// TODO, provider: $CLI network create --driver bridge --ipam-driver=none --opt com.docker.network.bridge.name=ostestbm ostestbm_net
 
-	network := baremetaldsNetwork{name, name + "_net", nil, nil}
+	network := openshiftNetwork{name, name + "_net", nil, nil}
 	if doesContainerNetworkExist(name) {
 		attachedContainers, err := getContainerAttachedToNetwork(name)
 		if err != nil {
@@ -547,8 +547,8 @@ func doesVirtualMachineNetworkExist(networkName string) bool {
 	return exec.Command("virsh", "net-dumpxml", networkName).Run() == nil
 }
 
-func getNetwork(networkName string) (baremetaldsNetwork, error) {
-	n := baremetaldsNetwork{
+func getNetwork(networkName string) (openshiftNetwork, error) {
+	n := openshiftNetwork{
 		name:                 networkName,
 		containerNetworkName: networkName + "_net",
 	}
