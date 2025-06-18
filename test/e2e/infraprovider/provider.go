@@ -1,8 +1,6 @@
 package infraprovider
 
 import (
-	"fmt"
-
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/providers/openshift"
 
@@ -20,13 +18,7 @@ var provider api.Provider
 // Set detects which infrastructure provider. Arg config is not needed for KinD provider but downstream implementations
 // will require access to the kapi to infer what platform k8 is running on.
 func Set(_ *rest.Config) error {
-	// detect if the provider is KinD
-	if openshift.IsBaremetalds() {
-		provider = openshift.NewBaremetalds()
-	}
-	if provider == nil {
-		return fmt.Errorf("failed to determine the infrastructure provider")
-	}
+	provider = openshift.NewOpenshiftProvider()
 	return nil
 }
 
