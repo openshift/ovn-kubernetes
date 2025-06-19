@@ -150,9 +150,10 @@ func (c *contextKind) createExternalContainer(container api.ExternalContainer) (
 	if container.Entrypoint != "" {
 		cmd = append(cmd, "--entrypoint", container.Entrypoint)
 	}
+	cmd = append(cmd, container.RuntimeArgs...)
 	cmd = append(cmd, container.Image)
-	if len(container.Args) > 0 {
-		cmd = append(cmd, container.Args...)
+	if len(container.CmdArgs) > 0 {
+		cmd = append(cmd, container.CmdArgs...)
 	} else {
 		if images.AgnHost() == container.Image {
 			cmd = append(cmd, "pause")
