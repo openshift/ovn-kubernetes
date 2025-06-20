@@ -798,9 +798,41 @@ func (gw *GatewayManager) GatewayInit(
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-
 			nat = libovsdbops.BuildSNATWithMatch(&externalIP[0], entry, "", extIDs, gw.netInfo.GetNetworkScopedClusterSubnetSNATMatch(nodeName))
-			nats = append(nats, nat)
+			// Given isEquivalentNATs util considers match to be a dealbreaker for a NAT's identity,
+			// we need to find the existing NATs with the same external IDs, logicalIP, exernalIP, logicalPort
+			// and update the "match" field alone if a NAT exists with remaining fields matching.
+			// Hence using a predicate to find existing NATs with all fields except match to be the same and then updating that NAT.
+			// If such a NAT does not exist, we create a new NAT.
+			// If it is a default network NAT, then match will be empty, so nothing to set.
+			p := func(item *nbdb.NAT) bool {
+				return item.ExternalIDs[types.NetworkExternalID] == nat.ExternalIDs[types.NetworkExternalID] &&
+					item.ExternalIDs[types.TopologyExternalID] == nat.ExternalIDs[types.TopologyExternalID] &&
+					// Note that given we have two conditional SNATs per UDN network,
+					// the externalIDs will be same but the externalIP will be different.
+					item.ExternalIP == nat.ExternalIP &&
+					item.LogicalIP == nat.LogicalIP &&
+					((item.LogicalPort == nil && nat.LogicalPort == nil) ||
+						(item.LogicalPort != nil && nat.LogicalPort != nil && *item.LogicalPort == *nat.LogicalPort))
+			}
+			existingNAT, err := libovsdbops.FindNATsWithPredicate(gw.nbClient, p)
+			if err != nil {
+				return fmt.Errorf("failed to fetch existing gateway NAT for network %q on node %q, err: %w",
+					gw.netInfo.GetNetworkName(), nodeName, err)
+			}
+			if len(existingNAT) > 0 {
+				if len(existingNAT) > 1 {
+					return fmt.Errorf("found multiple matching NATs for network %q on node %q, expected exactly one",
+						gw.netInfo.GetNetworkName(), nodeName)
+				}
+				// if a NAT exists with the same external IDs, logicalIP, exernalIP, logicalPort,
+				// update the "match" field alone and use that NAT.
+				existingNAT[0].Match = nat.Match
+				nats = append(nats, existingNAT[0])
+			} else {
+				// create a new NAT.
+				nats = append(nats, nat)
+			}
 		}
 		err := libovsdbops.CreateOrUpdateNATs(gw.nbClient, &logicalRouter, nats...)
 		if err != nil {
