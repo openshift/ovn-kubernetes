@@ -14,6 +14,7 @@ The following tasks are performed:
 - Check out the Kubernetes source tree and compiles some dependencies
 - Install KIND
 - Run a matrix of End-To-End Tests using KIND
+- Ensure that documentation builds successfully
 
 The full matrix of e2e tests found [here](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml)
 are also run periodically (twice daily) using an OVN-Kubernetes build based on the currently merged code base.
@@ -119,7 +120,7 @@ and set the environmental variable `K8S_VERSION` to the same value. Also make su
 your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.31.0
+K8S_VERSION=v1.32.3
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -379,3 +380,12 @@ defined in https://github.com/kubernetes-sigs/network-policy-api/tree/master/con
 and then invoked from this repo. Any changes to the tests first have to be submitted
 upstream to `network-policy-api` repo and then brought downstream into the ovn-kubernetes repo
 through version bump.
+
+# Documentation Build Check
+
+To catch any potential documentation build breakages which would prevent any docs changes
+from being deployed to our GitHub Pages [site](https://github.com/ovn-org/ovn-kubernetes). The build check will produce the
+html docs and will be available in the job artifacts for review. There is a link printed
+in the job run logs inside the step "Upload Artifact". Download and unzip that locally 
+to view the resulting docs after they are built to see what would be deployed to github
+pages.

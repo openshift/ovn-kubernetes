@@ -241,7 +241,6 @@ func (g *gateway) AddEgressIP(eip *egressipv1.EgressIP) error {
 		if err = g.Reconcile(); err != nil {
 			return fmt.Errorf("failed to sync gateway: %v", err)
 		}
-		g.openflowManager.requestFlowSync()
 	}
 	return nil
 }
@@ -258,7 +257,6 @@ func (g *gateway) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressIP) error {
 		if err = g.Reconcile(); err != nil {
 			return fmt.Errorf("failed to sync gateway: %v", err)
 		}
-		g.openflowManager.requestFlowSync()
 	}
 	return nil
 }
@@ -275,7 +273,6 @@ func (g *gateway) DeleteEgressIP(eip *egressipv1.EgressIP) error {
 		if err = g.Reconcile(); err != nil {
 			return fmt.Errorf("failed to sync gateway: %v", err)
 		}
-		g.openflowManager.requestFlowSync()
 	}
 	return nil
 }
@@ -290,7 +287,6 @@ func (g *gateway) SyncEgressIP(eips []interface{}) error {
 	if err := g.Reconcile(); err != nil {
 		return fmt.Errorf("failed to sync gateway: %v", err)
 	}
-	g.openflowManager.requestFlowSync()
 	return nil
 }
 
@@ -359,13 +355,13 @@ func setupUDPAggregationUplink(ifname string) error {
 func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, nodeSubnets, gwIPs []*net.IPNet,
 	advertised bool, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
-	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, nodeSubnets, gwIPs, advertised)
+	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, nodeSubnets, gwIPs, gwNextHops, advertised)
 	if err != nil {
 		return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", gwIntf, err)
 	}
 	var egressGWBridge *bridgeConfiguration
 	if egressGatewayIntf != "" {
-		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nodeSubnets, nil, false)
+		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nodeSubnets, nil, nil, false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", egressGatewayIntf, err)
 		}
@@ -492,6 +488,8 @@ func (g *gateway) Reconcile() error {
 	if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
 		return err
 	}
+	// let's sync these flows immediately
+	g.openflowManager.requestFlowSync()
 	err := g.updateSNATRules()
 	if err != nil {
 		return err
@@ -550,6 +548,7 @@ type bridgeConfiguration struct {
 	ofPortHost  string
 	netConfig   map[string]*bridgeUDNConfiguration
 	eipMarkIPs  *markIPsCache
+	nextHops    []net.IP
 }
 
 func (b *bridgeConfiguration) getGatewayIface() string {
@@ -590,7 +589,10 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *corev1.Node) ([]*
 	return ifAddrs, nil
 }
 
-func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubnets, gwIPs []*net.IPNet,
+func bridgeForInterface(intfName, nodeName,
+	physicalNetworkName string,
+	nodeSubnets, gwIPs []*net.IPNet,
+	gwNextHops []net.IP,
 	advertised bool) (*bridgeConfiguration, error) {
 	var intfRep string
 	var err error
@@ -608,6 +610,9 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, nodeSubn
 			types.DefaultNetworkName: defaultNetConfig,
 		},
 		eipMarkIPs: newMarkIPsCache(),
+	}
+	if len(gwNextHops) > 0 {
+		res.nextHops = gwNextHops
 	}
 	res.netConfig[types.DefaultNetworkName].advertised.Store(advertised)
 

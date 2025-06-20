@@ -5,12 +5,15 @@ import (
 	"net"
 	"testing"
 
-	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/api/core/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
+	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // OCP hack begin
@@ -18,23 +21,29 @@ import (
 func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	oldGwMode := globalconfig.Gateway.Mode
+	oldIPv4Mode := globalconfig.IPv4Mode
 	defer func() {
 		globalconfig.Gateway.Mode = oldGwMode
 		globalconfig.Default.ClusterSubnets = oldClusterSubnet
+		globalconfig.IPv4Mode = oldIPv4Mode
 	}()
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
 	_, cidr6, _ := net.ParseCIDR("fe00::/64")
-	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
+	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 26}, {CIDR: cidr6, HostSubnetLength: 26}}
+	globalconfig.IPv4Mode = true
 
 	name := "dns-default"
 	namespace := "openshift-dns"
 
-	UDNNetInfo := getSampleUDNNetInfo(namespace)
+	UDNNetInfo, err := getSampleUDNNetInfo(namespace, types.Layer3Topology)
+	if err != nil {
+		panic(err)
+	}
 
-	defaultService := &v1.Service{
+	defaultService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: v1.ServiceSpec{
-			Type: v1.ServiceTypeClusterIP,
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
 		},
 	}
 
@@ -69,7 +78,7 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 
 	tc := []struct {
 		name     string
-		service  *v1.Service
+		service  *corev1.Service
 		configs  []lbConfig
 		expected []LB
 	}{
@@ -79,7 +88,7 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1"},
-					protocol: v1.ProtocolTCP,
+					protocol: corev1.ProtocolTCP,
 					inport:   80,
 					clusterEndpoints: lbEndpoints{
 						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
@@ -163,45 +172,48 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 	oldClusterSubnet := globalconfig.Default.ClusterSubnets
 	oldGwMode := globalconfig.Gateway.Mode
+	oldIPv4Mode := globalconfig.IPv4Mode
 	defer func() {
 		globalconfig.Gateway.Mode = oldGwMode
 		globalconfig.Default.ClusterSubnets = oldClusterSubnet
+		globalconfig.IPv4Mode = oldIPv4Mode
 	}()
 	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
-	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}}
+	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 26}}
+	globalconfig.IPv4Mode = true
 
 	name := "router-default"
 	namespace := "openshift-ingress"
 	inport := int32(80)
 	outport := int32(8080)
 
-	UDNNetInfo := getSampleUDNNetInfo(namespace)
+	UDNNetInfo, _ := getSampleUDNNetInfo(namespace, types.Layer3Topology)
 
-	defaultService := &v1.Service{
+	defaultService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Namespace:   namespace,
 			Annotations: map[string]string{localWithFallbackAnnotation: ""}, // code checks for this annotation
 		},
-		Spec: v1.ServiceSpec{
-			Type:                  v1.ServiceTypeLoadBalancer,
-			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+		Spec: corev1.ServiceSpec{
+			Type:                  corev1.ServiceTypeLoadBalancer,
+			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
 			// add ingress IP
 			ClusterIP:  "192.168.1.1",
 			ClusterIPs: []string{"192.168.1.1"},
-			Ports: []v1.ServicePort{ // don't consider https for simplicity
+			Ports: []corev1.ServicePort{ // don't consider https for simplicity
 				{
 					Name:       "http",
 					Port:       80,
-					Protocol:   v1.ProtocolTCP,
+					Protocol:   corev1.ProtocolTCP,
 					TargetPort: intstr.FromInt(80),
 					NodePort:   5,
 				},
 			},
 		},
-		Status: v1.ServiceStatus{
-			LoadBalancer: v1.LoadBalancerStatus{
-				Ingress: []v1.LoadBalancerIngress{{
+		Status: corev1.ServiceStatus{
+			LoadBalancer: corev1.LoadBalancerStatus{
+				Ingress: []corev1.LoadBalancerIngress{{
 					IP: "5.5.5.5",
 				}},
 			},
@@ -237,7 +249,7 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 
 	tc := []struct {
 		name     string
-		service  *v1.Service
+		service  *corev1.Service
 		configs  []lbConfig
 		expected []LB
 	}{
@@ -247,7 +259,7 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"node"}, //  placeholder for node IP
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5, // node port
 					externalTrafficLocal: true,
 					hasNodePort:          true,
@@ -262,7 +274,7 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 				},
 				{
 					vips:                 []string{"5.5.5.5"}, // external VIP
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
 					clusterEndpoints: lbEndpoints{
@@ -346,7 +358,7 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 			configs: []lbConfig{
 				{
 					vips:                 []string{"node"}, //  placeholder for node IP
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               5, // node port
 					externalTrafficLocal: true,
 					hasNodePort:          true,
@@ -360,7 +372,7 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 				},
 				{
 					vips:                 []string{"5.5.5.5"}, // external VIP
-					protocol:             v1.ProtocolTCP,
+					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
 					clusterEndpoints: lbEndpoints{
