@@ -260,6 +260,10 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 		}
 	}
 
+	// reconciles namespaces that were added to the network, this will trigger namespace add event and
+	// network controller creates the address set for the namespace.
+	// To update gress policy ACLs with peer namespace address set, invoke requeuePeerNamespace method after
+	// address set is created for the namespace.
 	namespaceAdded := false
 	for _, ns := range reconcileNamespaces {
 		namespace, err := oc.watchFactory.GetNamespace(ns)
@@ -276,11 +280,6 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 	}
 	if namespaceAdded {
 		oc.retryNamespaces.RequestRetryObjs()
-	}
-
-	err := oc.requeuePeerNamespaces(reconcileNamespaces)
-	if err != nil {
-		klog.Infof("Failed to retry network policy peer namespaces for network %s: %v", oc.GetNetworkName(), err)
 	}
 }
 

@@ -679,7 +679,15 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	defer nsUnlock()
+	nsUnlock()
+	// Enqueue the UDN namespace into network policy controller if it needs to be
+	// processed by network policy peer namespace handlers.
+	if bsnc.IsPrimaryNetwork() {
+		err = bsnc.requeuePeerNamespace(ns)
+		if err != nil {
+			return fmt.Errorf("failed to requeue peer namespace %s: %v", ns.Name, err)
+		}
+	}
 	return nil
 }
 

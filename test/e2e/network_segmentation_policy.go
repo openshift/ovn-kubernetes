@@ -298,6 +298,8 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 					return updatedPod.Status.Phase
 				}, 1*time.Minute, 6*time.Second).Should(gomega.Equal(v1.PodPending))
 
+				// The pod won't run and the namespace address set won't be created until the NAD for the network is added
+				// to the namespace and we test here that once that happens the policy is reconciled to account for it.
 				ginkgo.By("creating NAD for red and orange namespaces and check pod moves into running state")
 				for _, namespace := range []string{namespaceRed, namespaceOrange} {
 					ginkgo.By("creating the attachment configuration for " + netConfName + " in namespace " + namespace)

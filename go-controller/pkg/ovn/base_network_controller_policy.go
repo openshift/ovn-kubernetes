@@ -1496,20 +1496,10 @@ func (bnc *BaseNetworkController) peerNamespaceUpdate(np *networkPolicy, gp *gre
 	return err
 }
 
-// requeuePeerNamespaces enqueues the namespace into network policy peer namespace
+// requeuePeerNamespace enqueues the namespace into network policy peer namespace
 // retry framework object(s) which need to be retried immediately with add event.
-func (bnc *BaseNetworkController) requeuePeerNamespaces(namespaces []string) error {
+func (bnc *BaseNetworkController) requeuePeerNamespace(namespace *corev1.Namespace) error {
 	var errors []error
-	var peerNamespaces []*corev1.Namespace
-	for _, ns := range namespaces {
-		namespace, err := bnc.watchFactory.GetNamespace(ns)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to retrieve namespace %s for reconciling network %s: %w",
-				ns, bnc.GetNetworkName(), err))
-			continue
-		}
-		peerNamespaces = append(peerNamespaces, namespace)
-	}
 	npKeys := bnc.networkPolicies.GetKeys()
 	for _, npKey := range npKeys {
 		err := bnc.networkPolicies.DoWithLock(npKey, func(npKey string) error {
@@ -1519,26 +1509,23 @@ func (bnc *BaseNetworkController) requeuePeerNamespaces(namespaces []string) err
 			}
 			np.RLock()
 			defer np.RUnlock()
+			if np.deleted {
+				return nil
+			}
 			var errors []error
 			for _, reconcilePeerNamespace := range np.reconcilePeerNamespaces {
-				namespaceAdded := false
-				for _, namespace := range peerNamespaces {
-					// Filter out namespace when it's labels not matching with network policy peer namespace
-					// selector.
-					if !reconcilePeerNamespace.handler.FilterFunc(namespace) {
-						continue
-					}
-					err := reconcilePeerNamespace.retryFramework.AddRetryObjWithAddNoBackoff(namespace)
-					if err != nil {
-						errors = append(errors, fmt.Errorf("failed to retry peer namespace %s for network policy %s on network %s: %w",
-							namespace.Name, npKey, bnc.GetNetworkName(), err))
-						continue
-					}
-					namespaceAdded = true
+				// Filter out namespace when it's labels not matching with network policy peer namespace
+				// selector.
+				if !reconcilePeerNamespace.handler.FilterFunc(namespace) {
+					continue
 				}
-				if namespaceAdded {
-					reconcilePeerNamespace.retryFramework.RequestRetryObjs()
+				err := reconcilePeerNamespace.retryFramework.AddRetryObjWithAddNoBackoff(namespace)
+				if err != nil {
+					errors = append(errors, fmt.Errorf("failed to retry peer namespace %s for network policy %s on network %s: %w",
+						namespace.Name, npKey, bnc.GetNetworkName(), err))
+					continue
 				}
+				reconcilePeerNamespace.retryFramework.RequestRetryObjs()
 			}
 			return utilerrors.Join(errors...)
 		})
@@ -1587,11 +1574,13 @@ func (bnc *BaseNetworkController) addPeerNamespaceHandler(
 	// a new peer namespace is newly created later under UDN network, it gets reconciled and
 	// address set is created for the namespace. so we must reconcile it for network policy
 	// as well to update gress policy ACL with matching peer namespace address set.
-	np.Lock()
-	np.reconcilePeerNamespaces = append(np.reconcilePeerNamespaces,
-		&peerNamespacesRetry{retryFramework: retryPeerNamespaces,
-			handler: namespaceHandler})
-	np.Unlock()
+	if bnc.IsPrimaryNetwork() {
+		np.Lock()
+		np.reconcilePeerNamespaces = append(np.reconcilePeerNamespaces,
+			&peerNamespacesRetry{retryFramework: retryPeerNamespaces,
+				handler: namespaceHandler})
+		np.Unlock()
+	}
 
 	return nil
 }
