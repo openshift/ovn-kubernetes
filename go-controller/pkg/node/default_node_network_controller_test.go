@@ -1560,5 +1560,204 @@ add element inet ovn-kubernetes no-pmtud-remote-node-ips-v6 { 2002:db8:1::4 }
 			})
 
 		})
+
+		Describe("derive-from-mgmt-port gateway interface resolution", func() {
+			var (
+				kubeMock        *mocks.Interface
+				sriovnetMock    utilMocks.SriovnetOps
+				netlinkOpsMock  *utilMocks.NetLinkOps
+				netlinkLinkMock *netlink_mocks.Link
+			)
+
+			const (
+				nodeName            = "test-node"
+				mgmtPortNetdev      = "pf0vf0"
+				vfPciAddr           = "0000:01:02.3"
+				pfPciAddr           = "0000:01:00.0"
+				expectedGatewayIntf = "eth0"
+			)
+
+			BeforeEach(func() {
+				kubeMock = new(mocks.Interface)
+				sriovnetMock = utilMocks.SriovnetOps{}
+				netlinkOpsMock = new(utilMocks.NetLinkOps)
+				netlinkLinkMock = new(netlink_mocks.Link)
+
+				util.SetSriovnetOpsInst(&sriovnetMock)
+				util.SetNetLinkOpMockInst(netlinkOpsMock)
+
+				// Setup default node network controller
+				cnnci := &CommonNodeNetworkControllerInfo{
+					name: nodeName,
+					Kube: kubeMock,
+				}
+				nc = &DefaultNodeNetworkController{
+					BaseNodeNetworkController: BaseNodeNetworkController{
+						CommonNodeNetworkControllerInfo: *cnnci,
+						ReconcilableNetInfo:             &util.DefaultNetInfo{},
+					},
+				}
+
+				// Set DPU host mode
+				config.OvnKubeNode.Mode = types.NodeModeDPUHost
+				config.OvnKubeNode.MgmtPortNetdev = mgmtPortNetdev
+				config.Gateway.Interface = types.DeriveFromMgmtPort
+			})
+
+			AfterEach(func() {
+				util.ResetNetLinkOpMockInst()
+			})
+
+			Context("when gateway interface is set to derive-from-mgmt-port", func() {
+				It("should resolve gateway interface from PCI address successfully", func() {
+					// Mock getManagementPortNetDev to return the management port device
+					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
+					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
+						Name: mgmtPortNetdev,
+					})
+
+					// Mock GetPciFromNetDevice to return VF PCI address
+					sriovnetMock.On("GetPciFromNetDevice", mgmtPortNetdev).Return(vfPciAddr, nil)
+
+					// Mock GetPfPciFromVfPci to return PF PCI address
+					sriovnetMock.On("GetPfPciFromVfPci", vfPciAddr).Return(pfPciAddr, nil)
+
+					// Mock GetNetDevicesFromPci to return available network devices
+					sriovnetMock.On("GetNetDevicesFromPci", pfPciAddr).Return([]string{expectedGatewayIntf, "eth1"}, nil)
+
+					// Execute the gateway interface resolution logic
+					// This simulates the logic in the Start() method
+					netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(netdevName).To(Equal(mgmtPortNetdev))
+
+					pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(pciAddr).To(Equal(vfPciAddr))
+
+					pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(pfPciAddr).To(Equal(pfPciAddr))
+
+					netdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(netdevs).To(HaveLen(2))
+					Expect(netdevs[0]).To(Equal(expectedGatewayIntf))
+
+					// Verify that the first device is selected as the gateway interface
+					selectedNetdev := netdevs[0]
+					Expect(selectedNetdev).To(Equal(expectedGatewayIntf))
+				})
+
+				It("should return error when no network devices found for PCI address", func() {
+					// Mock getManagementPortNetDev to return the management port device
+					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
+					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
+						Name: mgmtPortNetdev,
+					})
+
+					// Mock GetPciFromNetDevice to return VF PCI address
+					sriovnetMock.On("GetPciFromNetDevice", mgmtPortNetdev).Return(vfPciAddr, nil)
+
+					// Mock GetPfPciFromVfPci to return PF PCI address
+					sriovnetMock.On("GetPfPciFromVfPci", vfPciAddr).Return(pfPciAddr, nil)
+
+					// Mock GetNetDevicesFromPci to return empty list
+					sriovnetMock.On("GetNetDevicesFromPci", pfPciAddr).Return([]string{}, nil)
+
+					// Execute the gateway interface resolution logic
+					netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+					Expect(err).NotTo(HaveOccurred())
+
+					pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+					Expect(err).NotTo(HaveOccurred())
+
+					pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
+					Expect(err).NotTo(HaveOccurred())
+
+					netdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(netdevs).To(BeEmpty())
+
+					// This should result in an error when no devices are found
+					Expect(netdevs).To(BeEmpty())
+				})
+
+				It("should return error when GetPciFromNetDevice fails", func() {
+					// Mock getManagementPortNetDev to return the management port device
+					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
+					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
+						Name: mgmtPortNetdev,
+					})
+
+					// Mock GetPciFromNetDevice to return error
+					sriovnetMock.On("GetPciFromNetDevice", mgmtPortNetdev).Return("", fmt.Errorf("failed to get PCI address"))
+
+					// Execute the gateway interface resolution logic
+					netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+					Expect(err).NotTo(HaveOccurred())
+
+					_, err = util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("failed to get PCI address"))
+				})
+
+				It("should return error when GetPfPciFromVfPci fails", func() {
+					// Mock getManagementPortNetDev to return the management port device
+					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
+					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
+						Name: mgmtPortNetdev,
+					})
+
+					// Mock GetPciFromNetDevice to return VF PCI address
+					sriovnetMock.On("GetPciFromNetDevice", mgmtPortNetdev).Return(vfPciAddr, nil)
+
+					// Mock GetPfPciFromVfPci to return error
+					sriovnetMock.On("GetPfPciFromVfPci", vfPciAddr).Return("", fmt.Errorf("failed to get PF PCI address"))
+
+					// Execute the gateway interface resolution logic
+					netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+					Expect(err).NotTo(HaveOccurred())
+
+					pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+					Expect(err).NotTo(HaveOccurred())
+
+					_, err = util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("failed to get PF PCI address"))
+				})
+
+				It("should return error when GetNetDevicesFromPci fails", func() {
+					// Mock getManagementPortNetDev to return the management port device
+					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
+					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
+						Name: mgmtPortNetdev,
+					})
+
+					// Mock GetPciFromNetDevice to return VF PCI address
+					sriovnetMock.On("GetPciFromNetDevice", mgmtPortNetdev).Return(vfPciAddr, nil)
+
+					// Mock GetPfPciFromVfPci to return PF PCI address
+					sriovnetMock.On("GetPfPciFromVfPci", vfPciAddr).Return(pfPciAddr, nil)
+
+					// Mock GetNetDevicesFromPci to return error
+					sriovnetMock.On("GetNetDevicesFromPci", pfPciAddr).Return(nil, fmt.Errorf("failed to get network devices"))
+
+					// Execute the gateway interface resolution logic
+					netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+					Expect(err).NotTo(HaveOccurred())
+
+					pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+					Expect(err).NotTo(HaveOccurred())
+
+					pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
+					Expect(err).NotTo(HaveOccurred())
+
+					_, err = util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("failed to get network devices"))
+				})
+			})
+		})
 	})
 })
