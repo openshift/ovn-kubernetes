@@ -18,7 +18,7 @@ type minimalCrictlImages struct {
 func ImageIDByImageURL(desiredImage, jsonData string) (string, error) {
 	var imagesData minimalCrictlImages
 	if err := json.Unmarshal([]byte(jsonData), &imagesData); err != nil {
-		return "", fmt.Errorf("failed to parse crictl JSON: %w", err)
+		return "", fmt.Errorf("failed to parse crictl JSON: %w, %q", err, jsonData)
 	}
 
 	for _, img := range imagesData.Images {
