@@ -252,7 +252,7 @@ func (ec ExternalContainer) IsValidPreCreateContainer() (bool, error) {
 	if len(errs) == 0 {
 		return true, nil
 	}
-	return false, condenseErrors(errs)
+	return false, CondenseErrors(errs)
 }
 
 func (ec ExternalContainer) IsValidPostCreate() (bool, error) {
@@ -263,7 +263,7 @@ func (ec ExternalContainer) IsValidPostCreate() (bool, error) {
 	if len(errs) == 0 {
 		return true, nil
 	}
-	return false, condenseErrors(errs)
+	return false, CondenseErrors(errs)
 }
 
 func (ec ExternalContainer) IsValidPreDelete() (bool, error) {
@@ -275,7 +275,7 @@ func (ec ExternalContainer) IsValidPreDelete() (bool, error) {
 
 var NotFound = fmt.Errorf("not found")
 
-func condenseErrors(errs []error) error {
+func CondenseErrors(errs []error) error {
 	switch len(errs) {
 	case 0:
 		return nil
