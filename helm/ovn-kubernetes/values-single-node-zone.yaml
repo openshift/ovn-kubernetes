@@ -72,6 +72,8 @@ global:
   enableMulticast: ""
   # -- Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes
   enableMultiNetwork: false
+  # -- Configure to use user defined networks (UDN) feature with ovn-kubernetes
+  enableNetworkSegmentation: false
   # -- Configure to enable IPsec
   enableIpsec: false
   # -- Use SSL transport to NB/SB db and northd
@@ -152,10 +154,6 @@ global:
     tag: master
     # -- Image pull policy
     pullPolicy: IfNotPresent
-
-ovnkube-identity:
-    # -- number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes
-    replicas: 1
 
 # -- prometheus monitoring related fields
 monitoring:
