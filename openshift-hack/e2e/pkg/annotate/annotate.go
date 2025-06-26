@@ -18,7 +18,7 @@ var reHasSig = regexp.MustCompile(`\[sig-[\w-]+\]`)
 // Run generates tests annotations for the targeted package.
 // It accepts testMaps which defines labeling rules and filter
 // function to remove elements based on test name and their labels.
-func Run(testMaps map[string][]string, filter func(name string) bool) {
+func Run(testMaps map[string]testFilter, filter func(name string) bool) {
 	var errors []string
 
 	if len(os.Args) != 2 && len(os.Args) != 3 {
@@ -97,16 +97,18 @@ func init() {
 	}
 }
 
-func newGenerator(testMaps map[string][]string) *ginkgoTestRenamer {
+func newGenerator(testMaps map[string]testFilter) *ginkgoTestRenamer {
 	var allLabels []string
 	matches := make(map[string]*regexp.Regexp)
 	stringMatches := make(map[string][]string)
+	labelMatches := make(map[string][]string)
 
 	for label, items := range testMaps {
-		sort.Strings(items)
+		sort.Strings(items.descriptions)
+		sort.Strings(items.labels)
 		allLabels = append(allLabels, label)
 		var remain []string
-		for _, item := range items {
+		for _, item := range items.descriptions {
 			re := regexp.MustCompile(item)
 			if p, ok := re.LiteralPrefix(); ok {
 				stringMatches[label] = append(stringMatches[label], p)
@@ -117,6 +119,8 @@ func newGenerator(testMaps map[string][]string) *ginkgoTestRenamer {
 		if len(remain) > 0 {
 			matches[label] = regexp.MustCompile(strings.Join(remain, `|`))
 		}
+		// Store the ginkgo labels for direct matching
+		labelMatches[label] = items.labels
 	}
 	sort.Strings(allLabels)
 
@@ -126,6 +130,7 @@ func newGenerator(testMaps map[string][]string) *ginkgoTestRenamer {
 		allLabels:           allLabels,
 		stringMatches:       stringMatches,
 		matches:             matches,
+		labelMatches:        labelMatches,
 		excludedTestsFilter: excludedTestsFilter,
 		output:              make(map[string]string),
 	}
@@ -148,6 +153,8 @@ type ginkgoTestRenamer struct {
 	// regular expression excluding permanently a set of tests
 	// see ExcludedTests in openshift-hack/e2e/annotate/rules.go
 	excludedTestsFilter *regexp.Regexp
+	// ginkgo labels for direct matching
+	labelMatches map[string][]string
 
 	// output from the generateRename and also input for updateNodeText
 	output map[string]string
@@ -173,6 +180,9 @@ func (r *ginkgoTestRenamer) generateRename(name string, node types.TestSpec) {
 	}
 	newName += name
 
+	// Get the ginkgo labels from the test node
+	ginkgoLabels := node.Labels()
+
 	for {
 		count := 0
 		for _, label := range r.allLabels {
@@ -185,10 +195,27 @@ func (r *ginkgoTestRenamer) generateRename(name string, node types.TestSpec) {
 			}
 
 			var hasLabel bool
-			for _, segment := range r.stringMatches[label] {
-				hasLabel = strings.Contains(newName, segment)
+
+			// Check against ginkgo labels first
+			for _, ginkgoLabel := range ginkgoLabels {
+				for _, targetLabel := range r.labelMatches[label] {
+					if string(ginkgoLabel) == targetLabel {
+						hasLabel = true
+						break
+					}
+				}
 				if hasLabel {
 					break
+				}
+			}
+
+			// If not found in ginkgo labels, check against test name patterns
+			if !hasLabel {
+				for _, segment := range r.stringMatches[label] {
+					hasLabel = strings.Contains(newName, segment)
+					if hasLabel {
+						break
+					}
 				}
 			}
 			if !hasLabel {
@@ -212,6 +239,7 @@ func (r *ginkgoTestRenamer) generateRename(name string, node types.TestSpec) {
 	if !r.excludedTestsFilter.MatchString(newName) && !strings.Contains(newName, "[Suite:") {
 		isSerial := strings.Contains(newName, "[Serial]")
 		isConformance := strings.Contains(newName, "[Conformance]")
+		isVirtualization := strings.Contains(newName, "[Virtualization]")
 		switch {
 		case isSerial && isConformance:
 			newLabels += "[Suite:openshift/conformance/serial/minimal]"
@@ -219,6 +247,8 @@ func (r *ginkgoTestRenamer) generateRename(name string, node types.TestSpec) {
 			newLabels += "[Suite:openshift/conformance/serial]"
 		case isConformance:
 			newLabels += "[Suite:openshift/conformance/parallel/minimal]"
+		case isVirtualization:
+			newLabels += "[Suite:openshift/network/virtualization]"
 		default:
 			newLabels += "[Suite:openshift/conformance/parallel]"
 		}
