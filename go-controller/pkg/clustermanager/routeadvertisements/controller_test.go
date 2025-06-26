@@ -558,7 +558,7 @@ func TestController_reconcile(t *testing.T) {
 			expectNADAnnotations: map[string]map[string]string{"blue": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
-			name: "(layer2) reconciles eip RouteAdvertisement for a single FRR config, node, non default networks and non default target VRF",
+			name: "(layer2) fails to reconcile eip RouteAdvertisement for a single FRR config, node, non default networks and non default target VRF",
 			ra:   &testRA{Name: "ra", TargetVRF: "green", AdvertiseEgressIPs: true, NetworkSelector: map[string]string{"selected": "true"}},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -589,20 +589,11 @@ func TestController_reconcile(t *testing.T) {
 				{Name: "eip2", EIPs: map[string]string{"node": "1.0.1.4"}, NamespaceSelector: map[string]string{"selected": "black"}},      // namespace served by unselected network, ignored
 				{Name: "eip3", EIPs: map[string]string{"node": "1.0.1.5"}, NamespaceSelector: map[string]string{"selected": "green"}},
 			},
-			reconcile:            "ra",
-			expectAcceptedStatus: metav1.ConditionTrue,
-			expectFRRConfigs: []*testFRRConfig{
-				{
-					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
-					Routers: []*testRouter{
-						{ASN: 1, VRF: "green", Prefixes: []string{"1.0.1.5/32", "172.100.0.17/32"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.5/32", "172.100.0.17/32"}},
-						}},
-					}},
-			},
-			expectNADAnnotations: map[string]map[string]string{"green": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+			reconcile: "ra",
+			// EgressIP advertisements for Layer2 UDNs is not supported yet.
+			expectAcceptedStatus: metav1.ConditionFalse,
+			expectFRRConfigs:     []*testFRRConfig{},
+			expectNADAnnotations: map[string]map[string]string{"green": {}},
 		},
 		{
 			name: "reconciles a RouteAdvertisement updating the generated FRRConfigurations if needed",

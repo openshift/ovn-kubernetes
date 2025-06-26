@@ -6,14 +6,14 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 
 - 20 GB of free space in root file system
 - Docker run time or podman
-- [KIND]( https://kubernetes.io/docs/setup/learning-environment/kind/ )
+- [KIND](https://kubernetes.io/docs/setup/learning-environment/kind/)
    - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
    - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.yaml) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
 
       ```
       sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
       ```
-- [kubectl]( https://kubernetes.io/docs/tasks/tools/install-kubectl/ )
+- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - Python and pip
 - jq
 - openssl
@@ -129,6 +129,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-cl |--ovn-loglevel-controller <loglevel>] [-me|--multicast-enabled]
                  [-ep |--experimental-provider <name>] |
                  [-eb |--egress-gw-separate-bridge]
+                 [-nqe|--network-qos-enable]
                  [-h]]
 
 -cf  | --config-file                Name of the KIND J2 configuration file.
@@ -170,6 +171,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'.
 -ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
 -eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge.
+-nqe | --network-qos-enable         Enable network QoS. DEFAULT: Disabled.
 -lr  |--local-kind-registry         Will start and connect a kind local registry to push/retrieve images
 --delete                      	    Delete current cluster
 --deploy                      	    Deploy ovn kubernetes without restarting kind
@@ -322,7 +324,7 @@ $ cd ../dist/images/
 $ make fedora-image
 
 $ cd ../../contrib/
-$ KIND_IPV4_SUPPORT=false KIND_IPV6_SUPPORT=true ./kind.sh
+$ PLATFORM_IPV4_SUPPORT=false PLATFORM_IPV6_SUPPORT=true ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -426,7 +428,7 @@ $ cd ../dist/images/
 $ make fedora-image
 
 $ cd ../../contrib/
-$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.32.3 ./kind.sh
+$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.32.3 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
