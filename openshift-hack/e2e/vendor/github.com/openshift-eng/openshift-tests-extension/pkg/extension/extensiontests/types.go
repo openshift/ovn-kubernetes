@@ -1,9 +1,8 @@
 package extensiontests
 
 import (
-	"k8s.io/apimachinery/pkg/util/sets"
-
 	"github.com/openshift-eng/openshift-tests-extension/pkg/dbtime"
+	"github.com/openshift-eng/openshift-tests-extension/pkg/util/sets"
 )
 
 type Lifecycle string
@@ -31,6 +30,9 @@ type ExtensionTestSpec struct {
 
 	// Source is the origin of the test.
 	Source string `json:"source"`
+
+	// CodeLocations are the files where the spec originates from.
+	CodeLocations []string `json:"codeLocations,omitempty"`
 
 	// Lifecycle informs the executor whether the test is informing only, and should not cause the
 	// overall job run to fail, or if it's blocking where a failure of the test is fatal.

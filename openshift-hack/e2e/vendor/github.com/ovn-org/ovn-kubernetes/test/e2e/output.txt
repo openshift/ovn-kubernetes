@@ -1,0 +1,77 @@
+Summarizing 28 Failures:                                                                                                                                                                                           
+  [FAIL] Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge [It] can be reached by a client pod in the default network on a diffe
+rent node [BUG, OCPBUGS-43004]                                                                                                                                                                                     
+  /root/ovn-kubernetes/test/e2e/multihoming.go:319                                                                                                                                                                 
+  [FAIL] Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge [It] can be reached by a client pod in the default network on the sam
+e node [BUG, OCPBUGS-43004]                                                                                                                                                                                        
+  /root/ovn-kubernetes/test/e2e/multihoming.go:319                                                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] correctly sets the MTU on the pod      
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] can communicate over a localnet seconda
+ry network from pod to the underlay service                                                                                                                                                                        
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] and networkAttachmentDefinition is modi
+fied sets the new MTU on the pod after NetworkAttachmentDefinition reconcile                                                                                                                                       
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] and networkAttachmentDefinition is modi
+fied allocates the pod's secondary interface IP in the new range after NetworkAttachmentDefinition reconcile                                                                                                       
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] and networkAttachmentDefinition is modi
+fied can no longer communicate over a localnet secondary network from pod to the underlay service                                                                                                                  
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] and networkAttachmentDefinition is modi
+fied and the service connected to the underlay is reconfigured to connect to the new VLAN-ID can now communicate over a localnet secondary network from pod to the underlay service                                
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] with multi network policy blocking the 
+traffic can not communicate over a localnet secondary network from pod to the underlay service                                                                                                                     
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] when a policy is provisioned can commun
+icate over a localnet secondary network from pod to gw ingress denyall, egress allow all, ingress policy should have no impact on egress                                                                           
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] when a policy is provisioned can commun
+icate over a localnet secondary network from pod to gw egress allow all                                  
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207                                                                                                                                 
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a service running on the underlay [BeforeEach] when a policy is provisioned can commun
+icate over a localnet secondary network from pod to gw egress deny all
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a trunked configuration [BeforeEach] the same bridge mapping can be shared by a separa
+te VLAN by using the physical network name attribute 
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using pod selectors for a pure L2 overlay
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using pod selectors and port range for a pure L2 overlay
+   /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207
+  [PANICKED!] Multi Homing multiple pods connected to the same OVN-K secondary network localnet OVN-K secondary network with a trunked configuration [BeforeEach] the same bridge mapping can be shared by a separate VLAN by using the physical network name attribute
+  /root/ovn-kubernetes/test/e2e/infraprovider/providers/openshift/openshift.go:207
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using pod selectors for a pure L2 overlay
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using pod selectors and port range for a pure L2 overlay
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using pod selectors for a routed topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using pod selectors for a localnet topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using IPBlock for a pure L2 overlay
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using IPBlock for a routed topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using IPBlock for a localnet topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using namespace selectors for a pure L2 overlay
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using namespace selectors for a routed topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using namespace selectors for a localnet topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that configure traffic allow lists [It] using IPBlock for an IPAMless pure L2 overlay
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1362
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that allow all ingress [It] using ingress allow-all for a localnet topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1774
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that allow all ingress [It] using egress deny-all, ingress allow-all for a localnet topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1774
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that deny traffic [It] using ingress deny-all for a localnet topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1902
+  [FAIL] Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that deny traffic [It] using pod selectors and wrong port range for a localnet topology
+  /root/ovn-kubernetes/test/e2e/multihoming.go:1902
+
+

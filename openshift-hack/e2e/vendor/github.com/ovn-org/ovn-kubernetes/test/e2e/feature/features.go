@@ -1,24 +1,31 @@
 package feature
 
-import "github.com/ovn-org/ovn-kubernetes/test/e2e/label"
+import (
+	"github.com/onsi/ginkgo/v2"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/label"
+)
 
 var (
-	Service               = label.NewFeature("Service")
-	NetworkPolicy         = label.NewFeature("NetworkPolicy")
-	AdminNetworkPolicy    = label.NewFeature("AdminNetworkPolicy")
-	BaselineNetworkPolicy = label.NewFeature("BaselineNetworkPolicy")
-	NetworkSegmentation   = label.NewFeature("NetworkSegmentation")
-	EgressIP              = label.NewFeature("EgressIP")
-	EgressService         = label.NewFeature("EgressService")
-	EgressFirewall        = label.NewFeature("EgressFirewall")
-	EgressQos             = label.NewFeature("EgressQos")
-	ExternalGateway       = label.NewFeature("ExternalGateway")
-	DisablePacketMTUCheck = label.NewFeature("DisablePacketMTUCheck")
-	VirtualMachineSupport = label.NewFeature("VirtualMachineSupport")
-	Interconnect          = label.NewFeature("Interconnect")
-	Multicast             = label.NewFeature("Multicast")
-	MultiHoming           = label.NewFeature("MultiHoming")
-	NodeIPMACMigration    = label.NewFeature("NodeIPMACMigration")
-	OVSCPUPin             = label.NewFeature("OVSCPUPin")
-	Unidle                = label.NewFeature("Unidle")
+	Service               = New("Service")
+	NetworkPolicy         = New("NetworkPolicy")
+	AdminNetworkPolicy    = New("AdminNetworkPolicy")
+	BaselineNetworkPolicy = New("BaselineNetworkPolicy")
+	NetworkSegmentation   = New("NetworkSegmentation")
+	EgressIP              = New("EgressIP")
+	EgressService         = New("EgressService")
+	EgressFirewall        = New("EgressFirewall")
+	EgressQos             = New("EgressQos")
+	ExternalGateway       = New("ExternalGateway")
+	DisablePacketMTUCheck = New("DisablePacketMTUCheck")
+	VirtualMachineSupport = New("VirtualMachineSupport")
+	Interconnect          = New("Interconnect")
+	Multicast             = New("Multicast")
+	MultiHoming           = New("MultiHoming")
+	NodeIPMACMigration    = New("NodeIPMACMigration")
+	OVSCPUPin             = New("OVSCPUPin")
+	Unidle                = New("Unidle")
 )
+
+func New(name string) ginkgo.Labels {
+	return label.New("Feature", name).GinkgoLabel()
+}

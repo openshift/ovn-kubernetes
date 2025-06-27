@@ -18,21 +18,26 @@ limitations under the License.
 package v1
 
 import (
-	"net/http"
+	http "net/http"
 
-	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
+	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 
 type K8sV1Interface interface {
 	RESTClient() rest.Interface
+	ClusterUserDefinedNetworksGetter
 	UserDefinedNetworksGetter
 }
 
 // K8sV1Client is used to interact with features provided by the k8s.ovn.org group.
 type K8sV1Client struct {
 	restClient rest.Interface
+}
+
+func (c *K8sV1Client) ClusterUserDefinedNetworks() ClusterUserDefinedNetworkInterface {
+	return newClusterUserDefinedNetworks(c)
 }
 
 func (c *K8sV1Client) UserDefinedNetworks(namespace string) UserDefinedNetworkInterface {
@@ -84,10 +89,10 @@ func New(c rest.Interface) *K8sV1Client {
 }
 
 func setConfigDefaults(config *rest.Config) error {
-	gv := v1.SchemeGroupVersion
+	gv := userdefinednetworkv1.SchemeGroupVersion
 	config.GroupVersion = &gv
 	config.APIPath = "/apis"
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+	config.NegotiatedSerializer = rest.CodecFactoryForGeneratedClient(scheme.Scheme, scheme.Codecs).WithoutConversion()
 
 	if config.UserAgent == "" {
 		config.UserAgent = rest.DefaultKubernetesUserAgent()

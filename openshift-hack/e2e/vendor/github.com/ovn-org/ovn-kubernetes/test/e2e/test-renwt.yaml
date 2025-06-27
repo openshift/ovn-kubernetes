@@ -1,0 +1,21 @@
+
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: localnet-test-mcjwf
+spec:
+  namespaceSelector:
+    matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: In
+      values: [ blue-nqzdg,red-8ggpm]
+  network:
+    topology: Localnet
+    localnet:
+      role: Secondary
+      physicalNetworkName: localnet1-f7sb6
+      subnets: [192.168.100.0/24,2001:dbb::/64]
+      excludeSubnets: [192.168.100.0/29,2001:dbb::/120]
+      vlan:
+        mode: Access
+        access: {id: 200}

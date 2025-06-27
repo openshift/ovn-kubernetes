@@ -18,18 +18,18 @@ limitations under the License.
 package v1
 
 import (
-	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 )
 
-// EgressFirewallRuleApplyConfiguration represents an declarative configuration of the EgressFirewallRule type for use
+// EgressFirewallRuleApplyConfiguration represents a declarative configuration of the EgressFirewallRule type for use
 // with apply.
 type EgressFirewallRuleApplyConfiguration struct {
-	Type  *v1.EgressFirewallRuleType                   `json:"type,omitempty"`
+	Type  *egressfirewallv1.EgressFirewallRuleType     `json:"type,omitempty"`
 	Ports []EgressFirewallPortApplyConfiguration       `json:"ports,omitempty"`
 	To    *EgressFirewallDestinationApplyConfiguration `json:"to,omitempty"`
 }
 
-// EgressFirewallRuleApplyConfiguration constructs an declarative configuration of the EgressFirewallRule type for use with
+// EgressFirewallRuleApplyConfiguration constructs a declarative configuration of the EgressFirewallRule type for use with
 // apply.
 func EgressFirewallRule() *EgressFirewallRuleApplyConfiguration {
 	return &EgressFirewallRuleApplyConfiguration{}
@@ -38,7 +38,7 @@ func EgressFirewallRule() *EgressFirewallRuleApplyConfiguration {
 // WithType sets the Type field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Type field is set to the value of the last call.
-func (b *EgressFirewallRuleApplyConfiguration) WithType(value v1.EgressFirewallRuleType) *EgressFirewallRuleApplyConfiguration {
+func (b *EgressFirewallRuleApplyConfiguration) WithType(value egressfirewallv1.EgressFirewallRuleType) *EgressFirewallRuleApplyConfiguration {
 	b.Type = &value
 	return b
 }
