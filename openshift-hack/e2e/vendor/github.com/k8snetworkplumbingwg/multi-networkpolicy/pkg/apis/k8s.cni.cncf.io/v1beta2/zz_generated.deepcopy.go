@@ -215,7 +215,7 @@ func (in *MultiNetworkPolicyPort) DeepCopyInto(out *MultiNetworkPolicyPort) {
 	}
 	if in.EndPort != nil {
 		in, out := &in.EndPort, &out.EndPort
-		*out = new(int)
+		*out = new(int32)
 		**out = **in
 	}
 	return

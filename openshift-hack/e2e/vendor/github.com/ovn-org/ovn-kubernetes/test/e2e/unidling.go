@@ -10,10 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/ginkgo_wrapper"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,7 +38,7 @@ const (
 // Validate that Services with the well-known annotation k8s.ovn.org/idled-at
 // generate a NeedPods Event if the service doesn´t have endpoints and
 // OVN EmptyLB-Backends feature is enabled
-var _ = ginkgo_wrapper.Describe(feature.Unidle, func() {
+var _ = ginkgo.Describe("Unidling", feature.Unidle, func() {
 
 	const (
 		serviceName       = "empty-service"
@@ -70,7 +71,8 @@ var _ = ginkgo_wrapper.Describe(feature.Unidle, func() {
 
 		// Add a backend pod to the service in one node
 		ginkgo.By("creating a backend pod for the service " + serviceName)
-		serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: 9376}}, "serve-hostname")
+		serverPodPort := infraprovider.Get().GetK8HostPort()
+		serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: int32(serverPodPort)}}, "serve-hostname")
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.NodeName = nodeName
 		e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)

@@ -13,14 +13,15 @@ import (
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-
 	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
-	"k8s.io/klog/v2"
 
+	"k8s.io/apimachinery/pkg/api/validation"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 
@@ -36,6 +37,9 @@ const DefaultAPIServer = "http://localhost:8443"
 const DefaultVXLANPort = 4789
 
 const DefaultDBTxnTimeout = time.Second * 100
+
+// DefaultEphemeralPortRange is used for unit testing only
+const DefaultEphemeralPortRange = "32768-60999"
 
 // The following are global config parameters that other modules may access directly
 var (
@@ -60,20 +64,20 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:                       1400,
-		ConntrackZone:             64000,
-		EncapType:                 "geneve",
-		EncapIP:                   "",
-		EncapPort:                 DefaultEncapPort,
-		InactivityProbe:           100000, // in Milliseconds
-		OpenFlowProbe:             180,    // in Seconds
-		OfctrlWaitBeforeClear:     0,      // in Milliseconds
-		MonitorAll:                true,
-		OVSDBTxnTimeout:           DefaultDBTxnTimeout,
-		LFlowCacheEnable:          true,
-		RawClusterSubnets:         "10.128.0.0/14/23",
-		Zone:                      types.OvnDefaultZone,
-		UDNAllowedDefaultServices: *cli.NewStringSlice("default/kubernetes", "kube-system/kube-dns"),
+		MTU:                          1400,
+		ConntrackZone:                64000,
+		EncapType:                    "geneve",
+		EncapIP:                      "",
+		EncapPort:                    DefaultEncapPort,
+		InactivityProbe:              100000, // in Milliseconds
+		OpenFlowProbe:                0,      // in Milliseconds
+		OfctrlWaitBeforeClear:        0,      // in Milliseconds
+		MonitorAll:                   true,
+		OVSDBTxnTimeout:              DefaultDBTxnTimeout,
+		LFlowCacheEnable:             true,
+		RawClusterSubnets:            "10.128.0.0/14/23",
+		Zone:                         types.OvnDefaultZone,
+		RawUDNAllowedDefaultServices: "default/kubernetes,kube-system/kube-dns",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -232,9 +236,11 @@ type DefaultConfig struct {
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
 	EncapType string `gcfg:"encap-type"`
-	// The IP address of the encapsulation endpoint. If not specified, the IP address the
-	// NodeName resolves to will be used
+	// Configured IP address of the encapsulation endpoint.
 	EncapIP string `gcfg:"encap-ip"`
+	// Effective encap IP. It may be different from EncapIP if EncapIP meant to be
+	// the node's primary IP which can be updated when node's primary IP changes.
+	EffectiveEncapIP string
 	// The UDP Port of the encapsulation endpoint. If not specified, the IP default port
 	// of 6081 will be used
 	EncapPort uint `gcfg:"encap-port"`
@@ -283,9 +289,13 @@ type DefaultConfig struct {
 	// Zone name to which ovnkube-node/ovnkube-controller belongs to
 	Zone string `gcfg:"zone"`
 
+	// RawUDNAllowedDefaultServices holds the unparsed UDNAllowedDefaultServices. Should only be
+	// used inside config module.
+	RawUDNAllowedDefaultServices string `gcfg:"udn-allowed-default-services"`
+
 	// UDNAllowedDefaultServices holds a list of namespaced names of
 	// default cluster network services accessible from primary user-defined networks
-	UDNAllowedDefaultServices cli.StringSlice `gcfg:"udn-allowed-default-services"`
+	UDNAllowedDefaultServices []string
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -413,14 +423,19 @@ type OVNKubernetesFeatureConfig struct {
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
-	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
-	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
-	EnableInterconnect              bool `gcfg:"enable-interconnect"`
-	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
-	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
-	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
-	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
-	EnableObservability             bool `gcfg:"enable-observability"`
+	EnableRouteAdvertisements       bool `gcfg:"enable-route-advertisements"`
+	// This feature requires a kernel fix https://github.com/torvalds/linux/commit/7f3287db654395f9c5ddd246325ff7889f550286
+	// to work on a kind cluster. Flag allows to disable it for current CI, will be turned on when github runners have this fix.
+	DisableUDNHostIsolation      bool `gcfg:"disable-udn-host-isolation"`
+	EnableMultiNetworkPolicy     bool `gcfg:"enable-multi-networkpolicy"`
+	EnableStatelessNetPol        bool `gcfg:"enable-stateless-netpol"`
+	EnableInterconnect           bool `gcfg:"enable-interconnect"`
+	EnableMultiExternalGateway   bool `gcfg:"enable-multi-external-gateway"`
+	EnablePersistentIPs          bool `gcfg:"enable-persistent-ips"`
+	EnableDNSNameResolver        bool `gcfg:"enable-dns-name-resolver"`
+	EnableServiceTemplateSupport bool `gcfg:"enable-svc-template-support"`
+	EnableObservability          bool `gcfg:"enable-observability"`
+	EnableNetworkQoS             bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -441,7 +456,12 @@ type GatewayConfig struct {
 	Mode GatewayMode `gcfg:"mode"`
 	// Interface is the network interface to use for the gateway in "shared" mode
 	Interface string `gcfg:"interface"`
-	// Exgress gateway interface is the optional network interface to use for external gw pods traffic.
+	// GatewayAcceleratedInterface is the optional network interface to use for gateway traffic acceleration.
+	// This is typically a VF or SF device. When specified it would be used as the in_port for Openflow rules
+	// on the external bridge. The Host IP would be on this device.
+	// Should be used mutually exclusive to the `--gateway-interface` flag.
+	GatewayAcceleratedInterface string `gcfg:"gateway-accelerated-interface"`
+	// Egress gateway interface is the optional network interface to use for external gw pods traffic.
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
@@ -450,6 +470,7 @@ type GatewayConfig struct {
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
 	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+	// only applicable to the default network not for UDNs
 	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 	// V4JoinSubnet to be used in the cluster
 	V4JoinSubnet string `gcfg:"v4-join-subnet"`
@@ -476,6 +497,10 @@ type GatewayConfig struct {
 	DisableForwarding bool `gcfg:"disable-forwarding"`
 	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
+	// EphemeralPortRange is the range of ports used by egress SNAT operations in OVN. Specifically for NAT where
+	// the source IP of the NAT will be a shared Node IP address. If unset, the value will be determined by sysctl lookup
+	// for the kernel's ephemeral range: net.ipv4.ip_local_port_range. Format is "<min port>-<max port>".
+	EphemeralPortRange string `gfcg:"ephemeral-port-range"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -613,7 +638,7 @@ func init() {
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
 	savedClusterManager = ClusterManager
-	cli.VersionPrinter = func(c *cli.Context) {
+	cli.VersionPrinter = func(_ *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
 		fmt.Printf("Git branch: %s\n", Branch)
@@ -646,9 +671,18 @@ func PrepareTestConfig() error {
 	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
 	Default.OVSDBTxnTimeout = 5 * time.Second
+	if Gateway.Mode != GatewayModeDisabled {
+		Gateway.EphemeralPortRange = DefaultEphemeralPortRange
+	}
 
 	if err := completeConfig(); err != nil {
 		return err
+	}
+
+	// set klog level here as some tests will not call InitConfig
+	var level klog.Level
+	if err := level.Set(strconv.Itoa(Logging.Level)); err != nil {
+		return fmt.Errorf("failed to set klog log level %v", err)
 	}
 
 	// Don't pick up defaults from the environment
@@ -929,13 +963,13 @@ var CommonFlags = []cli.Flag{
 		Value:       Default.Zone,
 		Destination: &cliConfig.Default.Zone,
 	},
-	&cli.StringSliceFlag{
+	&cli.StringFlag{
 		Name: "udn-allowed-default-services",
 		Usage: "a list of namespaced names of default cluster network services accessible from primary" +
 			"user-defined networks. If not specified defaults to [\"default/kubernetes\", \"kube-system/kube-dns\"]." +
 			"Only used when enable-network-segmentation is set",
-		Value:       &Default.UDNAllowedDefaultServices,
-		Destination: &cliConfig.Default.UDNAllowedDefaultServices,
+		Value:       Default.RawUDNAllowedDefaultServices,
+		Destination: &cliConfig.Default.RawUDNAllowedDefaultServices,
 	},
 }
 
@@ -1053,10 +1087,22 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Value:       OVNKubernetesFeature.EnableMultiNetworkPolicy,
 	},
 	&cli.BoolFlag{
+		Name:        "disable-udn-host-isolation",
+		Usage:       "Configure to disable UDN host isolation with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.DisableUDNHostIsolation,
+		Value:       OVNKubernetesFeature.DisableUDNHostIsolation,
+	},
+	&cli.BoolFlag{
 		Name:        "enable-network-segmentation",
 		Usage:       "Configure to use network segmentation feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkSegmentation,
 		Value:       OVNKubernetesFeature.EnableNetworkSegmentation,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-route-advertisements",
+		Usage:       "Configure to use route advertisements feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableRouteAdvertisements,
+		Value:       OVNKubernetesFeature.EnableRouteAdvertisements,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-stateless-netpol",
@@ -1105,6 +1151,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use OVN sampling with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableObservability,
 		Value:       OVNKubernetesFeature.EnableObservability,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-network-qos",
+		Usage:       "Configure to use NetworkQoS CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkQoS,
+		Value:       OVNKubernetesFeature.EnableNetworkQoS,
 	},
 }
 
@@ -1377,6 +1429,13 @@ var OVNGatewayFlags = []cli.Flag{
 		Destination: &cliConfig.Gateway.Interface,
 	},
 	&cli.StringFlag{
+		Name: "gateway-accelerated-interface",
+		Usage: "The optional network interface to use for gateway traffic acceleration. " +
+			"This is typically a VF or SF device. When specified it would be used as the in_port for Openflow rules " +
+			"on the external bridge. The Host IP would be on this device.",
+		Destination: &cliConfig.Gateway.GatewayAcceleratedInterface,
+	},
+	&cli.StringFlag{
 		Name: "exgw-interface",
 		Usage: "The interface on nodes that will be used for external gw network traffic. " +
 			"If none specified, ovnk will use the default interface",
@@ -1459,6 +1518,14 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "allow-no-uplink",
 		Usage:       "Allow the external gateway bridge without an uplink port in local gateway mode",
 		Destination: &cliConfig.Gateway.AllowNoUplink,
+	},
+	&cli.StringFlag{
+		Name: "ephemeral-port-range",
+		Usage: "The port range in '<min port>-<max port>' format for OVN to use when SNAT'ing to a node IP. " +
+			"This range should not collide with the node port range being used in Kubernetes. If not provided, " +
+			"the default value will be derived from checking the sysctl value of net.ipv4.ip_local_port_range on the node.",
+		Destination: &cliConfig.Gateway.EphemeralPortRange,
+		Value:       Gateway.EphemeralPortRange,
 	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
@@ -1868,6 +1935,19 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		if !found {
 			return fmt.Errorf("invalid gateway mode %q: expect one of %s", string(Gateway.Mode), strings.Join(validModes, ","))
 		}
+
+		if len(Gateway.EphemeralPortRange) > 0 {
+			if !isValidEphemeralPortRange(Gateway.EphemeralPortRange) {
+				return fmt.Errorf("invalid ephemeral-port-range, should be in the format <min port>-<max port>")
+			}
+		} else {
+			// auto-detect ephermal range
+			portRange, err := getKernelEphemeralPortRange()
+			if err != nil {
+				return fmt.Errorf("unable to auto-detect ephemeral port range to use with OVN")
+			}
+			Gateway.EphemeralPortRange = portRange
+		}
 	}
 
 	// Options are only valid if Mode is not disabled
@@ -1877,6 +1957,9 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		}
 		if Gateway.NextHop != "" {
 			return fmt.Errorf("gateway next-hop option %q not allowed when gateway is disabled", Gateway.NextHop)
+		}
+		if len(Gateway.EphemeralPortRange) > 0 {
+			return fmt.Errorf("gateway ephemeral port range option not allowed when gateway is disabled")
 		}
 	}
 
@@ -1924,7 +2007,7 @@ func completeGatewayConfig(allSubnets *ConfigSubnets, masqueradeIPs *MasqueradeI
 	return nil
 }
 
-func buildOVNKubernetesFeatureConfig(ctx *cli.Context, cli, file *config) error {
+func buildOVNKubernetesFeatureConfig(cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&OVNKubernetesFeature, &file.OVNKubernetesFeature, &savedOVNKubernetesFeature); err != nil {
 		return err
@@ -1936,7 +2019,7 @@ func buildOVNKubernetesFeatureConfig(ctx *cli.Context, cli, file *config) error 
 	return nil
 }
 
-func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
+func buildMasterHAConfig(cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&MasterHA, &file.MasterHA, &savedMasterHA); err != nil {
 		return err
@@ -1961,7 +2044,7 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func buildClusterMgrHAConfig(ctx *cli.Context, cli, file *config) error {
+func buildClusterMgrHAConfig(cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&ClusterMgrHA, &file.ClusterMgrHA, &savedClusterMgrHA); err != nil {
 		return err
@@ -1986,7 +2069,7 @@ func buildClusterMgrHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func buildMonitoringConfig(ctx *cli.Context, cli, file *config) error {
+func buildMonitoringConfig(cli, file *config) error {
 	var err error
 	if err = overrideFields(&Monitoring, &file.Monitoring, &savedMonitoring); err != nil {
 		return err
@@ -2029,7 +2112,7 @@ func buildIPFIXConfig(cli, file *config) error {
 	return overrideFields(&IPFIX, &cli.IPFIX, &savedIPFIX)
 }
 
-func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
+func buildHybridOverlayConfig(cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
 		return err
@@ -2066,7 +2149,7 @@ func completeHybridOverlayConfig(allSubnets *ConfigSubnets) error {
 	return nil
 }
 
-func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
+func buildClusterManagerConfig(cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&ClusterManager, &file.ClusterManager, &savedClusterManager); err != nil {
 		return err
@@ -2133,11 +2216,37 @@ func completeDefaultConfig(allSubnets *ConfigSubnets) error {
 		allSubnets.Append(ConfigSubnetCluster, subnet.CIDR)
 	}
 
+	Default.UDNAllowedDefaultServices, err = parseServicesNamespacedNames(Default.RawUDNAllowedDefaultServices)
+	if err != nil {
+		return fmt.Errorf("UDN allowed services field is invalid: %v", err)
+	}
+
 	Default.HostMasqConntrackZone = Default.ConntrackZone + 1
 	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
 	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
 	Default.ReassemblyConntrackZone = Default.ConntrackZone + 4
 	return nil
+}
+
+// parseServicesNamespacedNames splits the input string by `,` and returns a slice
+// of keys that were verified to be a valid namespaced service name. It ignores spaces between the elements.
+func parseServicesNamespacedNames(servicesRaw string) ([]string, error) {
+	var services []string
+	for _, udnEnabledSVC := range strings.Split(servicesRaw, ",") {
+		svcKey := strings.TrimSpace(udnEnabledSVC)
+		namespace, name, err := cache.SplitMetaNamespaceKey(strings.TrimSpace(svcKey))
+		if namespace == "" {
+			return nil, fmt.Errorf("UDN enabled service %q no namespace set: %v", svcKey, err)
+		}
+		if errs := validation.ValidateNamespaceName(namespace, false); len(errs) != 0 {
+			return nil, fmt.Errorf("UDN enabled service %q has an invalid namespace: %v", svcKey, err)
+		}
+		if errs := validation.NameIsDNSSubdomain(name, false); len(errs) != 0 {
+			return nil, fmt.Errorf("UDN enabled service %q has an invalid name: %v", svcKey, err)
+		}
+		services = append(services, svcKey)
+	}
+	return services, nil
 }
 
 // getConfigFilePath returns config file path and 'true' if the config file is
@@ -2286,7 +2395,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildOVNKubernetesFeatureConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildOVNKubernetesFeatureConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -2294,15 +2403,15 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildMasterHAConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildMasterHAConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
-	if err = buildClusterMgrHAConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildClusterMgrHAConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
-	if err = buildMonitoringConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildMonitoringConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -2310,15 +2419,15 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildHybridOverlayConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
-	if err = buildOvnKubeNodeConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildOvnKubeNodeConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
-	if err = buildClusterManagerConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildClusterManagerConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -2641,7 +2750,7 @@ func ovnKubeNodeModeSupported(mode string) error {
 }
 
 // buildOvnKubeNodeConfig updates OvnKubeNode config from cli and config file
-func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
+func buildOvnKubeNodeConfig(cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&OvnKubeNode, &file.OvnKubeNode, &savedOvnKubeNode); err != nil {
 		return err

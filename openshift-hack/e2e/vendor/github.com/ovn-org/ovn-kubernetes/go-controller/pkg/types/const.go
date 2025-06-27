@@ -25,6 +25,9 @@ const (
 	PhysicalNetworkName     = "physnet"
 	PhysicalNetworkExGwName = "exgwphysnet"
 
+	// LoopbackInterfaceIndex is the link index corresponding to loopback interface
+	LoopbackInterfaceIndex = 1
+
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
 	LocalNetworkName = "locnet"
@@ -83,6 +86,10 @@ const (
 	DefaultAllowPriority = 1001
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
+	// Pass priority for isolated advertised networks
+	AdvertisedNetworkPassPriority = 1100
+	// Deny priority for isolated advertised networks
+	AdvertisedNetworkDenyPriority = 1050
 
 	// ACL PlaceHolderACL Tier Priorities
 	PrimaryUDNAllowPriority = 1001
@@ -115,20 +122,22 @@ const (
 	EgressSVCReroutePriority              = 101
 	EgressIPReroutePriority               = 100
 	EgressIPRerouteQoSRulePriority        = 103
-	EgressLiveMigrationReroutePiority     = 10
+	// priority of logical router policies on a nodes gateway router
+	EgressIPSNATMarkPriority           = 95
+	EgressLiveMigrationReroutePriority = 10
 
 	// EndpointSliceMirrorControllerName mirror EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
 	EndpointSliceMirrorControllerName = "endpointslice-mirror-controller.k8s.ovn.org"
 	// EndpointSliceDefaultControllerName default kubernetes EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
 	EndpointSliceDefaultControllerName = "endpointslice-controller.k8s.io"
-	// LabelSourceEndpointSlice label key used in mirrored EndpointSlice
+	// SourceEndpointSliceAnnotation key used in mirrored EndpointSlice
 	// that has the value of the default EndpointSlice name
-	LabelSourceEndpointSlice = "k8s.ovn.org/source-endpointslice"
+	SourceEndpointSliceAnnotation = "k8s.ovn.org/source-endpointslice"
 	// LabelSourceEndpointSliceVersion label key used in mirrored EndpointSlice
 	// that has the value of the last known default EndpointSlice ResourceVersion
 	LabelSourceEndpointSliceVersion = "k8s.ovn.org/source-endpointslice-version"
-	// LabelUserDefinedEndpointSliceNetwork label key used in mirrored EndpointSlices that contains the current primary user defined network name
-	LabelUserDefinedEndpointSliceNetwork = "k8s.ovn.org/endpointslice-network"
+	// UserDefinedNetworkEndpointSliceAnnotation key used in mirrored EndpointSlices that contains the current primary user defined network name
+	UserDefinedNetworkEndpointSliceAnnotation = "k8s.ovn.org/endpointslice-network"
 	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
 	LabelUserDefinedServiceName = "k8s.ovn.org/service-name"
 
@@ -143,6 +152,7 @@ const (
 
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
+	NeighborSolicitationICMPType  = 135
 	NeighborAdvertisementICMPType = 136
 
 	// Meter constants
@@ -153,9 +163,18 @@ const (
 
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"
+
+	// OvnNetworkNameAnnotation is the name of the network annotated on the NAD
+	// by cluster manager nad controller
+	OvnNetworkNameAnnotation = OvnK8sPrefix + "/network-name"
+	// OvnNetworkIDAnnotation is a unique network identifier annotated on the
+	// NAD by cluster manager nad controller
+	OvnNetworkIDAnnotation = OvnK8sPrefix + "/network-id"
+
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
-	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
-	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
+	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
@@ -186,6 +205,8 @@ const (
 
 	// key for network name external-id
 	NetworkExternalID = OvnK8sPrefix + "/" + "network"
+	// key for node name external-id
+	NodeExternalID = OvnK8sPrefix + "/" + "node"
 	// key for network role external-id: possible values are "default", "primary", "secondary"
 	NetworkRoleExternalID = OvnK8sPrefix + "/" + "role"
 	// key for NAD name external-id, only used for secondary logical switch port of a pod
@@ -199,6 +220,8 @@ const (
 	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
 	// key for UDN enabled services routes
 	UDNEnabledServiceExternalID = OvnK8sPrefix + "/" + "udn-enabled-default-service"
+	// RequiredUDNNamespaceLabel is the required namespace label for enabling primary UDNs
+	RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology   = "layer3"
@@ -210,12 +233,13 @@ const (
 	NetworkRolePrimary   = "primary"
 	NetworkRoleSecondary = "secondary"
 	NetworkRoleDefault   = "default"
-	// defined internally by ovnkube to recognize "default"
-	// network's role as a "infrastructure-locked" network
-	// when user defined network is the primary network for
-	// the pod which makes "default" network niether primary
+	// NetworkRoleInfrastructure is defined internally by ovnkube to recognize "default"
+	// network's role as an "infrastructure-locked" network
+	// when a user defined network is the primary network for
+	// the pod which makes "default" network neither primary
 	// nor secondary
 	NetworkRoleInfrastructure = "infrastructure-locked"
+	NetworkRoleNone           = "none"
 
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
@@ -234,8 +258,12 @@ const (
 
 	// InformerSyncTimeout is used when waiting for the initial informer cache sync
 	// (i.e. all existing objects should be listed by the informer).
-	// It allows ~4 list() retries with the default reflector exponential backoff config
-	InformerSyncTimeout = 20 * time.Second
+	// It allows ~5 list() retries with the default reflector exponential backoff config
+	// Also considers listing a high number of items on high load scenarios
+	// (last observed 4k egress firewall taking > 30s)
+	// TODO: consider not using a timeout, potentially shifting to configurable
+	// readiness probe
+	InformerSyncTimeout = 60 * time.Second
 
 	// HandlerSyncTimeout is used when waiting for initial object handler sync.
 	// (i.e. all the ADD events should be processed for the existing objects by the event handler)
@@ -245,4 +273,67 @@ const (
 	// entry for the gateway routers. After this time, the entry is removed and
 	// may be refreshed with a new ARP request.
 	GRMACBindingAgeThreshold = "300"
+
+	// InvalidID signifies an invalid ID. Currently used for network and tunnel IDs.
+	InvalidID = -1
+
+	// NoTunnelID signifies an empty/unset ID. Currently used for tunnel ID (reserved as un-usable when the allocator is created)
+	NoTunnelID = 0
+
+	// DefaultNetworkID is reserved for the default network only
+	DefaultNetworkID = 0
+
+	// NoNetworkID is used to signal internally that an ID is empty and should, updates
+	// with this value should be ignored
+	NoNetworkID = -2
+
+	// OVNKubeITPMark is the fwmark used for host->ITP=local svc traffic. Note
+	// that the fwmark is not a part of the packet, but just stored by kernel in
+	// its memory to track/filter packet. Hence fwmark is lost as soon as packet
+	// exits the host. The mark is set with an iptables rule by gateway and used
+	// to route to management port.
+	OVNKubeITPMark = "0x1745ec" // constant itp(174)-service(5ec)
+
+	// "mgmtport-no-snat-nodeports" is a set containing protocol / nodePort tuples
+	// indicating traffic that should not be SNATted when passing through the
+	// management port because it is addressed to an `externalTrafficPolicy: Local`
+	// NodePort.
+	NFTMgmtPortNoSNATNodePorts = "mgmtport-no-snat-nodeports"
+
+	// "mgmtport-no-snat-services-v4" and "mgmtport-no-snat-services-v6" are sets
+	// containing loadBalancerIP / protocol / port tuples indicating traffic that
+	// should not be SNATted when passing through the management port because it is
+	// addressed to an `externalTrafficPolicy: Local` load balancer IP.
+	NFTMgmtPortNoSNATServicesV4 = "mgmtport-no-snat-services-v4"
+	NFTMgmtPortNoSNATServicesV6 = "mgmtport-no-snat-services-v6"
+
+	// CUDNPrefix of all CUDN network names
+	CUDNPrefix = "cluster_udn_"
+
+	// NFTNoPMTUDRemoteNodeIPsv4 is a set used to track remote node IPs that do not belong to
+	// the local node's subnet.
+	NFTNoPMTUDRemoteNodeIPsv4 = "no-pmtud-remote-node-ips-v4"
+
+	// NFTNoPMTUDRemoteNodeIPsv6 is a set used to track remote node IPs that do not belong to
+	// the local node's subnet.
+	NFTNoPMTUDRemoteNodeIPsv6 = "no-pmtud-remote-node-ips-v6"
+
+	// Metrics
+	MetricOvnkubeNamespace               = "ovnkube"
+	MetricOvnkubeSubsystemController     = "controller"
+	MetricOvnkubeSubsystemClusterManager = "clustermanager"
+	MetricOvnkubeSubsystemNode           = "node"
+	MetricOvnNamespace                   = "ovn"
+	MetricOvnSubsystemDB                 = "db"
+	MetricOvnSubsystemNorthd             = "northd"
+	MetricOvnSubsystemController         = "controller"
+	MetricOvsNamespace                   = "ovs"
+	MetricOvsSubsystemVswitchd           = "vswitchd"
+	MetricOvsSubsystemDB                 = "db"
+
+	// "mgmtport-no-snat-subnets-v4" and "mgmtport-no-snat-subnets-v6" are sets containing
+	// subnets, indicating traffic that should not be SNATted when passing through the
+	// management port.
+	NFTMgmtPortNoSNATSubnetsV4 = "mgmtport-no-snat-subnets-v4"
+	NFTMgmtPortNoSNATSubnetsV6 = "mgmtport-no-snat-subnets-v6"
 )
