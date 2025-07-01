@@ -1083,7 +1083,7 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 func (e *EgressIPController) deletePreviousNetworkPodEgressIPAssignments(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod) {
 	cachedNetwork := e.getNetworkFromPodAssignment(getPodKey(pod))
 	if cachedNetwork != nil {
-		if util.AreNetworksCompatible(cachedNetwork, ni) {
+		if !util.AreNetworksCompatible(cachedNetwork, ni) {
 			if err := e.deletePodEgressIPAssignments(cachedNetwork, name, statusesToRemove, pod); err != nil {
 				// no error is returned because high probability network is deleted
 				klog.Errorf("Failed to delete EgressIP %s assignment for pod %s/%s attached to network %s: %v",
@@ -2451,11 +2451,18 @@ func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egress
 		return err
 	}
 	var ops []ovsdb.Operation
-	if !loadedPodNode || isLocalZonePod { // node is deleted (we can't determine zone so we always try and nuke OR pod is local to zone)
+	// For CDN only, add SNATs to support external GW feature
+	if ni.IsDefault() && (!loadedPodNode || isLocalZonePod) {
 		ops, err = e.addExternalGWPodSNATOps(ni, nil, pod.Namespace, pod.Name, status)
 		if err != nil {
 			return err
 		}
+	}
+	// Following cases will ensure removal of a pod LRP
+	// Case 1 - node where pod is hosted is not known
+	// Case 2 - pod is within the local zone
+	// case 3 - a local zone node is egress node and pod is attached to layer 2. For layer2, there is always an LRP attached to the egress Node GW router
+	if !loadedPodNode || isLocalZonePod || (isLocalZoneEgressNode && ni.IsSecondary() && ni.TopologyType() == types.Layer2Topology) {
 		ops, err = e.deleteReroutePolicyOps(ni, ops, status, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
 		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			// if the gateway router join IP setup is already gone, then don't count it as error.
