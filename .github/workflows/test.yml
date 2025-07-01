@@ -663,6 +663,13 @@ jobs:
         export OVN_IMAGE="ovn-daemonset-fedora:pr"
         make -C test install-kind
 
+    - name: Install prom2json binary
+      if: env.ENABLE_IPSEC == 'true'
+      run: |
+        set -x
+        go install github.com/prometheus/prom2json/cmd/prom2json@latest
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
     - name: traffic-flow-tests setup
       timeout-minutes: 5
       if: env.TRAFFIC_FLOW_TESTS != ''
