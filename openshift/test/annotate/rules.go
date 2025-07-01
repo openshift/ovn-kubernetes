@@ -22,6 +22,7 @@ var (
 			`[Feature:DisablePacketMTUCheck]`,
 			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
+			`[Feature:IPsec]`,
 			`[Feature:Multicast]`,
 			`[Feature:MultiHoming]`,
 			`[Feature:NetworkConnect]`,

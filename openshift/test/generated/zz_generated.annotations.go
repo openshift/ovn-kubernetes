@@ -1291,6 +1291,8 @@ var AppendedAnnotations = map[string]string{
 
 	"External Gateway e2e non-vxlan external gateway and update validation Should validate connectivity without vxlan before and after updating the namespace annotation to a new external gateway": "[Disabled:Unimplemented]",
 
+	"IPsec Metrics IKE Child SA State which reflects the down and up state of the IPsec tunnel": "[Disabled:Unimplemented]",
+
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv4": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv6": "[Disabled:Unimplemented]",
