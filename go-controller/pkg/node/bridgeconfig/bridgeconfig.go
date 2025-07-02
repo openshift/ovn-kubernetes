@@ -81,13 +81,11 @@ type BridgeConfiguration struct {
 	ofPortPhys string
 	netConfig  map[string]*BridgeUDNConfiguration
 	eipMarkIPs *egressip.MarkIPsCache
-	nextHops   []net.IP
 }
 
 func NewBridgeConfiguration(intfName, nodeName,
 	physicalNetworkName string,
 	nodeSubnets, gwIPs []*net.IPNet,
-	gwNextHops []net.IP,
 	advertised bool) (*BridgeConfiguration, error) {
 	var intfRep string
 	var err error
@@ -105,9 +103,6 @@ func NewBridgeConfiguration(intfName, nodeName,
 			types.DefaultNetworkName: defaultNetConfig,
 		},
 		eipMarkIPs: egressip.NewMarkIPsCache(),
-	}
-	if len(gwNextHops) > 0 {
-		res.nextHops = gwNextHops
 	}
 	res.netConfig[types.DefaultNetworkName].Advertised.Store(advertised)
 
@@ -473,18 +468,6 @@ func (b *BridgeConfiguration) SetEIPMarkIPs(eipMarkIPs *egressip.MarkIPsCache) {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
 	b.eipMarkIPs = eipMarkIPs
-}
-
-func (b *BridgeConfiguration) GetNextHops() []net.IP {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	return b.nextHops
-}
-
-func (b *BridgeConfiguration) SetNextHops(nextHops []net.IP) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	b.nextHops = nextHops
 }
 
 func gatewayReady(patchPort string) bool {
