@@ -63,7 +63,7 @@ func (netConfig *BridgeUDNConfiguration) setOfPatchPort() error {
 }
 
 type BridgeConfiguration struct {
-	Mutex sync.Mutex
+	mutex sync.Mutex
 
 	// variables that are only set on creation and never changed
 	// don't require mutex lock to read
@@ -234,8 +234,8 @@ func (b *BridgeConfiguration) GetGatewayIface() string {
 
 // UpdateInterfaceIPAddresses sets and returns the bridge's current ips
 func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*net.IPNet, error) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	ifAddrs, err := nodeutil.GetNetworkInterfaceIPAddresses(b.GetGatewayIface())
 	if err != nil {
 		return nil, err
@@ -265,8 +265,8 @@ func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*
 // GetPortConfigurations returns a slice of Network port configurations along with the
 // uplinkName and physical port's ofport value
 func (b *BridgeConfiguration) GetPortConfigurations() ([]*BridgeUDNConfiguration, string, string) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	var netConfigs []*BridgeUDNConfiguration
 	for _, netConfig := range b.netConfig {
 		netConfigs = append(netConfigs, netConfig.ShallowCopy())
@@ -280,8 +280,8 @@ func (b *BridgeConfiguration) AddNetworkConfig(
 	nodeSubnets []*net.IPNet,
 	masqCTMark, pktMark uint,
 	v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 
 	netName := nInfo.GetNetworkName()
 	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
@@ -309,15 +309,15 @@ func (b *BridgeConfiguration) AddNetworkConfig(
 
 // DelNetworkConfig deletes the provided netInfo from the bridge configuration cache
 func (b *BridgeConfiguration) DelNetworkConfig(nInfo util.NetInfo) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 
 	delete(b.netConfig, nInfo.GetNetworkName())
 }
 
 func (b *BridgeConfiguration) GetNetworkConfig(networkName string) *BridgeUDNConfiguration {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	return b.netConfig[networkName]
 }
 
@@ -327,8 +327,8 @@ func (b *BridgeConfiguration) GetNetworkConfig(networkName string) *BridgeUDNCon
 // NOTE: if the network configuration can't be found or if the network is not patched by OVN
 // yet this returns nil.
 func (b *BridgeConfiguration) GetActiveNetworkBridgeConfigCopy(networkName string) *BridgeUDNConfiguration {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 
 	if netConfig, found := b.netConfig[networkName]; found && netConfig.OfPortPatch != "" {
 		return netConfig.ShallowCopy()
@@ -337,8 +337,8 @@ func (b *BridgeConfiguration) GetActiveNetworkBridgeConfigCopy(networkName strin
 }
 
 func (b *BridgeConfiguration) PatchedNetConfigs() []*BridgeUDNConfiguration {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	result := make([]*BridgeUDNConfiguration, 0, len(b.netConfig))
 	for _, netConfig := range b.netConfig {
 		if netConfig.OfPortPatch == "" {
@@ -352,8 +352,8 @@ func (b *BridgeConfiguration) PatchedNetConfigs() []*BridgeUDNConfiguration {
 // IsGatewayReady checks if patch ports of every netConfig are present.
 // used by gateway on newGateway readyFunc
 func (b *BridgeConfiguration) IsGatewayReady() bool {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	for _, netConfig := range b.netConfig {
 		ready := gatewayReady(netConfig.PatchPort)
 		if !ready {
@@ -364,8 +364,8 @@ func (b *BridgeConfiguration) IsGatewayReady() bool {
 }
 
 func (b *BridgeConfiguration) SetOfPorts() error {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	// Get ofport of patchPort
 	for _, netConfig := range b.netConfig {
 		if err := netConfig.setOfPatchPort(); err != nil {
@@ -412,8 +412,8 @@ func (b *BridgeConfiguration) SetOfPorts() error {
 }
 
 func (b *BridgeConfiguration) GetIPs() []*net.IPNet {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	return b.ips
 }
 
@@ -426,20 +426,20 @@ func (b *BridgeConfiguration) GetUplinkName() string {
 }
 
 func (b *BridgeConfiguration) GetMAC() net.HardwareAddr {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	return b.macAddress
 }
 
 func (b *BridgeConfiguration) SetMAC(macAddr net.HardwareAddr) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	b.macAddress = macAddr
 }
 
 func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 
 	netConfig, found := b.netConfig[netName]
 	if !found {
@@ -453,20 +453,20 @@ func (b *BridgeConfiguration) GetInterfaceID() string {
 }
 
 func (b *BridgeConfiguration) GetOfPortHost() string {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	return b.ofPortHost
 }
 
 func (b *BridgeConfiguration) GetEIPMarkIPs() *egressip.MarkIPsCache {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	return b.eipMarkIPs
 }
 
 func (b *BridgeConfiguration) SetEIPMarkIPs(eipMarkIPs *egressip.MarkIPsCache) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	b.eipMarkIPs = eipMarkIPs
 }
 
