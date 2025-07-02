@@ -45,6 +45,7 @@ import (
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -1320,7 +1321,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressService {
 		wf := nc.watchFactory.(*factory.WatchFactory)
-		c, err := egressservice.NewController(nc.stopChan, ovnKubeNodeSNATMark, nc.name,
+		c, err := egressservice.NewController(nc.stopChan, nodetypes.OvnKubeNodeSNATMark, nc.name,
 			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 		if err != nil {
 			return err
