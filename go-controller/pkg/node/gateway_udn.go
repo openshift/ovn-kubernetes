@@ -792,6 +792,7 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 // If the network is advertised, an example of the rules we set for a network is:
 // 2000:	from all fwmark 0x1001 lookup 1007
 // 2000:	from all to 10.132.0.0/14 lookup 1007
+// 2000:   from all to 169.254.0.12 lookup 1007
 // 2000:	from all fwmark 0x1001 lookup 1009
 // 2000:	from all to 10.134.0.0/14 lookup 1009
 func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(isNetworkAdvertised bool) ([]netlink.Rule, []netlink.Rule, error) {
@@ -832,7 +833,7 @@ func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(isNetworkAdvertise
 		delIPRules = append(delIPRules, subnetIPRules...)
 	default:
 		addIPRules = append(addIPRules, subnetIPRules...)
-		delIPRules = append(delIPRules, masqIPRules...)
+		addIPRules = append(addIPRules, masqIPRules...)
 	}
 	return addIPRules, delIPRules, nil
 }

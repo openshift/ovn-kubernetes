@@ -1061,9 +1061,9 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 		return false
 	}
 
-	if searched.Match != existing.Match {
+	/*if searched.Match != existing.Match {
 		return false
-	}
+	}*/
 
 	// Compare externalIP if it's not empty.
 	if searched.ExternalIP != "" && searched.ExternalIP != existing.ExternalIP {
