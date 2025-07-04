@@ -609,6 +609,9 @@ func bridgeForInterface(intfName, nodeName,
 		subnets:     config.Default.ClusterSubnets,
 		nodeSubnets: nodeSubnets,
 	}
+	for _, subnet := range nodeSubnets {
+		defaultNetConfig.mgmtIPs = append(defaultNetConfig.mgmtIPs, util.GetNodeManagementIfAddr(subnet))
+	}
 	res := bridgeConfiguration{
 		nodeName: nodeName,
 		netConfig: map[string]*bridgeUDNConfiguration{
