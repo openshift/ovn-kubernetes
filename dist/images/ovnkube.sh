@@ -851,6 +851,12 @@ nb-ovsdb() {
     echo "=============== nb-ovsdb ========== reconfigured for ipsec"
   }
 
+ [[ "local" == "${OVN_GATEWAY_MODE}" &&  "true" == ${OVN_ROUTE_ADVERTISEMENTS_ENABLE} ]] && {
+    ovn-nbctl set NB_Global . options:use_ct_inv_match=false
+    echo "=============== nb-ovsdb ========== reconfigured for route advertisements"
+  }
+
+
   # Let ovn-northd sleep and not use so much CPU
   ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=${ovn_northd_backoff_interval}
   echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
