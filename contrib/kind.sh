@@ -845,14 +845,14 @@ build_ovn_image() {
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
       echo "Pushing built image to local $OCI_BIN registry"
-      $OCI_BIN push "$push_args" "$OVN_IMAGE"
+      $OCI_BIN push $push_args "$OVN_IMAGE"
     fi
   # We should push to local registry if image is not remote
   elif [ "${OVN_IMAGE}" != "" -a "${KIND_LOCAL_REGISTRY}" == true ] && (echo "$OVN_IMAGE" | grep / -vq); then
     local local_registry_ovn_image="localhost:5000/${OVN_IMAGE}"
     $OCI_BIN tag "$OVN_IMAGE" $local_registry_ovn_image
     OVN_IMAGE=$local_registry_ovn_image
-    $OCI_BIN push "$push_args" "$OVN_IMAGE"
+    $OCI_BIN push $push_args "$OVN_IMAGE"
   fi
 }
 
