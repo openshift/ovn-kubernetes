@@ -8,26 +8,32 @@
 FROM registry.ci.openshift.org/ocp/4.16:base-rhel9
 
 # install selinux-policy first to avoid a race
-RUN dnf install -y --nodocs \
+RUN dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs \
 	selinux-policy procps-ng && \
 	dnf clean all
 
-ARG ovsver=3.3.0-62.el9fdp
+# NOTE: OVS is not pinned to a particular patch version in order to stay in
+# sync with the OVS running on the host (it is not strictly necessary, but
+# reduces the number of variables in the system) and receive all the CVE and
+# bug fixes automatically.
+ARG ovsver=3.3
 ARG ovnver=24.03.5-40.el9fdp
 # NOTE: Ensure that the versions of OVS and OVN are overriden for OKD in each of the subsequent layers.
-ARG ovsver_okd=3.3.0-2.el9s
+# Centos and RHEL releases for ovn are built out of sync, so please make sure to bump for OKD with
+# the corresponding Centos version when updating the OCP version.
+ARG ovsver_okd=3.3
+# We are not bumping the OVN version for OKD since the FDP release is not done yet.
 ARG ovnver_okd=24.03.1-5.el9s
 
 RUN INSTALL_PKGS="iptables nftables" && \
     source /etc/os-release && \
     [ "${ID}" == "centos" ] && ovsver=$ovsver_okd && ovnver=$ovnver_okd; \
-	ovsver_short=$(echo "$ovsver" | cut -d'.' -f1,2) && \
 	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
-	dnf install -y --nodocs $INSTALL_PKGS && \
-	dnf install -y --nodocs "openvswitch$ovsver_short = $ovsver" "python3-openvswitch$ovsver_short = $ovsver" && \
-	dnf install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
 	dnf clean all && rm -rf /var/cache/* && \
-	sed 's/%/"/g' <<<"%openvswitch$ovsver_short-devel = $ovsver% %openvswitch$ovsver_short-ipsec = $ovsver% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
+	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
