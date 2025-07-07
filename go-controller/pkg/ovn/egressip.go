@@ -1446,7 +1446,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 			continue
 		}
 		for networkName, podCache := range networkPodCache {
-			for eIP, nodeName := range egressIPCache.egressIPIPToNodeCache {
+			for eIPIP, nodeName := range egressIPCache.egressIPIPToNodeCache {
 				if !egressIPCache.egressLocalNodesCache.Has(nodeName) {
 					continue
 				}
@@ -1460,7 +1460,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 					return fmt.Errorf("failed to create new network %s: %v", networkName, err)
 				}
 				routerName := ni.GetNetworkScopedGWRouterName(nodeName)
-				isEIPIPv6 := utilnet.IsIPv6String(eIP)
+				isEIPIPv6 := utilnet.IsIPv6String(eIPIP)
 				for podKey, podIPs := range podCache.egressLocalPods {
 					ops, err = processPodFn(ops, eIPName, podKey, egressIPCache.markCache[eIPName], routerName, networkName, podIPs, isEIPIPv6)
 					if err != nil {
@@ -1679,7 +1679,14 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 
 			// Update Logical Router Policies that have stale nexthops. Notice that we must do this separately
 			// because logicalRouterPolicyStaleNexthops must be populated first
-			klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops for network %s: %+v", networkName, logicalRouterPolicyStaleNexthops)
+			for _, staleNextHopLogicalRouterPolicy := range logicalRouterPolicyStaleNexthops {
+				if staleNextHopLogicalRouterPolicy.Nexthop == nil {
+					continue
+				}
+				klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops for LRP %q for network %s: %s",
+					staleNextHopLogicalRouterPolicy.UUID, networkName, *staleNextHopLogicalRouterPolicy.Nexthop)
+			}
+
 			err = libovsdbops.DeleteNextHopsFromLogicalRouterPolicies(e.nbClient, cache.networkToRouter[networkName], logicalRouterPolicyStaleNexthops...)
 			if err != nil {
 				return fmt.Errorf("unable to remove stale next hops from logical router policies for network %s: %v", networkName, err)
@@ -1709,7 +1716,13 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 			return false
 		}
 		egressIPName := egressIPMeta[0]
-		parsedLogicalIP := net.ParseIP(item.LogicalIP).String()
+		// check logical IP maps to a valid pod
+		parsedPodIP := net.ParseIP(item.LogicalIP)
+		if parsedPodIP == nil {
+			klog.Errorf("syncStaleSNATRules found invalid logical IP for NAT with UID %q", item.UUID)
+			return true
+		}
+		parsedPodIPStr := parsedPodIP.String()
 		cacheEntry, exists := egressIPCache.egressIPNameToPods[egressIPName][types.DefaultNetworkName]
 		egressPodIPs := sets.NewString()
 		if exists {
@@ -1722,7 +1735,7 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 				egressPodIPs.Insert(podIPs.UnsortedList()...)
 			}
 		}
-		if !exists || !egressPodIPs.Has(parsedLogicalIP) {
+		if !exists || !egressPodIPs.Has(parsedPodIPStr) {
 			klog.Infof("syncStaleSNATRules will delete %s due to logical ip: %v", egressIPName, item)
 			return true
 		}
@@ -1731,9 +1744,15 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 			klog.Errorf("syncStaleSNATRules failed to find default network in networks cache")
 			return false
 		}
-		if node, ok := egressIPCache.egressIPIPToNodeCache[item.ExternalIP]; !ok || !cacheEntry.egressLocalPods[types.DefaultNetworkName].Has(node) ||
-			item.LogicalPort == nil || *item.LogicalPort != ni.GetNetworkScopedK8sMgmtIntfName(node) {
-			klog.Infof("syncStaleSNATRules will delete %s due to external ip or stale logical port: %v", egressIPName, item)
+		// check external IP maps to a valid EgressIP IP and its assigned to a Node
+		node, ok := egressIPCache.egressIPIPToNodeCache[item.ExternalIP]
+		if !ok {
+			klog.Infof("syncStaleSNATRules found NAT %q without EIP assigned to a Node", item.UUID)
+			return true
+		}
+		// check logical port is set and correspondes to the correct egress node
+		if item.LogicalPort == nil || *item.LogicalPort != ni.GetNetworkScopedK8sMgmtIntfName(node) {
+			klog.Infof("syncStaleSNATRules found NAT %q with invalid logical port", item.UUID)
 			return true
 		}
 		return false
