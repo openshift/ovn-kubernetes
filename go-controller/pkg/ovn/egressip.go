@@ -1138,6 +1138,8 @@ func (e *EgressIPController) isLocalZoneNode(node *corev1.Node) bool {
 type egressIPCache struct {
 	// egressIP name -> network name -> cache
 	egressIPNameToPods map[string]map[string]selectedPods
+	// egressIP name -> to assigned Node names
+	egressIPNameToAssignedNodes map[string][]string
 	// egressLocalNodes will contain all nodes that are local
 	// to this zone which are serving this egressIP object..
 	// This will help sync SNATs
@@ -1154,7 +1156,7 @@ type egressIPCache struct {
 }
 
 type nodeNetworkRedirects struct {
-	// node name -> network name -> redirect IPs
+	// network name -> node name -> redirect IPs
 	cache map[string]map[string]redirectIPs
 }
 
@@ -1600,21 +1602,36 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 // It also removes stale nexthops from router policies used by EgressIPs.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) error {
-	for _, networkCache := range cache.egressIPNameToPods {
+	for eipName, networkCache := range cache.egressIPNameToPods {
 		for networkName, data := range networkCache {
 			logicalRouterPolicyStaleNexthops := []*nbdb.LogicalRouterPolicy{}
+			// select LRPs scoped to the correct LRP priority, network and EIP name
 			p := func(item *nbdb.LogicalRouterPolicy) bool {
 				if item.Priority != types.EgressIPReroutePriority || item.ExternalIDs[libovsdbops.NetworkKey.String()] != networkName {
 					return false
 				}
-				egressIPName, _ := getEIPLRPObjK8MetaData(item.ExternalIDs)
-				if egressIPName == "" {
+				networkNodeRedirectCache, ok := cache.egressNodeRedirectsCache.cache[networkName]
+				if !ok || len(networkNodeRedirectCache) == 0 {
+					klog.Infof("syncStaleEgressReroutePolicy found invalid logical router policy (UUID: %s) because no assigned Nodes for EgressIP %s", item.UUID, eipName)
+					return true
+				}
+				extractedEgressIPName, _ := getEIPLRPObjK8MetaData(item.ExternalIDs)
+				if extractedEgressIPName == "" {
 					klog.Errorf("syncStaleEgressReroutePolicy found logical router policy (UUID: %s) with invalid meta data associated with network %s", item.UUID, networkName)
-					return false
+					return true
+				}
+				if extractedEgressIPName != eipName {
+					// remove if there's no reference to this EIP name
+					_, ok := cache.egressIPNameToPods[extractedEgressIPName]
+					return !ok
 				}
 				splitMatch := strings.Split(item.Match, " ")
-				logicalIP := splitMatch[len(splitMatch)-1]
-				parsedLogicalIP := net.ParseIP(logicalIP)
+				podIPStr := splitMatch[len(splitMatch)-1]
+				podIP := net.ParseIP(podIPStr)
+				if podIP == nil {
+					klog.Infof("syncStaleEgressReroutePolicy found invalid LRP with broken match with UID %q", item.UUID)
+					return true
+				}
 				egressPodIPs := sets.NewString()
 				// Since LRPs are created only for pods local to this zone
 				// we need to care about only those pods. Nexthop for them will
@@ -1624,31 +1641,24 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 				for _, podIPs := range data.egressLocalPods {
 					egressPodIPs.Insert(podIPs.UnsortedList()...)
 				}
-				if !egressPodIPs.Has(parsedLogicalIP.String()) {
-					klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no nexthop or stale logical ip: %v", egressIPName, item)
+				if !egressPodIPs.Has(podIP.String()) {
+					klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no nexthop or stale logical ip: %v", extractedEgressIPName, item)
 					return true
 				}
 				// Check for stale nexthops that may exist in the logical router policy and store that in logicalRouterPolicyStaleNexthops.
 				// Note: adding missing nexthop(s) to the logical router policy is done outside the scope of this function.
 				staleNextHops := []string{}
 				for _, nexthop := range item.Nexthops {
-					nodeName, ok := cache.egressIPIPToNodeCache[parsedLogicalIP.String()]
-					if ok {
-						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no node assigned to logical ip: %v", egressIPName, item)
-						return true
+					// ensure valid next hop by iterating through the node config
+					var isFound bool // isFound is true, if the next hop IP is found within the set of assigned nodes
+					for _, nodeRedirect := range networkNodeRedirectCache {
+						if nodeRedirect.containsIP(nexthop) {
+							isFound = true
+							break
+						}
 					}
-					networksRedirects, ok := cache.egressNodeRedirectsCache.cache[nodeName]
-					if ok {
-						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no network in cache: %v", egressIPName, item)
-						return true
-					}
-					redirects, ok := networksRedirects[networkName]
-					if !ok {
-						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no redirects for network in cache: %v", egressIPName, item)
-						return true
-					}
-					//FIXME: be more specific about which is the valid next hop instead of relying on verifying if the IP is within a valid set of IPs.
-					if !redirects.containsIP(nexthop) {
+					if !isFound {
+						//FIXME: be more specific about which is the valid next hop instead of relying on verifying if the IP is within a valid set of IPs.
 						staleNextHops = append(staleNextHops, nexthop)
 					}
 				}
@@ -1907,9 +1917,12 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 	// This will help sync SNATs
 	egressLocalNodesCache := sets.New[string]()
 	cache.egressLocalNodesCache = egressLocalNodesCache
-	// egressIP name -> node name
-	egressNodesCache := make(map[string]string, 0)
-	cache.egressIPIPToNodeCache = egressNodesCache
+	// egressIP name -> nodes where the IPs are assigned
+	egressIPNameNodesCache := make(map[string][]string, 0)
+	cache.egressIPNameToAssignedNodes = egressIPNameNodesCache
+	// egressIP IP -> node name. Assigned node for EIP.
+	egressIPIPNodeCache := make(map[string]string, 0)
+	cache.egressIPIPToNodeCache = egressIPIPNodeCache
 	cache.markCache = make(map[string]string)
 	egressIPs, err := e.watchFactory.GetEgressIPs()
 	if err != nil {
@@ -1922,11 +1935,18 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 		}
 		cache.markCache[egressIP.Name] = mark.String()
 		egressIPsCache[egressIP.Name] = make(map[string]selectedPods, 0)
+		egressIPNameNodesCache[egressIP.Name] = make([]string, 0, len(egressIP.Status.Items))
 		for _, status := range egressIP.Status.Items {
+			eipIP := net.ParseIP(status.EgressIP)
+			if eipIP == nil {
+				klog.Errorf("Failed to parse EgressIP %s IP %q from status", egressIP.Name, status.EgressIP)
+				continue
+			}
+			egressIPIPNodeCache[eipIP.String()] = status.Node
 			if localZoneNodes.Has(status.Node) {
 				egressLocalNodesCache.Insert(status.Node)
 			}
-			egressNodesCache[status.EgressIP] = status.Node
+			egressIPNameNodesCache[egressIP.Name] = append(egressIPNameNodesCache[egressIP.Name], status.Node)
 		}
 		namespaces, err = e.watchFactory.GetNamespacesBySelector(egressIP.Spec.NamespaceSelector)
 		if err != nil {
