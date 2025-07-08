@@ -166,7 +166,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
@@ -194,6 +194,9 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 			Output: fmt.Sprintf("%t", hwOffload),
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-appctl --timeout=15 fdb/add breth0 breth0 0 " + eth0MAC,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
@@ -603,7 +606,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.brp0.forwarding=1",
+				Cmd:    "sysctl -w net/ipv4/conf/brp0/forwarding=1",
 				Output: "net.ipv4.conf.brp0.forwarding = 1",
 			})
 		}
@@ -640,6 +643,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 			Output: "false",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovs-appctl --timeout=15 fdb/add %s %s 0 %s", brphys, brphys, hostMAC),
 		})
 		// GetDPUHostInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -1065,7 +1071,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
@@ -1093,6 +1099,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 			Output: "false",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-appctl --timeout=15 fdb/add breth0 breth0 0 " + eth0MAC,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",

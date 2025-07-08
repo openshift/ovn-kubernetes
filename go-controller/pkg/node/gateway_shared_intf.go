@@ -1897,10 +1897,10 @@ func commonFlows(hostSubnets []*net.IPNet, bridge *bridgeConfiguration) ([]strin
 		for _, netConfig := range bridge.patchedNetConfigs() {
 			actions += "output:" + netConfig.ofPortPatch + ","
 		}
-		actions += strip_vlan + "output:" + ofPortHost
+		actions += strip_vlan + "NORMAL"
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, %s dl_dst=%s, actions=%s",
-				defaultOpenFlowCookie, ofPortPhys, match_vlan, bridgeMacAddress, actions))
+			fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
+				defaultOpenFlowCookie, match_vlan, bridgeMacAddress, actions))
 	}
 
 	// table 0, check packets coming from OVN have the correct mac address. Low priority flows that are a catch all
@@ -3046,8 +3046,8 @@ func getIPv(ipnet *net.IPNet) string {
 //	chain udn-bgp-drop {
 //	  comment "Drop traffic generated locally towards advertised UDN subnets"
 //	   type filter hook output priority filter; policy accept;
-//	   ip daddr @advertised-udn-subnets-v4 counter packets 0 bytes 0 drop
-//	   ip6 daddr @advertised-udn-subnets-v6 counter packets 0 bytes 0 drop
+//	   ct state new ip daddr @advertised-udn-subnets-v4 counter packets 0 bytes 0 drop
+//	   ct state new ip6 daddr @advertised-udn-subnets-v6 counter packets 0 bytes 0 drop
 //	 }
 func configureAdvertisedUDNIsolationNFTables() error {
 	counterIfDebug := ""
@@ -3089,11 +3089,11 @@ func configureAdvertisedUDNIsolationNFTables() error {
 
 	tx.Add(&knftables.Rule{
 		Chain: nftablesUDNBGPOutputChain,
-		Rule:  knftables.Concat(fmt.Sprintf("ip daddr @%s", nftablesAdvertisedUDNsSetV4), counterIfDebug, "drop"),
+		Rule:  knftables.Concat("ct state new", fmt.Sprintf("ip daddr @%s", nftablesAdvertisedUDNsSetV4), counterIfDebug, "drop"),
 	})
 	tx.Add(&knftables.Rule{
 		Chain: nftablesUDNBGPOutputChain,
-		Rule:  knftables.Concat(fmt.Sprintf("ip6 daddr @%s", nftablesAdvertisedUDNsSetV6), counterIfDebug, "drop"),
+		Rule:  knftables.Concat("ct state new", fmt.Sprintf("ip6 daddr @%s", nftablesAdvertisedUDNsSetV6), counterIfDebug, "drop"),
 	})
 	return nft.Run(context.TODO(), tx)
 }

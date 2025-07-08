@@ -52,6 +52,8 @@ const (
 	podV4IP3        = "10.128.1.3"
 	podV4IP4        = "10.128.1.4"
 	podV6IP         = "ae70::66"
+	podV6IP2        = "be70::66"
+	podV6IP3        = "be70::67"
 	v6GatewayIP     = "ae70::1"
 	v6Node1Subnet   = "ae70::66/64"
 	v6Node2Subnet   = "be70::66/64"
@@ -3408,6 +3410,184 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
 			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
+	})
+
+	ginkgo.Context("IPv4 on pod UPDATE", func() {
+		ginkgo.It("does not reconfigure or remove existing pod config if no change", func() {
+			config.OVNKubernetesFeature.EnableInterconnect = true
+			app.Action = func(*cli.Context) error {
+				egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(eipNamespace)
+				nodeIPv4 := "192.168.126.210/24"
+				egressIP := net.ParseIP("192.168.126.211")
+				_, nodeSubnetV4, _ := net.ParseCIDR(v4Node1Subnet)
+				_, nodeSubnetV6, _ := net.ParseCIDR(v6Node1Subnet)
+
+				annotations := map[string]string{
+					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
+					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\"}", v4Node1Subnet, v6Node1Subnet),
+					"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\", \"ipv6\": \"fd97::2/64\"}",
+					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", nodeIPv4),
+					"k8s.ovn.org/zone-name":                       node1Name,
+				}
+				node := getNodeObj(node1Name, annotations, map[string]string{}) // add node to avoid errori-ing out on transit switch IP fetch
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouterPort{
+								UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+								Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name,
+								Networks: []string{nodeLogicalRouterIfAddrV6, nodeLogicalRouterIfAddrV4},
+							},
+							&nbdb.LogicalRouter{
+								Name: types.OVNClusterRouter,
+								UUID: types.OVNClusterRouter + "-UUID",
+							},
+							&nbdb.LogicalRouter{
+								Name:    types.GWRouterPrefix + node1Name,
+								UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+								Options: map[string]string{"dynamic_neigh_routers": "false"},
+							},
+							&nbdb.LogicalSwitchPort{
+								UUID: "k8s-" + node.Name + "-UUID",
+								Name: "k8s-" + node.Name,
+								Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(nodeSubnetV4).IP.String(),
+									"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(nodeSubnetV6).IP.String()},
+							},
+							&nbdb.LogicalSwitch{
+								UUID:  node.Name + "-UUID",
+								Name:  node.Name,
+								Ports: []string{"k8s-" + node.Name + "-UUID"},
+							},
+						},
+					},
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{*egressNamespace},
+					},
+					&corev1.PodList{
+						Items: []corev1.Pod{egressPod},
+					},
+					&corev1.NodeList{
+						Items: []corev1.Node{node},
+					},
+				)
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{
+							egressIP.String(),
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+					},
+				}
+				i, n, _ := net.ParseCIDR(podV4IP + "/23")
+				n.IP = i
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.eIPC.nodeZoneState.Store(nodeName, true)
+				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.patchEgressIPObj(node1Name, egressIPName, egressIP.String())
+				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
+
+				expectedDatabaseState := []libovsdbtest.TestData{
+					getReRoutePolicy(egressPod.Status.PodIP, "4", "reroute-UUID", nodeLogicalRouterIPv4,
+						getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name, IPFamilyValueV4,
+							types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs()),
+					getEIPSNAT(podV4IP, egressPod.Namespace, egressPod.Name, egressIP.String(), "k8s-node1", DefaultNetworkControllerName),
+					&nbdb.LogicalRouter{
+						Name:     types.OVNClusterRouter,
+						UUID:     types.OVNClusterRouter + "-UUID",
+						Policies: []string{"reroute-UUID"},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name,
+						Networks: []string{nodeLogicalRouterIfAddrV6, nodeLogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalRouter{
+						Name:    types.GWRouterPrefix + node1Name,
+						UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+						Nat:     []string{"egressip-nat-UUID"},
+						Options: map[string]string{"dynamic_neigh_routers": "false"},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: "k8s-" + node.Name + "-UUID",
+						Name: "k8s-" + node.Name,
+						Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(nodeSubnetV4).IP.String(),
+							"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(nodeSubnetV6).IP.String()},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  node.Name + "-UUID",
+						Name:  node.Name,
+						Ports: []string{"k8s-" + node.Name + "-UUID"},
+					},
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				// async, create no-op updates that trigger reconcile for the selected pod async but update should continue to select the pod and not alter pod config
+				// meanwhile we watch the ovn dbs and ensure they do not alter for the given pods eip config
+				// therefore spawn a go routine to update the k8 constructs that will trigger reconcile of the pods, and, we want to ensure nothing is reconfigured.
+				errCh := make(chan error, 2)
+				go func() {
+					ns, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), egressNamespace.Name, metav1.GetOptions{})
+					if err != nil {
+						errCh <- err
+						return
+					}
+					// add new namespace label. Does not affect pod selection for EIP
+					ns = ns.DeepCopy()
+					ns.Labels["newlabel"] = "noop"
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
+					if err != nil {
+						errCh <- err
+						return
+					}
+					// add new pod label. Does not affect pod selection for EIP
+					pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressNamespace.Name).Get(context.TODO(), egressPod.Name, metav1.GetOptions{})
+					if err != nil {
+						errCh <- err
+						return
+					}
+					pod = pod.DeepCopy()
+					pod.Labels["newlabel"] = "noop"
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressNamespace.Name).Update(context.TODO(), pod, metav1.UpdateOptions{})
+					if err != nil {
+						errCh <- err
+					}
+					close(errCh)
+				}()
+				ginkgo.By("ensure OVN DB config for EIP remains consistent")
+				// ensure the DBs are unaltered
+				gomega.Consistently(fakeOvn.nbClient, 500*time.Millisecond, 1*time.Millisecond).WithTimeout(5 * time.Second).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				ginkgo.By("check for errors from goroutine updating namespace and pods")
+				select {
+				case err := <-errCh:
+					if err != nil {
+						gomega.Expect(err).NotTo(gomega.HaveOccurred(), "must successfully update namespace and pods")
+					}
+				case <-time.After(100 * time.Millisecond):
+					// Updates completed successfully
+				}
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 
 	ginkgo.Context("IPv6 on pod UPDATE", func() {
@@ -12723,6 +12903,553 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 		})
 
 	})
+
+	ginkgo.Context("Sync", func() {
+		ginkgo.It("removes config for previously selected pods on a deleted Node", func() {
+			// node 1 is local zone and egress Node.
+			// pod was on node 2 but it is deleted. Node 2 previously was also an egress Node.
+			app.Action = func(*cli.Context) error {
+				config.OVNKubernetesFeature.EnableInterconnect = true
+				// dual stack cluster
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				egressNamespace := newNamespace(eipNamespace)
+				egressPod := corev1.Pod{
+					ObjectMeta: newPodMeta(eipNamespace, podName, egressPodLabel),
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "containerName",
+								Image: "containerImage",
+							},
+						},
+						NodeName: node1Name,
+					},
+					Status: corev1.PodStatus{
+						Phase:  corev1.PodRunning,
+						PodIP:  podV4IP,
+						PodIPs: []corev1.PodIP{{IP: podV4IP}, {IP: podV6IP}},
+					},
+				}
+				// node 1 (local zone)
+				node1IPv4 := "192.168.126.210"
+				Node1IPv4CIDR := node1IPv4 + "/24"
+				node1IPv6 := "fc00:f853:ccd:e793::30"
+				node1IPv6CIDR := node1IPv6 + "/64"
+				node1TranSwitchIPv4CIDR := "100.88.0.2/16"
+				node1TranSwitchIPv6CIDR := "fd97::2/64"
+				_, node1IPV4Net, _ := net.ParseCIDR(v4Node1Subnet)
+				_, node1IPV6Net, _ := net.ParseCIDR(v6Node1Subnet)
+				nodeAnnotations := map[string]string{
+					"k8s.ovn.org/l3-gateway-config":               `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
+					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\",\"ipv6\":\"%s\"}}", nodeLogicalRouterIfAddrV4, nodeLogicalRouterIfAddrV6),
+					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", Node1IPv4CIDR, node1IPv6CIDR),
+					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4Node1Subnet, v6Node1Subnet),
+					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s\", \"ipv6\": \"%s\"}", node1TranSwitchIPv4CIDR, node1TranSwitchIPv6CIDR),
+					"k8s.ovn.org/zone-name":                       node1Name,
+					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\",\"%s\"]", Node1IPv4CIDR, node1IPv6CIDR),
+				}
+				node1 := getNodeObj(node1Name, nodeAnnotations, map[string]string{}) // add node to avoid error-ing out on transit switch IP fetch
+				// node 2 - deleted (remote zone)
+				node2TranSwitchIPv6 := "fd97::3"
+				eipIPv4 := "192.168.126.200"
+				eipIPv6 := "0:0:0:0:0:feff:c0a8:8e0d"
+				deletedPodIPv4 := podV4IP2
+				// dual IP family EIP selecting one pod in local zone
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{
+							eipIPv4,
+							eipIPv6,
+						},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{
+							{
+								Node:     node1Name,
+								EgressIP: eipIPv4,
+							},
+							// Previous was set to node 2 and Node was deleted while local zone EIP controller was down.
+							//{
+							//	Node:     node2Name,
+							//	EgressIP: eipIPv6,
+							//},
+						},
+					},
+				}
+				ginkgo.By("start OVN DBs with valid and invalid (pod doesn't exist..) OVN config")
+				node1NatLogicalPortName := "k8s-" + node1Name
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							// LRPs to support EIP assigned to a remote node node thats deleted while the controller was down
+							// Valid LRP for IPv4 egress node. IPv4 egress Node is local. IPv6 egress node is remote and deleted but ovn config remains
+							getReRoutePolicy(podV4IP, "4", "valid-reroute-ipv4-UUID",
+								nodeLogicalRouterIPv4, getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name,
+									IPFamilyValueV4, types.DefaultNetworkName, DefaultNetworkControllerName).GetExternalIDs()),
+							// invalid LRP for IPv6 because remove node is deleted
+							getReRoutePolicy(podV6IP, "6", "invalid-reroute-ipv6-UUID",
+								[]string{node2TranSwitchIPv6}, getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name,
+									IPFamilyValueV6, types.DefaultNetworkName, DefaultNetworkControllerName).GetExternalIDs()),
+							// NATs to support EIP assigned to the local node
+							// valid NAT
+							&nbdb.NAT{
+								UUID:        "valid-nat-ipv4-UUID",
+								LogicalIP:   podV4IP,
+								ExternalIP:  eipIPv4,
+								ExternalIDs: getEgressIPNATDbIDs(egressIPName, egressPod.Namespace, egressPod.Name, IPFamilyValueV4, DefaultNetworkControllerName).GetExternalIDs(),
+								Type:        nbdb.NATTypeSNAT,
+								LogicalPort: &node1NatLogicalPortName,
+								Options: map[string]string{
+									"stateless": "false",
+								},
+							},
+							// invalid NAT for a deleted pod on remote node
+							&nbdb.NAT{
+								UUID:        "invalid-nat-ipv4-UUID",
+								LogicalIP:   deletedPodIPv4,
+								ExternalIP:  eipIPv4,
+								ExternalIDs: getEgressIPNATDbIDs(egressIPName, egressNamespace.Namespace, "deletedpod", IPFamilyValueV4, DefaultNetworkControllerName).GetExternalIDs(),
+								Type:        nbdb.NATTypeSNAT,
+								LogicalPort: &node1NatLogicalPortName,
+								Options: map[string]string{
+									"stateless": "false",
+								},
+							},
+							&nbdb.LogicalRouterPort{
+								UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+								Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name,
+								Networks: []string{nodeLogicalRouterIfAddrV6, nodeLogicalRouterIfAddrV4},
+							},
+							&nbdb.LogicalRouter{
+								Name:     types.OVNClusterRouter,
+								UUID:     types.OVNClusterRouter + "-UUID",
+								Policies: []string{"valid-reroute-ipv4-UUID", "invalid-reroute-ipv6-UUID"},
+							},
+							&nbdb.LogicalRouter{
+								Name:    types.GWRouterPrefix + node1Name,
+								UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+								Options: map[string]string{"dynamic_neigh_routers": "false"},
+								Nat:     []string{"valid-nat-ipv4-UUID", "invalid-nat-ipv4-UUID"},
+							},
+							&nbdb.LogicalSwitchPort{
+								UUID: "k8s-" + node1.Name + "-UUID",
+								Name: "k8s-" + node1.Name,
+								Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV4Net).IP.String(),
+									"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV6Net).IP.String()},
+							},
+							&nbdb.LogicalSwitch{
+								UUID:  node1.Name + "-UUID",
+								Name:  node1.Name,
+								Ports: []string{"k8s-" + node1.Name + "-UUID"},
+							},
+						},
+					},
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{*egressNamespace},
+					},
+					&corev1.PodList{
+						Items: []corev1.Pod{egressPod},
+					},
+					&corev1.NodeList{
+						Items: []corev1.Node{node1},
+					},
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+				)
+				i, podIPv4Net, _ := net.ParseCIDR(podV4IP + "/23")
+				podIPv4Net.IP = i
+				i, podIPv6Net, _ := net.ParseCIDR(podV6IP + "/23")
+				podIPv6Net.IP = i
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{podIPv4Net, podIPv6Net})
+
+				// hack pod to be in the provided zone
+				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
+				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
+				fakeOvn.controller.localZoneNodes.Store(node1Name, true)
+				fakeOvn.controller.localZoneNodes.Store(node2Name, false)
+
+				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				ginkgo.By("ensuring cleanup of invalid LRP and NAT")
+				egressIPServedPodsASv4, egressIPServedPodsASv6 := buildEgressIPServedPodsAddressSets([]string{podV4IP, podV6IP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+				expectedDatabaseState := []libovsdbtest.TestData{
+					getReRoutePolicy(podV4IP, "4", "valid-reroute-ipv4-UUID",
+						nodeLogicalRouterIPv4, getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name,
+							IPFamilyValueV4, types.DefaultNetworkName, DefaultNetworkControllerName).GetExternalIDs()),
+					&nbdb.NAT{
+						UUID:        "valid-egressip-nat-UUID",
+						LogicalIP:   podV4IP,
+						ExternalIP:  eipIPv4,
+						ExternalIDs: getEgressIPNATDbIDs(egressIPName, egressPod.Namespace, egressPod.Name, IPFamilyValueV4, fakeOvn.controller.controllerName).GetExternalIDs(),
+						Type:        nbdb.NATTypeSNAT,
+						LogicalPort: &node1NatLogicalPortName,
+						Options: map[string]string{
+							"stateless": "false",
+						},
+					},
+					&nbdb.LogicalRouter{
+						Name:     types.OVNClusterRouter,
+						UUID:     types.OVNClusterRouter + "-UUID",
+						Policies: []string{"valid-reroute-ipv4-UUID"},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name,
+						Networks: []string{nodeLogicalRouterIfAddrV6, nodeLogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalRouter{
+						Name:    types.GWRouterPrefix + node1Name,
+						UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+						Nat:     []string{"valid-egressip-nat-UUID"},
+						Options: map[string]string{"dynamic_neigh_routers": "false"},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: "k8s-" + node1.Name + "-UUID",
+						Name: "k8s-" + node1.Name,
+						Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV4Net).IP.String(),
+							"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV6Net).IP.String()},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  node1.Name + "-UUID",
+						Name:  node1.Name,
+						Ports: []string{"k8s-" + node1.Name + "-UUID"},
+					},
+					egressIPServedPodsASv4,
+					egressIPServedPodsASv6,
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				ginkgo.By("ensure config is consistent")
+				gomega.Consistently(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("remove invalid OVN config for deleted pod", func() {
+			// removes invalid SNAT/NAT for a pod that was selected by an EIP but was removed while controller was not running and therefore OVN config should be removed
+			// does not modify valid SNAT/NAT
+			// further references to "local" or "remote" imply local or remote OVN zone for IC.
+			// one EIP object with two assigned IPs of different IP families (v4 and v6) which select one pod that's local
+			app.Action = func(*cli.Context) error {
+				config.OVNKubernetesFeature.EnableInterconnect = true
+				// dual stack cluster
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+				egressPod := corev1.Pod{
+					ObjectMeta: newPodMeta(eipNamespace, podName, egressPodLabel),
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "containerName",
+								Image: "containerImage",
+							},
+						},
+						NodeName: node1Name,
+					},
+					Status: corev1.PodStatus{
+						Phase:  corev1.PodRunning,
+						PodIP:  podV4IP,
+						PodIPs: []corev1.PodIP{{IP: podV4IP}, {IP: podV6IP}},
+					},
+				}
+				// deletedPodIP is a pod IP of a Pod that was deleted while eip controller was not running therefore config will exist in OVN DBs to support EIP
+				deletedPodIPv4, deletedPod2IPv4, deletedPodIPv6, deletedPod2IPv6 := podV4IP2, "10.128.0.20", podV6IP2, podV6IP3
+				egressNamespace := newNamespace(eipNamespace)
+				// node 1 (local zone)
+				node1IPv4 := "192.168.126.210"
+				Node1IPv4CIDR := node1IPv4 + "/24"
+				node1IPv6 := "fc00:f853:ccd:e793::30"
+				node1IPv6CIDR := node1IPv6 + "/64"
+				node1TranSwitchIPv4CIDR := "100.88.0.2/16"
+				node1TranSwitchIPv6CIDR := "fd97::2/64"
+				_, node1IPV4Net, _ := net.ParseCIDR(v4Node1Subnet)
+				_, node1IPV6Net, _ := net.ParseCIDR(v6Node1Subnet)
+				nodeAnnotations := map[string]string{
+					"k8s.ovn.org/l3-gateway-config":               `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
+					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\",\"ipv6\":\"%s\"}}", nodeLogicalRouterIfAddrV4, nodeLogicalRouterIfAddrV6),
+					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", Node1IPv4CIDR, node1IPv6CIDR),
+					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4Node1Subnet, v6Node1Subnet),
+					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s\", \"ipv6\": \"%s\"}", node1TranSwitchIPv4CIDR, node1TranSwitchIPv6CIDR),
+					"k8s.ovn.org/zone-name":                       node1Name,
+					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\",\"%s\"]", Node1IPv4CIDR, node1IPv6CIDR),
+				}
+				node1 := getNodeObj(node1Name, nodeAnnotations, map[string]string{}) // add node to avoid error-ing out on transit switch IP fetch
+				// node 2 (remote zone)
+				node2IPv4 := "192.168.126.202"
+				node2IPv4CIDR := node2IPv4 + "/24"
+				node2IPv6 := "fc00:f853:cce:e793::20"
+				node2IPv6CIDR := node2IPv6 + "/64"
+				node2TranSwitchIPv4 := "100.88.0.3"
+				node2TranSwitchIPv4CIDR := node2TranSwitchIPv4 + "/16"
+				node2TranSwitchIPv6 := "fd97::3"
+				node2TranSwitchIPv6CIDR := node2TranSwitchIPv6 + "/64"
+				_, node2IPV4Net, _ := net.ParseCIDR(v4Node2Subnet)
+				_, node2IPV6Net, _ := net.ParseCIDR(v6Node2Subnet)
+				nodeAnnotations = map[string]string{
+					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\",\"ipv6\":\"%s\"}}", node2LogicalRouterIfAddrV4, node2LogicalRouterIfAddrV6),
+					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, node2IPv6CIDR),
+					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4Node2Subnet, v6Node2Subnet),
+					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s\", \"ipv6\": \"%s\"}", node2TranSwitchIPv4CIDR, node2TranSwitchIPv6CIDR),
+					"k8s.ovn.org/zone-name":                       node2Name,
+					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\",\"%s\"]", node2IPv4CIDR, node2IPv6CIDR),
+				}
+				node2 := getNodeObj(node2Name, nodeAnnotations, map[string]string{})
+				eipIPv4 := "192.168.126.200"
+				eipIPv6 := "0:0:0:0:0:feff:c0a8:8e0d"
+				// dual IP family EIP selecting one pod in local zone
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{
+							eipIPv4,
+							eipIPv6,
+						},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{
+							{
+								Node:     node1Name,
+								EgressIP: eipIPv4,
+							},
+							{
+								Node:     node2Name,
+								EgressIP: eipIPv6,
+							},
+						},
+					},
+				}
+				ginkgo.By("start OVN DBs with valid and invalid ( 2 pods don't exist..) OVN config")
+				node1NatLogicalPortName := "k8s-" + node1Name
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							// LRPs to support EIP assigned to a remote node
+							// valid LRP for IPv4/IPv6. IPv4 Egress Node is local, IPv6 is remote
+							getReRoutePolicy(podV4IP, "4", "valid-reroute-ipv4-UUID",
+								nodeLogicalRouterIPv4, getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name,
+									IPFamilyValueV4, types.DefaultNetworkName, DefaultNetworkControllerName).GetExternalIDs()),
+							getReRoutePolicy(podV6IP, "6", "valid-reroute-ipv6-UUID",
+								[]string{node2TranSwitchIPv6}, getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name,
+									IPFamilyValueV6, types.DefaultNetworkName, DefaultNetworkControllerName).GetExternalIDs()),
+							// invalid lrps to redirect to the remote egress node for deleted pods
+							getReRoutePolicy(deletedPodIPv6, "6", "invalid-reroute-ipv6-UUID",
+								[]string{node2TranSwitchIPv6}, getEgressIPLRPReRouteDbIDs(eIP.Name, "UNKNOWN", "UNKNOWN",
+									IPFamilyValueV6, types.DefaultNetworkName, DefaultNetworkControllerName).GetExternalIDs()),
+							getReRoutePolicy(deletedPod2IPv6, "6", "invalid-reroute2-ipv6-UUID",
+								[]string{node2TranSwitchIPv6}, getEgressIPLRPReRouteDbIDs(eIP.Name, "UNKNOWN", "UNKNOWN",
+									IPFamilyValueV6, types.DefaultNetworkName, DefaultNetworkControllerName).GetExternalIDs()),
+							// NATs to support EIP assigned to the local node
+							// valid NAT
+							&nbdb.NAT{
+								UUID:        "valid-nat-ipv4-UUID",
+								LogicalIP:   podV4IP,
+								ExternalIP:  eipIPv4,
+								ExternalIDs: getEgressIPNATDbIDs(egressIPName, egressPod.Namespace, egressPod.Name, IPFamilyValueV4, DefaultNetworkControllerName).GetExternalIDs(),
+								Type:        nbdb.NATTypeSNAT,
+								LogicalPort: &node1NatLogicalPortName,
+								Options: map[string]string{
+									"stateless": "false",
+								},
+							},
+							// invalid NATs
+							&nbdb.NAT{
+								UUID:        "invalid-nat-ipv4-UUID",
+								LogicalIP:   deletedPodIPv4,
+								ExternalIP:  eipIPv4,
+								ExternalIDs: getEgressIPNATDbIDs(egressIPName, "UNKNOWN", "UNKNOWN", IPFamilyValueV4, DefaultNetworkControllerName).GetExternalIDs(),
+								Type:        nbdb.NATTypeSNAT,
+								LogicalPort: &node1NatLogicalPortName,
+								Options: map[string]string{
+									"stateless": "false",
+								},
+							},
+							&nbdb.NAT{
+								UUID:        "invalid-nat2-ipv4-UUID",
+								LogicalIP:   deletedPod2IPv4,
+								ExternalIP:  eipIPv4,
+								ExternalIDs: getEgressIPNATDbIDs(egressIPName, "UNKNOWN", "UNKNOWN", IPFamilyValueV4, DefaultNetworkControllerName).GetExternalIDs(),
+								Type:        nbdb.NATTypeSNAT,
+								LogicalPort: &node1NatLogicalPortName,
+								Options: map[string]string{
+									"stateless": "false",
+								},
+							},
+							&nbdb.LogicalRouterPort{
+								UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+								Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name,
+								Networks: []string{nodeLogicalRouterIfAddrV6, nodeLogicalRouterIfAddrV4},
+							},
+							&nbdb.LogicalRouter{
+								Name:     types.OVNClusterRouter,
+								UUID:     types.OVNClusterRouter + "-UUID",
+								Policies: []string{"valid-reroute-ipv4-UUID", "valid-reroute-ipv6-UUID", "invalid-reroute-ipv6-UUID", "invalid-reroute2-ipv6-UUID"},
+							},
+							&nbdb.LogicalRouter{
+								Name:    types.GWRouterPrefix + node1Name,
+								UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+								Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+								Options: map[string]string{"dynamic_neigh_routers": "false"},
+								Nat:     []string{"valid-nat-ipv4-UUID", "invalid-nat-ipv4-UUID"},
+							},
+							&nbdb.LogicalSwitchPort{
+								UUID: "k8s-" + node1.Name + "-UUID",
+								Name: "k8s-" + node1.Name,
+								Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV4Net).IP.String(),
+									"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV6Net).IP.String()},
+							},
+							&nbdb.LogicalSwitchPort{
+								UUID: "k8s-" + node2.Name + "-UUID",
+								Name: "k8s-" + node2.Name,
+								Addresses: []string{"fe:1a:b2:3f:0e:fd " + util.GetNodeManagementIfAddr(node2IPV4Net).IP.String(),
+									"fe:1a:b2:3f:0e:fd " + util.GetNodeManagementIfAddr(node2IPV6Net).IP.String()},
+							},
+							&nbdb.LogicalSwitch{
+								UUID:  node1.Name + "-UUID",
+								Name:  node1.Name,
+								Ports: []string{"k8s-" + node1.Name + "-UUID"},
+							},
+							&nbdb.LogicalSwitch{
+								UUID:  node2.Name + "-UUID",
+								Name:  node2.Name,
+								Ports: []string{"k8s-" + node2.Name + "-UUID"},
+							},
+						},
+					},
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{*egressNamespace},
+					},
+					&corev1.PodList{
+						Items: []corev1.Pod{egressPod},
+					},
+					&corev1.NodeList{
+						Items: []corev1.Node{node1, node2},
+					},
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+				)
+				i, podIPv4Net, _ := net.ParseCIDR(podV4IP + "/23")
+				podIPv4Net.IP = i
+				i, podIPv6Net, _ := net.ParseCIDR(podV6IP + "/23")
+				podIPv6Net.IP = i
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{podIPv4Net, podIPv6Net})
+
+				// hack pod to be in the provided zone
+				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
+				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
+				fakeOvn.controller.localZoneNodes.Store(node1Name, true)
+				fakeOvn.controller.localZoneNodes.Store(node2Name, false)
+
+				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				ginkgo.By("ensuring cleanup of invalid LRP and NAT")
+				egressIPServedPodsASv4, egressIPServedPodsASv6 := buildEgressIPServedPodsAddressSets([]string{podV4IP, podV6IP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+				expectedDatabaseState := []libovsdbtest.TestData{
+					// LRPs to support EIP assigned to a remote node
+					// valid LRP for IPv4/IPv6. IPv4 Egress Node is local, IPv6 is remote
+					getReRoutePolicy(podV4IP, "4", "valid-reroute-ipv4-UUID",
+						nodeLogicalRouterIPv4, getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name,
+							IPFamilyValueV4, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs()),
+					getReRoutePolicy(podV6IP, "6", "valid-reroute-ipv6-UUID",
+						[]string{node2TranSwitchIPv6}, getEgressIPLRPReRouteDbIDs(eIP.Name, egressPod.Namespace, egressPod.Name,
+							IPFamilyValueV6, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs()),
+					// valid NAT
+					&nbdb.NAT{
+						UUID:        "valid-egressip-nat-UUID",
+						LogicalIP:   podV4IP,
+						ExternalIP:  eipIPv4,
+						ExternalIDs: getEgressIPNATDbIDs(egressIPName, egressPod.Namespace, egressPod.Name, IPFamilyValueV4, fakeOvn.controller.controllerName).GetExternalIDs(),
+						Type:        nbdb.NATTypeSNAT,
+						LogicalPort: &node1NatLogicalPortName,
+						Options: map[string]string{
+							"stateless": "false",
+						},
+					},
+					&nbdb.LogicalRouter{
+						Name:     types.OVNClusterRouter,
+						UUID:     types.OVNClusterRouter + "-UUID",
+						Policies: []string{"valid-reroute-ipv4-UUID", "valid-reroute-ipv6-UUID"},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name,
+						Networks: []string{nodeLogicalRouterIfAddrV6, nodeLogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalRouter{
+						Name:    types.GWRouterPrefix + node1Name,
+						UUID:    types.GWRouterPrefix + node1Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+						Nat:     []string{"valid-egressip-nat-UUID"},
+						Options: map[string]string{"dynamic_neigh_routers": "false"},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: "k8s-" + node1.Name + "-UUID",
+						Name: "k8s-" + node1.Name,
+						Addresses: []string{"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV4Net).IP.String(),
+							"fe:1a:b2:3f:0e:fb " + util.GetNodeManagementIfAddr(node1IPV6Net).IP.String()},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: "k8s-" + node2.Name + "-UUID",
+						Name: "k8s-" + node2.Name,
+						Addresses: []string{"fe:1a:b2:3f:0e:fd " + util.GetNodeManagementIfAddr(node2IPV4Net).IP.String(),
+							"fe:1a:b2:3f:0e:fd " + util.GetNodeManagementIfAddr(node2IPV6Net).IP.String()},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  node1.Name + "-UUID",
+						Name:  node1.Name,
+						Ports: []string{"k8s-" + node1.Name + "-UUID"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  node2.Name + "-UUID",
+						Name:  node2.Name,
+						Ports: []string{"k8s-" + node2.Name + "-UUID"},
+					},
+					egressIPServedPodsASv4,
+					egressIPServedPodsASv6,
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				ginkgo.By("ensure config is consistent")
+				gomega.Consistently(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
 })
 
 // TEST UTILITY FUNCTIONS;

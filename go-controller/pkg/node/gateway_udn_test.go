@@ -59,14 +59,14 @@ func getCreationFakeCommands(fexec *ovntest.FakeExec, mgtPort, mgtPortMAC, netNa
 	})
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf." + mgtPort + ".forwarding=1",
+		Cmd:    "sysctl -w net/ipv4/conf/" + mgtPort + "/forwarding=1",
 		Output: "net.ipv4.conf." + mgtPort + ".forwarding = 1",
 	})
 }
 
 func getRPFilterLooseModeFakeCommands(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp3.rp_filter=2",
+		Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp3/rp_filter=2",
 		Output: "net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
 	})
 }
@@ -148,7 +148,7 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	})
 	if config.IPv4Mode {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+			Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
 			Output: "net.ipv4.conf.breth0.forwarding = 1",
 		})
 	}
@@ -170,6 +170,9 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 		Output: "false",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovs-appctl --timeout=15 fdb/add breth0 breth0 0 00:00:00:55:66:99",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_worker1-to-br-int ofport",
