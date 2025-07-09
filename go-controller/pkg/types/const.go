@@ -86,6 +86,10 @@ const (
 	DefaultAllowPriority = 1001
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
+	// Pass priority for isolated advertised networks
+	AdvertisedNetworkPassPriority = 1100
+	// Deny priority for isolated advertised networks
+	AdvertisedNetworkDenyPriority = 1050
 
 	// ACL PlaceHolderACL Tier Priorities
 	PrimaryUDNAllowPriority = 1001
@@ -305,4 +309,12 @@ const (
 
 	// CUDNPrefix of all CUDN network names
 	CUDNPrefix = "cluster_udn_"
+
+	// NFTNoPMTUDRemoteNodeIPsv4 is a set used to track remote node IPs that do not belong to
+	// the local node's subnet.
+	NFTNoPMTUDRemoteNodeIPsv4 = "no-pmtud-remote-node-ips-v4"
+
+	// NFTNoPMTUDRemoteNodeIPsv6 is a set used to track remote node IPs that do not belong to
+	// the local node's subnet.
+	NFTNoPMTUDRemoteNodeIPsv6 = "no-pmtud-remote-node-ips-v6"
 )
