@@ -1,4 +1,4 @@
-package metrics
+package recorders
 
 import (
 	"fmt"
@@ -14,17 +14,29 @@ import (
 
 	"github.com/ovn-org/libovsdb/client"
 
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func setupOvn(nbData libovsdbtest.TestSetup) (client.Client, client.Client, *libovsdbtest.Context) {
-	nbClient, sbClient, cleanup, err := libovsdbtest.NewNBSBTestHarness(nbData)
+func setHvCfg(nbClient client.Client, hvCfg int, hvCfgTimestamp time.Time) {
+	nbGlobal := nbdb.NBGlobal{}
+	nbGlobalResp, err := libovsdbops.GetNBGlobal(nbClient, &nbGlobal)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	return sbClient, nbClient, cleanup
+	nbGlobalResp.HvCfg = hvCfg
+	nbGlobalResp.HvCfgTimestamp = int(hvCfgTimestamp.UnixMilli())
+	ops, err := nbClient.Where(nbGlobalResp).Update(nbGlobalResp, &nbGlobalResp.HvCfg, &nbGlobalResp.HvCfgTimestamp)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(ops).To(gomega.HaveLen(1))
+	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
 func getKubeClient(nodeCount int) *kube.Kube {
@@ -40,23 +52,16 @@ func getKubeClient(nodeCount int) *kube.Kube {
 	return &kube.Kube{KClient: kubeFakeClient}
 }
 
-func setHvCfg(nbClient client.Client, hvCfg int, hvCfgTimestamp time.Time) {
-	nbGlobal := nbdb.NBGlobal{}
-	nbGlobalResp, err := libovsdbops.GetNBGlobal(nbClient, &nbGlobal)
+func setupOvn(nbData libovsdbtest.TestSetup) (client.Client, client.Client, *libovsdbtest.Context) {
+	nbClient, sbClient, cleanup, err := libovsdbtest.NewNBSBTestHarness(nbData)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	nbGlobalResp.HvCfg = hvCfg
-	nbGlobalResp.HvCfgTimestamp = int(hvCfgTimestamp.UnixMilli())
-	ops, err := nbClient.Where(nbGlobalResp).Update(nbGlobalResp, &nbGlobalResp.HvCfg, &nbGlobalResp.HvCfgTimestamp)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(ops).To(gomega.HaveLen(1))
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	return sbClient, nbClient, cleanup
 }
 
 var _ = ginkgo.Describe("Config Duration Operations", func() {
 	var (
 		instance       *ConfigDurationRecorder
-		k              *kube.Kube
+		wf             *factory.WatchFactory
 		nbClient       client.Client
 		cleanup        *libovsdbtest.Context
 		stop           chan struct{}
@@ -69,7 +74,23 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 	ginkgo.BeforeEach(func() {
 		cdr = nil
 		instance = GetConfigDurationRecorder()
-		k = getKubeClient(1)
+		k := getKubeClient(1)
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
+		egressQoSFakeClient := &egressqosfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           k.KClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+			EgressQoSClient:      egressQoSFakeClient,
+		}
+
+		var err error
+		wf, err = factory.NewMasterWatchFactory(fakeClient.GetMasterClientset())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		err = wf.Start()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 		stop = make(chan struct{})
 		_, nbClient, cleanup = setupOvn(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{&nbdb.NBGlobal{UUID: "cd-op-uuid"}}})
@@ -78,11 +99,12 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 	ginkgo.AfterEach(func() {
 		cleanup.Cleanup()
 		close(stop)
+		wf.Stop()
 	})
 
 	ginkgo.Context("Runtime", func() {
 		ginkgo.It("records correctly", func() {
-			instance.Run(nbClient, k, 0, time.Millisecond, stop)
+			instance.Run(nbClient, wf, 0, time.Millisecond, stop)
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
 			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
@@ -104,7 +126,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 		})
 
 		ginkgo.It("records correctly with OVN latency", func() {
-			instance.Run(nbClient, k, 0, time.Millisecond, stop)
+			instance.Run(nbClient, wf, 0, time.Millisecond, stop)
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
 			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
@@ -134,7 +156,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 		})
 
 		ginkgo.It("records multiple different objs including adding OVN latency", func() {
-			instance.Run(nbClient, k, 0, time.Millisecond, stop)
+			instance.Run(nbClient, wf, 0, time.Millisecond, stop)
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
 			// recording 1
@@ -186,13 +208,13 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 		})
 
 		ginkgo.It("denies recording when no start called", func() {
-			instance.Run(nbClient, k, 0, time.Millisecond, stop)
+			instance.Run(nbClient, wf, 0, time.Millisecond, stop)
 			ops, _, _, _ := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
 			gomega.Expect(ops).Should(gomega.BeEmpty())
 		})
 
 		ginkgo.It("allows multiple addOVN records for the same obj", func() {
-			instance.Run(nbClient, k, 0, time.Millisecond, stop)
+			instance.Run(nbClient, wf, 0, time.Millisecond, stop)
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
 			// recording 1
