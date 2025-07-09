@@ -137,12 +137,18 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *corev1.Node, a
 }
 
 func (oc *DefaultNetworkController) deleteHybridOverlayPort(node *corev1.Node) error {
-	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
-	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
-	if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp); err != nil {
-		return err
+	if _, err := libovsdbops.GetLogicalSwitchPort(oc.nbClient, &lsp); err != nil {
+		if !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return fmt.Errorf("failed to get logical switch port for hybrid overlay port %s, err: %v", portName, err)
+		}
+	} else {
+		sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
+		klog.Infof("Removing node %s hybrid overlay port", node.Name)
+		if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp); err != nil {
+			return err
+		}
 	}
 	if err := oc.removeHybridLRPolicySharedGW(node); err != nil {
 		return err
@@ -171,7 +177,7 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 			// In cases of OpenShift SDN live migration, where config.HybridOverlay.ClusterSubnets is not provided, we
 			// use the host subnets allocated by OpenShiftSDN as the hybrid-overlay-node-subnet and set up hybrid
 			// overlay routes/policies to these subnets.
-			nodes, err := oc.kube.GetNodes()
+			nodes, err := oc.watchFactory.GetNodes()
 			if err != nil {
 				return err
 			}
@@ -407,7 +413,7 @@ func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeName string, 
 	}
 
 	// Delete routes to HO subnet from GRs
-	nodes, err := oc.kube.GetNodes()
+	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		return err
 	}
