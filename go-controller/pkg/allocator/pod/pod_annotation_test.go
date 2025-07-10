@@ -24,6 +24,7 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/pool"
 )
 
 type ipAllocatorStub struct {
@@ -982,6 +983,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				pod,
 				network,
 				claimsReconciler,
+				pool.NewNetworkPool(),
 				tt.args.reallocate,
 				tt.role,
 			)
