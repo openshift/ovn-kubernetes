@@ -8,7 +8,7 @@
 4. [Create Sample Pods and Verify the Configuration](#4-create-sample-pods-and-verify-the-configuration)
 5. [Explain the NetworkQoS Object](#5-explain-the-networkqos-object)
 
-## **1  Overview**
+## **1 Overview**
 
 Differentiated Services Code Point (DSCP) marking and egress bandwidth metering let you prioritize or police specific traffic flows. The new **NetworkQoS** Custom Resource Definition (CRD) in [ovn-kubernetes](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/dist/templates/k8s.ovn.org_networkqoses.yaml.j2) makes both features available to Kubernetes users on **all** pod interfaces—primary or secondary—without touching pod manifests.
 
@@ -19,7 +19,7 @@ cd contrib
 ./kind-helm.sh -nqe -mne ;  #  --enable-network-qos --enable-multi-network
 ```
 
-## **2  Create a Secondary Network**
+## **2 Create a Secondary Network**
 
 File: nad.yaml
 
@@ -46,7 +46,7 @@ spec:
 ```
 *Why the label?* `NetworkQoS` uses a label selector to find matching NADs. Without at least one label, the selector cannot match.
 
-## **3  Define a NetworkQoS Policy**
+## **3 Define a NetworkQoS Policy**
 
 File: nqos.yaml
 
@@ -108,7 +108,7 @@ NAME           STATUS
 qos-external   NetworkQoS Destinations applied
 ```
 
-## **4  Create Sample Pods and Verify the Configuration**
+## **4 Create Sample Pods and Verify the Configuration**
 
 ### **4.1  Launch Test Pods**
 
@@ -284,7 +284,7 @@ tcpdump: listening on eth0, link-type EN10MB (Ethernet), capture size 262144 byt
     10.245.2.3 > 10.245.4.3: ICMP echo reply, id 14, seq 56, length 64
 ```
 
-## **5  Explain the NetworkQoS Object**
+## **5 Explain the NetworkQoS Object**
 
 Below is an *abbreviated* map of the CRD schema returned by `kubectl explain networkqos --recursive` (v1alpha1). Use this as a quick reference. For the definitive specification, always consult the `kubectl explain` output or the CRD YAML in the ovn-kubernetes repository.
 
