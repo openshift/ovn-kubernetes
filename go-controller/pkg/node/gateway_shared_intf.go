@@ -1807,7 +1807,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 						bridgeMacAddress, netConfig.ofPortPatch))
 			}
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, pkt_mark=%s, "+
+				fmt.Sprintf("cookie=%s, priority=199, table=2, ip, pkt_mark=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
@@ -1843,7 +1843,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 						bridgeMacAddress, netConfig.ofPortPatch))
 			}
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, pkt_mark=%s, "+
+				fmt.Sprintf("cookie=%s, priority=199, table=2, ip6, pkt_mark=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
