@@ -354,7 +354,7 @@ func (gw *GatewayManager) createGWRouterPeerPort(nodeName string) error {
 	if gw.netInfo.TopologyType() == types.Layer2Topology {
 		node, err := gw.watchFactory.GetNode(nodeName)
 		if err != nil {
-			return fmt.Errorf("failed to fetch node %s from watch factory %w", node, err)
+			return fmt.Errorf("failed to fetch node %s from watch factory %w", node.Name, err)
 		}
 		tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, gw.netInfo.GetNetworkName())
 		if err != nil {
