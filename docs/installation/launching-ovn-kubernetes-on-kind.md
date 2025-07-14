@@ -14,20 +14,19 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
       sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
       ```
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-- Python and pip
+- Python 3 and [pipx](https://pipx.pypa.io/stable/installation/)
 - jq
 - openssl
 - openvswitch
 - Go 1.23.0 or above
-
-**NOTE :** In certain operating systems such as CentOS 8.x, pip2 and pip3 binaries are installed instead of pip. In such situations create a softlink for "pip" that points to "pip2".
+- For podman users: skopeo
 
 For OVN kubernetes KIND deployment, use the `kind.sh` script.
 
 First Download and build the OVN-Kubernetes repo: 
 
-```
-git clone https://github.com/ovn-kubernetes/ovn-kubernetes.git; 
+```shell
+git clone https://github.com/ovn-kubernetes/ovn-kubernetes.git 
 cd ovn-kubernetes
 ```
 The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
@@ -52,13 +51,6 @@ $ pushd contrib
 $ export KUBECONFIG=${HOME}/ovn.conf
 $ ./kind.sh
 $ popd
-```
-
-**NOTE:** If you run into issues with installing jinjanate on Ubuntu due to [PEP-0668](https://peps.python.org/pep-0668/) you can work around via:
-```
-sudo apt-get install pipx
-pipx install jinjanator[yaml] 
-pipx ensurepath
 ```
 
 ### Run the KIND deployment with podman
@@ -87,8 +79,9 @@ To deploy KIND however, you need to start it as root and then copy root's kube c
 ```
 $ pushd contrib
 $ sudo ./kind.sh -ep podman
+$ mkdir -p ~/.kube
 $ sudo cp /root/ovn.conf ~/.kube/kind-config
-$ sudo chown $(id -u):$(id -g) -R ~/.kube
+$ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
 $ export KUBECONFIG=~/.kube/kind-config
 $ popd
 ```

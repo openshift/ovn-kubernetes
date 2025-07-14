@@ -459,8 +459,8 @@ print_params() {
 
 install_jinjanator_renderer() {
   # ensure jinjanator renderer installed
-  pip install wheel --user
-  pip freeze | grep jinjanator || pip install jinjanator[yaml] --user
+  pipx install jinjanator[yaml]
+  pipx ensurepath --force >/dev/null
   export PATH=~/.local/bin:$PATH
 }
 
@@ -499,11 +499,11 @@ check_dependencies() {
   fi
 
   if ! command_exists jinjanate ; then
-    if ! command_exists pip ; then
-      echo "Dependency not met: 'jinjanator' not installed and cannot install with 'pip'"
+    if ! command_exists pipx ; then
+      echo "Dependency not met: 'jinjanator' not installed and cannot install with 'pipx'"
       exit 1
     fi
-    echo "'jinjanate' not found, installing with 'pip'"
+    echo "'jinjanate' not found, installing with 'pipx'"
     install_jinjanator_renderer
   fi
 
