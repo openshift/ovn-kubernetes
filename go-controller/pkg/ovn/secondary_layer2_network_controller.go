@@ -757,8 +757,8 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string) error {
-	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
+func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, gwRouterName string) error {
+	outputPort := types.GWRouterToJoinSwitchPrefix + gwRouterName
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
 	if err != nil {
 		return err
@@ -766,12 +766,12 @@ func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localP
 	if len(nats) == 0 {
 		return nil // nothing to do
 	}
-	router := &nbdb.LogicalRouter{
-		Name: routerName,
+	gwRouter := &nbdb.LogicalRouter{
+		Name: gwRouterName,
 	}
-	if err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, router, nats...); err != nil {
+	if err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, gwRouter, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for cluster on router: %q for network %q, error: %w",
-			routerName, oc.GetNetworkName(), err)
+			gwRouterName, oc.GetNetworkName(), err)
 	}
 	return nil
 }
