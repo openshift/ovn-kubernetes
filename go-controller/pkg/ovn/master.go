@@ -34,7 +34,7 @@ const (
 )
 
 type GatewayConfig struct {
-	config                     *util.L3GatewayConfig
+	annoConfig                 *util.L3GatewayConfig
 	hostSubnets                []*net.IPNet
 	clusterSubnets             []*net.IPNet
 	gwLRPJoinIPs               []*net.IPNet
@@ -135,7 +135,7 @@ func (oc *DefaultNetworkController) nodeGatewayConfig(node *corev1.Node) (*Gatew
 	}
 
 	return &GatewayConfig{
-		config:                     l3GatewayConfig,
+		annoConfig:                 l3GatewayConfig,
 		hostSubnets:                hostSubnets,
 		clusterSubnets:             clusterSubnets,
 		gwLRPJoinIPs:               gwLRPIPs,

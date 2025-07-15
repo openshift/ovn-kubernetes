@@ -1090,7 +1090,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node)
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 
 	return &GatewayConfig{
-		config:                     l3GatewayConfig,
+		annoConfig:                 l3GatewayConfig,
 		hostSubnets:                hostSubnets,
 		clusterSubnets:             clusterSubnets,
 		gwLRPJoinIPs:               gwLRPJoinIPs,

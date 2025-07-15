@@ -833,7 +833,7 @@ func (gw *GatewayManager) gatewayInit(
 		}
 	}
 
-	gwRouter, err := gw.createGWRouter(gwConfig.config, gwConfig.gwLRPJoinIPs)
+	gwRouter, err := gw.createGWRouter(gwConfig.annoConfig, gwConfig.gwLRPJoinIPs)
 	if err != nil {
 		return err
 	}
@@ -848,22 +848,22 @@ func (gw *GatewayManager) gatewayInit(
 	}
 
 	if err := gw.addExternalSwitch("",
-		gwConfig.config.InterfaceID,
+		gwConfig.annoConfig.InterfaceID,
 		gw.gwRouterName,
-		gwConfig.config.MACAddress.String(),
+		gwConfig.annoConfig.MACAddress.String(),
 		physNetName(gw.netInfo),
-		gwConfig.config.IPAddresses,
-		gwConfig.config.VLANID); err != nil {
+		gwConfig.annoConfig.IPAddresses,
+		gwConfig.annoConfig.VLANID); err != nil {
 		return err
 	}
 
-	if gwConfig.config.EgressGWInterfaceID != "" {
+	if gwConfig.annoConfig.EgressGWInterfaceID != "" {
 		if err := gw.addExternalSwitch(types.EgressGWSwitchPrefix,
-			gwConfig.config.EgressGWInterfaceID,
+			gwConfig.annoConfig.EgressGWInterfaceID,
 			gw.gwRouterName,
-			gwConfig.config.EgressGWMACAddress.String(),
+			gwConfig.annoConfig.EgressGWMACAddress.String(),
 			types.PhysicalNetworkExGwName,
-			gwConfig.config.EgressGWIPAddresses,
+			gwConfig.annoConfig.EgressGWIPAddresses,
 			nil); err != nil {
 			return err
 		}
@@ -879,7 +879,7 @@ func (gw *GatewayManager) gatewayInit(
 	}
 
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + gw.gwRouterName
-	if err = gw.updateGWRouterStaticRoutes(gwConfig.clusterSubnets, gwConfig.ovnClusterLRPToJoinIfAddrs, gwConfig.config, externalRouterPort,
+	if err = gw.updateGWRouterStaticRoutes(gwConfig.clusterSubnets, gwConfig.ovnClusterLRPToJoinIfAddrs, gwConfig.annoConfig, externalRouterPort,
 		gwRouter); err != nil {
 		return err
 	}
@@ -892,7 +892,7 @@ func (gw *GatewayManager) gatewayInit(
 		return err
 	}
 
-	if err = gw.updateGWRouterNAT(nodeName, gwConfig.clusterSubnets, gwConfig.config, gwConfig.externalIPs, gwLRPIPs, gwRouter); err != nil {
+	if err = gw.updateGWRouterNAT(nodeName, gwConfig.clusterSubnets, gwConfig.annoConfig, gwConfig.externalIPs, gwLRPIPs, gwRouter); err != nil {
 		return err
 	}
 
@@ -1331,7 +1331,7 @@ func (gw *GatewayManager) SyncGateway(
 	node *corev1.Node,
 	gwConfig *GatewayConfig,
 ) error {
-	if gwConfig.config.Mode == config.GatewayModeDisabled {
+	if gwConfig.annoConfig.Mode == config.GatewayModeDisabled {
 		if err := gw.Cleanup(); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
@@ -1361,7 +1361,7 @@ func (gw *GatewayManager) SyncGateway(
 		if mgmtIfAddr == nil {
 			return fmt.Errorf("management interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
 		}
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(mgmtIfAddr.IP), gwConfig.config.IPAddresses)
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(mgmtIfAddr.IP), gwConfig.annoConfig.IPAddresses)
 		if err != nil {
 			return fmt.Errorf("failed to extract the gateway IP addr for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}

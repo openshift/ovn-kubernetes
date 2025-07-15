@@ -830,7 +830,7 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 	return &GatewayConfig{
-		config:                     l3GatewayConfig,
+		annoConfig:                 l3GatewayConfig,
 		hostSubnets:                hostSubnets,
 		clusterSubnets:             hostSubnets,
 		gwLRPJoinIPs:               gwLRPJoinIPs,

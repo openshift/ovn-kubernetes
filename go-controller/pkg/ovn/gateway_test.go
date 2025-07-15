@@ -465,7 +465,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -582,7 +582,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -705,7 +705,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -794,7 +794,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -876,7 +876,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -972,7 +972,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1082,7 +1082,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1162,7 +1162,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1249,7 +1249,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1330,7 +1330,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1444,7 +1444,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1561,7 +1561,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1651,7 +1651,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
@@ -1770,7 +1770,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NodePortEnable: true,
 			}
 			gwConfig := &GatewayConfig{
-				config:                     l3GatewayConfig,
+				annoConfig:                 l3GatewayConfig,
 				hostSubnets:                hostSubnets,
 				clusterSubnets:             clusterIPSubnets,
 				gwLRPJoinIPs:               joinLRPIPs,
