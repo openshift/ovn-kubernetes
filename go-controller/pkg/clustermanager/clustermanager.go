@@ -217,7 +217,7 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 
-		if util.IsPrimaryNetworkCustomizationEnabled() {
+		if util.IsPreconfiguredUDNAddressesEnabled() {
 			if err := cm.userDefinedNetworkController.EnsureDefaultNetworkNAD(); err != nil {
 				return err
 			}

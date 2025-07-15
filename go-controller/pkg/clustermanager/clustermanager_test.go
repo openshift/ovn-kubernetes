@@ -1474,7 +1474,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			})
 		})
 
-		ginkgo.When("the multi-network, network-segmentation, are customized-network features are enabled", func() {
+		ginkgo.When("the multi-network, network-segmentation, and preconfigured-udn-addresses features are enabled", func() {
 			ginkgo.BeforeEach(func() {
 				config.OVNKubernetesFeature.EnableMultiNetwork = true
 				config.OVNKubernetesFeature.EnableNetworkSegmentation = true
