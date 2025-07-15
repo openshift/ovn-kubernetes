@@ -246,10 +246,12 @@ func assertPIDHasSchedAffinity(t *testing.T, pid int, expectedCPUSet unix.CPUSet
 	require.NoError(t, err)
 
 	for _, task := range tasks {
-		err := unix.SchedGetaffinity(task, &actual)
-		require.NoError(t, err)
-		assert.Equal(t, expectedCPUSet, actual,
-			"task[%d] of process[%d] Expected CPUSet %0x != Actual CPUSet %0x", task, pid, expectedCPUSet, actual)
+		assert.Eventually(t, func() bool {
+			err := unix.SchedGetaffinity(task, &actual)
+			assert.NoError(t, err)
+
+			return actual == expectedCPUSet
+		}, time.Second, 10*time.Millisecond, "task[%d] of process[%d]  Expected CPUSet %0x != Actual CPUSet %0x", task, pid, expectedCPUSet, actual)
 	}
 }
 
