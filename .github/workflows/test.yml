@@ -387,6 +387,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: ovn upgrade
@@ -395,6 +396,7 @@ jobs:
         make -C test upgrade-ovn
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run E2E shard-conformance
@@ -402,6 +404,7 @@ jobs:
         make -C test shard-conformance
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
@@ -634,6 +637,7 @@ jobs:
       run: make -C test traffic-flow-tests WHAT="setup"
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run Tests
@@ -687,6 +691,7 @@ jobs:
         fi
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
@@ -799,6 +804,7 @@ jobs:
         ./contrib/kind-dual-stack-conversion.sh
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run Dual-Stack Tests
@@ -806,6 +812,7 @@ jobs:
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run Dual-Stack Control-Plane Tests
@@ -813,6 +820,7 @@ jobs:
         make -C test control-plane WHAT="DualStack"
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
