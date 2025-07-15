@@ -33,13 +33,14 @@ const (
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
 
-type L3GatewayConfig struct {
-	config         *util.L3GatewayConfig
-	hostSubnets    []*net.IPNet
-	clusterSubnets []*net.IPNet
-	gwLRPJoinIPs   []*net.IPNet
-	hostAddrs      []string
-	externalIPs    []net.IP
+type GatewayConfig struct {
+	config                     *util.L3GatewayConfig
+	hostSubnets                []*net.IPNet
+	clusterSubnets             []*net.IPNet
+	gwLRPJoinIPs               []*net.IPNet
+	hostAddrs                  []string
+	externalIPs                []net.IP
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
 }
 
 // SetupMaster creates the central router and load-balancers for the network
@@ -91,7 +92,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *corev1.N
 	return err
 }
 
-func (oc *DefaultNetworkController) nodeGatewayConfig(node *corev1.Node) (*L3GatewayConfig, error) {
+func (oc *DefaultNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, err
@@ -133,13 +134,14 @@ func (oc *DefaultNetworkController) nodeGatewayConfig(node *corev1.Node) (*L3Gat
 		}
 	}
 
-	return &L3GatewayConfig{
-		config:         l3GatewayConfig,
-		hostSubnets:    hostSubnets,
-		clusterSubnets: clusterSubnets,
-		gwLRPJoinIPs:   gwLRPIPs,
-		hostAddrs:      hostAddrs,
-		externalIPs:    externalIPs,
+	return &GatewayConfig{
+		config:                     l3GatewayConfig,
+		hostSubnets:                hostSubnets,
+		clusterSubnets:             clusterSubnets,
+		gwLRPJoinIPs:               gwLRPIPs,
+		hostAddrs:                  hostAddrs,
+		externalIPs:                externalIPs,
+		ovnClusterLRPToJoinIfAddrs: oc.ovnClusterLRPToJoinIfAddrs,
 	}, nil
 }
 

@@ -582,13 +582,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 			} else {
 				if err := gwManager.SyncGateway(
 					node,
-					gwConfig.config,
-					gwConfig.hostSubnets,
-					nil,
-					gwConfig.hostSubnets,
-					gwConfig.gwLRPJoinIPs, // the joinIP allocated to this node for this controller's network
-					nil,                   // no need for ovnClusterLRPToJoinIfAddrs
-					gwConfig.externalIPs,
+					gwConfig,
 				); err != nil {
 					errs = append(errs, err)
 					oc.gatewaysFailed.Store(node.Name, true)
@@ -795,14 +789,7 @@ func (oc *SecondaryLayer2NetworkController) deleteUDNClusterSubnetEgressSNAT(loc
 	return nil
 }
 
-type SecondaryL2GatewayConfig struct {
-	config       *util.L3GatewayConfig
-	hostSubnets  []*net.IPNet
-	gwLRPJoinIPs []*net.IPNet
-	externalIPs  []net.IP
-}
-
-func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL2GatewayConfig, error) {
+func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
@@ -842,11 +829,14 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
-	return &SecondaryL2GatewayConfig{
-		config:       l3GatewayConfig,
-		hostSubnets:  hostSubnets,
-		gwLRPJoinIPs: gwLRPJoinIPs,
-		externalIPs:  externalIPs,
+	return &GatewayConfig{
+		config:                     l3GatewayConfig,
+		hostSubnets:                hostSubnets,
+		clusterSubnets:             hostSubnets,
+		gwLRPJoinIPs:               gwLRPJoinIPs,
+		hostAddrs:                  nil,
+		externalIPs:                externalIPs,
+		ovnClusterLRPToJoinIfAddrs: nil,
 	}, nil
 }
 

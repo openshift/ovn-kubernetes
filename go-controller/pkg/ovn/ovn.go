@@ -381,13 +381,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 
 	if err := oc.newGatewayManager(node.Name).SyncGateway(
 		node,
-		gwConfig.config,
-		gwConfig.hostSubnets,
-		gwConfig.hostAddrs,
-		gwConfig.clusterSubnets,
-		gwConfig.gwLRPJoinIPs,
-		oc.ovnClusterLRPToJoinIfAddrs,
-		gwConfig.externalIPs,
+		gwConfig,
 	); err != nil {
 		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 	}

@@ -803,11 +803,7 @@ func (gw *GatewayManager) updateGWRouterNAT(nodeName string, clusterIPSubnet []*
 // enableGatewayMTU enables options:gateway_mtu for gateway routers.
 func (gw *GatewayManager) gatewayInit(
 	nodeName string,
-	clusterIPSubnet []*net.IPNet,
-	hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig,
-	gwLRPJoinIPs, drLRPIfAddrs []*net.IPNet,
-	externalIPs []net.IP,
+	gwConfig *GatewayConfig,
 	enableGatewayMTU bool,
 ) error {
 
@@ -837,7 +833,7 @@ func (gw *GatewayManager) gatewayInit(
 		}
 	}
 
-	gwRouter, err := gw.createGWRouter(l3GatewayConfig, gwLRPJoinIPs)
+	gwRouter, err := gw.createGWRouter(gwConfig.config, gwConfig.gwLRPJoinIPs)
 	if err != nil {
 		return err
 	}
@@ -846,28 +842,28 @@ func (gw *GatewayManager) gatewayInit(
 		return err
 	}
 
-	gwLRPIPs, err := gw.createGWRouterPort(hostSubnets, gwLRPJoinIPs, enableGatewayMTU, gwRouter)
+	gwLRPIPs, err := gw.createGWRouterPort(gwConfig.hostSubnets, gwConfig.gwLRPJoinIPs, enableGatewayMTU, gwRouter)
 	if err != nil {
 		return err
 	}
 
 	if err := gw.addExternalSwitch("",
-		l3GatewayConfig.InterfaceID,
+		gwConfig.config.InterfaceID,
 		gw.gwRouterName,
-		l3GatewayConfig.MACAddress.String(),
+		gwConfig.config.MACAddress.String(),
 		physNetName(gw.netInfo),
-		l3GatewayConfig.IPAddresses,
-		l3GatewayConfig.VLANID); err != nil {
+		gwConfig.config.IPAddresses,
+		gwConfig.config.VLANID); err != nil {
 		return err
 	}
 
-	if l3GatewayConfig.EgressGWInterfaceID != "" {
+	if gwConfig.config.EgressGWInterfaceID != "" {
 		if err := gw.addExternalSwitch(types.EgressGWSwitchPrefix,
-			l3GatewayConfig.EgressGWInterfaceID,
+			gwConfig.config.EgressGWInterfaceID,
 			gw.gwRouterName,
-			l3GatewayConfig.EgressGWMACAddress.String(),
+			gwConfig.config.EgressGWMACAddress.String(),
 			types.PhysicalNetworkExGwName,
-			l3GatewayConfig.EgressGWIPAddresses,
+			gwConfig.config.EgressGWIPAddresses,
 			nil); err != nil {
 			return err
 		}
@@ -883,20 +879,20 @@ func (gw *GatewayManager) gatewayInit(
 	}
 
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + gw.gwRouterName
-	if err = gw.updateGWRouterStaticRoutes(clusterIPSubnet, drLRPIfAddrs, l3GatewayConfig, externalRouterPort,
+	if err = gw.updateGWRouterStaticRoutes(gwConfig.clusterSubnets, gwConfig.ovnClusterLRPToJoinIfAddrs, gwConfig.config, externalRouterPort,
 		gwRouter); err != nil {
 		return err
 	}
 
-	if err = gw.updateClusterRouterStaticRoutes(hostSubnets, gwLRPIPs); err != nil {
+	if err = gw.updateClusterRouterStaticRoutes(gwConfig.hostSubnets, gwLRPIPs); err != nil {
 		return err
 	}
 
-	if err = gw.syncNATsForGRIPChange(externalIPs, oldExtIPs, gwLRPIPs, gwRouter, oldLogicalRouter); err != nil {
+	if err = gw.syncNATsForGRIPChange(gwConfig.externalIPs, oldExtIPs, gwLRPIPs, gwRouter, oldLogicalRouter); err != nil {
 		return err
 	}
 
-	if err = gw.updateGWRouterNAT(nodeName, clusterIPSubnet, l3GatewayConfig, externalIPs, gwLRPIPs, gwRouter); err != nil {
+	if err = gw.updateGWRouterNAT(nodeName, gwConfig.clusterSubnets, gwConfig.config, gwConfig.externalIPs, gwLRPIPs, gwRouter); err != nil {
 		return err
 	}
 
@@ -1333,20 +1329,15 @@ func (gw *GatewayManager) isRoutingAdvertised(node string) bool {
 // SyncGateway ensures a node's gateway router is configured according to the L3 config and host subnets
 func (gw *GatewayManager) SyncGateway(
 	node *corev1.Node,
-	l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet,
-	hostAddrs []string,
-	clusterSubnets, grLRPJoinIPs []*net.IPNet,
-	ovnClusterLRPToJoinIfAddrs []*net.IPNet,
-	externalIPs []net.IP,
+	gwConfig *GatewayConfig,
 ) error {
-	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
+	if gwConfig.config.Mode == config.GatewayModeDisabled {
 		if err := gw.Cleanup(); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 		return nil
 	}
-	if hostSubnets == nil {
+	if gwConfig.hostSubnets == nil {
 		return nil
 	}
 
@@ -1354,12 +1345,7 @@ func (gw *GatewayManager) SyncGateway(
 
 	err := gw.gatewayInit(
 		node.Name,
-		clusterSubnets,
-		hostSubnets,
-		l3GatewayConfig,
-		grLRPJoinIPs, // the joinIP allocated to this node's GR for this controller's network
-		ovnClusterLRPToJoinIfAddrs,
-		externalIPs,
+		gwConfig,
 		enableGatewayMTU,
 	)
 	if err != nil {
@@ -1370,16 +1356,16 @@ func (gw *GatewayManager) SyncGateway(
 	if gw.clusterRouterName == "" {
 		routerName = gw.gwRouterName
 	}
-	for _, subnet := range hostSubnets {
+	for _, subnet := range gwConfig.hostSubnets {
 		mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
 		if mgmtIfAddr == nil {
 			return fmt.Errorf("management interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
 		}
-		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(mgmtIfAddr.IP), l3GatewayConfig.IPAddresses)
+		l3GatewayConfigIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6(mgmtIfAddr.IP), gwConfig.config.IPAddresses)
 		if err != nil {
 			return fmt.Errorf("failed to extract the gateway IP addr for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(mgmtIfAddr.IP), hostAddrs)
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(mgmtIfAddr.IP), gwConfig.hostAddrs)
 		if err != nil && err != util.ErrorNoIP {
 			return fmt.Errorf("failed to extract the host IP addrs for network %q: %v", gw.netInfo.GetNetworkName(), err)
 		}
