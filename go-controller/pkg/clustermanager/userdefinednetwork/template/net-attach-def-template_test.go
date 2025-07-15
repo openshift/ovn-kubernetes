@@ -301,6 +301,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			// must be defined so the primary user defined network can match the ip families of the underlying cluster
 			config.IPv4Mode = true
 			config.IPv6Mode = true
+			config.OVNKubernetesFeature.EnablePersistentIPs = true
 			nad, err := RenderNetAttachDefManifest(testUdn, testNs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))
@@ -436,6 +437,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			// must be defined so the primary user defined network can match the ip families of the underlying cluster
 			config.IPv4Mode = true
 			config.IPv6Mode = true
+			config.OVNKubernetesFeature.EnablePersistentIPs = true
 			nad, err := RenderNetAttachDefManifest(cudn, testNs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))
