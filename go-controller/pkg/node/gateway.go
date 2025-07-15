@@ -406,8 +406,8 @@ func (g *gateway) Reconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
-	nodeIPs, _ := g.nodeIPManager.ListAddresses()
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, nodeIPs); err != nil {
+	hostIPs, hostSubnets := g.nodeIPManager.ListAddresses()
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, hostSubnets, hostIPs); err != nil {
 		return err
 	}
 	// Services create OpenFlow flows as well, need to update them all

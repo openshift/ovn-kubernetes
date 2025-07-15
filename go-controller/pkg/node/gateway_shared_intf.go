@@ -1371,7 +1371,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, error) {
+func commonFlows(subnets, hostSubnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 	ofPortPhys := bridge.ofPortPhys
@@ -1432,7 +1432,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 					// Allow OVN->Host traffic on the same node
 					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
-						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, subnets, false)...)
+						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, false)...)
 					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP
@@ -1512,7 +1512,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 					// Allow OVN->Host traffic on the same node
 					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
-						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, subnets, true)...)
+						dftFlows = append(dftFlows, ovnToHostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, true)...)
 					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP
@@ -1771,11 +1771,11 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 
 // initSvcViaMgmPortRoutingRules creates the svc2managementport routing table, routes and rules
 // that let's us forward service traffic to ovn-k8s-mp0 as opposed to the default route towards breth0
-func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
+func initSvcViaMgmPortRoutingRules(subnets []*net.IPNet) error {
 	// create ovnkubeSvcViaMgmPortRT and service route towards ovn-k8s-mp0
-	for _, hostSubnet := range hostSubnets {
-		isIPv6 := utilnet.IsIPv6CIDR(hostSubnet)
-		gatewayIP := util.GetNodeGatewayIfAddr(hostSubnet).IP.String()
+	for _, subnet := range subnets {
+		isIPv6 := utilnet.IsIPv6CIDR(subnet)
+		gatewayIP := util.GetNodeGatewayIfAddr(subnet).IP.String()
 		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 			if isIPv6 == utilnet.IsIPv6CIDR(svcCIDR) {
 				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", types.K8sMgmtIntfName); err != nil {
@@ -1895,7 +1895,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
-		nodeIPs, _ := gw.nodeIPManager.ListAddresses()
+		hostIPs, hostSubnets := gw.nodeIPManager.ListAddresses()
 
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
 			// Delete stale masquerade resources if there are any. This is to make sure that there
@@ -1919,7 +1919,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, hostSubnets, hostIPs)
 		if err != nil {
 			return err
 		}
@@ -1928,7 +1928,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
 			nodeIPs, _ := gw.nodeIPManager.ListAddresses()
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, nodeIPs); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(subnets, hostSubnets, nodeIPs); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
