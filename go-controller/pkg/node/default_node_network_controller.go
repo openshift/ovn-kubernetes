@@ -1186,10 +1186,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			bridgeName := nc.Gateway.GetGatewayIface()
-			// Configure route for svc towards shared gw bridge
-			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
-			if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
+			// Configure route for svc towards shared gateway interface
+			if err := configureSvcRouteViaInterface(nc.routeManager, nc.Gateway.GetGatewayIface(), DummyNextHopIPs()); err != nil {
 				return err
 			}
 		}
@@ -1653,10 +1651,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 
 func getPMTUDKey(nodeName string) string {
 	return fmt.Sprintf("%s_pmtud", nodeName)
-}
-
-func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge string) error {
-	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs())
 }
 
 // DummyNextHopIPs returns the fake next hops used for service traffic routing.
