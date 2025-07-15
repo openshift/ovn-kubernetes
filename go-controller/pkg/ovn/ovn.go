@@ -379,23 +379,17 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 		return fmt.Errorf("error getting gateway config for node %s: %v", node.Name, err)
 	}
 
-	if gwConfig.config.Mode == config.GatewayModeDisabled {
-		if err := oc.newGatewayManager(node.Name).Cleanup(); err != nil {
-			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
-		}
-	} else {
-		if err := oc.newGatewayManager(node.Name).syncGatewayLogicalNetwork(
-			node,
-			gwConfig.config,
-			gwConfig.hostSubnets,
-			gwConfig.hostAddrs,
-			gwConfig.clusterSubnets,
-			gwConfig.gwLRPJoinIPs,
-			oc.ovnClusterLRPToJoinIfAddrs,
-			gwConfig.externalIPs,
-		); err != nil {
-			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
-		}
+	if err := oc.newGatewayManager(node.Name).SyncGateway(
+		node,
+		gwConfig.config,
+		gwConfig.hostSubnets,
+		gwConfig.hostAddrs,
+		gwConfig.clusterSubnets,
+		gwConfig.gwLRPJoinIPs,
+		oc.ovnClusterLRPToJoinIfAddrs,
+		gwConfig.externalIPs,
+	); err != nil {
+		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 	}
 
 	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {

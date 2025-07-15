@@ -580,7 +580,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 				errs = append(errs, err)
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				if err := gwManager.syncNodeGateway(
+				if err := gwManager.SyncGateway(
 					node,
 					gwConfig.config,
 					gwConfig.hostSubnets,

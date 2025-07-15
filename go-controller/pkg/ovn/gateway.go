@@ -799,9 +799,9 @@ func (gw *GatewayManager) updateGWRouterNAT(nodeName string, clusterIPSubnet []*
 	return nil
 }
 
-// GatewayInit creates a gateway router for the local chassis.
+// gatewayInit creates a gateway router for the local chassis.
 // enableGatewayMTU enables options:gateway_mtu for gateway routers.
-func (gw *GatewayManager) GatewayInit(
+func (gw *GatewayManager) gatewayInit(
 	nodeName string,
 	clusterIPSubnet []*net.IPNet,
 	hostSubnets []*net.IPNet,
@@ -1330,19 +1330,29 @@ func (gw *GatewayManager) isRoutingAdvertised(node string) bool {
 	return util.IsPodNetworkAdvertisedAtNode(gw.netInfo, node)
 }
 
-func (gw *GatewayManager) syncGatewayLogicalNetwork(
+// SyncGateway ensures a node's gateway router is configured according to the L3 config and host subnets
+func (gw *GatewayManager) SyncGateway(
 	node *corev1.Node,
 	l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,
-	clusterSubnets []*net.IPNet,
-	grLRPJoinIPs []*net.IPNet,
+	clusterSubnets, grLRPJoinIPs []*net.IPNet,
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet,
 	externalIPs []net.IP,
 ) error {
+	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
+		if err := gw.Cleanup(); err != nil {
+			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
+		}
+		return nil
+	}
+	if hostSubnets == nil {
+		return nil
+	}
+
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
 
-	err := gw.GatewayInit(
+	err := gw.gatewayInit(
 		node.Name,
 		clusterSubnets,
 		hostSubnets,
@@ -1386,37 +1396,6 @@ func (gw *GatewayManager) syncGatewayLogicalNetwork(
 	}
 
 	return nil
-}
-
-// syncNodeGateway ensures a node's gateway router is configured according to the L3 config and host subnets
-func (gw *GatewayManager) syncNodeGateway(
-	node *corev1.Node,
-	l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet,
-	hostAddrs []string,
-	clusterSubnets, grLRPJoinIPs []*net.IPNet,
-	joinSwitchIPs []*net.IPNet,
-	externalIPs []net.IP,
-) error {
-	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := gw.Cleanup(); err != nil {
-			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
-		}
-		return nil
-	}
-	if hostSubnets == nil {
-		return nil
-	}
-	return gw.syncGatewayLogicalNetwork(
-		node,
-		l3GatewayConfig,
-		hostSubnets,
-		hostAddrs,
-		clusterSubnets,
-		grLRPJoinIPs,  // the joinIP allocated to this node for this controller's network
-		joinSwitchIPs, // the .1 of this controller's global joinSubnet
-		externalIPs,
-	)
 }
 
 func physNetName(netInfo util.NetInfo) string {

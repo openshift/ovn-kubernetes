@@ -469,7 +469,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -582,7 +582,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -701,7 +701,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -786,7 +786,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -871,7 +871,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			mgmtPortIP := ""
 
 			// Disable option:gateway_mtu.
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -890,7 +890,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			// Enable option:gateway_mtu.
 			expectedOVNClusterRouter.StaticRoutes = []string{}
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -968,7 +968,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -989,7 +989,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			oldJoinLRPIPs := joinLRPIPs
 			joinLRPIPs = ovntest.MustParseIPNets("100.64.0.99/16")
 			expectedOVNClusterRouter.StaticRoutes = []string{}
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1072,7 +1072,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1151,7 +1151,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.IPv4Mode = false
 			config.IPv6Mode = true
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1231,7 +1231,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1309,7 +1309,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1419,7 +1419,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1531,7 +1531,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1618,7 +1618,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
@@ -1734,7 +1734,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedOVNClusterRouter.StaticRoutes = []string{}
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
 				clusterIPSubnets,
 				hostSubnets,
