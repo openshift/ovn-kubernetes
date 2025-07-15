@@ -1771,11 +1771,11 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 
 // initSvcViaMgmPortRoutingRules creates the svc2managementport routing table, routes and rules
 // that let's us forward service traffic to ovn-k8s-mp0 as opposed to the default route towards breth0
-func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
+func initSvcViaMgmPortRoutingRules(subnets []*net.IPNet) error {
 	// create ovnkubeSvcViaMgmPortRT and service route towards ovn-k8s-mp0
-	for _, hostSubnet := range hostSubnets {
-		isIPv6 := utilnet.IsIPv6CIDR(hostSubnet)
-		gatewayIP := util.GetNodeGatewayIfAddr(hostSubnet).IP.String()
+	for _, subnet := range subnets {
+		isIPv6 := utilnet.IsIPv6CIDR(subnet)
+		gatewayIP := util.GetNodeGatewayIfAddr(subnet).IP.String()
 		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 			if isIPv6 == utilnet.IsIPv6CIDR(svcCIDR) {
 				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", types.K8sMgmtIntfName); err != nil {
