@@ -1402,21 +1402,21 @@ func (gw *GatewayManager) syncNodeGateway(
 		if err := gw.Cleanup(); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
-	} else if hostSubnets != nil {
-		if err := gw.syncGatewayLogicalNetwork(
-			node,
-			l3GatewayConfig,
-			hostSubnets,
-			hostAddrs,
-			clusterSubnets,
-			grLRPJoinIPs,  // the joinIP allocated to this node for this controller's network
-			joinSwitchIPs, // the .1 of this controller's global joinSubnet
-			externalIPs,
-		); err != nil {
-			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
-		}
+		return nil
 	}
-	return nil
+	if hostSubnets == nil {
+		return nil
+	}
+	return gw.syncGatewayLogicalNetwork(
+		node,
+		l3GatewayConfig,
+		hostSubnets,
+		hostAddrs,
+		clusterSubnets,
+		grLRPJoinIPs,  // the joinIP allocated to this node for this controller's network
+		joinSwitchIPs, // the .1 of this controller's global joinSubnet
+		externalIPs,
+	)
 }
 
 func physNetName(netInfo util.NetInfo) string {
