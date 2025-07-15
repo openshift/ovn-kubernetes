@@ -342,7 +342,7 @@ func (gw *GatewayManager) createGWRouterPeerPort(nodeName string) error {
 		Type:      "router",
 		Addresses: []string{"router"},
 		Options: map[string]string{
-			"router-port": gwRouterPortName,
+			libovsdbops.RouterPort: gwRouterPortName,
 		},
 	}
 	if gw.netInfo.IsSecondary() {
@@ -366,7 +366,7 @@ func (gw *GatewayManager) createGWRouterPeerPort(nodeName string) error {
 			return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %w",
 				nodeName, gw.netInfo.GetNetworkName(), err)
 		}
-		logicalSwitchPort.Options["requested-tnl-key"] = strconv.Itoa(tunnelID)
+		logicalSwitchPort.Options[libovsdbops.RequestedTnlKey] = strconv.Itoa(tunnelID)
 	}
 	sw := nbdb.LogicalSwitch{Name: gw.joinSwitchName}
 	err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(gw.nbClient, &sw, &logicalSwitchPort)
@@ -399,7 +399,7 @@ func (gw *GatewayManager) createGWRouterPort(hostSubnets []*net.IPNet, gwLRPJoin
 	var options map[string]string
 	if enableGatewayMTU {
 		options = map[string]string{
-			"gateway_mtu": strconv.Itoa(config.Default.MTU),
+			libovsdbops.GatewayMTU: strconv.Itoa(config.Default.MTU),
 		}
 	}
 
@@ -974,7 +974,7 @@ func (gw *GatewayManager) addExternalSwitch(prefix, interfaceID, gatewayRouter, 
 		Name: externalSwitchPortToRouter,
 		Type: "router",
 		Options: map[string]string{
-			"router-port": externalRouterPort,
+			libovsdbops.RouterPort: externalRouterPort,
 
 			// This option will program OVN to start sending GARPs for all external IPS
 			// that the logical switch port has been configured to use. This is

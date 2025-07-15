@@ -14,6 +14,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -87,7 +88,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 	var options map[string]string
 	if gatewayMTU != "" {
 		options = map[string]string{
-			"gateway_mtu": gatewayMTU,
+			libovsdbops.GatewayMTU: gatewayMTU,
 		}
 	}
 	testData = append(testData, &nbdb.LogicalRouterPort{
@@ -344,7 +345,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			Type:      "router",
 			Addresses: []string{"router"},
 			Options: map[string]string{
-				"router-port": gwRouterPort,
+				libovsdbops.RouterPort: gwRouterPort,
 			},
 		},
 		&nbdb.LogicalSwitchPort{
@@ -352,7 +353,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			Name: externalSwitchPortToRouter,
 			Type: "router",
 			Options: map[string]string{
-				"router-port":               externalRouterPort,
+				libovsdbops.RouterPort:      externalRouterPort,
 				"nat-addresses":             "router",
 				"exclude-lb-vips-from-garp": "true",
 			},
@@ -1692,7 +1693,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					&nbdb.LogicalRouterPort{
 						UUID:    types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
 						Name:    types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
-						Options: map[string]string{"gateway_mtu": "1400"},
+						Options: map[string]string{libovsdbops.GatewayMTU: "1400"},
 					},
 					expectedGR,
 					expectedOVNClusterRouter,

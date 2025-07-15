@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -84,7 +85,7 @@ var _ = ginkgo.Describe("OVN Pod Operations with network segmentation", func() {
 							},
 							Options: map[string]string{
 								// check requested-chassis will be updated to correct t1.nodeName value
-								"requested-chassis": t1.nodeName,
+								libovsdbops.RequestedChassis: t1.nodeName,
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},

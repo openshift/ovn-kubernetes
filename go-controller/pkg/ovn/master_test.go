@@ -336,7 +336,7 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		Networks:       []string{node.NodeGWIP},
 		GatewayChassis: []string{chassisName + "-UUID"},
 		Options: map[string]string{
-			"gateway_mtu": "1400",
+			libovsdbops.GatewayMTU: "1400",
 		},
 	})
 	if serviceControllerEnabled {
@@ -356,8 +356,8 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		UUID: types.SwitchToRouterPrefix + node.Name + "-UUID",
 		Type: "router",
 		Options: map[string]string{
-			"router-port": types.RouterToSwitchPrefix + node.Name,
-			"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+			libovsdbops.RouterPort: types.RouterToSwitchPrefix + node.Name,
+			"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 		},
 		Addresses: []string{"router"},
 	})

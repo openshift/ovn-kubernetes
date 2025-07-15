@@ -725,8 +725,8 @@ func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.
 			node.Name, oc.GetNetworkName(), err)
 	}
 	logicalSwitchPort.Options = map[string]string{
-		"requested-tnl-key": strconv.Itoa(tunnelID),
-		"requested-chassis": node.Name,
+		libovsdbops.RequestedTnlKey:  strconv.Itoa(tunnelID),
+		libovsdbops.RequestedChassis: node.Name,
 	}
 	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
