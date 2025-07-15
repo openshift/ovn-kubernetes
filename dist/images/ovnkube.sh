@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #set -euo pipefail
 
 # Enable verbose shell output if OVNKUBE_SH_VERBOSE is set to 'true'
