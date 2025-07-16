@@ -676,3 +676,26 @@ func AddRoutesGatewayIP(
 
 	return nil
 }
+
+// ReleasePodAddressPoolResources releases MAC addresses from the address pool
+// when a pod is deleted, to clean up addresses and prevent conflicts.
+func (allocator *PodAnnotationAllocator) ReleasePodAddressPoolResources(pod *corev1.Pod, nadName string) error {
+	podNetwork, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to unmarshal pod annotation: %w", err)
+	}
+	if podNetwork.MAC == nil {
+		return nil
+	}
+
+	networkName := allocator.netInfo.GetNetworkName()
+	allocator.addressPool.RemoveMACFromPool(networkName, podNetwork.MAC)
+
+	klog.V(5).Infof("Removed MAC %s from address pool for network %s, pod %s/%s, nad %s",
+		podNetwork.MAC, networkName, pod.Namespace, pod.Name, nadName)
+
+	return nil
+}
