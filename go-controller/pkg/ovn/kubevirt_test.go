@@ -540,8 +540,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				UUID: ovntypes.SwitchToRouterPrefix + t.nodeName + "-UUID",
 				Type: "router",
 				Options: map[string]string{
-					"router-port": logicalRouterPort.Name,
-					"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+					libovsdbops.RouterPort: logicalRouterPort.Name,
+					"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 				},
 			}
 			logicalSwitch = &nbdb.LogicalSwitch{
@@ -600,8 +600,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					UUID: ovntypes.SwitchToRouterPrefix + t.migrationTarget.nodeName + "-UUID",
 					Type: "router",
 					Options: map[string]string{
-						"router-port": migrationTargetLRP.Name,
-						"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+						libovsdbops.RouterPort: migrationTargetLRP.Name,
+						"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 					},
 				}
 				migrationTargetLS = &nbdb.LogicalSwitch{
