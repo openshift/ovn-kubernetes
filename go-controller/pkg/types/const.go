@@ -187,6 +187,9 @@ const (
 	NodeModeDPU     = "dpu"
 	NodeModeDPUHost = "dpu-host"
 
+	// Gateway interface configuration
+	DeriveFromMgmtPort = "derive-from-mgmt-port"
+
 	// Geneve header length for IPv4 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv4 = 58
 	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
