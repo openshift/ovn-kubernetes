@@ -424,6 +424,11 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		}
 	}
 
+	// Set static FDB entry for LOCAL port
+	if err := util.SetStaticFDBEntry(gatewayBridge.bridgeName, gatewayBridge.bridgeName, gatewayBridge.macAddress); err != nil {
+		return nil, nil, err
+	}
+
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
@@ -527,11 +532,11 @@ func (g *gateway) addAllServices() []error {
 func (g *gateway) updateSNATRules() error {
 	subnets := util.IPsToNetworkIPs(g.nodeIPManager.mgmtPort.GetAddresses()...)
 
-	if g.GetDefaultPodNetworkAdvertised() || config.Gateway.Mode != config.GatewayModeLocal {
-		return delLocalGatewayPodSubnetNATRules(subnets...)
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNFTRules()
 	}
 
-	return addLocalGatewayPodSubnetNATRules(subnets...)
+	return addOrUpdateLocalGatewayPodSubnetNFTRules(g.GetDefaultPodNetworkAdvertised(), subnets...)
 }
 
 type bridgeConfiguration struct {

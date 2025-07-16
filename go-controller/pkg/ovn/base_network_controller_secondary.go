@@ -18,8 +18,8 @@ import (
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -679,7 +679,15 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	defer nsUnlock()
+	nsUnlock()
+	// Enqueue the UDN namespace into network policy controller if it needs to be
+	// processed by network policy peer namespace handlers.
+	if bsnc.IsPrimaryNetwork() {
+		err = bsnc.requeuePeerNamespace(ns)
+		if err != nil {
+			return fmt.Errorf("failed to requeue peer namespace %s: %v", ns.Name, err)
+		}
+	}
 	return nil
 }
 
@@ -804,7 +812,7 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
-func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string) ([]*nbdb.NAT, error) {
+func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string, isUDNAdvertised bool) ([]*nbdb.NAT, error) {
 	if len(localPodSubnets) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -831,10 +839,36 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 		if masqIP == nil {
 			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 		}
-		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
-			extIDs, getMasqueradeManagementIPSNATMatch(dstMac.String())))
+		if !isUDNAdvertised {
+			snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
+				extIDs, getMasqueradeManagementIPSNATMatch(dstMac.String())))
+		} else {
+			dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, DefaultNetworkControllerName)
+			addrSet, err := bsnc.addressSetFactory.GetAddressSet(dbIDs)
+			if err != nil {
+				return nil, fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
+			}
+			ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS := addrSet.GetASHashNames()
+			snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
+				extIDs, fmt.Sprintf("%s && (%s)", getMasqueradeManagementIPSNATMatch(dstMac.String()), getClusterNodesDestinationBasedSNATMatch(ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS))))
+		}
 	}
 	return snats, nil
+}
+
+func getMasqueradeManagementIPSNATMatch(dstMac string) string {
+	return fmt.Sprintf("eth.dst == %s", dstMac)
+}
+
+func getClusterNodesDestinationBasedSNATMatch(ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS string) string {
+	if config.IPv4Mode && config.IPv6Mode {
+		return fmt.Sprintf("ip4.dst == $%s || ip6.dst == $%s", ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS)
+	} else if config.IPv4Mode {
+		return fmt.Sprintf("ip4.dst == $%s", ipv4ClusterNodeIPAS)
+	} else if config.IPv6Mode {
+		return fmt.Sprintf("ip6.dst == $%s", ipv6ClusterNodeIPAS)
+	}
+	return ""
 }
 
 func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
@@ -857,10 +891,6 @@ func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnot
 	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
 
 	return kubevirt.EnsureDHCPOptionsForLSP(bsnc.controllerName, bsnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
-}
-
-func getMasqueradeManagementIPSNATMatch(dstMac string) string {
-	return fmt.Sprintf("eth.dst == %s", dstMac)
 }
 
 func (bsnc *BaseSecondaryNetworkController) requireDHCP(pod *corev1.Pod) bool {
