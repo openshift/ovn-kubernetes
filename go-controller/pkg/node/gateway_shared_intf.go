@@ -406,9 +406,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 
 	// Add flows for default network services that are accessible from UDN networks
 	if util.IsNetworkSegmentationSupportEnabled() {
-		// The flow added below has a higher priority than the per UDN service flow:
-		//   priority=200, table=2, ip, ip_src=169.254.0.<UDN>, actions=set_field:<bridge-mac>->eth_dst,output:<UDN-patch-port>
-		// This ordering ensures that traffic to UDN allowed default services goes to the the default patch port.
+		// The flow added below has a higher priority than the per UDN service isolation flow:
+		//   priority=200, table=2, ip, ip_src=169.254.0.<UDN>, actions=drop
+		// This ordering ensures that traffic to UDN allowed default services goes to the default patch port.
 
 		if util.IsUDNEnabledService(ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String()) {
 			key = strings.Join([]string{"UDNAllowedSVC", service.Namespace, service.Name}, "_")
@@ -1788,13 +1788,17 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				// Use the filtered subnets for the flow compute instead of the masqueradeIP
 				srcIPOrSubnet = matchingIPFamilySubnet.String()
 			}
+
+			// Drop traffic coming from the masquerade IP or the UDN subnet(for advertised UDNs) to ensure that
+			// isolation between networks is enforced. This handles the case where a pod on the UDN subnet is sending traffic to
+			// a service in another UDN.
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, ip_src=%s, "+
-					"actions=set_field:%s->eth_dst,output:%s",
-					defaultOpenFlowCookie, srcIPOrSubnet,
-					bridgeMacAddress, netConfig.ofPortPatch))
+					"actions=drop",
+					defaultOpenFlowCookie, srcIPOrSubnet))
+
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, pkt_mark=%s, "+
+				fmt.Sprintf("cookie=%s, priority=250, table=2, ip, pkt_mark=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
@@ -1825,11 +1829,10 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			}
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, ipv6_src=%s, "+
-					"actions=set_field:%s->eth_dst,output:%s",
-					defaultOpenFlowCookie, srcIPOrSubnet,
-					bridgeMacAddress, netConfig.ofPortPatch))
+					"actions=drop",
+					defaultOpenFlowCookie, srcIPOrSubnet))
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, pkt_mark=%s, "+
+				fmt.Sprintf("cookie=%s, priority=250, table=2, ip6, pkt_mark=%s, "+
 					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.pktMark,
 					bridgeMacAddress, netConfig.ofPortPatch))
