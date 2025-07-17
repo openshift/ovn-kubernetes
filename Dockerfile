@@ -27,26 +27,26 @@ RUN cd go-controller; CGO_ENABLED=1 make
 # - git commit number
 # - ovnkube.sh script
 FROM registry.ci.openshift.org/ocp/4.19:ovn-kubernetes-base
-
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+COPY ovn-24*.rpm /root/
 # more-pkgs file is updated in Dockerfile.base
 # more-pkgs file contains the following ovs/ovn packages to be installed in this Dockerfile
 # - openvswitch-devel
 # - openvswitch-ipsec
 # - ovn-vtep
 RUN INSTALL_PKGS=" \
-	openssl firewalld-filesystem \
-	libpcap iproute iproute-tc strace \
-	tcpdump iputils \
-	libreswan \
-	ethtool conntrack-tools \
-	openshift-clients \
-	" && \
-	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
-	eval "dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $(cat /more-pkgs)" && \
+       openssl firewalld-filesystem \
+       libpcap iproute iproute-tc strace \
+       tcpdump iputils \
+       libreswan \
+       ethtool conntrack-tools \
+       openshift-clients \
+       " && \
+       rpm -Uhv --nodeps --force /root/*.rpm && \
+       dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
