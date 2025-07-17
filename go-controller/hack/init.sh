@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 OUT_DIR=${OUT_DIR:-_output}
 
