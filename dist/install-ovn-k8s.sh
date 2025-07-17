@@ -1,4 +1,4 @@
-#!/bin/bash -ex
+#!/usr/bin/env bash -ex
 # shellcheck disable=SC2016
 
 SCRIPTS_DIR=$(dirname "${BASH_SOURCE[0]}")

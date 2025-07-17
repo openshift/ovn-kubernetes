@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Currently supported platforms of multi-arch images are: amd64 arm64
 LINUX_ARCH=(amd64 arm64)
