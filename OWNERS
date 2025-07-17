@@ -1,16 +1,14 @@
 reviewers:
-  - abhat
-  - dcbw
-  - JacobTanenbaum
   - jcaamano
+  - kyrtapz
+  - martinkennelly
   - trozet
   - tssurya
 approvers:
   - abhat
-  - danwinship
-  - dcbw
-  - JacobTanenbaum
   - jcaamano
+  - kyrtapz
+  - martinkennelly
   - knobunc
   - trozet
   - tssurya

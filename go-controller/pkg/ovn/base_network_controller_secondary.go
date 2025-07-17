@@ -18,8 +18,8 @@ import (
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -679,7 +679,15 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	defer nsUnlock()
+	nsUnlock()
+	// Enqueue the UDN namespace into network policy controller if it needs to be
+	// processed by network policy peer namespace handlers.
+	if bsnc.IsPrimaryNetwork() {
+		err = bsnc.requeuePeerNamespace(ns)
+		if err != nil {
+			return fmt.Errorf("failed to requeue peer namespace %s: %v", ns.Name, err)
+		}
+	}
 	return nil
 }
 
