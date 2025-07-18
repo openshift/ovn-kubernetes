@@ -387,6 +387,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: ovn upgrade
@@ -395,6 +396,7 @@ jobs:
         make -C test upgrade-ovn
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run E2E shard-conformance
@@ -402,6 +404,7 @@ jobs:
         make -C test shard-conformance
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
@@ -468,17 +471,17 @@ jobs:
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled", "num-workers": "3", "network-segmentation": "enable-network-segmentation"}
-          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": "enable-network-segmentation", "routeadvertisements": "true"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": "enable-network-segmentation", "routeadvertisements": "true", "preconfigured-udn-addresses": "true"}
           - {"target": "control-plane", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
-          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
-          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding", "preconfigured-udn-addresses": "true"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "preconfigured-udn-addresses": "true"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-disabled"}
-          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          - {"target": "bgp", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation"}
-          - {"target": "bgp", "ha": "noHA", "gateway-mode": "shared",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation"}
-          - {"target": "traffic-flow-test-only","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24", "network-segmentation": "enable-network-segmentation"}
-          - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "network-segmentation": "enable-network-segmentation"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "preconfigured-udn-addresses": "true"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "preconfigured-udn-addresses": "true"}
+          - {"target": "bgp", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "preconfigured-udn-addresses": "true"}
+          - {"target": "bgp", "ha": "noHA", "gateway-mode": "shared",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "preconfigured-udn-addresses": "true"}
+          - {"target": "traffic-flow-test-only","ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "traffic-flow-tests": "1-24", "network-segmentation": "enable-network-segmentation", "preconfigured-udn-addresses": "true"}
+          - {"target": "tools", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "network-segmentation": "enable-network-segmentation", "preconfigured-udn-addresses": "true"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
@@ -492,6 +495,7 @@ jobs:
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || matrix.target == 'network-segmentation' || matrix.target == 'tools' || matrix.target == 'multi-homing-helm' || matrix.target == 'traffic-flow-test-only' || matrix.routeadvertisements != '' }}"
       ENABLE_NETWORK_SEGMENTATION: "${{ matrix.target == 'network-segmentation' || matrix.network-segmentation == 'enable-network-segmentation' }}"
+      ENABLE_PRE_CONF_UDN_ADDR: "${{ matrix.preconfigured-udn-addresses == 'true' }}"
       DISABLE_UDN_HOST_ISOLATION: "true"
       PLATFORM_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       PLATFORM_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
@@ -508,6 +512,7 @@ jobs:
       TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
       ENABLE_ROUTE_ADVERTISEMENTS: "${{ matrix.routeadvertisements != '' }}"
       ADVERTISE_DEFAULT_NETWORK:  "${{ matrix.routeadvertisements == 'advertise-default' }}"
+      ENABLE_PRE_CONF_UDN_ADDR: "${{ ( matrix.target == 'network-segmentation' || matrix.target == 'kv-live-migration' ) && matrix.ic == 'ic-single-node-zones' }}"
     steps:
 
     - name: Install VRF kernel module
@@ -634,6 +639,7 @@ jobs:
       run: make -C test traffic-flow-tests WHAT="setup"
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run Tests
@@ -687,6 +693,7 @@ jobs:
         fi
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
@@ -799,6 +806,7 @@ jobs:
         ./contrib/kind-dual-stack-conversion.sh
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run Dual-Stack Tests
@@ -806,6 +814,7 @@ jobs:
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Run Dual-Stack Control-Plane Tests
@@ -813,6 +822,7 @@ jobs:
         make -C test control-plane WHAT="DualStack"
 
     - name: Runner Diagnostics
+      if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Export kind logs
