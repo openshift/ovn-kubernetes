@@ -23,17 +23,20 @@ ARG ovnver=24.09.2-69.el9fdp
 # the corresponding Centos version when updating the OCP version.
 ARG ovsver_okd=3.5
 # We are not bumping the OVN version for OKD since the FDP release is not done yet.
-ARG ovnver_okd=24.09.1-10.el9s
+ARG ovnver_okd=24.09.2-71.el9s
+
+COPY ovn-24.09*.rpm /root/
 
 RUN INSTALL_PKGS="iptables nftables" && \
-    source /etc/os-release && \
+    source /etc/os-release && echo "ID ${ID}" && \
     [ "${ID}" == "centos" ] && ovsver=$ovsver_okd && ovnver=$ovnver_okd; \
 	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
-	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
+        dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
-	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
-	dnf clean all && rm -rf /var/cache/* && \
-	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
+        dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
+        rpm -Uhv --nodeps --force /root/*.rpm && \
+        echo "done rpm" && \
+        dnf clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
