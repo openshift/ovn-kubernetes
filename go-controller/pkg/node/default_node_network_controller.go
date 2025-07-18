@@ -965,8 +965,12 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// First part of gateway initialization. It will be completed by (nc *DefaultNodeNetworkController) Start()
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// IPv6 is not supported in DPU enabled nodes, error out if ovnkube is not set in IPv4 mode
+		if config.IPv6Mode && config.OvnKubeNode.Mode == types.NodeModeDPU {
+			return fmt.Errorf("IPv6 mode is not supported on a DPU enabled node")
+		}
 		// Initialize gateway for OVS internal port or representor management port
-		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, nc.mgmtPortController, nodeAddr)
+		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, nc.mgmtPortController)
 		if err != nil {
 			return err
 		}
@@ -1059,7 +1063,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			netdevName = netdevs[0]
 			config.Gateway.Interface = netdevName
 		}
-		err = nc.initGatewayDPUHost(nc.nodeAddress)
+		err = nc.initGatewayDPUHost(nc.nodeAddress, nodeAnnotator)
 		if err != nil {
 			return err
 		}
