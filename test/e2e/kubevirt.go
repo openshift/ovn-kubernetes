@@ -50,7 +50,7 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
 	utilnet "k8s.io/utils/net"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	butaneconfig "github.com/coreos/butane/config"
@@ -794,9 +794,9 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 		}
 
-		waitVirtualMachineInstanceReadiness = func(vmi *kubevirtv1.VirtualMachineInstance) {
+		waitVirtualMachineInstanceReadinessWith = func(vmi *kubevirtv1.VirtualMachineInstance, conditionStatus corev1.ConditionStatus) {
 			GinkgoHelper()
-			By(fmt.Sprintf("Waiting for readiness at virtual machine %s", vmi.Name))
+			By(fmt.Sprintf("Waiting for readiness=%q at virtual machine %s", conditionStatus, vmi.Name))
 			Eventually(func() []kubevirtv1.VirtualMachineInstanceCondition {
 				err := crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi), vmi)
 				Expect(err).To(SatisfyAny(
@@ -807,8 +807,18 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(
 				ContainElement(SatisfyAll(
 					HaveField("Type", kubevirtv1.VirtualMachineInstanceReady),
-					HaveField("Status", corev1.ConditionTrue),
+					HaveField("Status", conditionStatus),
 				)))
+		}
+
+		waitVirtualMachineInstanceReadiness = func(vmi *kubevirtv1.VirtualMachineInstance) {
+			GinkgoHelper()
+			waitVirtualMachineInstanceReadinessWith(vmi, corev1.ConditionTrue)
+		}
+
+		waitVirtualMachineInstanceFailed = func(vmi *kubevirtv1.VirtualMachineInstance) {
+			GinkgoHelper()
+			waitVirtualMachineInstanceReadinessWith(vmi, corev1.ConditionFalse)
 		}
 
 		waitVirtualMachineAddresses = func(vmi *kubevirtv1.VirtualMachineInstance) []kubevirt.Address {
@@ -903,7 +913,7 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 							NetworkSource: networkSource,
 						},
 					},
-					TerminationGracePeriodSeconds: pointer.Int64(5),
+					TerminationGracePeriodSeconds: ptr.To(int64(5)),
 					Volumes: []kubevirtv1.Volume{
 						{
 							Name: "containerdisk",
@@ -929,7 +939,7 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 					GenerateName: vmi.GenerateName,
 				},
 				Spec: kubevirtv1.VirtualMachineSpec{
-					Running: pointer.Bool(true),
+					RunStrategy: ptr.To(kubevirtv1.RunStrategyAlways),
 					Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{
 							Annotations: vmi.Annotations,
@@ -1414,8 +1424,8 @@ fi
 					Name: "force-post-copy",
 				},
 				Spec: kvmigrationsv1alpha1.MigrationPolicySpec{
-					AllowPostCopy:           pointer.Bool(true),
-					CompletionTimeoutPerGiB: pointer.Int64(1),
+					AllowPostCopy:           ptr.To(true),
+					CompletionTimeoutPerGiB: ptr.To(int64(1)),
 					BandwidthPerMigration:   &bandwidthPerMigration,
 					Selectors: &kvmigrationsv1alpha1.Selectors{
 						VirtualMachineInstanceSelector: kvmigrationsv1alpha1.LabelSelector{
@@ -1699,8 +1709,8 @@ write_files:
 			namespace = fr.Namespace.Name
 
 			networkName := ""
-			cidrs := generateL2Subnets(cidrIPv4, cidrIPv6)
-			cudn, networkName = kubevirt.GenerateCUDN(namespace, "net1", td.topology, td.role, cidrs)
+			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
+			cudn, networkName = kubevirt.GenerateCUDN(namespace, "net1", td.topology, td.role, dualCIDRs)
 
 			if td.topology == udnv1.NetworkTopologyLocalnet {
 				By("setting up the localnet underlay")
@@ -1809,7 +1819,7 @@ ip route add %[3]s via %[4]s
 
 			// expect 2 addresses on dual-stack deployments; 1 on single-stack
 			step = by(vmi.Name, "Wait for addresses at the virtual machine")
-			expectedNumberOfAddresses := len(cidrs)
+			expectedNumberOfAddresses := len(dualCIDRs)
 			expectedAddreses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
 			expectedAddresesAtGuest := expectedAddreses
 			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, podNetworkStatusByNetConfigPredicate(namespace, cudn.Name, strings.ToLower(string(td.role))))
@@ -1836,7 +1846,7 @@ ip route add %[3]s via %[4]s
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 
 			if td.role == udnv1.NetworkRolePrimary {
-				if isIPv6Supported() && isInterconnectEnabled() {
+				if isIPv6Supported(fr.ClientSet) && isInterconnectEnabled() {
 					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway before %s %s", td.resource.description, td.test.description))
 
 					nodeRunningVMI, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.NodeName, metav1.GetOptions{})
@@ -1906,7 +1916,7 @@ ip route add %[3]s via %[4]s
 			}
 
 			if td.role == udnv1.NetworkRolePrimary && td.test.description == liveMigrate.description && isInterconnectEnabled() {
-				if isIPv4Supported() {
+				if isIPv4Supported(fr.ClientSet) {
 					step = by(vmi.Name, fmt.Sprintf("Checking IPv4 gateway cached mac after %s %s", td.resource.description, td.test.description))
 					Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
 
@@ -1923,7 +1933,7 @@ ip route add %[3]s via %[4]s
 						WithPolling(time.Second).
 						Should(Equal(expectedGatewayMAC), step)
 				}
-				if isIPv6Supported() {
+				if isIPv6Supported(fr.ClientSet) {
 					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway after %s %s", td.resource.description, td.test.description))
 
 					targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
@@ -2055,8 +2065,8 @@ ip route add %[3]s via %[4]s
 			})
 			fr.Namespace = ns
 			namespace = fr.Namespace.Name
-			cidrs := generateL2Subnets(cidrIPv4, cidrIPv6)
-			cudn, _ := kubevirt.GenerateCUDN(namespace, "net1", udnv1.NetworkTopologyLayer2, udnv1.NetworkRolePrimary, cidrs)
+			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
+			cudn, _ := kubevirt.GenerateCUDN(namespace, "net1", udnv1.NetworkTopologyLayer2, udnv1.NetworkRolePrimary, dualCIDRs)
 			cudn.Spec.Network.Layer2.MTU = 1300
 			createCUDN(cudn)
 
@@ -2097,7 +2107,7 @@ ip route add %[3]s via %[4]s
 				Get(context.Background(), config.Kubernetes.DNSServiceName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			if isIPv4Supported() {
+			if isIPv4Supported(fr.ClientSet) {
 				expectedIP, err := matchIPv4StringFamily(primaryUDNNetworkStatus.IPs)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -2125,7 +2135,7 @@ ip route add %[3]s via %[4]s
 				Expect(primaryUDNValueForDevice("GENERAL.MTU")).To(ConsistOf("1300"))
 			}
 
-			if isIPv6Supported() {
+			if isIPv6Supported(fr.ClientSet) {
 				expectedIP, err := matchIPv6StringFamily(primaryUDNNetworkStatus.IPs)
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(primaryUDNValueFor).
@@ -2164,7 +2174,7 @@ ip route add %[3]s via %[4]s
 			vmiIPv4              = "10.128.0.100/24"
 			vmiIPv6              = "2010:100:200::100/60"
 			vmiMAC               = "0A:58:0A:80:00:64"
-			cidr                 = selectCIDRs(ipv4CIDR, ipv6CIDR)
+			cidrs                = []string{ipv4CIDR, ipv6CIDR}
 			staticIPsNetworkData = func(ips []string) (string, error) {
 				type Ethernet struct {
 					Addresses []string `json:"addresses,omitempty"`
@@ -2213,21 +2223,26 @@ chpasswd: { expire: False }
 			selectedNodes = workerNodeList.Items
 			Expect(selectedNodes).NotTo(BeEmpty())
 
-			iperfServerTestPods, err = createIperfServerPods(selectedNodes, cudn.Name, cudn.Spec.Network.Localnet.Role, cidr)
+			iperfServerTestPods, err = createIperfServerPods(selectedNodes, cudn.Name, cudn.Spec.Network.Localnet.Role, filterCIDRs(fr.ClientSet, cidrs...))
 			Expect(err).NotTo(HaveOccurred())
 
-			networkData, err := staticIPsNetworkData(selectCIDRs(vmiIPv4, vmiIPv6))
+			networkData, err := staticIPsNetworkData(filterCIDRs(fr.ClientSet, vmiIPv4, vmiIPv6))
 			Expect(err).NotTo(HaveOccurred())
 
-			vmi := fedoraWithTestToolingVMI(nil /*labels*/, nil /*annotations*/, nil /*nodeSelector*/, kubevirtv1.NetworkSource{
+			vm := fedoraWithTestToolingVM(nil /*labels*/, nil /*annotations*/, nil /*nodeSelector*/, kubevirtv1.NetworkSource{
 				Multus: &kubevirtv1.MultusNetwork{
 					NetworkName: cudn.Name,
 				},
 			}, userData, networkData)
 			// Harcode mac address so it's the same after live migration
-			vmi.Spec.Domain.Devices.Interfaces[0].MacAddress = vmiMAC
-			createVirtualMachineInstance(vmi)
-
+			vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = vmiMAC
+			createVirtualMachine(vm)
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vm.Name,
+				},
+			}
 			waitVirtualMachineInstanceReadiness(vmi)
 			Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
 
@@ -2253,10 +2268,38 @@ chpasswd: { expire: False }
 			by(vmi.Name, "Running live migration for virtual machine instance")
 			td(vmi)
 
-			step = by(vmi.Name, fmt.Sprintf("Login to virtual machine after virtual machine instance live migration"))
+			// Update vmi status after live migration
+			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
+
+			step = by(vmi.Name, "Login to virtual machine after virtual machine instance live migration")
 			Expect(kubevirt.LoginToFedora(vmi, "fedora", "fedora")).To(Succeed(), step)
 
 			step = by(vmi.Name, "Check east/west traffic after virtual machine instance live migration")
+			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
+
+			By("Stop iperf3 traffic before force killing vm, so iperf3 server do not get stuck")
+			output, err = kubevirt.RunCommand(vmi, "killall iperf3", 5*time.Second)
+			Expect(err).ToNot(HaveOccurred(), output)
+
+			step = by(vmi.Name, fmt.Sprintf("Force kill qemu at node %q where VM is running on", vmi.Status.NodeName))
+			Expect(kubevirt.ForceKillVirtLauncherAtNode(infraprovider.Get(), vmi.Status.NodeName, vmi.Namespace, vmi.Name)).To(Succeed())
+
+			step = by(vmi.Name, "Waiting for failed restarted VMI to reach ready state")
+			waitVirtualMachineInstanceFailed(vmi)
+			waitVirtualMachineInstanceReadiness(vmi)
+			Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
+
+			step = by(vmi.Name, "Login to virtual machine after virtual machine instance force killed")
+			Expect(kubevirt.LoginToFedora(vmi, "fedora", "fedora")).To(Succeed(), step)
+
+			step = by(vmi.Name, "Restart iperf traffic after forcing a vm failure")
+			Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
+			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
+
+			by(vmi.Name, "Running live migration after forcing vm failure")
+			td(vmi)
+
+			step = by(vmi.Name, "Check east/west traffic for failed virtual machine after live migration")
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 		},
 			Entry("after succeeded live migration", liveMigrateSucceed),

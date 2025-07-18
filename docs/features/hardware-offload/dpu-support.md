@@ -43,6 +43,8 @@ These aforementioned parts are expected to be deployed also on two different Kub
 #### OVN Kubernetes component on a DPU-Enabled Host
 - ovn-node
 
+For detailed configuration of gateway interfaces in DPU host mode, see [DPU Gateway Interface Configuration](dpu-gateway-interface.md).
+
 ### DPU Cluster
 ---
 

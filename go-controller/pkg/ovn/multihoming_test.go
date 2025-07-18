@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -165,7 +166,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 					delete(lsp.Options, "iface-id-ver")
 				}
 				if ocInfo.bnc.isLayer2Interconnect() {
-					lsp.Options["requested-tnl-key"] = "1" // hardcode this for now.
+					lsp.Options[libovsdbops.RequestedTnlKey] = "1" // hardcode this for now.
 				}
 				data = append(data, lsp)
 
@@ -216,12 +217,12 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 								"k8s.ovn.org/topology": ocInfo.bnc.TopologyType(),
 								"k8s.ovn.org/network":  ocInfo.bnc.GetNetworkName(),
 							},
-							Options: map[string]string{"router-port": ovntypes.RouterToSwitchPrefix + switchName},
+							Options: map[string]string{libovsdbops.RouterPort: ovntypes.RouterToSwitchPrefix + switchName},
 							Type:    "router",
 						}
 						data = append(data, lsp)
 						if util.IsNetworkSegmentationSupportEnabled() && ocInfo.bnc.IsPrimaryNetwork() {
-							lsp.Options["requested-tnl-key"] = "25"
+							lsp.Options[libovsdbops.RequestedTnlKey] = "25"
 						}
 						nodeslsps[switchName] = append(nodeslsps[switchName], networkSwitchToGWRouterLSPUUID)
 
@@ -291,11 +292,11 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWit
 					UUID: transitSwitchName + "-UUID",
 					Name: transitSwitchName,
 					OtherConfig: map[string]string{
-						"mcast_querier":            "false",
-						"mcast_flood_unregistered": "true",
-						"interconn-ts":             transitSwitchName,
-						"requested-tnl-key":        "16711685",
-						"mcast_snoop":              "true",
+						"mcast_querier":             "false",
+						"mcast_flood_unregistered":  "true",
+						"interconn-ts":              transitSwitchName,
+						libovsdbops.RequestedTnlKey: "16711685",
+						"mcast_snoop":               "true",
 					},
 					ExternalIDs: extIDs,
 				})
@@ -332,8 +333,8 @@ func newExpectedSwitchPort(lspUUID string, portName string, podAddr string, pod 
 			ovntypes.TopologyExternalID: netInfo.TopologyType(),
 		},
 		Options: map[string]string{
-			"requested-chassis": pod.nodeName,
-			"iface-id-ver":      pod.podName,
+			libovsdbops.RequestedChassis: pod.nodeName,
+			"iface-id-ver":               pod.podName,
 		},
 		PortSecurity: []string{podAddr},
 	}
@@ -343,7 +344,7 @@ func newExpectedSwitchToRouterPort(lspUUID string, portName string, pod testPod,
 	lrp := newExpectedSwitchPort(lspUUID, portName, "router", pod, netInfo, nad)
 	lrp.ExternalIDs = nil
 	lrp.Options = map[string]string{
-		"router-port": "rtos-isolatednet_test-node",
+		libovsdbops.RouterPort: "rtos-isolatednet_test-node",
 	}
 	lrp.PortSecurity = nil
 	lrp.Type = "router"

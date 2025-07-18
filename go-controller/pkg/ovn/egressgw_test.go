@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -133,8 +134,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -169,8 +170,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -273,8 +274,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -309,8 +310,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -417,8 +418,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -463,8 +464,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -895,8 +896,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -966,8 +967,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -1076,8 +1077,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -1116,8 +1117,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -1237,8 +1238,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -1277,8 +1278,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -1408,8 +1409,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -1448,8 +1449,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -1589,8 +1590,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -1629,8 +1630,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -1662,8 +1663,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -1708,8 +1709,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -1742,8 +1743,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -1782,8 +1783,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -1896,8 +1897,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2030,8 +2031,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2171,8 +2172,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2364,8 +2365,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"requested-chassis": "node1",
-							"iface-id-ver":      "myPod",
+							libovsdbops.RequestedChassis: "node1",
+							"iface-id-ver":               "myPod",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2546,8 +2547,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"requested-chassis": "node1",
-							"iface-id-ver":      "myPod",
+							libovsdbops.RequestedChassis: "node1",
+							"iface-id-ver":               "myPod",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},

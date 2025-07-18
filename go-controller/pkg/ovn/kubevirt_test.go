@@ -146,10 +146,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				addressIPv6: "fd11::3",
 			},
 		}
-		logicalSwitch                            *nbdb.LogicalSwitch
-		ovnClusterRouter                         *nbdb.LogicalRouter
-		logicalRouterPort                        *nbdb.LogicalRouterPort
-		migrationSourceLSRP, migrationTargetLSRP *nbdb.LogicalSwitchPort
 
 		lrpIP = func(network string) string {
 			return strings.Split(network, "/")[0]
@@ -497,6 +493,12 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 
 	Context("during execution", func() {
 		DescribeTable("reconcile migratable vm pods", func(t testData) {
+			var (
+				logicalSwitch                            *nbdb.LogicalSwitch
+				ovnClusterRouter                         *nbdb.LogicalRouter
+				logicalRouterPort                        *nbdb.LogicalRouterPort
+				migrationSourceLSRP, migrationTargetLSRP *nbdb.LogicalSwitchPort
+			)
 
 			_, parsedClusterCIDRIPv4, err := net.ParseCIDR(clusterCIDRIPv4)
 			Expect(err).ToNot(HaveOccurred())
@@ -540,8 +542,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				UUID: ovntypes.SwitchToRouterPrefix + t.nodeName + "-UUID",
 				Type: "router",
 				Options: map[string]string{
-					"router-port": logicalRouterPort.Name,
-					"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+					libovsdbops.RouterPort: logicalRouterPort.Name,
+					"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 				},
 			}
 			logicalSwitch = &nbdb.LogicalSwitch{
@@ -600,8 +602,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					UUID: ovntypes.SwitchToRouterPrefix + t.migrationTarget.nodeName + "-UUID",
 					Type: "router",
 					Options: map[string]string{
-						"router-port": migrationTargetLRP.Name,
-						"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+						libovsdbops.RouterPort: migrationTargetLRP.Name,
+						"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 					},
 				}
 				migrationTargetLS = &nbdb.LogicalSwitch{

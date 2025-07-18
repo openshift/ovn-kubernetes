@@ -130,7 +130,7 @@ func (gtf *GatewayTopologyFactory) NewJoinSwitch(
 		Name: drSwitchPort,
 		Type: "router",
 		Options: map[string]string{
-			"router-port": drRouterPort,
+			libovsdbops.RouterPort: drRouterPort,
 		},
 		Addresses: []string{"router"},
 	}

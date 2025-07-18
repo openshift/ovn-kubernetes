@@ -22,6 +22,7 @@ import (
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
@@ -56,6 +57,8 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 		eIP1Mark           = 50000
 		eIP2Mark           = 50001
 		secondaryNetworkID = "2"
+		//tnlKey = zoneinterconnect.BaseTransitSwitchTunnelKey + secondaryNetworkID
+		tnlKey = "16711685"
 	)
 
 	getEgressIPStatusLen := func(egressIPName string) func() int {
@@ -1375,7 +1378,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 						UUID:      "stor-" + networkName1_ + node1Name + "-UUID",
 						Name:      "stor-" + networkName1_ + node1Name,
 						Addresses: []string{"router"},
-						Options:   map[string]string{"router-port": "rtos-" + networkName1_ + node1Name},
+						Options:   map[string]string{libovsdbops.RouterPort: "rtos-" + networkName1_ + node1Name},
 						Type:      "router",
 					},
 					&nbdb.ACL{
@@ -1414,11 +1417,11 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 							ovntypes.TopologyExternalID:    ovntypes.Layer3Topology,
 							ovntypes.NetworkRoleExternalID: ovntypes.NetworkRolePrimary},
 						OtherConfig: map[string]string{
-							"mcast_snoop":              "true",
-							"mcast_querier":            "false",
-							"mcast_flood_unregistered": "true",
-							"interconn-ts":             networkName1_ + ovntypes.TransitSwitch,
-							"requested-tnl-key":        "16711685",
+							"mcast_snoop":               "true",
+							"mcast_querier":             "false",
+							"mcast_flood_unregistered":  "true",
+							"interconn-ts":              networkName1_ + ovntypes.TransitSwitch,
+							libovsdbops.RequestedTnlKey: tnlKey,
 						},
 					},
 					getNoReRouteReplyTrafficPolicyForController(netInfo.GetNetworkName(), DefaultNetworkControllerName),
@@ -1562,7 +1565,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 						UUID:      "stor-" + networkName1_ + node1Name + "-UUID",
 						Name:      "stor-" + networkName1_ + node1Name,
 						Addresses: []string{"router"},
-						Options:   map[string]string{"router-port": "rtos-" + networkName1_ + node1Name},
+						Options:   map[string]string{libovsdbops.RouterPort: "rtos-" + networkName1_ + node1Name},
 						Type:      "router",
 					},
 					&nbdb.ACL{
@@ -1601,11 +1604,11 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 							ovntypes.TopologyExternalID:    ovntypes.Layer3Topology,
 							ovntypes.NetworkRoleExternalID: ovntypes.NetworkRolePrimary},
 						OtherConfig: map[string]string{
-							"mcast_snoop":              "true",
-							"mcast_querier":            "false",
-							"mcast_flood_unregistered": "true",
-							"interconn-ts":             networkName1_ + ovntypes.TransitSwitch,
-							"requested-tnl-key":        "16711685",
+							"mcast_snoop":               "true",
+							"mcast_querier":             "false",
+							"mcast_flood_unregistered":  "true",
+							"interconn-ts":              networkName1_ + ovntypes.TransitSwitch,
+							libovsdbops.RequestedTnlKey: tnlKey,
 						},
 					},
 					getNoReRouteReplyTrafficPolicyForController(netInfo.GetNetworkName(), DefaultNetworkControllerName),
@@ -2725,7 +2728,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 						UUID:      "stor-" + networkName1_ + node1Name + "-UUID",
 						Name:      "stor-" + networkName1_ + node1Name,
 						Addresses: []string{"router"},
-						Options:   map[string]string{"router-port": "rtos-" + networkName1_ + node1Name},
+						Options:   map[string]string{libovsdbops.RouterPort: "rtos-" + networkName1_ + node1Name},
 						Type:      "router",
 					},
 					&nbdb.ACL{
@@ -2765,11 +2768,11 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 							ovntypes.NetworkRoleExternalID: ovntypes.NetworkRolePrimary,
 						},
 						OtherConfig: map[string]string{
-							"mcast_snoop":              "true",
-							"mcast_querier":            "false",
-							"mcast_flood_unregistered": "true",
-							"interconn-ts":             networkName1_ + ovntypes.TransitSwitch,
-							"requested-tnl-key":        "16711685",
+							"mcast_snoop":               "true",
+							"mcast_querier":             "false",
+							"mcast_flood_unregistered":  "true",
+							"interconn-ts":              networkName1_ + ovntypes.TransitSwitch,
+							libovsdbops.RequestedTnlKey: tnlKey,
 						},
 					},
 					getNoReRouteReplyTrafficPolicyForController(netInfo.GetNetworkName(), DefaultNetworkControllerName),

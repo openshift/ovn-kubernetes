@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 workdir=$(cd ../ && pwd)
 substitute_string='pkg/testing/mocks'

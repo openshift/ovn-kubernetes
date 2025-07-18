@@ -93,9 +93,17 @@ clean:
 
 lint:
 ifeq ($(CONTAINER_RUNNABLE), 0)
-	@GOPATH=${GOPATH} ./hack/lint.sh $(CONTAINER_RUNTIME)
+	@GOPATH=${GOPATH} ./hack/lint.sh $(CONTAINER_RUNTIME) || { echo "lint failed! Try running 'make lint-fix'"; exit 1; }
 else
-	echo "linter can only be run within a container since it needs a specific golangci-lint version"
+	echo "linter can only be run within a container since it needs a specific golangci-lint version"; exit 1
+endif
+
+lint-fix:
+ifeq ($(CONTAINER_RUNNABLE), 0)
+	@GOPATH=${GOPATH} ./hack/lint.sh $(CONTAINER_RUNTIME) fix || { echo "ERROR: lint fix failed! There is a bug that changes file ownership to root \
+	when this happens. To fix it, simply run 'chown -R <user>:<group> *' from the repo root."; exit 1; }
+else
+	echo "linter can only be run within a container since it needs a specific golangci-lint version"; exit 1
 endif
 
 gofmt:

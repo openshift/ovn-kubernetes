@@ -33,6 +33,16 @@ const (
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
 
+type GatewayConfig struct {
+	annoConfig                 *util.L3GatewayConfig
+	hostSubnets                []*net.IPNet
+	clusterSubnets             []*net.IPNet
+	gwLRPJoinIPs               []*net.IPNet
+	hostAddrs                  []string
+	externalIPs                []net.IP
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
+}
+
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *DefaultNetworkController) SetupMaster() error {
 	// Create default Control Plane Protection (COPP) entry for routers
@@ -82,15 +92,33 @@ func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *corev1.N
 	return err
 }
 
-func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
-	node *corev1.Node,
-	l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet,
-	hostAddrs []string,
-) error {
+func (oc *DefaultNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return nil, err
+	}
+
+	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
+	for i, ip := range l3GatewayConfig.IPAddresses {
+		externalIPs[i] = ip.IP
+	}
+
+	var hostAddrs []string
+	if config.Gateway.Mode == config.GatewayModeShared {
+		hostAddrs, err = util.GetNodeHostAddrs(node)
+		if err != nil && !util.IsAnnotationNotSetError(err) {
+			return nil, fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
+		}
+	}
+
 	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
+	}
+
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+	if err != nil {
+		return nil, err
 	}
 
 	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
@@ -101,26 +129,20 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
 			var err1 error
 			gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
 			if err1 != nil {
-				return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+				return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
 			}
 		}
 	}
 
-	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
-	for i, ip := range l3GatewayConfig.IPAddresses {
-		externalIPs[i] = ip.IP
-	}
-
-	return oc.newGatewayManager(node.Name).syncGatewayLogicalNetwork(
-		node,
-		l3GatewayConfig,
-		hostSubnets,
-		hostAddrs,
-		clusterSubnets,
-		gwLRPIPs,
-		oc.ovnClusterLRPToJoinIfAddrs,
-		externalIPs,
-	)
+	return &GatewayConfig{
+		annoConfig:                 l3GatewayConfig,
+		hostSubnets:                hostSubnets,
+		clusterSubnets:             clusterSubnets,
+		gwLRPJoinIPs:               gwLRPIPs,
+		hostAddrs:                  hostAddrs,
+		externalIPs:                externalIPs,
+		ovnClusterLRPToJoinIfAddrs: oc.ovnClusterLRPToJoinIfAddrs,
+	}, nil
 }
 
 func (oc *DefaultNetworkController) addNode(node *corev1.Node) ([]*net.IPNet, error) {
@@ -596,7 +618,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 	}
 
 	if nSyncs.syncGw {
-		err := oc.syncNodeGateway(node, nil)
+		err := oc.syncNodeGateway(node)
 		if err != nil {
 			errs = append(errs, err)
 			oc.gatewaysFailed.Store(node.Name, true)
