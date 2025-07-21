@@ -301,3 +301,332 @@ func dummyMasqueradeSubnet() *net.IPNet {
 		Mask: net.CIDRMask(24, 32),
 	}
 }
+
+func emptyDefaultClusterNetworkNodeSwitch(nodeName string) []libovsdbtest.TestData {
+	switchUUID := nodeName + "-UUID"
+	return []libovsdbtest.TestData{&nbdb.LogicalSwitch{UUID: switchUUID, Name: nodeName}}
+}
+
+func expectedGWEntities(nodeName string, netInfo util.NetInfo, gwConfig util.L3GatewayConfig) []libovsdbtest.TestData {
+	gwRouterName := fmt.Sprintf("GR_%s_%s", netInfo.GetNetworkName(), nodeName)
+
+	expectedEntities := append(
+		expectedGWRouterPlusNATAndStaticRoutes(nodeName, gwRouterName, netInfo, gwConfig),
+		expectedGRToJoinSwitchLRP(gwRouterName, gwRouterIPAddress(), netInfo),
+		expectedGRToExternalSwitchLRP(gwRouterName, netInfo, nodePhysicalIPAddress(), udnGWSNATAddress()),
+		expectedGatewayChassis(nodeName, netInfo, gwConfig),
+		expectedStaticMACBinding(gwRouterName, nextHopMasqueradeIP()),
+	)
+	expectedEntities = append(expectedEntities, expectedExternalSwitchAndLSPs(netInfo, gwConfig, nodeName)...)
+	expectedEntities = append(expectedEntities, expectedJoinSwitchAndLSPs(netInfo, nodeName)...)
+	return expectedEntities
+}
+
+func expectedGWRouterPlusNATAndStaticRoutes(
+	nodeName, gwRouterName string,
+	netInfo util.NetInfo,
+	gwConfig util.L3GatewayConfig,
+) []libovsdbtest.TestData {
+	gwRouterToExtLRPUUID := fmt.Sprintf("%s%s-UUID", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
+	gwRouterToJoinLRPUUID := fmt.Sprintf("%s%s-UUID", ovntypes.GWRouterToJoinSwitchPrefix, gwRouterName)
+
+	const (
+		nat1             = "abc-UUID"
+		nat2             = "cba-UUID"
+		staticRoute1     = "srA-UUID"
+		staticRoute2     = "srB-UUID"
+		staticRoute3     = "srC-UUID"
+		ipv4DefaultRoute = "0.0.0.0/0"
+	)
+
+	staticRouteOutputPort := ovntypes.GWRouterToExtSwitchPrefix + netInfo.GetNetworkScopedGWRouterName(nodeName)
+	nextHopIP := gwConfig.NextHops[0].String()
+	ipv4Subnet := networkSubnet(netInfo)
+	nextHopMasqIP := nextHopMasqueradeIP().String()
+	masqSubnet := config.Gateway.V4MasqueradeSubnet
+	return []libovsdbtest.TestData{
+		&nbdb.LogicalRouter{
+			Name:         gwRouterName,
+			UUID:         gwRouterName + "-UUID",
+			ExternalIDs:  gwRouterExternalIDs(netInfo, gwConfig),
+			Options:      gwRouterOptions(gwConfig),
+			Ports:        []string{gwRouterToJoinLRPUUID, gwRouterToExtLRPUUID},
+			Nat:          []string{nat1, nat2},
+			StaticRoutes: []string{staticRoute1, staticRoute2, staticRoute3},
+		},
+		newNATEntry(nat1, dummyJoinIP().IP.String(), gwRouterIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo)),
+		newNATEntry(nat2, dummyJoinIP().IP.String(), networkSubnet(netInfo), standardNonDefaultNetworkExtIDs(netInfo)),
+		expectedGRStaticRoute(staticRoute1, ipv4Subnet, dummyJoinIP().IP.String(), nil, nil, netInfo),
+		expectedGRStaticRoute(staticRoute2, ipv4DefaultRoute, nextHopIP, nil, &staticRouteOutputPort, netInfo),
+		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort, netInfo),
+	}
+}
+
+func expectedStaticMACBinding(gwRouterName string, ip net.IP) *nbdb.StaticMACBinding {
+	lrpName := fmt.Sprintf("%s%s", ovntypes.GWRouterToExtSwitchPrefix, gwRouterName)
+	return &nbdb.StaticMACBinding{
+		UUID:               lrpName + "static-mac-binding-UUID",
+		IP:                 ip.String(),
+		LogicalPort:        lrpName,
+		MAC:                util.IPAddrToHWAddr(nextHopMasqueradeIP()).String(),
+		OverrideDynamicMAC: true,
+	}
+}
+
+func expectedGatewayChassis(nodeName string, netInfo util.NetInfo, gwConfig util.L3GatewayConfig) *nbdb.GatewayChassis {
+	gwChassisName := fmt.Sprintf("%s%s_%s-%s", ovntypes.RouterToSwitchPrefix, netInfo.GetNetworkName(), nodeName, gwConfig.ChassisID)
+	return &nbdb.GatewayChassis{UUID: gwChassisName + "-UUID", Name: gwChassisName, Priority: 1, ChassisName: gwConfig.ChassisID}
+}
+
+func expectedGRToJoinSwitchLRP(gatewayRouterName string, gwRouterLRPIP *net.IPNet, netInfo util.NetInfo) *nbdb.LogicalRouterPort {
+	lrpName := fmt.Sprintf("%s%s", ovntypes.GWRouterToJoinSwitchPrefix, gatewayRouterName)
+	options := map[string]string{"gateway_mtu": fmt.Sprintf("%d", 1400)}
+	return expectedLogicalRouterPort(lrpName, netInfo, options, gwRouterLRPIP)
+}
+
+func expectedGRToExternalSwitchLRP(gatewayRouterName string, netInfo util.NetInfo, joinSwitchIPs ...*net.IPNet) *nbdb.LogicalRouterPort {
+	lrpName := fmt.Sprintf("%s%s", ovntypes.GWRouterToExtSwitchPrefix, gatewayRouterName)
+	return expectedLogicalRouterPort(lrpName, netInfo, nil, joinSwitchIPs...)
+}
+
+func expectedLogicalRouterPort(lrpName string, netInfo util.NetInfo, options map[string]string, routerNetworks ...*net.IPNet) *nbdb.LogicalRouterPort {
+	var ips []string
+	for _, ip := range routerNetworks {
+		ips = append(ips, ip.String())
+	}
+	var mac string
+	if len(routerNetworks) > 0 {
+		ipToGenMacFrom := routerNetworks[0]
+		mac = util.IPAddrToHWAddr(ipToGenMacFrom.IP).String()
+	}
+	return &nbdb.LogicalRouterPort{
+		UUID:     lrpName + "-UUID",
+		Name:     lrpName,
+		Networks: ips,
+		MAC:      mac,
+		Options:  options,
+		ExternalIDs: map[string]string{
+			"k8s.ovn.org/topology": netInfo.TopologyType(),
+			"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+		},
+	}
+}
+
+func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayConfig) []libovsdbtest.TestData {
+	const (
+		routerPolicyUUID1 = "lrpol1-UUID"
+		routerPolicyUUID2 = "lrpol2-UUID"
+		staticRouteUUID1  = "sr1-UUID"
+		staticRouteUUID2  = "sr2-UUID"
+	)
+	joinIPAddr := dummyJoinIP().IP.String()
+	clusterRouterName := fmt.Sprintf("%s_ovn_cluster_router", netInfo.GetNetworkName())
+	rtosLRPName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, netInfo.GetNetworkScopedName(nodeName))
+	rtosLRPUUID := rtosLRPName + "-UUID"
+	nodeIP := gwConfig.IPAddresses[0].IP.String()
+	networkIPv4Subnet := networkSubnet(netInfo)
+	subnet := netInfo.Subnets()[0] // egress requires subnets. So far, these helpers do not work for dual-stack
+
+	gatewayChassisUUID := fmt.Sprintf("%s-%s-UUID", rtosLRPName, gwConfig.ChassisID)
+	expectedEntities := []libovsdbtest.TestData{
+		&nbdb.LogicalRouter{
+			Name:         clusterRouterName,
+			UUID:         clusterRouterName + "-UUID",
+			Ports:        []string{rtosLRPUUID},
+			StaticRoutes: []string{staticRouteUUID1, staticRouteUUID2},
+			Policies:     []string{routerPolicyUUID1, routerPolicyUUID2},
+			ExternalIDs:  standardNonDefaultNetworkExtIDs(netInfo),
+		},
+		&nbdb.LogicalRouterPort{UUID: rtosLRPUUID, Name: rtosLRPName, Networks: []string{"192.168.0.1/16"}, MAC: "0a:58:c0:a8:00:01", GatewayChassis: []string{gatewayChassisUUID}},
+		expectedGRStaticRoute(staticRouteUUID1, networkIPv4Subnet, gwRouterIPAddress().IP.String(), &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
+		expectedGRStaticRoute(staticRouteUUID2, gwRouterIPAddress().IP.String(), gwRouterIPAddress().IP.String(), nil, nil, netInfo),
+		expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(subnet.CIDR).String()),
+		expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, joinIPAddr, managementPortIP(subnet.CIDR).String()),
+	}
+	return expectedEntities
+}
+
+func expectedLogicalRouterPolicy(routerPolicyUUID1 string, netInfo util.NetInfo, nodeName, destIP, nextHop string) *nbdb.LogicalRouterPolicy {
+	const (
+		priority      = 1004
+		rerouteAction = "reroute"
+	)
+	networkScopedNodeName := netInfo.GetNetworkScopedName(nodeName)
+	lrpName := fmt.Sprintf("%s%s", ovntypes.RouterToSwitchPrefix, networkScopedNodeName)
+	return &nbdb.LogicalRouterPolicy{
+		UUID:        routerPolicyUUID1,
+		Action:      rerouteAction,
+		ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+		Match:       fmt.Sprintf("inport == %q && ip4.dst == %s /* %s */", lrpName, destIP, networkScopedNodeName),
+		Nexthops:    []string{nextHop},
+		Priority:    priority,
+	}
+}
+
+func expectedGRStaticRoute(uuid, ipPrefix, nextHop string, policy *nbdb.LogicalRouterStaticRoutePolicy, outputPort *string, netInfo util.NetInfo) *nbdb.LogicalRouterStaticRoute {
+	return &nbdb.LogicalRouterStaticRoute{
+		UUID:       uuid,
+		IPPrefix:   ipPrefix,
+		OutputPort: outputPort,
+		Nexthop:    nextHop,
+		Policy:     policy,
+		ExternalIDs: map[string]string{
+			"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+			"k8s.ovn.org/topology": netInfo.TopologyType(),
+		},
+	}
+}
+
+func allowAllFromMgmtPort(aclUUID string, mgmtPortIP string, switchName string) *nbdb.ACL {
+	meterName := "acl-logging"
+	return &nbdb.ACL{
+		UUID:      aclUUID,
+		Action:    "allow-related",
+		Direction: "to-lport",
+		ExternalIDs: map[string]string{
+			"k8s.ovn.org/name":             switchName,
+			"ip":                           mgmtPortIP,
+			"k8s.ovn.org/id":               fmt.Sprintf("isolatednet-network-controller:NetpolNode:%s:%s", switchName, mgmtPortIP),
+			"k8s.ovn.org/owner-controller": "isolatednet-network-controller",
+			"k8s.ovn.org/owner-type":       "NetpolNode",
+		},
+		Match:    fmt.Sprintf("ip4.src==%s", mgmtPortIP),
+		Meter:    &meterName,
+		Priority: 1001,
+		Tier:     2,
+	}
+}
+
+func nodePhysicalIPAddress() *net.IPNet {
+	return &net.IPNet{
+		IP:   net.ParseIP("192.168.126.202"),
+		Mask: net.CIDRMask(24, 32),
+	}
+}
+
+func udnGWSNATAddress() *net.IPNet {
+	return &net.IPNet{
+		IP:   net.ParseIP("169.254.169.13"),
+		Mask: net.CIDRMask(24, 32),
+	}
+}
+
+func newNATEntry(uuid string, externalIP string, logicalIP string, extIDs map[string]string) *nbdb.NAT {
+	return &nbdb.NAT{
+		UUID:        uuid,
+		ExternalIP:  externalIP,
+		LogicalIP:   logicalIP,
+		Type:        "snat",
+		Options:     map[string]string{"stateless": "false"},
+		ExternalIDs: extIDs,
+	}
+}
+
+func expectedExternalSwitchAndLSPs(netInfo util.NetInfo, gwConfig util.L3GatewayConfig, nodeName string) []libovsdbtest.TestData {
+	const (
+		port1UUID = "port1-UUID"
+		port2UUID = "port2-UUID"
+	)
+	gwRouterName := netInfo.GetNetworkScopedGWRouterName(nodeName)
+	return []libovsdbtest.TestData{
+		&nbdb.LogicalSwitch{
+			UUID:        "ext-UUID",
+			Name:        netInfo.GetNetworkScopedExtSwitchName(nodeName),
+			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+			Ports:       []string{port1UUID, port2UUID},
+		},
+		&nbdb.LogicalSwitchPort{
+			UUID:        port1UUID,
+			Name:        netInfo.GetNetworkScopedExtPortName(gwConfig.BridgeID, nodeName),
+			Addresses:   []string{"unknown"},
+			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+			Options:     map[string]string{"network_name": "physnet"},
+			Type:        ovntypes.LocalnetTopology,
+		},
+		&nbdb.LogicalSwitchPort{
+			UUID:        port2UUID,
+			Name:        ovntypes.EXTSwitchToGWRouterPrefix + gwRouterName,
+			Addresses:   []string{gwConfig.MACAddress.String()},
+			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+			Options:     externalSwitchRouterPortOptions(gwRouterName),
+			Type:        "router",
+		},
+	}
+}
+
+func externalSwitchRouterPortOptions(gatewayRouterName string) map[string]string {
+	return map[string]string{
+		"nat-addresses":             "router",
+		"exclude-lb-vips-from-garp": "true",
+		"router-port":               ovntypes.GWRouterToExtSwitchPrefix + gatewayRouterName,
+	}
+}
+
+func expectedJoinSwitchAndLSPs(netInfo util.NetInfo, nodeName string) []libovsdbtest.TestData {
+	const joinToGRLSPUUID = "port3-UUID"
+	gwRouterName := netInfo.GetNetworkScopedGWRouterName(nodeName)
+	expectedData := []libovsdbtest.TestData{
+		&nbdb.LogicalSwitch{
+			UUID:        "join-UUID",
+			Name:        netInfo.GetNetworkScopedJoinSwitchName(),
+			Ports:       []string{joinToGRLSPUUID},
+			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+		},
+		&nbdb.LogicalSwitchPort{
+			UUID:        joinToGRLSPUUID,
+			Name:        ovntypes.JoinSwitchToGWRouterPrefix + gwRouterName,
+			Addresses:   []string{"router"},
+			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
+			Options:     map[string]string{"router-port": ovntypes.GWRouterToJoinSwitchPrefix + gwRouterName},
+			Type:        "router",
+		},
+	}
+	return expectedData
+}
+
+func nextHopMasqueradeIP() net.IP {
+	return net.ParseIP("169.254.169.4")
+}
+
+func gwRouterIPAddress() *net.IPNet {
+	return &net.IPNet{
+		IP:   net.ParseIP("100.65.0.4"),
+		Mask: net.CIDRMask(16, 32),
+	}
+}
+
+func networkSubnet(netInfo util.NetInfo) string {
+	return strings.TrimSuffix(subnetsAsString(netInfo.Subnets())[0], "/24")
+}
+
+func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
+
+	dynamicNeighRouters := "true"
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		dynamicNeighRouters = "false"
+	}
+
+	return map[string]string{
+		"lb_force_snat_ip":              "router_ip",
+		"mac_binding_age_threshold":     "300",
+		"chassis":                       gwConfig.ChassisID,
+		"always_learn_from_arp_request": "false",
+		"dynamic_neigh_routers":         dynamicNeighRouters,
+	}
+}
+
+func standardNonDefaultNetworkExtIDs(netInfo util.NetInfo) map[string]string {
+	return map[string]string{
+		"k8s.ovn.org/topology": netInfo.TopologyType(),
+		"k8s.ovn.org/network":  netInfo.GetNetworkName(),
+	}
+}
+
+func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo, nodeName string) *SecondaryLayer3NetworkController {
+	layer3NetworkController := NewSecondaryLayer3NetworkController(cnci, netInfo)
+	layer3NetworkController.gatewayManagers.Store(
+		nodeName,
+		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
+	)
+	return layer3NetworkController
+}
