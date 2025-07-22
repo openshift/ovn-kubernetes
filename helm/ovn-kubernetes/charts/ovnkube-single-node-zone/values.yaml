@@ -7,3 +7,4 @@ logFileMaxSize: 100
 logFileMaxBackups: 5
 logFileMaxAge: 5
 libovsdbClientLogFile: ""
+AdvertisedUDNIsolationMode: "strict"
