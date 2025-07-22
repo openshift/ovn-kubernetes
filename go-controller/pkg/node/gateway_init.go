@@ -9,7 +9,6 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -188,6 +187,39 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 	return nil
 }
 
+// getNodePrimaryIfAddrs returns the appropriate interface addresses based on the node mode
+func getNodePrimaryIfAddrs(watchFactory factory.NodeWatchFactory, nodeName string, gatewayIntf string) ([]*net.IPNet, error) {
+	switch config.OvnKubeNode.Mode {
+	case types.NodeModeDPU:
+		// For DPU mode, use the host IP address from node annotation
+		node, err := watchFactory.GetNode(nodeName)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving node %s: %v", nodeName, err)
+		}
+
+		// Extract the primary DPU address annotation from the node
+		nodeIfAddr, err := util.GetNodePrimaryDPUHostAddrAnnotation(node)
+		if err != nil {
+			return nil, err
+		}
+
+		if nodeIfAddr.IPv4 == "" {
+			return nil, fmt.Errorf("node primary DPU address annotation is empty for node %s", nodeName)
+		}
+
+		nodeIP, nodeAddrs, err := net.ParseCIDR(nodeIfAddr.IPv4)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse node IP address %s: %v", nodeIfAddr.IPv4, err)
+		}
+
+		nodeAddrs.IP = nodeIP
+		return []*net.IPNet{nodeAddrs}, nil
+	default:
+		// For other modes, get network interface IP addresses directly
+		return nodeutil.GetNetworkInterfaceIPAddresses(gatewayIntf)
+	}
+}
+
 // initGatewayPreStart executes the first part of the gateway initialization for the node.
 // It creates the gateway object, the node IP manager, openflow manager and node port watcher
 // once OVN controller is ready and the patch port exists for this node.
@@ -215,44 +247,10 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
 
-	ifAddrs, err = nodeutil.GetNetworkInterfaceIPAddresses(gatewayIntf)
+	// Get interface addresses based on node mode
+	ifAddrs, err = getNodePrimaryIfAddrs(nc.watchFactory, nc.name, gatewayIntf)
 	if err != nil {
 		return nil, err
-	}
-
-	// For DPU mode, we need to use the host IP address which is stored as a Kubernetes
-	// node annotation rather than using the gateway interface IP addresses.
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		// Retrieve the current node object from the Kubernetes API
-		var node *corev1.Node
-		if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
-			return nil, fmt.Errorf("error retrieving node %s: %v", nc.name, err)
-		}
-
-		// Extract the primary DPU address annotation from the node
-		nodeIfAddr, err := util.GetNodePrimaryDPUHostAddrAnnotation(node)
-		if err != nil {
-			return nil, err
-		}
-		// For DPU mode, we only support IPv4 for now.
-		nodeAddrStr := nodeIfAddr.IPv4
-		if nodeAddrStr == "" {
-			return nil, fmt.Errorf("node primary DPU address annotation is empty for node %s", nc.name)
-		}
-
-		// Parse the IPv4 address string into IP and network components
-		nodeIP, nodeAddrs, err := net.ParseCIDR(nodeAddrStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse node IP address %s: %v", nodeAddrStr, err)
-		}
-
-		// Set the parsed IP as the network address
-		nodeAddrs.IP = nodeIP
-
-		// Create a new slice and replace ifAddrs with the DPU host address
-		// This overrides the gateway interface addresses for DPU mode
-		var gwIps []*net.IPNet
-		ifAddrs = append(gwIps, nodeAddrs)
 	}
 
 	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {
