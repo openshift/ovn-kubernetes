@@ -16,11 +16,11 @@ ARG ovsver=3.1.0-159.el8fdp
 ARG ovnver=23.06.4-26.el8fdp
 
 RUN \
-    yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch3.1 = $ovsver" "python3-openvswitch3.1 = $ovsver" && \
+    yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch3.1" "python3-openvswitch3.1" && \
     yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn23.06 = $ovnver" "ovn23.06-central = $ovnver" "ovn23.06-host = $ovnver" && \
     yum clean all && rm -rf /var/cache/*
 
-RUN sed 's/%/"/g' <<<"%openvswitch3.1-devel = $ovsver% %openvswitch3.1-ipsec = $ovsver% %ovn23.06-vtep = $ovnver%" > /more-pkgs
+RUN sed 's/%/"/g' <<<"%openvswitch3.1-devel% %openvswitch3.1-ipsec% %ovn23.06-vtep = $ovnver%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
@@ -45,6 +45,13 @@ COPY ./dist/images/iptables-scripts/ip6tables /usr/sbin/
 COPY ./dist/images/iptables-scripts/ip6tables-save /usr/sbin/
 COPY ./dist/images/iptables-scripts/ip6tables-restore /usr/sbin/
 COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
+
+# Copy and install custom OVS/OVN RPMs.
+RUN mkdir -p /root/fdp/
+COPY *fdp.*.rpm /root/fdp/
+RUN dnf install -y 'dnf-command(versionlock)'
+RUN dnf install -y /root/fdp/*.rpm
+RUN dnf versionlock add python3-openvswitch* openvswitch* ovn*
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
