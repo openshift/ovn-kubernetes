@@ -459,7 +459,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
@@ -502,7 +502,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 		cnode := node.DeepCopy()
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
@@ -538,7 +538,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ofm := getDummyOpenflowManager()
@@ -580,7 +580,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 		cnode := node.DeepCopy()
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
