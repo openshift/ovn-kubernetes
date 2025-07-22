@@ -21,9 +21,11 @@ import (
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/label"
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -53,7 +55,7 @@ const (
 	bgpExternalNetworkName = "bgpnet"
 )
 
-var _ = ginkgo.Describe("BGP: Pod to external server when default podNetwork is advertised", func() {
+var _ = ginkgo.Describe("BGP: Pod to external server when default podNetwork is advertised", feature.RouteAdvertisements, func() {
 	var serverContainerIPs []string
 	var frrContainerIPv4, frrContainerIPv6 string
 	var nodes *corev1.NodeList
@@ -248,7 +250,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when default podNetwork is 
 	})
 })
 
-var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advertised", func() {
+var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advertised", feature.RouteAdvertisements, func() {
 	var serverContainerIPs []string
 	var frrContainerIPv4, frrContainerIPv6 string
 	var nodes *corev1.NodeList
@@ -525,7 +527,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 	)
 })
 
-var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks",
+var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks", feature.RouteAdvertisements,
 	func(cudnATemplate, cudnBTemplate *udnv1.ClusterUserDefinedNetwork) {
 		const curlConnectionTimeoutCode = "28"
 		const (
@@ -1068,7 +1070,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 	),
 )
 
-var _ = ginkgo.Describe("BGP: For a VRF-Lite configured network", func() {
+var _ = ginkgo.Describe("BGP: For a VRF-Lite configured network", feature.RouteAdvertisements, func() {
 
 	// testing helpers used throughout this testing node
 	const (
@@ -1545,12 +1547,14 @@ var _ = ginkgo.Describe("BGP: For a VRF-Lite configured network", func() {
 
 					otherNetworksToTest := []ginkgo.TableEntry{
 						ginkgo.Entry("Default", defaultNetwork, nil),
-						ginkgo.Entry("Layer 3 UDN non advertised", udn, otherLayer3NetworkSpec),
-						ginkgo.Entry("Layer 3 CUDN advertised", cudnAdvertised, otherLayer3NetworkSpec),
 						ginkgo.Entry("Layer 3 CUDN advertised VRF-Lite", cudnAdvertisedVRFLite, otherLayer3NetworkSpec),
-						ginkgo.Entry("Layer 2 UDN non advertised", udn, otherLayer2NetworkSpec),
-						ginkgo.Entry("Layer 2 CUDN advertised", cudnAdvertised, otherLayer2NetworkSpec),
 						ginkgo.Entry("Layer 2 CUDN advertised VRF-Lite", cudnAdvertisedVRFLite, otherLayer2NetworkSpec),
+						// The following testcases are labeled as extended,
+						// might not be run on all jobs
+						ginkgo.Entry("Layer 3 UDN non advertised", udn, otherLayer3NetworkSpec, label.Extended()),
+						ginkgo.Entry("Layer 3 CUDN advertised", cudnAdvertised, otherLayer3NetworkSpec, label.Extended()),
+						ginkgo.Entry("Layer 2 UDN non advertised", udn, otherLayer2NetworkSpec, label.Extended()),
+						ginkgo.Entry("Layer 2 CUDN advertised", cudnAdvertised, otherLayer2NetworkSpec, label.Extended()),
 					}
 
 					ginkgo.DescribeTableSubtree("Of type",
