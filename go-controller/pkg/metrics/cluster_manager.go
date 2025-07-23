@@ -7,28 +7,29 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 var registerClusterManagerBaseMetrics sync.Once
 
 // MetricClusterManagerLeader identifies whether this instance of ovnkube-cluster-manager is a leader or not
 var MetricClusterManagerLeader = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "leader",
 	Help:      "Identifies whether the instance of ovnkube-cluster-manager is a leader(1) or not(0).",
 })
 
 var MetricClusterManagerReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "ready_duration_seconds",
 	Help:      "The duration for the cluster manager to get to ready state",
 })
 
 var metricV4HostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "num_v4_host_subnets",
 	Help:      "The total number of v4 host subnets possible per network"},
 	[]string{
@@ -37,8 +38,8 @@ var metricV4HostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricV6HostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "num_v6_host_subnets",
 	Help:      "The total number of v6 host subnets possible per network"},
 	[]string{
@@ -47,8 +48,8 @@ var metricV6HostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricV4AllocatedHostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "allocated_v4_host_subnets",
 	Help:      "The total number of v4 host subnets currently allocated per network"},
 	[]string{
@@ -57,8 +58,8 @@ var metricV4AllocatedHostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOp
 )
 
 var metricV6AllocatedHostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "allocated_v6_host_subnets",
 	Help:      "The total number of v6 host subnets currently allocated per network"},
 	[]string{
@@ -68,22 +69,22 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGaugeVec(prometheus.GaugeOp
 
 /** EgressIP metrics recorded from cluster-manager begins**/
 var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "num_egress_ips",
 	Help:      "The number of defined egress IP addresses",
 })
 
 var metricEgressIPNodeUnreacheableCount = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "egress_ips_node_unreachable_total",
 	Help:      "The total number of times assigned egress IP(s) were unreachable"},
 )
 
 var metricEgressIPRebalanceCount = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemClusterManager,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 	Name:      "egress_ips_rebalance_total",
 	Help:      "The total number of times assigned egress IP(s) needed to be moved to a different node"},
 )
@@ -98,8 +99,8 @@ func RegisterClusterManagerBase() {
 		prometheus.MustRegister(MetricClusterManagerReadyDuration)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
-				Namespace: MetricOvnkubeNamespace,
-				Subsystem: MetricOvnkubeSubsystemClusterManager,
+				Namespace: types.MetricOvnkubeNamespace,
+				Subsystem: types.MetricOvnkubeSubsystemClusterManager,
 				Name:      "build_info",
 				Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
 					"and go version from which ovnkube was built and when and who built it",

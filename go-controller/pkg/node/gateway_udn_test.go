@@ -59,14 +59,14 @@ func getCreationFakeCommands(fexec *ovntest.FakeExec, mgtPort, mgtPortMAC, netNa
 	})
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf." + mgtPort + ".forwarding=1",
+		Cmd:    "sysctl -w net/ipv4/conf/" + mgtPort + "/forwarding=1",
 		Output: "net.ipv4.conf." + mgtPort + ".forwarding = 1",
 	})
 }
 
 func getRPFilterLooseModeFakeCommands(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp3.rp_filter=2",
+		Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp3/rp_filter=2",
 		Output: "net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
 	})
 }
@@ -148,7 +148,7 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	})
 	if config.IPv4Mode {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+			Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
 			Output: "net.ipv4.conf.breth0.forwarding = 1",
 		})
 	}
@@ -170,6 +170,9 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 		Output: "false",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovs-appctl --timeout=15 fdb/add breth0 breth0 0 00:00:00:55:66:99",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_worker1-to-br-int ofport",
@@ -459,7 +462,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
@@ -502,7 +505,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 		cnode := node.DeepCopy()
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
@@ -538,7 +541,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, netInfo.MTU())
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ofm := getDummyOpenflowManager()
@@ -580,7 +583,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(err).NotTo(HaveOccurred())
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		factoryMock.On("GetNode", "worker1").Return(node, nil)
+		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
 		cnode := node.DeepCopy()
 		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {

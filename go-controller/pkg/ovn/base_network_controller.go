@@ -14,8 +14,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -24,8 +22,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -35,6 +33,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
@@ -192,8 +191,7 @@ type BaseNetworkController struct {
 
 func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed func(string)) error {
 	// gather some information first
-	var err error
-	var retryNodes []*corev1.Node
+	var reconcileNodes []string
 	oc.localZoneNodes.Range(func(key, _ any) bool {
 		nodeName := key.(string)
 		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
@@ -202,51 +200,87 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 			// noop
 			return true
 		}
-		var node *corev1.Node
-		node, err = oc.watchFactory.GetNode(nodeName)
-		if err != nil {
-			return false
-		}
-		retryNodes = append(retryNodes, node)
+		reconcileNodes = append(reconcileNodes, nodeName)
 		return true
 	})
-	if err != nil {
-		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
-	}
 	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
 	reconcilePendingPods := !oc.IsDefault() && !oc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
+	reconcileNamespaces := sets.NewString()
+	if oc.IsPrimaryNetwork() {
+		// since CanServeNamespace filters out namespace events for namespaces unknown
+		// to be served by this primary network, we need to reconcile namespaces once
+		// the network is reconfigured to serve a namespace.
+		reconcileNamespaces = sets.NewString(netInfo.GetNADNamespaces()...).Difference(
+			sets.NewString(oc.GetNADNamespaces()...))
+	}
 
 	// set the new NetInfo, point of no return
-	err = util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
 	if err != nil {
 		return fmt.Errorf("failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
 
+	oc.doReconcile(reconcileRoutes, reconcilePendingPods, reconcileNodes, setNodeFailed, reconcileNamespaces.List())
+
+	return nil
+}
+
+// doReconcile performs the reconciliation after the controller NetInfo has already being
+// updated with the changes. What needs to be reconciled should already be known and
+// provided on the arguments of the method. This method returns no error and logs them
+// instead since once the controller NetInfo has been updated there is no point in retrying.
+func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPods bool,
+	reconcileNodes []string, setNodeFailed func(string), reconcileNamespaces []string) {
 	if reconcileRoutes {
-		err = oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
+		err := oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
 		if err != nil {
 			klog.Errorf("Failed to reconcile network %s on route import controller: %v", oc.GetNetworkName(), err)
 		}
 	}
 
-	for _, node := range retryNodes {
-		setNodeFailed(node.Name)
+	for _, nodeName := range reconcileNodes {
+		setNodeFailed(nodeName)
+		node, err := oc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			klog.Infof("Failed to get node %s for reconciling network %s: %v", nodeName, oc.GetNetworkName(), err)
+			continue
+		}
 		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
 		if err != nil {
-			klog.Errorf("Failed to retry node %s for network %s: %v", node.Name, oc.GetNetworkName(), err)
+			klog.Errorf("Failed to retry node %s for network %s: %v", nodeName, oc.GetNetworkName(), err)
 		}
 	}
-	if len(retryNodes) > 0 {
+	if len(reconcileNodes) > 0 {
 		oc.retryNodes.RequestRetryObjs()
 	}
 
 	if reconcilePendingPods {
-		if err := ovnretry.RequeuePendingPods(oc.kube, oc.GetNetInfo(), oc.retryPods); err != nil {
+		if err := ovnretry.RequeuePendingPods(oc.watchFactory, oc.GetNetInfo(), oc.retryPods); err != nil {
 			klog.Errorf("Failed to requeue pending pods for network %s: %v", oc.GetNetworkName(), err)
 		}
 	}
 
-	return nil
+	// reconciles namespaces that were added to the network, this will trigger namespace add event and
+	// network controller creates the address set for the namespace.
+	// To update gress policy ACLs with peer namespace address set, invoke requeuePeerNamespace method after
+	// address set is created for the namespace.
+	namespaceAdded := false
+	for _, ns := range reconcileNamespaces {
+		namespace, err := oc.watchFactory.GetNamespace(ns)
+		if err != nil {
+			klog.Infof("Failed to get namespace %s for reconciling network %s: %v", ns, oc.GetNetworkName(), err)
+			continue
+		}
+		err = oc.retryNamespaces.AddRetryObjWithAddNoBackoff(namespace)
+		if err != nil {
+			klog.Infof("Failed to retry namespace %s for network %s: %v", ns, oc.GetNetworkName(), err)
+			continue
+		}
+		namespaceAdded = true
+	}
+	if namespaceAdded {
+		oc.retryNamespaces.RequestRetryObjs()
+	}
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -319,7 +353,7 @@ func (bnc *BaseNetworkController) GetLogicalPortName(pod *corev1.Pod, nadName st
 func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
 	[]ovsdb.Operation, func(), time.Time, error) {
 	if !bnc.IsSecondary() {
-		return metrics.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
+		return recorders.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
 	}
 	// TBD: no op for secondary network for now
 	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
@@ -579,18 +613,19 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 
 func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 	errs := []error{}
-	pods, err := bnc.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-	})
+	pods, err := bnc.watchFactory.GetAllPods()
 	if err != nil {
 		errs = append(errs, err)
-		klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function",
+		klog.Errorf("Unable to list existing pods for synchronizing node: %s, existing pods on this node may not function",
 			nodeName)
 	} else {
 		klog.V(5).Infof("When adding node %s for network %s, found %d pods to add to retryPods", nodeName, bnc.GetNetworkName(), len(pods))
 		for _, pod := range pods {
 			pod := *pod
 			if util.PodCompleted(&pod) {
+				continue
+			}
+			if pod.Spec.NodeName != nodeName {
 				continue
 			}
 			klog.V(5).Infof("Adding pod %s/%s to retryPods for network %s", pod.Namespace, pod.Name, bnc.GetNetworkName())

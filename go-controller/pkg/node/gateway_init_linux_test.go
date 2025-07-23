@@ -56,11 +56,14 @@ add table inet ovn-kubernetes
 add set inet ovn-kubernetes mgmtport-no-snat-nodeports { type inet_proto . inet_service ; comment "NodePorts not subject to management port SNAT" ; }
 add set inet ovn-kubernetes mgmtport-no-snat-services-v4 { type ipv4_addr . inet_proto . inet_service ; comment "eTP:Local short-circuit not subject to management port SNAT (IPv4)" ; }
 add set inet ovn-kubernetes mgmtport-no-snat-services-v6 { type ipv6_addr . inet_proto . inet_service ; comment "eTP:Local short-circuit not subject to management port SNAT (IPv6)" ; }
+add set inet ovn-kubernetes mgmtport-no-snat-subnets-v4 { type ipv4_addr ; flags interval ; comment "subnets not subject to management port SNAT (IPv4)" ; }
+add set inet ovn-kubernetes mgmtport-no-snat-subnets-v6 { type ipv6_addr ; flags interval ; comment "subnets not subject to management port SNAT (IPv6)" ; }
 add chain inet ovn-kubernetes mgmtport-snat { type nat hook postrouting priority 100 ; comment "OVN SNAT to Management Port" ; }
 add rule inet ovn-kubernetes mgmtport-snat oifname != %s return
 add rule inet ovn-kubernetes mgmtport-snat meta nfproto ipv4 ip saddr 10.1.1.2 counter return
 add rule inet ovn-kubernetes mgmtport-snat meta l4proto . th dport @mgmtport-no-snat-nodeports counter return
 add rule inet ovn-kubernetes mgmtport-snat ip daddr . meta l4proto . th dport @mgmtport-no-snat-services-v4 counter return
+add rule inet ovn-kubernetes mgmtport-snat ip saddr @mgmtport-no-snat-subnets-v4 counter return
 add rule inet ovn-kubernetes mgmtport-snat counter snat ip to 10.1.1.2
 `
 
@@ -163,7 +166,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
@@ -191,6 +194,9 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 			Output: fmt.Sprintf("%t", hwOffload),
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-appctl --timeout=15 fdb/add breth0 breth0 0 " + eth0MAC,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
@@ -600,7 +606,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.brp0.forwarding=1",
+				Cmd:    "sysctl -w net/ipv4/conf/brp0/forwarding=1",
 				Output: "net.ipv4.conf.brp0.forwarding = 1",
 			})
 		}
@@ -637,6 +643,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 			Output: "false",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovs-appctl --timeout=15 fdb/add %s %s 0 %s", brphys, brphys, hostMAC),
 		})
 		// GetDPUHostInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -1062,7 +1071,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
@@ -1090,6 +1099,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
 			Output: "false",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-appctl --timeout=15 fdb/add breth0 breth0 0 " + eth0MAC,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
