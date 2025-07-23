@@ -182,14 +182,15 @@ func (n NetworkInterface) GetMAC() string {
 }
 
 type ExternalContainer struct {
-	Name       string
-	Image      string
-	Network    Network
-	Entrypoint string
-	Args       []string
-	ExtPort    uint16
-	IPv4       string
-	IPv6       string
+	Name        string
+	Image       string
+	Network     Network
+	Entrypoint  string
+	CmdArgs     []string
+	ExtPort     uint16
+	IPv4        string
+	IPv6        string
+	RuntimeArgs []string
 }
 
 func (ec ExternalContainer) GetName() string {
@@ -227,7 +228,7 @@ func (ec ExternalContainer) IsIPv6() bool {
 }
 
 func (ec ExternalContainer) String() string {
-	str := fmt.Sprintf("Name: %q, Image: %q, Network: %q, Command: %q", ec.Name, ec.Image, ec.Network, strings.Join(ec.Args, " "))
+	str := fmt.Sprintf("Name: %q, Image: %q, Network: %q, RuntimeArgs: %q, Command: %q", ec.Name, ec.Image, ec.Network, strings.Join(ec.RuntimeArgs, " "), strings.Join(ec.CmdArgs, " "))
 	if ec.IsIPv4() {
 		str = fmt.Sprintf("%s, IPv4 address: %q", str, ec.GetIPv4())
 	}
@@ -247,9 +248,6 @@ func (ec ExternalContainer) IsValidPreCreateContainer() (bool, error) {
 	}
 	if ec.Network.String() == "" {
 		errs = append(errs, errors.New("network is not set"))
-	}
-	if ec.ExtPort == 0 {
-		errs = append(errs, errors.New("port is not set"))
 	}
 	if len(errs) == 0 {
 		return true, nil
