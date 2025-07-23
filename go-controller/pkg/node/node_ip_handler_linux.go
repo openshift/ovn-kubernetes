@@ -65,27 +65,11 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort manag
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		var ifAddrs []*net.IPNet
-
-		// update k8s.ovn.org/host-cidrs
-		node, err := watchFactory.GetNode(nodeName)
-		if err != nil {
-			klog.Errorf("Failed to get node %s: %v", nodeName, err)
-			return nil
-		}
-		if useNetlink {
-			// get updated interface IP addresses for the gateway bridge
-			ifAddrs, err = gwBridge.UpdateInterfaceIPAddresses(node)
-			if err != nil {
-				klog.Errorf("Failed to obtain interface IP addresses for node %s: %v", nodeName, err)
-				return nil
-			}
-		}
-		if err = mgr.updateHostCIDRs(ifAddrs); err != nil {
+		if err := mgr.updateHostCIDRs(); err != nil {
 			klog.Errorf("Failed to update host-cidrs annotations on node %s: %v", nodeName, err)
 			return nil
 		}
-		if err = mgr.nodeAnnotator.Run(); err != nil {
+		if err := mgr.nodeAnnotator.Run(); err != nil {
 			klog.Errorf("Failed to set host-cidrs annotations on node %s: %v", nodeName, err)
 			return nil
 		}
@@ -286,7 +270,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	}
 
 	// update k8s.ovn.org/host-cidrs
-	if err = c.updateHostCIDRs(ifAddrs); err != nil {
+	if err = c.updateHostCIDRs(); err != nil {
 		return err
 	}
 
@@ -316,14 +300,10 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	return nil
 }
 
-func (c *addressManager) updateHostCIDRs(ifAddrs []*net.IPNet) error {
+func (c *addressManager) updateHostCIDRs() error {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
-		// host internal IP address instead.
-		// Currently we are only intentionally supporting IPv4 for DPU here.
-		nodeIPNetv4, _ := util.MatchFirstIPNetFamily(false, ifAddrs)
-		nodeAddrSet := sets.New[string](nodeIPNetv4.String())
-		return util.SetNodeHostCIDRs(c.nodeAnnotator, nodeAddrSet)
+		// For DPU mode, we don't need to update the host-cidrs annotation.
+		return nil
 	}
 
 	return util.SetNodeHostCIDRs(c.nodeAnnotator, c.cidrs)
