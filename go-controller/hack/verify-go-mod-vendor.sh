@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -o errexit # Nozero exit code of any of the commands below will fail the test.
 set -o nounset
 set -o pipefail

@@ -360,7 +360,7 @@ func (zic *ZoneInterconnectHandler) AddTransitPortConfig(remote bool, podAnnotat
 	if port.Options == nil {
 		port.Options = map[string]string{}
 	}
-	port.Options["requested-tnl-key"] = strconv.Itoa(podAnnotation.TunnelID)
+	port.Options[libovsdbops.RequestedTnlKey] = strconv.Itoa(podAnnotation.TunnelID)
 
 	if remote {
 		port.Type = lportTypeRemote
@@ -375,7 +375,7 @@ func (zic *ZoneInterconnectHandler) addTransitSwitchConfig(sw *nbdb.LogicalSwitc
 	}
 
 	sw.OtherConfig["interconn-ts"] = sw.Name
-	sw.OtherConfig["requested-tnl-key"] = strconv.Itoa(BaseTransitSwitchTunnelKey + networkID)
+	sw.OtherConfig[libovsdbops.RequestedTnlKey] = strconv.Itoa(BaseTransitSwitchTunnelKey + networkID)
 	sw.OtherConfig["mcast_snoop"] = "true"
 	sw.OtherConfig["mcast_querier"] = "false"
 	sw.OtherConfig["mcast_flood_unregistered"] = "true"
@@ -420,8 +420,8 @@ func (zic *ZoneInterconnectHandler) createLocalZoneNodeResources(node *corev1.No
 	}
 
 	lspOptions := map[string]string{
-		"router-port":       logicalRouterPortName,
-		"requested-tnl-key": strconv.Itoa(nodeID),
+		libovsdbops.RouterPort:      logicalRouterPortName,
+		libovsdbops.RequestedTnlKey: strconv.Itoa(nodeID),
 	}
 
 	// Store the node name in the external_ids column for book keeping
@@ -459,8 +459,8 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 	}
 
 	lspOptions := map[string]string{
-		"requested-tnl-key": strconv.Itoa(nodeID),
-		"requested-chassis": node.Name,
+		libovsdbops.RequestedTnlKey:  strconv.Itoa(nodeID),
+		libovsdbops.RequestedChassis: node.Name,
 	}
 	// Store the node name in the external_ids column for book keeping
 	externalIDs := map[string]string{

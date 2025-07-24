@@ -373,34 +373,17 @@ func (oc *DefaultNetworkController) WatchEgressIPPods() error {
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
-func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node, hostSubnets []*net.IPNet) error {
-	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
+	gwConfig, err := oc.nodeGatewayConfig(node)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting gateway config for node %s: %v", node.Name, err)
 	}
 
-	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
-		if err != nil {
-			return err
-		}
-	}
-
-	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := oc.newGatewayManager(node.Name).Cleanup(); err != nil {
-			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
-		}
-	} else if hostSubnets != nil {
-		var hostAddrs []string
-		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.GetNodeHostAddrs(node)
-			if err != nil && !util.IsAnnotationNotSetError(err) {
-				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
-			}
-		}
-		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
-			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
-		}
+	if err := oc.newGatewayManager(node.Name).SyncGateway(
+		node,
+		gwConfig,
+	); err != nil {
+		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 	}
 
 	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {

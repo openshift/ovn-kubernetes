@@ -2594,7 +2594,7 @@ func (e *EgressIPController) addExternalGWPodSNATOps(ni util.NetInfo, ops []ovsd
 			if err != nil {
 				return nil, err
 			}
-			ops, err = addOrUpdatePodSNATOps(e.nbClient, ni.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs, "", ops)
+			ops, err = addOrUpdatePodSNATOps(e.nbClient, ni.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs, ops)
 			if err != nil {
 				return nil, err
 			}
@@ -3639,12 +3639,12 @@ func (e *EgressIPController) createNATRuleOps(ni util.NetInfo, ops []ovsdb.Opera
 			nats = append(nats, nat)
 		}
 	}
-	router := &nbdb.LogicalRouter{
+	gwRouter := &nbdb.LogicalRouter{
 		Name: ni.GetNetworkScopedGWRouterName(status.Node),
 	}
-	ops, err = libovsdbops.CreateOrUpdateNATsOps(e.nbClient, ops, router, nats...)
+	ops, err = libovsdbops.CreateOrUpdateNATsOps(e.nbClient, ops, gwRouter, nats...)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create snat rules, for router: %s, error: %v", router.Name, err)
+		return nil, fmt.Errorf("unable to create snat rules, for router: %s, error: %v", gwRouter.Name, err)
 	}
 	return ops, nil
 }
