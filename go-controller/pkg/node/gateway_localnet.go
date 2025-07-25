@@ -20,16 +20,16 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
+func newLocalGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
 	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory,
 	routeManager *routemanager.Controller) (*gateway, error) {
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 
-	for _, hostSubnet := range hostSubnets {
+	for _, subnet := range subnets {
 		// local gateway mode uses mp0 as default path for all ingress traffic into OVN
 		var nextHop *net.IPNet
-		if utilnet.IsIPv6CIDR(hostSubnet) {
+		if utilnet.IsIPv6CIDR(subnet) {
 			nextHop = cfg.ipv6.ifAddr
 		} else {
 			nextHop = cfg.ipv4.ifAddr
@@ -129,16 +129,16 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nodeName, err)
 		}
 
-		nodeIPs, _ := gw.nodeIPManager.ListAddresses()
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, hostSubnets, nodeIPs)
+		hostIPs, hostSubnets := gw.nodeIPManager.ListAddresses()
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, hostSubnets, hostIPs)
 		if err != nil {
 			return err
 		}
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			nodeIPs, _ := gw.nodeIPManager.ListAddresses()
-			if err := gw.openflowManager.updateBridgeFlowCache(hostSubnets, nodeIPs); err != nil {
+			hostIPs, hostSubnets := gw.nodeIPManager.ListAddresses()
+			if err := gw.openflowManager.updateBridgeFlowCache(subnets, hostSubnets, hostIPs); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
@@ -158,7 +158,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		if config.Gateway.NodeportEnable {
 			if config.OvnKubeNode.Mode == types.NodeModeFull {
 				// (TODO): Internal Traffic Policy is not supported in DPU mode
-				if err := initSvcViaMgmPortRoutingRules(hostSubnets); err != nil {
+				if err := initSvcViaMgmPortRoutingRules(subnets); err != nil {
 					return err
 				}
 			}
