@@ -23,6 +23,7 @@ var (
 	MultiHoming           = New("MultiHoming")
 	NodeIPMACMigration    = New("NodeIPMACMigration")
 	OVSCPUPin             = New("OVSCPUPin")
+	RouteAdvertisements   = New("RouteAdvertisements")
 	Unidle                = New("Unidle")
 )
 
