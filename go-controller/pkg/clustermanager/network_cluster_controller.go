@@ -577,6 +577,11 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		// 2. a user removed the annotation on the node
 		// Either way to play it safe for now do a partial json unmarshal check
 		if !nodeFailed && util.NoHostSubnet(oldNode) == util.NoHostSubnet(newNode) && !h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) {
+			// we may need explicit cleanup of network unavailable condition
+			// at this point, otherwise the node is still tainted with
+			// node.kubernetes.io/network-unavailable:NoSchedule which prevents
+			// pods from being scheduled on it.
+			h.clearInitialNodeNetworkUnavailableCondition(newNode)
 			// no other node updates would require us to reconcile again
 			return nil
 		}
