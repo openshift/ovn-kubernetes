@@ -1473,6 +1473,11 @@ func singleNodePerZone() bool {
 	return *singleNodePerZoneResult
 }
 
+func isIPsecEnabled() bool {
+	val, present := os.LookupEnv("ENABLE_IPSEC")
+	return present && val == "true"
+}
+
 func getNodeContainerName() string {
 	if singleNodePerZone() {
 		return "ovnkube-controller"
