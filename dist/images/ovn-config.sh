@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # run on master to configure ovn-kubernetes
 # The /etc/openvswitch/ovn_k8s.conf and /etc/sysconfig/ovn-kubernetes

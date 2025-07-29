@@ -535,7 +535,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 	// rescheduled.
 
 	if !config.Kubernetes.DisableRequestedChassis {
-		lsp.Options["requested-chassis"] = pod.Spec.NodeName
+		lsp.Options[libovsdbops.RequestedChassis] = pod.Spec.NodeName
 	}
 
 	// let's calculate if this network controller's role for this pod

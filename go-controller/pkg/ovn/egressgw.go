@@ -649,15 +649,12 @@ func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, gwR
 // addOrUpdatePodSNAT adds or updates per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
 func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet) error {
-	nats, err := buildPodSNAT(extIPs, podIfAddrs, "")
+	ops, err := addOrUpdatePodSNATOps(nbClient, gwRouterName, extIPs, podIfAddrs, nil)
 	if err != nil {
 		return err
 	}
-	logicalRouter := nbdb.LogicalRouter{
-		Name: gwRouterName,
-	}
-	if err := libovsdbops.CreateOrUpdateNATs(nbClient, &logicalRouter, nats...); err != nil {
-		return fmt.Errorf("failed to update SNAT for pods of router %s: %v", logicalRouter.Name, err)
+	if _, err = libovsdbops.TransactAndCheck(nbClient, ops); err != nil {
+		return fmt.Errorf("failed to update SNAT for pods of router %s: %v", gwRouterName, err)
 	}
 	return nil
 }
@@ -665,14 +662,14 @@ func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, gwRouterName string, ext
 // addOrUpdatePodSNATOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet, match string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
-	router := &nbdb.LogicalRouter{Name: gwRouterName}
-	nats, err := buildPodSNAT(extIPs, podIfAddrs, match)
+func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, gwRouterName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+	gwRouter := &nbdb.LogicalRouter{Name: gwRouterName}
+	nats, err := buildPodSNAT(extIPs, podIfAddrs, "")
 	if err != nil {
 		return nil, err
 	}
-	if ops, err = libovsdbops.CreateOrUpdateNATsOps(nbClient, ops, router, nats...); err != nil {
-		return nil, fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gwRouterName, err)
+	if ops, err = libovsdbops.CreateOrUpdateNATsOps(nbClient, ops, gwRouter, nats...); err != nil {
+		return nil, fmt.Errorf("failed to create ops to update SNAT for pods of router: %s, error: %v", gwRouterName, err)
 	}
 	return ops, nil
 }

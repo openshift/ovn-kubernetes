@@ -9,6 +9,7 @@ import (
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -237,7 +238,7 @@ func expectedLogicalSwitchPort(portName string) *nbdb.LogicalSwitchPort {
 		Addresses: []string{"router"},
 		Name:      portName,
 		Options: map[string]string{
-			"router-port": "rtoj-mydearrouter",
+			libovsdbops.RouterPort: "rtoj-mydearrouter",
 		},
 		ParentName:   nil,
 		PortSecurity: nil,

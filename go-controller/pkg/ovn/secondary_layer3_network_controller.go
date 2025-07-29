@@ -777,15 +777,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				if err := gwManager.syncNodeGateway(
+				if err := gwManager.SyncGateway(
 					node,
-					gwConfig.config,
-					gwConfig.hostSubnets,
-					gwConfig.hostAddrs,
-					gwConfig.clusterSubnets,
-					gwConfig.gwLRPJoinIPs,         // the joinIP allocated to this node for this controller's network
-					oc.ovnClusterLRPToJoinIfAddrs, // the .1 of this controller's global joinSubnet
-					gwConfig.externalIPs,
+					gwConfig,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
 						"failed to sync node GW for network %q: %v",
@@ -1045,16 +1039,7 @@ func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
 	return nil
 }
 
-type SecondaryL3GatewayConfig struct {
-	config         *util.L3GatewayConfig
-	hostSubnets    []*net.IPNet
-	clusterSubnets []*net.IPNet
-	gwLRPJoinIPs   []*net.IPNet
-	hostAddrs      []string
-	externalIPs    []net.IP
-}
-
-func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL3GatewayConfig, error) {
+func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
@@ -1104,13 +1089,14 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node)
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 
-	return &SecondaryL3GatewayConfig{
-		config:         l3GatewayConfig,
-		hostSubnets:    hostSubnets,
-		clusterSubnets: clusterSubnets,
-		gwLRPJoinIPs:   gwLRPJoinIPs,
-		hostAddrs:      hostAddrs,
-		externalIPs:    externalIPs,
+	return &GatewayConfig{
+		annoConfig:                 l3GatewayConfig,
+		hostSubnets:                hostSubnets,
+		clusterSubnets:             clusterSubnets,
+		gwLRPJoinIPs:               gwLRPJoinIPs,
+		hostAddrs:                  hostAddrs,
+		externalIPs:                externalIPs,
+		ovnClusterLRPToJoinIfAddrs: oc.ovnClusterLRPToJoinIfAddrs,
 	}, nil
 }
 

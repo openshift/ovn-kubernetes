@@ -425,7 +425,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 	enableGatewayMTU := util.ParseNodeGatewayMTUSupport(node)
 	if enableGatewayMTU {
 		lrpOptions = map[string]string{
-			"gateway_mtu": strconv.Itoa(config.Default.MTU),
+			libovsdbops.GatewayMTU: strconv.Itoa(config.Default.MTU),
 		}
 	}
 	logicalRouterPort := nbdb.LogicalRouterPort{
@@ -560,7 +560,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		Type:      "router",
 		Addresses: []string{"router"},
 		Options: map[string]string{
-			"router-port": types.RouterToSwitchPrefix + switchName,
+			libovsdbops.RouterPort: types.RouterToSwitchPrefix + switchName,
 		},
 	}
 	if bnc.IsDefault() {

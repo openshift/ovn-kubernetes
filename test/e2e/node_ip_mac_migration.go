@@ -953,26 +953,31 @@ func migrateWorkerNodeIP(nodeName, fromIP, targetIP string, invertOrder bool) (e
 
 	// Define a function to change the IP address for later use.
 	changeIPAddress := func() error {
-		// Add new IP first - this will preserve the default route.
 		newIPMask := targetIP + "/" + mask
-		framework.Logf("Adding new IP address %s to node %s", newIPMask, nodeName)
-		// Add cleanup command.
-		cleanupCmd := []string{"ip", "address", "del", newIPMask, "dev", iface}
-		cleanupCommands = append(cleanupCommands, cleanupCmd)
-		// Run command.
-		_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "address", "add", newIPMask, "dev", iface})
-		if err != nil {
-			return fmt.Errorf("failed to add new IP %s to interface %s on node %s: %v", newIPMask, iface, nodeName, err)
-		}
-		// Delete current IP address. On rollback, first add the old IP and then delete the new one.
+
+		// Delete current IP address. If you add a second ip from the same subnet to an interface, it will
+		// be considered a secondary IP address and will be deleted together with the primary (aka old) IP.
 		framework.Logf("Deleting current IP address %s from node %s", parsedNetIPMask.String(), nodeName)
-		// Add cleanup command.
-		cleanupCmd = []string{"ip", "address", "add", parsedNetIPMask.String(), "dev", iface}
-		cleanupCommands = append([][]string{cleanupCmd}, cleanupCommands...)
+		// Add cleanup command to add original IP back to the end of the cleanupCommands list.
+		// This way, we preserve first delete then add new IP sequence.
+		cleanupCmd := []string{"ip", "address", "add", parsedNetIPMask.String(), "dev", iface}
+		cleanupCommands = append(cleanupCommands, cleanupCmd)
 		// Run command.
 		_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "address", "del", parsedNetIPMask.String(), "dev", iface})
 		if err != nil {
 			return err
+		}
+
+		// Now add new IP.
+		framework.Logf("Adding new IP address %s to node %s", newIPMask, nodeName)
+		// Add cleanup command to remove the new IP address to the beginning of the cleanupCommands list.
+		cleanupCmd = []string{"ip", "address", "del", newIPMask, "dev", iface}
+		cleanupCommands = append([][]string{cleanupCmd}, cleanupCommands...)
+
+		// Run command.
+		_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "address", "add", newIPMask, "dev", iface})
+		if err != nil {
+			return fmt.Errorf("failed to add new IP %s to interface %s on node %s: %v", newIPMask, iface, nodeName, err)
 		}
 		return nil
 	}

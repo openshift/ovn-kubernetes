@@ -423,19 +423,17 @@ type OVNKubernetesFeatureConfig struct {
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
+	EnablePreconfiguredUDNAddresses bool `gcfg:"enable-preconfigured-udn-addresses"`
 	EnableRouteAdvertisements       bool `gcfg:"enable-route-advertisements"`
-	// This feature requires a kernel fix https://github.com/torvalds/linux/commit/7f3287db654395f9c5ddd246325ff7889f550286
-	// to work on a kind cluster. Flag allows to disable it for current CI, will be turned on when github runners have this fix.
-	DisableUDNHostIsolation      bool `gcfg:"disable-udn-host-isolation"`
-	EnableMultiNetworkPolicy     bool `gcfg:"enable-multi-networkpolicy"`
-	EnableStatelessNetPol        bool `gcfg:"enable-stateless-netpol"`
-	EnableInterconnect           bool `gcfg:"enable-interconnect"`
-	EnableMultiExternalGateway   bool `gcfg:"enable-multi-external-gateway"`
-	EnablePersistentIPs          bool `gcfg:"enable-persistent-ips"`
-	EnableDNSNameResolver        bool `gcfg:"enable-dns-name-resolver"`
-	EnableServiceTemplateSupport bool `gcfg:"enable-svc-template-support"`
-	EnableObservability          bool `gcfg:"enable-observability"`
-	EnableNetworkQoS             bool `gcfg:"enable-network-qos"`
+	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
+	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
+	EnableInterconnect              bool `gcfg:"enable-interconnect"`
+	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
+	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
+	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
+	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
+	EnableObservability             bool `gcfg:"enable-observability"`
+	EnableNetworkQoS                bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1087,16 +1085,16 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Value:       OVNKubernetesFeature.EnableMultiNetworkPolicy,
 	},
 	&cli.BoolFlag{
-		Name:        "disable-udn-host-isolation",
-		Usage:       "Configure to disable UDN host isolation with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.DisableUDNHostIsolation,
-		Value:       OVNKubernetesFeature.DisableUDNHostIsolation,
-	},
-	&cli.BoolFlag{
 		Name:        "enable-network-segmentation",
 		Usage:       "Configure to use network segmentation feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkSegmentation,
 		Value:       OVNKubernetesFeature.EnableNetworkSegmentation,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-preconfigured-udn-addresses",
+		Usage:       "Enable workloads connect to user-defined network with preconfigured addresses.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses,
+		Value:       OVNKubernetesFeature.EnablePreconfiguredUDNAddresses,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-route-advertisements",
