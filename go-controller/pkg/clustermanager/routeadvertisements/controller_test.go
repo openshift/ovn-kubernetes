@@ -1051,7 +1051,7 @@ func TestController_reconcile(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			// prime the default network NAD
 			if defaultNAD == nil {
-				defaultNAD, err = c.getOrCreateDefaultNetworkNAD()
+				defaultNAD, err = util.EnsureDefaultNetworkNAD(c.nadLister, c.nadClient)
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				// update it with the annotation that network manager would set
 				defaultNAD.Annotations = map[string]string{types.OvnNetworkNameAnnotation: types.DefaultNetworkName}

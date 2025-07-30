@@ -150,6 +150,12 @@ func (c *Controller) Run() error {
 		return fmt.Errorf("unable to start user-defined network controller: %v", err)
 	}
 
+	if util.IsPreconfiguredUDNAddressesEnabled() {
+		if _, err := util.EnsureDefaultNetworkNAD(c.nadLister, c.nadClient); err != nil {
+			return fmt.Errorf("failed to ensure default network nad exists: %w", err)
+		}
+	}
+
 	return nil
 }
 
