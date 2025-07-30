@@ -34,7 +34,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 		zone:               zone,
 		cm:                 cm,
 		networks:           map[string]util.MutableNetInfo{},
-		networkControllers: map[string]*networkControllerState{},
+		networkControllers: map[string]*NetworkControllerState{},
 	}
 
 	// this controller does not feed from an informer, networks are manually
@@ -88,7 +88,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 	return nc
 }
 
-type networkControllerState struct {
+type NetworkControllerState struct {
 	controller         NetworkController
 	stoppedAndDeleting bool
 }
@@ -110,7 +110,7 @@ type networkController struct {
 
 	cm                 ControllerManager
 	networks           map[string]util.MutableNetInfo
-	networkControllers map[string]*networkControllerState
+	networkControllers map[string]*NetworkControllerState
 }
 
 // Start will cleanup stale networks that have not been ensured via
@@ -191,7 +191,7 @@ func (c *networkController) getAllNetworks() []util.NetInfo {
 	return networks
 }
 
-func (c *networkController) setNetworkState(network string, state *networkControllerState) {
+func (c *networkController) setNetworkState(network string, state *NetworkControllerState) {
 	c.Lock()
 	defer c.Unlock()
 	if state == nil {
@@ -201,12 +201,12 @@ func (c *networkController) setNetworkState(network string, state *networkContro
 	c.networkControllers[network] = state
 }
 
-func (c *networkController) getNetworkState(network string) *networkControllerState {
+func (c *networkController) GetNetworkState(network string) *NetworkControllerState {
 	c.RLock()
 	defer c.RUnlock()
 	state := c.networkControllers[network]
 	if state == nil {
-		return &networkControllerState{}
+		return &NetworkControllerState{}
 	}
 	return state
 }
@@ -215,14 +215,14 @@ func (c *networkController) getReconcilableNetworkState(network string) (Reconci
 	if network == types.DefaultNetworkName {
 		return c.cm.GetDefaultNetworkController(), false
 	}
-	state := c.getNetworkState(network)
+	state := c.GetNetworkState(network)
 	return state.controller, state.stoppedAndDeleting
 }
 
-func (c *networkController) getAllNetworkStates() []*networkControllerState {
+func (c *networkController) getAllNetworkStates() []*NetworkControllerState {
 	c.RLock()
 	defer c.RUnlock()
-	networkStates := make([]*networkControllerState, 0, len(c.networks))
+	networkStates := make([]*NetworkControllerState, 0, len(c.networks))
 	for _, state := range c.networkControllers {
 		networkStates = append(networkStates, state)
 	}
@@ -346,13 +346,13 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	if err != nil {
 		return fmt.Errorf("failed to start network %s: %w", networkName, err)
 	}
-	c.setNetworkState(network.GetNetworkName(), &networkControllerState{controller: nc})
+	c.setNetworkState(network.GetNetworkName(), &NetworkControllerState{controller: nc})
 
 	return nil
 }
 
 func (c *networkController) deleteNetwork(network string) error {
-	have := c.getNetworkState(network)
+	have := c.GetNetworkState(network)
 	if have.controller == nil {
 		return nil
 	}

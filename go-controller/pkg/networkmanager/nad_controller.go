@@ -669,3 +669,9 @@ func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInf
 
 	return nil
 }
+
+func (c *nadController) GetNetworkControllerState(network string) *NetworkControllerState {
+	c.RLock()
+	defer c.RUnlock()
+	return c.networkController.GetNetworkState(network)
+}

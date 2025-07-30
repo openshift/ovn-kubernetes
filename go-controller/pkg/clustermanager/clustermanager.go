@@ -146,6 +146,7 @@ func NewClusterManager(
 			ovnClient.UserDefinedNetworkClient,
 			wf.UserDefinedNetworkInformer(), wf.ClusterUserDefinedNetworkInformer(),
 			udntemplate.RenderNetAttachDefManifest,
+			cm.networkManager.Interface().GetNetworkControllerState,
 			wf.PodCoreInformer(),
 			wf.NamespaceInformer(),
 			cm.recorder,
