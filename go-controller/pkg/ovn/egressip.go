@@ -26,8 +26,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -1083,7 +1083,7 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 func (e *EgressIPController) deletePreviousNetworkPodEgressIPAssignments(ni util.NetInfo, name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *corev1.Pod) {
 	cachedNetwork := e.getNetworkFromPodAssignment(getPodKey(pod))
 	if cachedNetwork != nil {
-		if util.AreNetworksCompatible(cachedNetwork, ni) {
+		if !util.AreNetworksCompatible(cachedNetwork, ni) {
 			if err := e.deletePodEgressIPAssignments(cachedNetwork, name, statusesToRemove, pod); err != nil {
 				// no error is returned because high probability network is deleted
 				klog.Errorf("Failed to delete EgressIP %s assignment for pod %s/%s attached to network %s: %v",
@@ -1138,6 +1138,8 @@ func (e *EgressIPController) isLocalZoneNode(node *corev1.Node) bool {
 type egressIPCache struct {
 	// egressIP name -> network name -> cache
 	egressIPNameToPods map[string]map[string]selectedPods
+	// egressIP name -> to assigned Node names
+	egressIPNameToAssignedNodes map[string][]string
 	// egressLocalNodes will contain all nodes that are local
 	// to this zone which are serving this egressIP object..
 	// This will help sync SNATs
@@ -1154,7 +1156,7 @@ type egressIPCache struct {
 }
 
 type nodeNetworkRedirects struct {
-	// node name -> network name -> redirect IPs
+	// network name -> node name -> redirect IPs
 	cache map[string]map[string]redirectIPs
 }
 
@@ -1444,7 +1446,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 			continue
 		}
 		for networkName, podCache := range networkPodCache {
-			for eIP, nodeName := range egressIPCache.egressIPIPToNodeCache {
+			for eIPIP, nodeName := range egressIPCache.egressIPIPToNodeCache {
 				if !egressIPCache.egressLocalNodesCache.Has(nodeName) {
 					continue
 				}
@@ -1458,7 +1460,7 @@ func (e *EgressIPController) syncStaleGWMarkRules(egressIPCache egressIPCache) e
 					return fmt.Errorf("failed to create new network %s: %v", networkName, err)
 				}
 				routerName := ni.GetNetworkScopedGWRouterName(nodeName)
-				isEIPIPv6 := utilnet.IsIPv6String(eIP)
+				isEIPIPv6 := utilnet.IsIPv6String(eIPIP)
 				for podKey, podIPs := range podCache.egressLocalPods {
 					ops, err = processPodFn(ops, eIPName, podKey, egressIPCache.markCache[eIPName], routerName, networkName, podIPs, isEIPIPv6)
 					if err != nil {
@@ -1600,21 +1602,36 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 // It also removes stale nexthops from router policies used by EgressIPs.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) error {
-	for _, networkCache := range cache.egressIPNameToPods {
+	for eipName, networkCache := range cache.egressIPNameToPods {
 		for networkName, data := range networkCache {
 			logicalRouterPolicyStaleNexthops := []*nbdb.LogicalRouterPolicy{}
+			// select LRPs scoped to the correct LRP priority, network and EIP name
 			p := func(item *nbdb.LogicalRouterPolicy) bool {
 				if item.Priority != types.EgressIPReroutePriority || item.ExternalIDs[libovsdbops.NetworkKey.String()] != networkName {
 					return false
 				}
-				egressIPName, _ := getEIPLRPObjK8MetaData(item.ExternalIDs)
-				if egressIPName == "" {
+				networkNodeRedirectCache, ok := cache.egressNodeRedirectsCache.cache[networkName]
+				if !ok || len(networkNodeRedirectCache) == 0 {
+					klog.Infof("syncStaleEgressReroutePolicy found invalid logical router policy (UUID: %s) because no assigned Nodes for EgressIP %s", item.UUID, eipName)
+					return true
+				}
+				extractedEgressIPName, _ := getEIPLRPObjK8MetaData(item.ExternalIDs)
+				if extractedEgressIPName == "" {
 					klog.Errorf("syncStaleEgressReroutePolicy found logical router policy (UUID: %s) with invalid meta data associated with network %s", item.UUID, networkName)
-					return false
+					return true
+				}
+				if extractedEgressIPName != eipName {
+					// remove if there's no reference to this EIP name
+					_, ok := cache.egressIPNameToPods[extractedEgressIPName]
+					return !ok
 				}
 				splitMatch := strings.Split(item.Match, " ")
-				logicalIP := splitMatch[len(splitMatch)-1]
-				parsedLogicalIP := net.ParseIP(logicalIP)
+				podIPStr := splitMatch[len(splitMatch)-1]
+				podIP := net.ParseIP(podIPStr)
+				if podIP == nil {
+					klog.Infof("syncStaleEgressReroutePolicy found invalid LRP with broken match with UID %q", item.UUID)
+					return true
+				}
 				egressPodIPs := sets.NewString()
 				// Since LRPs are created only for pods local to this zone
 				// we need to care about only those pods. Nexthop for them will
@@ -1624,31 +1641,24 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 				for _, podIPs := range data.egressLocalPods {
 					egressPodIPs.Insert(podIPs.UnsortedList()...)
 				}
-				if !egressPodIPs.Has(parsedLogicalIP.String()) {
-					klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no nexthop or stale logical ip: %v", egressIPName, item)
+				if !egressPodIPs.Has(podIP.String()) {
+					klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no nexthop or stale logical ip: %v", extractedEgressIPName, item)
 					return true
 				}
 				// Check for stale nexthops that may exist in the logical router policy and store that in logicalRouterPolicyStaleNexthops.
 				// Note: adding missing nexthop(s) to the logical router policy is done outside the scope of this function.
 				staleNextHops := []string{}
 				for _, nexthop := range item.Nexthops {
-					nodeName, ok := cache.egressIPIPToNodeCache[parsedLogicalIP.String()]
-					if ok {
-						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no node assigned to logical ip: %v", egressIPName, item)
-						return true
+					// ensure valid next hop by iterating through the node config
+					var isFound bool // isFound is true, if the next hop IP is found within the set of assigned nodes
+					for _, nodeRedirect := range networkNodeRedirectCache {
+						if nodeRedirect.containsIP(nexthop) {
+							isFound = true
+							break
+						}
 					}
-					networksRedirects, ok := cache.egressNodeRedirectsCache.cache[nodeName]
-					if ok {
-						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no network in cache: %v", egressIPName, item)
-						return true
-					}
-					redirects, ok := networksRedirects[networkName]
-					if !ok {
-						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no redirects for network in cache: %v", egressIPName, item)
-						return true
-					}
-					//FIXME: be more specific about which is the valid next hop instead of relying on verifying if the IP is within a valid set of IPs.
-					if !redirects.containsIP(nexthop) {
+					if !isFound {
+						//FIXME: be more specific about which is the valid next hop instead of relying on verifying if the IP is within a valid set of IPs.
 						staleNextHops = append(staleNextHops, nexthop)
 					}
 				}
@@ -1669,7 +1679,14 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 
 			// Update Logical Router Policies that have stale nexthops. Notice that we must do this separately
 			// because logicalRouterPolicyStaleNexthops must be populated first
-			klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops for network %s: %+v", networkName, logicalRouterPolicyStaleNexthops)
+			for _, staleNextHopLogicalRouterPolicy := range logicalRouterPolicyStaleNexthops {
+				if staleNextHopLogicalRouterPolicy.Nexthop == nil {
+					continue
+				}
+				klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops for LRP %q for network %s: %s",
+					staleNextHopLogicalRouterPolicy.UUID, networkName, *staleNextHopLogicalRouterPolicy.Nexthop)
+			}
+
 			err = libovsdbops.DeleteNextHopsFromLogicalRouterPolicies(e.nbClient, cache.networkToRouter[networkName], logicalRouterPolicyStaleNexthops...)
 			if err != nil {
 				return fmt.Errorf("unable to remove stale next hops from logical router policies for network %s: %v", networkName, err)
@@ -1699,7 +1716,13 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 			return false
 		}
 		egressIPName := egressIPMeta[0]
-		parsedLogicalIP := net.ParseIP(item.LogicalIP).String()
+		// check logical IP maps to a valid pod
+		parsedPodIP := net.ParseIP(item.LogicalIP)
+		if parsedPodIP == nil {
+			klog.Errorf("syncStaleSNATRules found invalid logical IP for NAT with UID %q", item.UUID)
+			return true
+		}
+		parsedPodIPStr := parsedPodIP.String()
 		cacheEntry, exists := egressIPCache.egressIPNameToPods[egressIPName][types.DefaultNetworkName]
 		egressPodIPs := sets.NewString()
 		if exists {
@@ -1712,7 +1735,7 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 				egressPodIPs.Insert(podIPs.UnsortedList()...)
 			}
 		}
-		if !exists || !egressPodIPs.Has(parsedLogicalIP) {
+		if !exists || !egressPodIPs.Has(parsedPodIPStr) {
 			klog.Infof("syncStaleSNATRules will delete %s due to logical ip: %v", egressIPName, item)
 			return true
 		}
@@ -1721,9 +1744,15 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 			klog.Errorf("syncStaleSNATRules failed to find default network in networks cache")
 			return false
 		}
-		if node, ok := egressIPCache.egressIPIPToNodeCache[item.ExternalIP]; !ok || !cacheEntry.egressLocalPods[types.DefaultNetworkName].Has(node) ||
-			item.LogicalPort == nil || *item.LogicalPort != ni.GetNetworkScopedK8sMgmtIntfName(node) {
-			klog.Infof("syncStaleSNATRules will delete %s due to external ip or stale logical port: %v", egressIPName, item)
+		// check external IP maps to a valid EgressIP IP and its assigned to a Node
+		node, ok := egressIPCache.egressIPIPToNodeCache[item.ExternalIP]
+		if !ok {
+			klog.Infof("syncStaleSNATRules found NAT %q without EIP assigned to a Node", item.UUID)
+			return true
+		}
+		// check logical port is set and correspondes to the correct egress node
+		if item.LogicalPort == nil || *item.LogicalPort != ni.GetNetworkScopedK8sMgmtIntfName(node) {
+			klog.Infof("syncStaleSNATRules found NAT %q with invalid logical port", item.UUID)
 			return true
 		}
 		return false
@@ -1907,9 +1936,12 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 	// This will help sync SNATs
 	egressLocalNodesCache := sets.New[string]()
 	cache.egressLocalNodesCache = egressLocalNodesCache
-	// egressIP name -> node name
-	egressNodesCache := make(map[string]string, 0)
-	cache.egressIPIPToNodeCache = egressNodesCache
+	// egressIP name -> nodes where the IPs are assigned
+	egressIPNameNodesCache := make(map[string][]string, 0)
+	cache.egressIPNameToAssignedNodes = egressIPNameNodesCache
+	// egressIP IP -> node name. Assigned node for EIP.
+	egressIPIPNodeCache := make(map[string]string, 0)
+	cache.egressIPIPToNodeCache = egressIPIPNodeCache
 	cache.markCache = make(map[string]string)
 	egressIPs, err := e.watchFactory.GetEgressIPs()
 	if err != nil {
@@ -1922,11 +1954,18 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 		}
 		cache.markCache[egressIP.Name] = mark.String()
 		egressIPsCache[egressIP.Name] = make(map[string]selectedPods, 0)
+		egressIPNameNodesCache[egressIP.Name] = make([]string, 0, len(egressIP.Status.Items))
 		for _, status := range egressIP.Status.Items {
+			eipIP := net.ParseIP(status.EgressIP)
+			if eipIP == nil {
+				klog.Errorf("Failed to parse EgressIP %s IP %q from status", egressIP.Name, status.EgressIP)
+				continue
+			}
+			egressIPIPNodeCache[eipIP.String()] = status.Node
 			if localZoneNodes.Has(status.Node) {
 				egressLocalNodesCache.Insert(status.Node)
 			}
-			egressNodesCache[status.EgressIP] = status.Node
+			egressIPNameNodesCache[egressIP.Name] = append(egressIPNameNodesCache[egressIP.Name], status.Node)
 		}
 		namespaces, err = e.watchFactory.GetNamespacesBySelector(egressIP.Spec.NamespaceSelector)
 		if err != nil {
@@ -2050,28 +2089,14 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 			// NOTE3: When the node gets deleted we do not remove this route intentionally because
 			// on IC if the node is gone, then the ovn_cluster_router is also gone along with all
 			// the routes on it.
-			processNetworkFn := func(ni util.NetInfo) error {
-				if ni.TopologyType() == types.Layer2Topology || len(ni.Subnets()) == 0 {
-					return nil
-				}
-				if err := libovsdbutil.CreateDefaultRouteToExternal(e.nbClient, ni.GetNetworkScopedClusterRouterName(),
-					ni.GetNetworkScopedGWRouterName(node.Name), ni.Subnets()); err != nil {
-					return fmt.Errorf("failed to create route to external for network %s: %v", ni.GetNetworkName(), err)
-				}
-				return nil
-			}
 			ni := e.networkManager.GetNetwork(types.DefaultNetworkName)
-			if ni == nil {
-				return fmt.Errorf("failed to get default network from NAD controller")
+			gatewayIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, types.DefaultNetworkName)
+			if err != nil {
+				return fmt.Errorf("failed to get default network gateway router join IPs for node %q: %w", node.Name, err)
 			}
-			if err := processNetworkFn(ni); err != nil {
-				return fmt.Errorf("failed to process default network: %v", err)
-			}
-			if !isEgressIPForUDNSupported() {
-				return nil
-			}
-			if err := e.networkManager.DoWithLock(processNetworkFn); err != nil {
-				return fmt.Errorf("failed to process all user defined networks route to external: %v", err)
+			if err := libovsdbutil.CreateDefaultRouteToExternal(e.nbClient, ni.GetNetworkScopedClusterRouterName(),
+				ni.GetNetworkScopedGWRouterName(node.Name), ni.Subnets(), gatewayIPs); err != nil {
+				return fmt.Errorf("failed to create route to external for network %s: %v", ni.GetNetworkName(), err)
 			}
 		}
 	}
@@ -2465,11 +2490,18 @@ func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egress
 		return err
 	}
 	var ops []ovsdb.Operation
-	if !loadedPodNode || isLocalZonePod { // node is deleted (we can't determine zone so we always try and nuke OR pod is local to zone)
+	// For CDN only, add SNATs to support external GW feature
+	if ni.IsDefault() && (!loadedPodNode || isLocalZonePod) {
 		ops, err = e.addExternalGWPodSNATOps(ni, nil, pod.Namespace, pod.Name, status)
 		if err != nil {
 			return err
 		}
+	}
+	// Following cases will ensure removal of a pod LRP
+	// Case 1 - node where pod is hosted is not known
+	// Case 2 - pod is within the local zone
+	// case 3 - a local zone node is egress node and pod is attached to layer 2. For layer2, there is always an LRP attached to the egress Node GW router
+	if !loadedPodNode || isLocalZonePod || (isLocalZoneEgressNode && ni.IsSecondary() && ni.TopologyType() == types.Layer2Topology) {
 		ops, err = e.deleteReroutePolicyOps(ni, ops, status, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
 		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			// if the gateway router join IP setup is already gone, then don't count it as error.
@@ -3139,7 +3171,7 @@ func createDefaultNoRerouteServicePolicies(nbClient libovsdbclient.Client, netwo
 	return nil
 }
 
-func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo) error {
+func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo, node *corev1.Node) error {
 	e.nodeUpdateMutex.Lock()
 	defer e.nodeUpdateMutex.Unlock()
 	subnetEntries := ni.Subnets()
@@ -3164,8 +3196,12 @@ func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo) err
 		return fmt.Errorf("failed to ensure no reroute node policies for network %s: %v", ni.GetNetworkName(), err)
 	}
 	if config.OVNKubernetesFeature.EnableInterconnect && ni.TopologyType() == types.Layer3Topology {
+		gatewayIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, ni.GetNetworkName())
+		if err != nil {
+			return fmt.Errorf("failed to get %q network gateway router join IPs for node %q, err: %w", ni.GetNetworkName(), node.Name, err)
+		}
 		if err := libovsdbutil.CreateDefaultRouteToExternal(e.nbClient, routerName,
-			ni.GetNetworkScopedGWRouterName(localNode), subnetEntries); err != nil {
+			ni.GetNetworkScopedGWRouterName(localNode), subnetEntries, gatewayIPs); err != nil {
 			return fmt.Errorf("failed to create route to external for network %s: %v", ni.GetNetworkName(), err)
 		}
 	}
