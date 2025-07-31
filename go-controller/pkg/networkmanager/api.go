@@ -42,6 +42,9 @@ type Interface interface {
 	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
 	DoWithLock(f func(network util.NetInfo) error) error
 	GetActiveNetworkNamespaces(networkName string) ([]string, error)
+
+	// GetNetworkControllerState returns the state of a specific network controller
+	GetNetworkControllerState(network string) *NetworkControllerState
 }
 
 // Controller handles the runtime of the package
@@ -202,6 +205,14 @@ func (nm defaultNetworkManager) DoWithLock(f func(network util.NetInfo) error) e
 
 func (nm defaultNetworkManager) GetActiveNetworkNamespaces(_ string) ([]string, error) {
 	return []string{"default"}, nil
+}
+
+func (nm defaultNetworkManager) GetNetworkControllerState(network string) *NetworkControllerState {
+	return nil
+}
+
+func (nm defaultNetworkManager) GetAllNetworkControllerStates() map[string]*NetworkControllerState {
+	return make(map[string]*NetworkControllerState)
 }
 
 var def Controller = &defaultNetworkManager{}
