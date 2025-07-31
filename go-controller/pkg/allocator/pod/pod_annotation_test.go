@@ -883,33 +883,32 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			if tt.isSingleStackIPv4 {
 				config.IPv6Mode = false
 			}
-			if tt.netInfo == nil {
-				tt.netInfo = &util.DefaultNetInfo{}
-				tt.nadName = types.DefaultNetworkName
-				if !tt.ipam || tt.idAllocation || tt.persistentIPAllocation || tt.args.ipamClaim != nil {
-					tt.nadName = util.GetNADName(network.Namespace, network.Name)
-					var subnets string
-					if tt.ipam {
-						subnets = "192.168.0.0/24,2001:db8::/64"
-						if tt.isSingleStackIPv4 {
-							subnets = "192.168.0.0/24"
-						} else if tt.isSingleStackIPv6 {
-							subnets = "2001:db8::/64"
-						}
+			var netInfo util.NetInfo
+			netInfo = &util.DefaultNetInfo{}
+			nadName := types.DefaultNetworkName
+			if !tt.ipam || tt.idAllocation || tt.persistentIPAllocation || tt.args.ipamClaim != nil {
+				nadName = util.GetNADName(network.Namespace, network.Name)
+				var subnets string
+				if tt.ipam {
+					subnets = "192.168.0.0/24,2010:100:200::/64"
+					if tt.isSingleStackIPv4 {
+						subnets = "192.168.0.0/24"
+					} else if tt.isSingleStackIPv6 {
+						subnets = "2010:100:200::/64"
 					}
-					tt.netInfo, err = util.NewNetInfo(&ovncnitypes.NetConf{
-						Topology: types.Layer2Topology,
-						NetConf: cnitypes.NetConf{
-							Name: network.Name,
-						},
-						NADName:            tt.nadName,
-						Subnets:            subnets,
-						AllowPersistentIPs: tt.persistentIPAllocation,
-						Role:               tt.role,
-					})
-					if err != nil {
-						t.Fatalf("failed to create NetInfo: %v", err)
-					}
+				}
+				netInfo, err = util.NewNetInfo(&ovncnitypes.NetConf{
+					Topology: types.Layer2Topology,
+					NetConf: cnitypes.NetConf{
+						Name: network.Name,
+					},
+					NADName:            nadName,
+					Subnets:            subnets,
+					AllowPersistentIPs: tt.persistentIPAllocation,
+					Role:               tt.role,
+				})
+				if err != nil {
+					t.Fatalf("failed to create NetInfo: %v", err)
 				}
 			}
 
