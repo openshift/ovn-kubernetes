@@ -8,25 +8,36 @@ import "github.com/ovn-kubernetes/libovsdb/model"
 const LogicalRouterStaticRouteTable = "Logical_Router_Static_Route"
 
 type (
-	LogicalRouterStaticRoutePolicy = string
+	LogicalRouterStaticRoutePolicy          = string
+	LogicalRouterStaticRouteSelectionFields = string
 )
 
 var (
-	LogicalRouterStaticRoutePolicySrcIP LogicalRouterStaticRoutePolicy = "src-ip"
-	LogicalRouterStaticRoutePolicyDstIP LogicalRouterStaticRoutePolicy = "dst-ip"
+	LogicalRouterStaticRoutePolicySrcIP            LogicalRouterStaticRoutePolicy          = "src-ip"
+	LogicalRouterStaticRoutePolicyDstIP            LogicalRouterStaticRoutePolicy          = "dst-ip"
+	LogicalRouterStaticRouteSelectionFieldsEthSrc  LogicalRouterStaticRouteSelectionFields = "eth_src"
+	LogicalRouterStaticRouteSelectionFieldsEthDst  LogicalRouterStaticRouteSelectionFields = "eth_dst"
+	LogicalRouterStaticRouteSelectionFieldsIPProto LogicalRouterStaticRouteSelectionFields = "ip_proto"
+	LogicalRouterStaticRouteSelectionFieldsIPSrc   LogicalRouterStaticRouteSelectionFields = "ip_src"
+	LogicalRouterStaticRouteSelectionFieldsIPDst   LogicalRouterStaticRouteSelectionFields = "ip_dst"
+	LogicalRouterStaticRouteSelectionFieldsIpv6Src LogicalRouterStaticRouteSelectionFields = "ipv6_src"
+	LogicalRouterStaticRouteSelectionFieldsIpv6Dst LogicalRouterStaticRouteSelectionFields = "ipv6_dst"
+	LogicalRouterStaticRouteSelectionFieldsTpSrc   LogicalRouterStaticRouteSelectionFields = "tp_src"
+	LogicalRouterStaticRouteSelectionFieldsTpDst   LogicalRouterStaticRouteSelectionFields = "tp_dst"
 )
 
 // LogicalRouterStaticRoute defines an object in Logical_Router_Static_Route table
 type LogicalRouterStaticRoute struct {
-	UUID        string                          `ovsdb:"_uuid"`
-	BFD         *string                         `ovsdb:"bfd"`
-	ExternalIDs map[string]string               `ovsdb:"external_ids"`
-	IPPrefix    string                          `ovsdb:"ip_prefix"`
-	Nexthop     string                          `ovsdb:"nexthop"`
-	Options     map[string]string               `ovsdb:"options"`
-	OutputPort  *string                         `ovsdb:"output_port"`
-	Policy      *LogicalRouterStaticRoutePolicy `ovsdb:"policy"`
-	RouteTable  string                          `ovsdb:"route_table"`
+	UUID            string                                    `ovsdb:"_uuid"`
+	BFD             *string                                   `ovsdb:"bfd"`
+	ExternalIDs     map[string]string                         `ovsdb:"external_ids"`
+	IPPrefix        string                                    `ovsdb:"ip_prefix"`
+	Nexthop         string                                    `ovsdb:"nexthop"`
+	Options         map[string]string                         `ovsdb:"options"`
+	OutputPort      *string                                   `ovsdb:"output_port"`
+	Policy          *LogicalRouterStaticRoutePolicy           `ovsdb:"policy"`
+	RouteTable      string                                    `ovsdb:"route_table"`
+	SelectionFields []LogicalRouterStaticRouteSelectionFields `ovsdb:"selection_fields"`
 }
 
 func (a *LogicalRouterStaticRoute) GetUUID() string {
@@ -171,6 +182,34 @@ func (a *LogicalRouterStaticRoute) GetRouteTable() string {
 	return a.RouteTable
 }
 
+func (a *LogicalRouterStaticRoute) GetSelectionFields() []LogicalRouterStaticRouteSelectionFields {
+	return a.SelectionFields
+}
+
+func copyLogicalRouterStaticRouteSelectionFields(a []LogicalRouterStaticRouteSelectionFields) []LogicalRouterStaticRouteSelectionFields {
+	if a == nil {
+		return nil
+	}
+	b := make([]LogicalRouterStaticRouteSelectionFields, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalRouterStaticRouteSelectionFields(a, b []LogicalRouterStaticRouteSelectionFields) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *LogicalRouterStaticRoute) DeepCopyInto(b *LogicalRouterStaticRoute) {
 	*b = *a
 	b.BFD = copyLogicalRouterStaticRouteBFD(a.BFD)
@@ -178,6 +217,7 @@ func (a *LogicalRouterStaticRoute) DeepCopyInto(b *LogicalRouterStaticRoute) {
 	b.Options = copyLogicalRouterStaticRouteOptions(a.Options)
 	b.OutputPort = copyLogicalRouterStaticRouteOutputPort(a.OutputPort)
 	b.Policy = copyLogicalRouterStaticRoutePolicy(a.Policy)
+	b.SelectionFields = copyLogicalRouterStaticRouteSelectionFields(a.SelectionFields)
 }
 
 func (a *LogicalRouterStaticRoute) DeepCopy() *LogicalRouterStaticRoute {
@@ -204,7 +244,8 @@ func (a *LogicalRouterStaticRoute) Equals(b *LogicalRouterStaticRoute) bool {
 		equalLogicalRouterStaticRouteOptions(a.Options, b.Options) &&
 		equalLogicalRouterStaticRouteOutputPort(a.OutputPort, b.OutputPort) &&
 		equalLogicalRouterStaticRoutePolicy(a.Policy, b.Policy) &&
-		a.RouteTable == b.RouteTable
+		a.RouteTable == b.RouteTable &&
+		equalLogicalRouterStaticRouteSelectionFields(a.SelectionFields, b.SelectionFields)
 }
 
 func (a *LogicalRouterStaticRoute) EqualsModel(b model.Model) bool {
