@@ -82,7 +82,6 @@ type NetInfo interface {
 	GetNetworkScopedExtPortName(bridgeID, nodeName string) string
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
-	GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string
 
 	// GetNetInfo is an identity method used to get the specific NetInfo
 	// implementation
@@ -543,10 +542,6 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
-func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(_ string) string {
-	return ""
-}
-
 func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
 	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
@@ -736,13 +731,6 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerName(lbName string) s
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string {
 	return nInfo.GetNetworkScopedName(lbGroupName)
-}
-
-func (nInfo *secondaryNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string {
-	if nInfo.TopologyType() != types.Layer2Topology {
-		return ""
-	}
-	return fmt.Sprintf("outport == %q", types.GWRouterToExtSwitchPrefix+nInfo.GetNetworkScopedGWRouterName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network
@@ -1376,6 +1364,12 @@ func IsRouteAdvertisementsEnabled() bool {
 	// for now, we require multi-network to be enabled because we rely on NADs,
 	// even for the default network
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
+}
+
+// IsPreconfiguredUDNAddressesEnabled indicates if user defined IPs / MAC
+// addresses can be set in primary UDNs
+func IsPreconfiguredUDNAddressesEnabled() bool {
+	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses
 }
 
 func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
