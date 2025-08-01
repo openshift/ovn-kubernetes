@@ -208,7 +208,7 @@ func allocatePodAnnotationWithTunnelID(
 }
 
 // validateStaticIPRequest checks if a static IP request can be honored when IPAM is enabled for the given network.
-func validateStaticIPRequest(netInfo util.NetInfo, podDesc string) error {
+func validateStaticIPRequest(netInfo util.NetInfo, network *nadapi.NetworkSelectionElement, ipamClaim *ipamclaimsapi.IPAMClaim, podDesc string) error {
 	// Allow static IPs with IPAM only for primary networks with layer2 topology when EnablePreconfiguredUDNAddresses is enabled
 	// Feature gate integration: EnablePreconfiguredUDNAddresses controls static IP allocation with IPAM
 	if !util.IsPreconfiguredUDNAddressesEnabled() {
@@ -225,6 +225,13 @@ func validateStaticIPRequest(netInfo util.NetInfo, podDesc string) error {
 		// IPs excluded from allocation, making it impossible to safely honor static IP
 		// requests when IPAM is enabled.
 		return fmt.Errorf("cannot allocate a static IP request with IPAM for pod %s: layer2 topology is required, but network has topology %q", podDesc, netInfo.TopologyType())
+	}
+	if ipamClaim != nil && len(ipamClaim.Status.IPs) > 0 {
+		for _, ipRequest := range network.IPRequest {
+			if !util.IsItemInSlice(ipamClaim.Status.IPs, ipRequest) {
+				return fmt.Errorf("cannot allocate a static IP request with IPAM for pod %q: the pod references an ipam claim with IPs not containing the requested IP %q", podDesc, ipRequest)
+			}
+		}
 	}
 	return nil
 }
@@ -354,7 +361,7 @@ func allocatePodAnnotationWithRollback(
 	}
 
 	if hasIPAM && hasStaticIPRequest {
-		if err = validateStaticIPRequest(netInfo, podDesc); err != nil {
+		if err = validateStaticIPRequest(netInfo, network, ipamClaim, podDesc); err != nil {
 			return
 		}
 	}

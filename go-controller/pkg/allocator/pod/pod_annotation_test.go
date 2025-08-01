@@ -659,6 +659,29 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// on networks with IPAM and layer2 topology, expect error when IPAMClaims status IPs do not match requested IPs
+			name:                            "expect error, static IP with IPAM on layer2 when IPAMClaims status IPs do not match requested IPs",
+			ipam:                            true,
+			role:                            types.NetworkRolePrimary,
+			persistentIPAllocation:          true,
+			enablePreconfiguredUDNAddresses: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPRequest:          []string{"192.168.0.101/24"},
+					IPAMClaimReference: "my-ipam-claim",
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{"192.168.0.200/24"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			// with preconfigured UDN address feature enabled still continue failing with secondary layer2 with ipam + static IPs
 			name:                            "expect error, static IP with IPAM on secondary network when EnablePreconfiguredUDNAddresses is enabled",
 			ipam:                            true,
