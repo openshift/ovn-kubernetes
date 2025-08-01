@@ -522,9 +522,11 @@ func (h *networkClusterControllerEventHandler) AddResource(obj interface{}, _ bo
 		}
 		err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(node)
 		if err == nil {
+			klog.Infof("Node add: clearing network available condition for node %s", node.Name)
 			h.clearInitialNodeNetworkUnavailableCondition(node)
 			h.nodeSyncFailed.Delete(node.Name)
 		} else {
+			klog.Infof("Node add: clearning network available condition for node %s failed, err %v", node.Name, err)
 			h.nodeSyncFailed.Store(node.Name, true)
 		}
 		statusErr := h.ncc.updateNetworkStatus(node.Name, err)
@@ -581,15 +583,18 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 			// at this point, otherwise the node is still tainted with
 			// node.kubernetes.io/network-unavailable:NoSchedule which prevents
 			// pods from being scheduled on it.
+			klog.Infof("Node update: attempt 1: clearing network available condition for node %s", newNode.Name)
 			h.clearInitialNodeNetworkUnavailableCondition(newNode)
 			// no other node updates would require us to reconcile again
 			return nil
 		}
 		err = h.ncc.nodeAllocator.HandleAddUpdateNodeEvent(newNode)
 		if err == nil {
+			klog.Infof("Node update: attempt2: clearing network available condition for node %s", newNode.Name)
 			h.clearInitialNodeNetworkUnavailableCondition(newNode)
 			h.nodeSyncFailed.Delete(newNode.GetName())
 		} else {
+			klog.Infof("Node update: clearning network available condition for node %s failed, err %v", newNode.Name, err)
 			h.nodeSyncFailed.Store(newNode.Name, true)
 		}
 		statusErr := h.ncc.updateNetworkStatus(newNode.Name, err)
@@ -737,6 +742,7 @@ func (h *networkClusterControllerEventHandler) GetResourceFromInformerCache(key 
 func (h *networkClusterControllerEventHandler) clearInitialNodeNetworkUnavailableCondition(origNode *corev1.Node) {
 	// If it is not a Cloud Provider node, then nothing to do.
 	if origNode.Spec.ProviderID == "" {
+		klog.Infof("Node %s doesn't set with .Spec.ProviderID, so skip removing NetworkUnavailableCondition", origNode.Name)
 		return
 	}
 
@@ -772,6 +778,8 @@ func (h *networkClusterControllerEventHandler) clearInitialNodeNetworkUnavailabl
 		klog.Errorf("Status update failed for local node %s: %v", origNode.Name, resultErr)
 	} else if cleared {
 		klog.Infof("Cleared node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
+	} else {
+		klog.Infof("No need to clear node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
 	}
 }
 
