@@ -192,7 +192,7 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		cniNetConf["mtu"] = mtu
 	}
 	if len(netConfSpec.JoinSubnet) > 0 {
-		cniNetConf["joinSubnets"] = netConfSpec.JoinSubnet
+		cniNetConf["joinSubnet"] = netConfSpec.JoinSubnet
 	}
 	if len(netConfSpec.Subnets) > 0 {
 		cniNetConf["subnets"] = netConfSpec.Subnets

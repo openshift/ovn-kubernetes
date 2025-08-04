@@ -28,7 +28,7 @@ import (
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/knftables"
 
-	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/client"
 
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -830,7 +830,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	if node, err = nc.Kube.GetNode(nc.name); err != nil {
+	if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
 
@@ -895,7 +895,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
-		if node, err = nc.Kube.GetNode(nc.name); err != nil {
+		if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
 			return false, nil
 		}
@@ -999,7 +999,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	if node, err = nc.Kube.GetNode(nc.name); err != nil {
+	if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
 
@@ -1079,7 +1079,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 			// we loop through all the nodes in the cluster and ensure ovnkube-controller has finished creating the LRSR required for pod2pod overlay communication
 			if !syncNodes {
-				nodes, err := nc.Kube.GetNodes()
+				nodes, err := nc.watchFactory.GetNodes()
 				if err != nil {
 					err1 = fmt.Errorf("upgrade hack: error retrieving node %s: %v", nc.name, err)
 					return false, nil
