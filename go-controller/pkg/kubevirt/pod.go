@@ -470,11 +470,15 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 
 	targetPod := vmPods[len(vmPods)-1]
 	livingPods := filterNotComplete(vmPods)
+
+	// If there is no living pod we should state no live migration status
+	if len(livingPods) == 0 {
+		return nil, nil
+	}
+
+	// There is a living pod but is not the target one so the migration
+	// has failed.
 	if util.PodCompleted(targetPod) {
-		// if target pod failed, then there should be only one living source pod.
-		if len(livingPods) != 1 {
-			return nil, fmt.Errorf("unexpected live migration state: should have a single living pod")
-		}
 		return &LiveMigrationStatus{
 			SourcePod: livingPods[0],
 			TargetPod: targetPod,

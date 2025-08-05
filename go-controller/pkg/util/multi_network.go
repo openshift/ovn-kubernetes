@@ -709,7 +709,7 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedGWRouterName(nodeName string) str
 func (nInfo *secondaryNetInfo) GetNetworkScopedSwitchName(nodeName string) string {
 	// In Layer2Topology there is just one global switch
 	if nInfo.TopologyType() == types.Layer2Topology {
-		return fmt.Sprintf("%s%s", nInfo.getPrefix(), types.OVNLayer2Switch)
+		return nInfo.GetNetworkScopedName(types.OVNLayer2Switch)
 	}
 	return nInfo.GetNetworkScopedName(nodeName)
 }
@@ -821,6 +821,11 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	}
 	if nInfo == nil && other == nil {
 		return true
+	}
+	// if network ID has changed, it means the network was re-created, and all controllers
+	// should execute delete+create instead of update
+	if nInfo.GetNetworkID() != types.InvalidID && other.GetNetworkID() != types.InvalidID && nInfo.GetNetworkID() != other.GetNetworkID() {
+		return false
 	}
 	if nInfo.netName != other.GetNetworkName() {
 		return false

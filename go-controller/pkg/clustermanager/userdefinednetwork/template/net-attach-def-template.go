@@ -166,6 +166,9 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 			netConfSpec.VLANID = int(cfg.VLAN.Access.ID)
 		}
 	}
+	if netConfSpec.AllowPersistentIPs && !config.OVNKubernetesFeature.EnablePersistentIPs {
+		return nil, fmt.Errorf("allowPersistentIPs is set but persistentIPs is Disabled")
+	}
 
 	if err := util.ValidateNetConf(nadName, netConfSpec); err != nil {
 		return nil, err
