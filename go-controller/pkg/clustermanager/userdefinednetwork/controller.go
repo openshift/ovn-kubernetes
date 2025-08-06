@@ -38,6 +38,7 @@ import (
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -72,6 +73,8 @@ type Controller struct {
 	// trying to create an object with the same name.
 	createNetworkLock sync.Mutex
 
+	networkManager networkmanager.Interface
+
 	udnClient         userdefinednetworkclientset.Interface
 	udnLister         userdefinednetworklister.UserDefinedNetworkLister
 	cudnLister        userdefinednetworklister.ClusterUserDefinedNetworkLister
@@ -93,6 +96,7 @@ func New(
 	udnInformer userdefinednetworkinformer.UserDefinedNetworkInformer,
 	cudnInformer userdefinednetworkinformer.ClusterUserDefinedNetworkInformer,
 	renderNadFn RenderNetAttachDefManifest,
+	networkManager networkmanager.Interface,
 	podInformer corev1informer.PodInformer,
 	namespaceInformer corev1informer.NamespaceInformer,
 	eventRecorder record.EventRecorder,
@@ -108,6 +112,7 @@ func New(
 		renderNadFn:                 renderNadFn,
 		podInformer:                 podInformer,
 		namespaceInformer:           namespaceInformer,
+		networkManager:              networkManager,
 		networkInUseRequeueInterval: defaultNetworkInUseCheckInterval,
 		namespaceTracker:            map[string]sets.Set[string]{},
 		eventRecorder:               eventRecorder,
@@ -404,6 +409,10 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 				return nil, fmt.Errorf("failed to delete NetworkAttachmentDefinition [%s/%s]: %w", udn.Namespace, udn.Name, err)
 			}
 
+			if c.networkManager.GetControllerNetwork(util.GenerateUDNNetworkName(udn.Namespace, udn.Name)) != nil {
+				return nil, &networkInUseError{err: fmt.Errorf("cannot remove UDN, controller for network %s is still running", util.GenerateUDNNetworkName(udn.Namespace, udn.Name))}
+			}
+
 			controllerutil.RemoveFinalizer(udn, template.FinalizerUserDefinedNetwork)
 			udn, err := c.udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).Update(context.Background(), udn, metav1.UpdateOptions{})
 			if err != nil {
@@ -574,6 +583,10 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 
 			if len(errs) > 0 {
 				return nil, errors.Join(errs...)
+			}
+
+			if c.networkManager.GetControllerNetwork(util.GenerateCUDNNetworkName(cudn.Name)) != nil {
+				return nil, &networkInUseError{err: fmt.Errorf("cannot remove cluster UDN, controller for network %s is still running", util.GenerateCUDNNetworkName(cudn.Name))}
 			}
 
 			var err error
