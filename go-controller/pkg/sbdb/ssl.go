@@ -16,7 +16,6 @@ type SSL struct {
 	ExternalIDs     map[string]string `ovsdb:"external_ids"`
 	PrivateKey      string            `ovsdb:"private_key"`
 	SSLCiphers      string            `ovsdb:"ssl_ciphers"`
-	SSLCiphersuites string            `ovsdb:"ssl_ciphersuites"`
 	SSLProtocols    string            `ovsdb:"ssl_protocols"`
 }
 
@@ -74,10 +73,6 @@ func (a *SSL) GetSSLCiphers() string {
 	return a.SSLCiphers
 }
 
-func (a *SSL) GetSSLCiphersuites() string {
-	return a.SSLCiphersuites
-}
-
 func (a *SSL) GetSSLProtocols() string {
 	return a.SSLProtocols
 }
@@ -110,7 +105,6 @@ func (a *SSL) Equals(b *SSL) bool {
 		equalSSLExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		a.PrivateKey == b.PrivateKey &&
 		a.SSLCiphers == b.SSLCiphers &&
-		a.SSLCiphersuites == b.SSLCiphersuites &&
 		a.SSLProtocols == b.SSLProtocols
 }
 

@@ -21,7 +21,6 @@ type LogicalSwitchPort struct {
 	Name             string            `ovsdb:"name"`
 	Options          map[string]string `ovsdb:"options"`
 	ParentName       *string           `ovsdb:"parent_name"`
-	Peer             *string           `ovsdb:"peer"`
 	PortSecurity     []string          `ovsdb:"port_security"`
 	Tag              *int              `ovsdb:"tag"`
 	TagRequest       *int              `ovsdb:"tag_request"`
@@ -285,28 +284,6 @@ func equalLogicalSwitchPortParentName(a, b *string) bool {
 	return *a == *b
 }
 
-func (a *LogicalSwitchPort) GetPeer() *string {
-	return a.Peer
-}
-
-func copyLogicalSwitchPortPeer(a *string) *string {
-	if a == nil {
-		return nil
-	}
-	b := *a
-	return &b
-}
-
-func equalLogicalSwitchPortPeer(a, b *string) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if a == b {
-		return true
-	}
-	return *a == *b
-}
-
 func (a *LogicalSwitchPort) GetPortSecurity() []string {
 	return a.PortSecurity
 }
@@ -417,7 +394,6 @@ func (a *LogicalSwitchPort) DeepCopyInto(b *LogicalSwitchPort) {
 	b.MirrorRules = copyLogicalSwitchPortMirrorRules(a.MirrorRules)
 	b.Options = copyLogicalSwitchPortOptions(a.Options)
 	b.ParentName = copyLogicalSwitchPortParentName(a.ParentName)
-	b.Peer = copyLogicalSwitchPortPeer(a.Peer)
 	b.PortSecurity = copyLogicalSwitchPortPortSecurity(a.PortSecurity)
 	b.Tag = copyLogicalSwitchPortTag(a.Tag)
 	b.TagRequest = copyLogicalSwitchPortTagRequest(a.TagRequest)
@@ -452,7 +428,6 @@ func (a *LogicalSwitchPort) Equals(b *LogicalSwitchPort) bool {
 		a.Name == b.Name &&
 		equalLogicalSwitchPortOptions(a.Options, b.Options) &&
 		equalLogicalSwitchPortParentName(a.ParentName, b.ParentName) &&
-		equalLogicalSwitchPortPeer(a.Peer, b.Peer) &&
 		equalLogicalSwitchPortPortSecurity(a.PortSecurity, b.PortSecurity) &&
 		equalLogicalSwitchPortTag(a.Tag, b.Tag) &&
 		equalLogicalSwitchPortTagRequest(a.TagRequest, b.TagRequest) &&
