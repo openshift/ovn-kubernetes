@@ -66,7 +66,3 @@ It is distributed across the nodes in the cluster and is responsible
 for routing traffic between the different zones.
 
 FIXME: This page is lazily written, there is so much more to do here.
-
-## References
-
-* https://docs.google.com/presentation/d/1BtkYAO30gI3v6ah2hS6XTGtt6JBHNRHh64vhGEtfLEM/edit#slide=id.gfb215b3717_0_3299
