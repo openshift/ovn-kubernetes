@@ -12,15 +12,16 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-ARG ovsver=3.1.0-159.el8fdp
+ARG ovsver=3.1
 ARG ovnver=23.06.4-26.el8fdp
 
 RUN \
-    yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch3.1 = $ovsver" "python3-openvswitch3.1 = $ovsver" && \
+    yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
     yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn23.06 = $ovnver" "ovn23.06-central = $ovnver" "ovn23.06-host = $ovnver" && \
     yum clean all && rm -rf /var/cache/*
 
-RUN sed 's/%/"/g' <<<"%openvswitch3.1-devel = $ovsver% %openvswitch3.1-ipsec = $ovsver% %ovn23.06-vtep = $ovnver%" > /more-pkgs
+RUN ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
+	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
