@@ -845,3 +845,9 @@ EOF
     done
   fi
 }
+
+interconnect_arg_check() {
+  if [ "${IC_ARG_PROVIDED:-}" = "true" ]; then
+    echo "INFO: Interconnect mode is now the default mode, you do not need to use pass -ic or --enable-interconnect anymore"
+  fi
+}
