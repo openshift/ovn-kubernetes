@@ -525,7 +525,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 			actions += "output:" + netConfig.OfPortPatch + ","
 		}
 
-		actions += strip_vlan + "output:" + ofPortHost
+		actions += strip_vlan + "NORMAL"
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
 				nodetypes.DefaultOpenFlowCookie, match_vlan, bridgeMacAddress, actions))
