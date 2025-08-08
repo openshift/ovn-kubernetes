@@ -21,7 +21,6 @@ import (
 
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/priorityqueue"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -64,8 +63,7 @@ func EnqueueRequestsFromMapFunc(fn MapFunc) EventHandler {
 // TypedEnqueueRequestsFromMapFunc is experimental and subject to future change.
 func TypedEnqueueRequestsFromMapFunc[object any, request comparable](fn TypedMapFunc[object, request]) TypedEventHandler[object, request] {
 	return &enqueueRequestsFromMapFunc[object, request]{
-		toRequests:                   fn,
-		objectImplementsClientObject: implementsClientObject[object](),
+		toRequests: fn,
 	}
 }
 
@@ -73,8 +71,7 @@ var _ EventHandler = &enqueueRequestsFromMapFunc[client.Object, reconcile.Reques
 
 type enqueueRequestsFromMapFunc[object any, request comparable] struct {
 	// Mapper transforms the argument into a slice of keys to be reconciled
-	toRequests                   TypedMapFunc[object, request]
-	objectImplementsClientObject bool
+	toRequests TypedMapFunc[object, request]
 }
 
 // Create implements EventHandler.
@@ -84,14 +81,7 @@ func (e *enqueueRequestsFromMapFunc[object, request]) Create(
 	q workqueue.TypedRateLimitingInterface[request],
 ) {
 	reqs := map[request]empty{}
-
-	var lowPriority bool
-	if isPriorityQueue(q) && !isNil(evt.Object) {
-		if evt.IsInInitialList {
-			lowPriority = true
-		}
-	}
-	e.mapAndEnqueue(ctx, q, evt.Object, reqs, lowPriority)
+	e.mapAndEnqueue(ctx, q, evt.Object, reqs)
 }
 
 // Update implements EventHandler.
@@ -100,13 +90,9 @@ func (e *enqueueRequestsFromMapFunc[object, request]) Update(
 	evt event.TypedUpdateEvent[object],
 	q workqueue.TypedRateLimitingInterface[request],
 ) {
-	var lowPriority bool
-	if e.objectImplementsClientObject && isPriorityQueue(q) && !isNil(evt.ObjectOld) && !isNil(evt.ObjectNew) {
-		lowPriority = any(evt.ObjectOld).(client.Object).GetResourceVersion() == any(evt.ObjectNew).(client.Object).GetResourceVersion()
-	}
 	reqs := map[request]empty{}
-	e.mapAndEnqueue(ctx, q, evt.ObjectOld, reqs, lowPriority)
-	e.mapAndEnqueue(ctx, q, evt.ObjectNew, reqs, lowPriority)
+	e.mapAndEnqueue(ctx, q, evt.ObjectOld, reqs)
+	e.mapAndEnqueue(ctx, q, evt.ObjectNew, reqs)
 }
 
 // Delete implements EventHandler.
@@ -116,7 +102,7 @@ func (e *enqueueRequestsFromMapFunc[object, request]) Delete(
 	q workqueue.TypedRateLimitingInterface[request],
 ) {
 	reqs := map[request]empty{}
-	e.mapAndEnqueue(ctx, q, evt.Object, reqs, false)
+	e.mapAndEnqueue(ctx, q, evt.Object, reqs)
 }
 
 // Generic implements EventHandler.
@@ -126,26 +112,14 @@ func (e *enqueueRequestsFromMapFunc[object, request]) Generic(
 	q workqueue.TypedRateLimitingInterface[request],
 ) {
 	reqs := map[request]empty{}
-	e.mapAndEnqueue(ctx, q, evt.Object, reqs, false)
+	e.mapAndEnqueue(ctx, q, evt.Object, reqs)
 }
 
-func (e *enqueueRequestsFromMapFunc[object, request]) mapAndEnqueue(
-	ctx context.Context,
-	q workqueue.TypedRateLimitingInterface[request],
-	o object,
-	reqs map[request]empty,
-	lowPriority bool,
-) {
+func (e *enqueueRequestsFromMapFunc[object, request]) mapAndEnqueue(ctx context.Context, q workqueue.TypedRateLimitingInterface[request], o object, reqs map[request]empty) {
 	for _, req := range e.toRequests(ctx, o) {
 		_, ok := reqs[req]
 		if !ok {
-			if lowPriority {
-				q.(priorityqueue.PriorityQueue[request]).AddWithOpts(priorityqueue.AddOpts{
-					Priority: LowPriority,
-				}, req)
-			} else {
-				q.Add(req)
-			}
+			q.Add(req)
 			reqs[req] = empty{}
 		}
 	}
