@@ -255,15 +255,23 @@ print_params() {
 }
 
 check_dependencies() {
-    for cmd in $OCI_BIN kubectl kind helm go ; do \
-         if ! command_exists $cmd ; then
-           2&>1 echo "Dependency not met: $cmd"
+    if ! command_exists kubectl ; then
+      echo "'kubectl' not found, installing"
+      setup_kubectl_bin
+    fi
+
+    for cmd in "$OCI_BIN" kind helm go ; do \
+         if ! command_exists "$cmd" ; then
+           echo "Dependency not met: $cmd"
            exit 1
         fi
     done
 
     # check for currently unsupported features
-    [ "${PLATFORM_IPV6_SUPPORT}" == "true" ] && { &>1 echo "Fatal: PLATFORM_IPV6_SUPPORT support not implemented yet"; exit 1; } ||:
+    if [ "${PLATFORM_IPV6_SUPPORT:-}" = "true" ]; then
+        echo "Fatal: PLATFORM_IPV6_SUPPORT support not implemented yet"
+        exit 1
+    fi
 }
 
 helm_prereqs() {
@@ -414,7 +422,7 @@ create_ovn_kubernetes() {
       label_ovn_single_node_zones
       value_file="values-single-node-zone.yaml"
       ovnkube_db_options=""
-    elif [[ $KIND_NUM_NODES_PER_ZONE > 1 ]]; then
+    elif [[ $KIND_NUM_NODES_PER_ZONE -gt 1 ]]; then
       label_ovn_multiple_nodes_zones
       value_file="values-multi-node-zone.yaml"
       ovnkube_db_options=""

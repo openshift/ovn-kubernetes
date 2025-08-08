@@ -6,37 +6,6 @@ DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Source the kind-common file from the same directory where this script is located
 source "${DIR}/kind-common"
 
-function setup_kubectl_bin() {
-    ###########################################################################
-    # Description:                                                            #
-    # setup kubectl for querying the cluster                                  #
-    #                                                                         #
-    # Arguments:                                                              #
-    #   $1 - error message if not provided, it will just exit                 #
-    ###########################################################################
-    if [ ! -d "./bin" ]
-    then
-        mkdir -p ./bin
-        if_error_exit "Failed to create bin dir!"
-    fi
-
-    if [[ "$OSTYPE" == "linux-gnu" ]]; then
-        OS_TYPE="linux"
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        OS_TYPE="darwin"
-    fi
-
-    pushd ./bin
-       if [ ! -f ./kubectl ]; then
-           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS_TYPE}/${ARCH}/kubectl"
-           if_error_exit "Failed to download kubectl failed!"
-       fi
-    popd
-
-    chmod +x ./bin/kubectl
-    export PATH=${PATH}:$(pwd)/bin
-}
-
 # Some environments (Fedora32,31 on desktop), have problems when the cluster
 # is deleted directly with kind `kind delete cluster --name ovn`, it restarts the host.
 # The root cause is unknown, this also can not be reproduced in Ubuntu 20.04 or
