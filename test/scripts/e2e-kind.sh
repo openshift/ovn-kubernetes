@@ -30,6 +30,11 @@ KubeProxy
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 
+# NOT IMPLEMENTED: Service CIDR is a GA feature in K8s v1.33 which is not yet
+# supported in OVN-K.
+\[sig-network\].+Service CIDRs
+\[sig-network\].+ServiceCIDR
+
 # Clean up SCTP tests https://github.com/kubernetes/kubernetes/issues/96717
 should create a Pod with SCTP HostPort
 
@@ -41,6 +46,23 @@ should resolve connection reset issue #74839
 
 # TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/129049
 Services should be able to switch session affinity for NodePort service
+
+# FIXME: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5460
+# Skipping tests for now, commit to be reverted once kube rebase to 1.33 completes
+# TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/130181
+should update the ephemeral containers in an existing pod 
+will start an ephemeral container in an existing pod
+
+# FIXME: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5460
+# Skipping test for now, commit to be reverted once kube rebase to 1.33 completes
+# TO BE FIXED BY https://github.com/kubernetes/kubernetes/commit/3698050dc799a3c81a50ef050e763bade4184c4d
+# Could not determine why the failure is happening in 1.32 but the test does pass in 1.33
+should work with a search path containing an underscore and a search path with a single dot
+
+# FIXME: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5460
+# Skipping test for now, commit to be reverted once kube rebase to 1.33 completes
+# TO BE FIXED BY backport of https://github.com/kubernetes/kubernetes/pull/128850
+should connect to the named ports exposed by restartable init containers
 
 # api flakes
 sig-api-machinery
@@ -73,6 +95,7 @@ validates that there is no conflict between pods with same hostPort but differen
 
 # Skip Beta features by feature name for visibility
 \[FeatureGate:MultiCIDRServiceAllocator\] \[Beta\]
+
 
 # Skip unsupported GA features by feature name for visibility
 # TODO

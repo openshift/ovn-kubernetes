@@ -109,7 +109,10 @@ nav:
       - EgressFirewall: api-reference/egress-firewall-api-spec.md
       - AdminPolicyBasedExternalRoutes: api-reference/admin-epbr-api-spec.md
       - UserDefinedNetwork: api-reference/userdefinednetwork-api-spec.md
+      - RouteAdvertisements: api-reference/routeadvertisements-api-spec.md
   - Features:
+    - Universal Connectivity:
+      - UserDefinedNetwork: features/user-defined-networks/user-defined-networks.md
     - NetworkSecurityControls:
       - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
       - NetworkPolicy: features/network-security-controls/network-policy.md
@@ -134,6 +137,8 @@ nav:
     - Hardware Acceleration:
       - OVS Acceleration with kernel datapath: features/hardware-offload/ovs-kernel.md
       - OVS Acceleration with DOCA datapath: features/hardware-offload/ovs-doca.md
+    - BGP Integration:
+      - Route Advertisements: features/bgp-integration/route-advertisements.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
     - OVNKube Trace: troubleshooting/ovnkube-trace.md
@@ -148,5 +153,6 @@ nav:
     - Network QoS: okeps/okep-4380-network-qos.md
     - User Defined Networks: okeps/okep-5193-user-defined-networks.md
     - Preconfigured UDN Addresses: okeps/okep-5233-preconfigured-udn-addresses.md
+    - BGP: okeps/okep-5296-bgp.md
   - Blog:
     - blog/index.md

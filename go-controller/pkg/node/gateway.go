@@ -37,6 +37,7 @@ type Gateway interface {
 	GetGatewayIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
 	SetDefaultPodNetworkAdvertised(bool)
+	SetDefaultBridgeGARPDropFlows(bool)
 	Reconcile() error
 }
 
@@ -476,6 +477,15 @@ func (g *gateway) GetDefaultPodNetworkAdvertised() bool {
 	return g.openflowManager.defaultBridge.GetNetworkConfig(types.DefaultNetworkName).Advertised.Load()
 }
 
+// SetDefaultBridgeGARPDropFlows will enable flows to drop GARPs if the openflow
+// manager has been initialized.
+func (g *gateway) SetDefaultBridgeGARPDropFlows(isDropped bool) {
+	if g.openflowManager == nil {
+		return
+	}
+	g.openflowManager.setDefaultBridgeGARPDrop(isDropped)
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
 func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
@@ -521,9 +531,9 @@ func (g *gateway) addAllServices() []error {
 func (g *gateway) updateSNATRules() error {
 	subnets := util.IPsToNetworkIPs(g.nodeIPManager.mgmtPort.GetAddresses()...)
 
-	if g.GetDefaultPodNetworkAdvertised() || config.Gateway.Mode != config.GatewayModeLocal {
-		return delLocalGatewayPodSubnetNATRules(subnets...)
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNFTRules()
 	}
 
-	return addLocalGatewayPodSubnetNATRules(subnets...)
+	return addOrUpdateLocalGatewayPodSubnetNFTRules(g.GetDefaultPodNetworkAdvertised(), subnets...)
 }
