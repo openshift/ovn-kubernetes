@@ -132,7 +132,7 @@ spec:
 		framework.ExpectNoError(err, "failed to get primary network")
 		externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 		externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-			CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+			Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 		externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 		framework.ExpectNoError(err, "failed to create external container")
 		externalContainerIPs[4], externalContainerIPs[6] = externalContainer.GetIPv4(), externalContainer.GetIPv6()
@@ -454,7 +454,7 @@ spec:
 					Expect(pods.Items).To(HaveLen(1))
 					ovnkPod = pods.Items[0]
 
-					cmd := fmt.Sprintf("ovs-ofctl dump-flows %s table=0", deploymentconfig.Get().ExternalBridgeName())
+					cmd := "ovs-ofctl dump-flows breth0 table=0"
 					err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 						stdout, err := e2epodoutput.RunHostCmdWithRetries(ovnkPod.Namespace, ovnkPod.Name, cmd, framework.Poll, 30*time.Second)
 						if err != nil {
@@ -515,7 +515,7 @@ spec:
 							time.Sleep(time.Duration(settleTimeout) * time.Second)
 
 							By(fmt.Sprintf("Checking nodeport flows have been updated to use new IP: %s", migrationWorkerNodeIP))
-							cmd := fmt.Sprintf("ovs-ofctl dump-flows %s table=0", deploymentconfig.Get().ExternalBridgeName())
+							cmd := "ovs-ofctl dump-flows breth0 table=0"
 							err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 								stdout, err := e2epodoutput.RunHostCmdWithRetries(ovnkPod.Namespace, ovnkPod.Name, cmd, framework.Poll, 30*time.Second)
 								if err != nil {
@@ -628,7 +628,7 @@ func checkFlowsForMACPeriodically(ovnkPod v1.Pod, addr net.HardwareAddr, duratio
 }
 
 func checkFlowsForMAC(ovnkPod v1.Pod, mac net.HardwareAddr) error {
-	cmd := fmt.Sprintf("ovs-ofctl dump-flows %s", deploymentconfig.Get().ExternalBridgeName())
+	cmd := "ovs-ofctl dump-flows breth0"
 	flowOutput := e2epodoutput.RunHostCmdOrDie(ovnkPod.Namespace, ovnkPod.Name, cmd)
 	lines := strings.Split(flowOutput, "\n")
 	for _, line := range lines {

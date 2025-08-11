@@ -951,18 +951,10 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		return nil
 	}
 
-	var updateStatus bool
 	condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
-	switch {
-	case condition == nil:
-		fallthrough
-	case condition.ObservedGeneration != ra.Generation:
-		fallthrough
-	case (err == nil) != (condition.Status == metav1.ConditionTrue):
-		fallthrough
-	case hadUpdates:
-		updateStatus = true
-	}
+	updateStatus := hadUpdates || condition == nil || condition.ObservedGeneration != ra.Generation
+	updateStatus = updateStatus || err != nil
+
 	if !updateStatus {
 		return nil
 	}

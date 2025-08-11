@@ -1,8 +1,8 @@
 package cudn
 
-import "github.com/ovn-org/ovn-kubernetes/test/e2e/testscenario"
+import "github.com/ovn-org/ovn-kubernetes/test/e2e/testdata"
 
-var MismatchTopologyConfig = []testscenario.ValidateCRScenario{
+var MismatchTopologyConfig = []testdata.ValidateCRScenario{
 	{
 		Description: "topology is localnet but topology config is layer2",
 		ExpectedErr: `spec.localnet is required when topology is Localnet and forbidden otherwise`,

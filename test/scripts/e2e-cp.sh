@@ -40,14 +40,6 @@ skip() {
   SKIPPED_TESTS+=$*
 }
 
-SKIPPED_LABELED_TESTS=""
-skip_label() {
-  if [ "$SKIPPED_LABELED_TESTS" != "" ]; then
-  	SKIPPED_LABELED_TESTS+=" && "
-  fi
-  SKIPPED_LABELED_TESTS+="!($*)"
-}
-
 if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
 	  # No support for these features in dual-stack yet
@@ -146,11 +138,6 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
   skip $BGP_TESTS
 else
   if [ "$ADVERTISE_DEFAULT_NETWORK" = true ]; then
-    # Filter out extended RouteAdvertisements tests to keep job run time down
-    if [ "$ENABLE_NETWORK_SEGMENTATION" = true ]; then
-      skip_label "Feature:RouteAdvertisements && EXTENDED"
-    fi
-    
     # Some test don't work when the default network is advertised, either because
     # the configuration that the test excercises does not make sense for an advertised network, or
     # there is some bug or functional gap
@@ -158,9 +145,9 @@ else
 
     # pod reached from default network through secondary interface, asymetric, configuration does not make sense
     # TODO: perhaps the secondary network attached pods should not be attached to default network
-    skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on the same node"
-    skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on a different node"
-
+    skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to breth0 can be reached by a client pod in the default network on the same node"
+    skip "Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to breth0 can be reached by a client pod in the default network on a different node"
+  
     # these tests require metallb but the configuration we do for it is not compatible with the configuration we do to advertise the default network
     # TODO: consolidate configuration
     skip "Load Balancer Service Tests with MetalLB"
@@ -216,7 +203,6 @@ go test -test.timeout ${GO_TEST_TIMEOUT}m -v . \
         -ginkgo.timeout ${TEST_TIMEOUT}m \
         -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
-        ${SKIPPED_LABELED_TESTS:+-ginkgo.label-filter="${SKIPPED_LABELED_TESTS}"} \
         -ginkgo.junit-report=${E2E_REPORT_DIR}/junit_${E2E_REPORT_PREFIX}report.xml \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
