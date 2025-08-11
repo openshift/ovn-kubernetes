@@ -46,7 +46,7 @@ kubectl_wait_daemonset(){
     echo "CURRENT READY REPLICAS: $READY_REPLICAS, CURRENT DESIRED REPLICAS: $DESIRED_REPLICAS for the DaemonSet $1"
     if [[ $READY_REPLICAS -eq $DESIRED_REPLICAS ]]; then
       UP_TO_DATE_REPLICAS=$(run_kubectl get daemonsets.apps $1 -n ovn-kubernetes  -o=jsonpath='{.status.updatedNumberScheduled}')
-      echo "CURRENT UP TO DATE REPLICAS: $UP_TO_DATE_REPLICAS for the Deployment $1"
+      echo "CURRENT UP TO DATE REPLICAS: $UP_TO_DATE_REPLICAS for the DaemonSet $1"
       if [[ $READY_REPLICAS -eq $UP_TO_DATE_REPLICAS ]]; then
         break
       fi
@@ -71,7 +71,7 @@ kubectl_wait_deployment(){
     READY_REPLICAS=$(run_kubectl get deployments.apps $1 -n ovn-kubernetes -o=jsonpath='{.status.readyReplicas}')
     echo "CURRENT READY REPLICAS: $READY_REPLICAS, CURRENT DESIRED REPLICAS: $DESIRED_REPLICAS for the Deployment $1"
     if [[ $READY_REPLICAS -eq $DESIRED_REPLICAS ]]; then
-      UP_TO_DATE_REPLICAS=$(run_kubectl get deployments.apps ovnkube-master -n ovn-kubernetes -o=jsonpath='{.status.updatedReplicas}')
+      UP_TO_DATE_REPLICAS=$(run_kubectl get deployments.apps $1 -n ovn-kubernetes -o=jsonpath='{.status.updatedReplicas}')
       echo "CURRENT UP TO DATE REPLICAS: $UP_TO_DATE_REPLICAS for the Deployment $1"
       if [[ $READY_REPLICAS -eq $UP_TO_DATE_REPLICAS ]]; then
         break
@@ -130,6 +130,7 @@ create_ovn_kube_manifests() {
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
+    --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
     --disable-forwarding="${OVN_DISABLE_FORWARDING}" \
@@ -164,6 +165,7 @@ set_default_ovn_manifest_params() {
   OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
   # ovn configs 
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
+  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-true}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
   OVN_DISABLE_FORWARDING=${OVN_DISABLE_FORWARDING:-false}
@@ -213,6 +215,7 @@ print_ovn_manifest_params() {
      echo "PLATFORM_IPV6_SUPPORT = $PLATFORM_IPV6_SUPPORT"
      echo "OVN_HA = $OVN_HA"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
+     echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
      echo "OVN_DISABLE_FORWARDING = $OVN_DISABLE_FORWARDING"
@@ -290,45 +293,63 @@ if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
   kubectl_wait_daemonset ovnkube-identity
 fi
 
+if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == false ]; then
+  # install updated ovnkube-node daemonset
+  run_kubectl apply -f ovnkube-node.yaml
 
-# install updated ovnkube-node daemonset
-run_kubectl apply -f ovnkube-node.yaml
+  kubectl_wait_daemonset ovnkube-node
 
-kubectl_wait_daemonset ovnkube-node
+  run_kubectl get all -n ovn-kubernetes
+  CURRENT_REPLICAS_OVNKUBE_DB=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-db -o=jsonpath='{.spec.replicas}')
+  run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=0
 
-run_kubectl get all -n ovn-kubernetes
-CURRENT_REPLICAS_OVNKUBE_DB=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-db -o=jsonpath='{.spec.replicas}')
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=0
+  # install updated ovnkube-db daemonset
+  if [ "$OVN_HA" == true ]; then
+    run_kubectl apply -f ovnkube-db-raft.yaml
+  else
+    run_kubectl apply -f ovnkube-db.yaml
+  fi
 
-# install updated ovnkube-db daemonset
-if [ "$OVN_HA" == true ]; then
-  run_kubectl apply -f ovnkube-db-raft.yaml
+  run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=$CURRENT_REPLICAS_OVNKUBE_DB
+  kubectl_wait_deployment ovnkube-db
+
+  CURRENT_REPLICAS_OVNKUBE_MASTER=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-master -o=jsonpath='{.spec.replicas}')
+
+  # scaling down replica before changing image briefly helps get around an issue seen with KIND
+  # The issue was sometimes the KIND cluster won't scale down the ovnkube-master pod in time
+  # and the new pod with the new image would be stuck in "Pending" state
+  run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=0
+
+  # install updated ovnkube-master deployment
+  run_kubectl apply -f ovnkube-master.yaml
+
+  popd
+
+  run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=$CURRENT_REPLICAS_OVNKUBE_MASTER
+  kubectl_wait_deployment ovnkube-master
+  kubectl_wait_for_upgrade
+
+  run_kubectl describe ds ovnkube-node -n ovn-kubernetes
+
+  run_kubectl describe deployments.apps ovnkube-master -n ovn-kubernetes
+
 else
-  run_kubectl apply -f ovnkube-db.yaml
+  # we only support single node per zone IC upgrades.
+  run_kubectl apply -f ovnkube-single-node-zone.yaml
+  kubectl_wait_daemonset ovnkube-node
+
+  run_kubectl get all -n ovn-kubernetes
+  CURRENT_REPLICAS_OVNKUBE_CONTROL_PLANE=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-control-plane -o=jsonpath='{.spec.replicas}')
+
+  run_kubectl scale deploy -n ovn-kubernetes ovnkube-control-plane --replicas=0
+
+  # install updated ovnkube-control-plane deployment
+  run_kubectl apply -f ovnkube-control-plane.yaml
+
+  run_kubectl scale deploy -n ovn-kubernetes ovnkube-control-plane --replicas=$CURRENT_REPLICAS_OVNKUBE_CONTROL_PLANE
+  kubectl_wait_deployment ovnkube-control-plane
+  kubectl_wait_for_upgrade
 fi
-
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=$CURRENT_REPLICAS_OVNKUBE_DB
-kubectl_wait_deployment ovnkube-db
-
-CURRENT_REPLICAS_OVNKUBE_MASTER=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-master -o=jsonpath='{.spec.replicas}')
-
-# scaling down replica before changing image briefly helps get around an issue seen with KIND
-# The issue was sometimes the KIND cluster won't scale down the ovnkube-master pod in time
-# and the new pod with the new image would be stuck in "Pending" state
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=0
-
-# install updated ovnkube-master deployment
-run_kubectl apply -f ovnkube-master.yaml
-
-popd
-
-run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=$CURRENT_REPLICAS_OVNKUBE_MASTER
-kubectl_wait_deployment ovnkube-master
-kubectl_wait_for_upgrade
-
-run_kubectl describe ds ovnkube-node -n ovn-kubernetes
-
-run_kubectl describe deployments.apps ovnkube-master -n ovn-kubernetes
 
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 MASTER_NODES=$(kubectl get nodes -l node-role.kubernetes.io/control-plane -o name)
