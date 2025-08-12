@@ -14,35 +14,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func (b *BridgeConfiguration) DefaultBridgeFlows(hostSubnets []*net.IPNet, extraIPs []net.IP) ([]string, error) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	dftFlows, err := b.flowsForDefaultBridge(extraIPs)
-	if err != nil {
-		return nil, err
-	}
-	dftCommonFlows, err := b.commonFlows(hostSubnets)
-	if err != nil {
-		return nil, err
-	}
-	return append(dftFlows, dftCommonFlows...), nil
-}
-
-func (b *BridgeConfiguration) ExternalBridgeFlows(hostSubnets []*net.IPNet) ([]string, error) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	return b.commonFlows(hostSubnets)
-}
-
-// must be called with bridge.mutex held
-func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string, error) {
+func FlowsForDefaultBridge(bridge *BridgeConfiguration, extraIPs []net.IP) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 
-	ofPortPhys := b.OfPortPhys
-	bridgeMacAddress := b.MacAddress.String()
-	ofPortHost := b.OfPortHost
-	bridgeIPs := b.Ips
+	ofPortPhys := bridge.OfPortPhys
+	bridgeMacAddress := bridge.MacAddress.String()
+	ofPortHost := bridge.OfPortHost
+	bridgeIPs := bridge.Ips
 
 	var dftFlows []string
 	// 14 bytes of overhead for ethernet header (does not include VLAN)
@@ -79,7 +58,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
 		}
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			// table 0, SVC Hairpin from OVN destined to local host, DNAT and go to table 4
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ip, ip_dst=%s, ip_src=%s,"+
@@ -103,7 +82,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				continue
 			}
 
-			for _, netConfig := range b.PatchedNetConfigs() {
+			for _, netConfig := range bridge.PatchedNetConfigs() {
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ip, ip_dst=%s, ip_src=%s,"+
 						"actions=ct(commit,zone=%d,table=4)",
@@ -142,7 +121,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 			return nil, fmt.Errorf("unable to determine IPv6 physical IP of host: %v", err)
 		}
 		// table 0, SVC Hairpin from OVN destined to local host, DNAT to host, send to table 4
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ipv6, ipv6_dst=%s, ipv6_src=%s,"+
 					"actions=ct(commit,zone=%d,nat(dst=%s),table=4)",
@@ -165,7 +144,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				continue
 			}
 
-			for _, netConfig := range b.PatchedNetConfigs() {
+			for _, netConfig := range bridge.PatchedNetConfigs() {
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ipv6, ipv6_dst=%s, ipv6_src=%s,"+
 						"actions=ct(commit,zone=%d,table=4)",
@@ -216,7 +195,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				// we match on the UDNPodSubnet itself and we also don't SNAT to 169.254.0.2
 				// sample flow: cookie=0xdeff105, duration=1472.742s, table=0, n_packets=9, n_bytes=666, priority=550
 				//              ip,in_port=LOCAL,nw_src=103.103.0.0/16,nw_dst=10.96.0.0/16 actions=ct(commit,table=2,zone=64001)
-				for _, netConfig := range b.PatchedNetConfigs() {
+				for _, netConfig := range bridge.PatchedNetConfigs() {
 					if netConfig.IsDefaultNetwork() {
 						continue
 					}
@@ -249,7 +228,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 			// In UDN match on the whole masquerade subnet to handle replies from UDN enabled services
 			masqDst = masqSubnet
 		}
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			// table 0, Reply hairpin traffic to host, coming from OVN, unSNAT
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
@@ -272,7 +251,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 		dftFlows = append(dftFlows, reassemblyFlows...)
 	}
 	if ofPortPhys != "" {
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			var actions string
 			if config.Gateway.Mode != config.GatewayModeLocal || config.Gateway.DisablePacketMTUCheck {
 				actions = fmt.Sprintf("output:%s", netConfig.OfPortPatch)
@@ -340,7 +319,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				nodetypes.DefaultOpenFlowCookie, match_vlan, bridgeMacAddress, strip_vlan, ofPortHost))
 	}
 
-	defaultNetConfig := b.NetConfig[types.DefaultNetworkName]
+	defaultNetConfig := bridge.NetConfig[types.DefaultNetworkName]
 
 	// table 2, dispatch from Host -> OVN
 	dftFlows = append(dftFlows,
@@ -351,7 +330,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 	// table 2, priority 200, dispatch from UDN -> Host -> OVN. These packets have
 	// already been SNATed to the UDN's masq IP or have been marked with the UDN's packet mark.
 	if config.IPv4Mode {
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			if netConfig.IsDefaultNetwork() {
 				continue
 			}
@@ -389,7 +368,7 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 	}
 
 	if config.IPv6Mode {
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			if netConfig.IsDefaultNetwork() {
 				continue
 			}
@@ -493,14 +472,13 @@ func generateIPFragmentReassemblyFlow(ofPortPhys string) []string {
 	return flows
 }
 
-// must be called with bridge.mutex held
-func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, error) {
+func CommonFlows(hostSubnets []*net.IPNet, bridge *BridgeConfiguration) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
-	ofPortPhys := b.OfPortPhys
-	bridgeMacAddress := b.MacAddress.String()
-	ofPortHost := b.OfPortHost
-	bridgeIPs := b.Ips
+	ofPortPhys := bridge.OfPortPhys
+	bridgeMacAddress := bridge.MacAddress.String()
+	ofPortHost := bridge.OfPortHost
+	bridgeIPs := bridge.Ips
 
 	var dftFlows []string
 
@@ -516,7 +494,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 	if ofPortPhys != "" {
 		// table 0, we check to see if this dest mac is the shared mac, if so flood to all ports
 		actions := ""
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			actions += "output:" + netConfig.OfPortPatch + ","
 		}
 
@@ -528,7 +506,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 
 	// table 0, check packets coming from OVN have the correct mac address. Low priority flows that are a catch all
 	// for non-IP packets that would normally be forwarded with NORMAL action (table 0, priority 0 flow).
-	for _, netConfig := range b.PatchedNetConfigs() {
+	for _, netConfig := range bridge.PatchedNetConfigs() {
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_src=%s, actions=output:NORMAL",
 				nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress))
@@ -543,7 +521,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
 		}
 		if ofPortPhys != "" {
-			for _, netConfig := range b.PatchedNetConfigs() {
+			for _, netConfig := range bridge.PatchedNetConfigs() {
 				// table0, packets coming from egressIP pods that have mark 1008 on them
 				// will be SNAT-ed a final time into nodeIP to maintain consistency in traffic even if the GR
 				// SNATs these into egressIP prior to reaching external bridge.
@@ -558,9 +536,9 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
 				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
 				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
-					config.Gateway.Mode != config.GatewayModeDisabled && b.EipMarkIPs != nil {
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.EipMarkIPs != nil {
 					if netConfig.MasqCTMark != nodetypes.CtMarkOVN {
-						for mark, eip := range b.EipMarkIPs.GetIPv4() {
+						for mark, eip := range bridge.EipMarkIPs.GetIPv4() {
 							dftFlows = append(dftFlows,
 								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ip, pkt_mark=%d, "+
 									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
@@ -602,7 +580,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 					nodetypes.DefaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, nodetypes.CtMarkHost, mod_vlan_id, ofPortPhys))
 		}
 		if config.Gateway.Mode == config.GatewayModeLocal {
-			for _, netConfig := range b.PatchedNetConfigs() {
+			for _, netConfig := range bridge.PatchedNetConfigs() {
 				// table 0, any packet coming from OVN send to host in LGW mode, host will take care of sending it outside if needed.
 				// exceptions are traffic for egressIP and egressGW features and ICMP related traffic which will hit the priority 100 flow instead of this.
 				dftFlows = append(dftFlows,
@@ -642,7 +620,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 			return nil, fmt.Errorf("unable to determine IPv6 physical IP of host: %v", err)
 		}
 		if ofPortPhys != "" {
-			for _, netConfig := range b.PatchedNetConfigs() {
+			for _, netConfig := range bridge.PatchedNetConfigs() {
 				// table0, packets coming from egressIP pods that have mark 1008 on them
 				// will be DNAT-ed a final time into nodeIP to maintain consistency in traffic even if the GR
 				// DNATs these into egressIP prior to reaching external bridge.
@@ -657,9 +635,9 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 				// table 0, packets coming from egressIP pods only from user defined networks. If an egressIP is assigned to
 				// this node, then all networks get a flow even if no pods on that network were selected for by this egressIP.
 				if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect &&
-					config.Gateway.Mode != config.GatewayModeDisabled && b.EipMarkIPs != nil {
+					config.Gateway.Mode != config.GatewayModeDisabled && bridge.EipMarkIPs != nil {
 					if netConfig.MasqCTMark != nodetypes.CtMarkOVN {
-						for mark, eip := range b.EipMarkIPs.GetIPv6() {
+						for mark, eip := range bridge.EipMarkIPs.GetIPv6() {
 							dftFlows = append(dftFlows,
 								fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, ipv6, pkt_mark=%d, "+
 									"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
@@ -701,7 +679,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 
 		}
 		if config.Gateway.Mode == config.GatewayModeLocal {
-			for _, netConfig := range b.PatchedNetConfigs() {
+			for _, netConfig := range bridge.PatchedNetConfigs() {
 				// table 0, any packet coming from OVN send to host in LGW mode, host will take care of sending it outside if needed.
 				// exceptions are traffic for egressIP and egressGW features and ICMP related traffic which will hit the priority 100 flow instead of this.
 				dftFlows = append(dftFlows,
@@ -736,7 +714,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 	// Due to the fact that ovn-controllers on different nodes apply the changes independently,
 	// there is a chance that the pod traffic will reach the egress node before it configures the SNAT flows.
 	// Drop pod traffic that is not SNATed, excluding local pods(required for ICNIv2)
-	defaultNetConfig := b.NetConfig[types.DefaultNetworkName]
+	defaultNetConfig := bridge.NetConfig[types.DefaultNetworkName]
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		for _, clusterEntry := range config.Default.ClusterSubnets {
 			cidr := clusterEntry.CIDR
@@ -761,7 +739,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 	}
 
 	if ofPortPhys != "" {
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			isNetworkAdvertised := netConfig.Advertised.Load()
 			// disableSNATMultipleGWs only applies to default network
 			disableSNATMultipleGWs := netConfig.IsDefaultNetwork() && config.Gateway.DisableSNATMultipleGWs
@@ -839,7 +817,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 					"actions=output:%s", nodetypes.DefaultOpenFlowCookie, ofPortHost))
 
 			// Send UDN destined traffic to right patch port
-			for _, netConfig := range b.PatchedNetConfigs() {
+			for _, netConfig := range bridge.PatchedNetConfigs() {
 				if netConfig.MasqCTMark != nodetypes.CtMarkOVN {
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=5, table=11, ct_mark=%s, "+
@@ -860,15 +838,13 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 	return dftFlows, nil
 }
 
-func (b *BridgeConfiguration) PMTUDDropFlows(ipAddrs []string) []string {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+func PmtudDropFlows(bridge *BridgeConfiguration, ipAddrs []string) []string {
 	var flows []string
 	if config.Gateway.Mode != config.GatewayModeShared {
 		return nil
 	}
 	for _, addr := range ipAddrs {
-		for _, netConfig := range b.PatchedNetConfigs() {
+		for _, netConfig := range bridge.PatchedNetConfigs() {
 			flows = append(flows,
 				nodeutil.GenerateICMPFragmentationFlow(addr, nodetypes.OutputPortDrop, netConfig.OfPortPatch, nodetypes.PmtudOpenFlowCookie, 700))
 		}
