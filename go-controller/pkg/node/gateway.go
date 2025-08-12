@@ -17,7 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -50,7 +49,7 @@ type gateway struct {
 	nodePortWatcher      informer.ServiceAndEndpointsEventHandler
 	openflowManager      *openflowManager
 	nodeIPManager        *addressManager
-	bridgeEIPAddrManager *egressip.BridgeEIPAddrManager
+	bridgeEIPAddrManager *bridgeEIPAddrManager
 	initFunc             func() error
 	readyFunc            func() (bool, error)
 
@@ -234,7 +233,7 @@ func (g *gateway) AddEgressIP(eip *egressipv1.EgressIP) error {
 	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
 		return nil
 	}
-	isSyncRequired, err := g.bridgeEIPAddrManager.AddEgressIP(eip)
+	isSyncRequired, err := g.bridgeEIPAddrManager.addEgressIP(eip)
 	if err != nil {
 		return err
 	}
@@ -250,7 +249,7 @@ func (g *gateway) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressIP) error {
 	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
 		return nil
 	}
-	isSyncRequired, err := g.bridgeEIPAddrManager.UpdateEgressIP(oldEIP, newEIP)
+	isSyncRequired, err := g.bridgeEIPAddrManager.updateEgressIP(oldEIP, newEIP)
 	if err != nil {
 		return err
 	}
@@ -266,7 +265,7 @@ func (g *gateway) DeleteEgressIP(eip *egressipv1.EgressIP) error {
 	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
 		return nil
 	}
-	isSyncRequired, err := g.bridgeEIPAddrManager.DeleteEgressIP(eip)
+	isSyncRequired, err := g.bridgeEIPAddrManager.deleteEgressIP(eip)
 	if err != nil {
 		return err
 	}
@@ -282,7 +281,7 @@ func (g *gateway) SyncEgressIP(eips []interface{}) error {
 	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
 		return nil
 	}
-	if err := g.bridgeEIPAddrManager.SyncEgressIP(eips); err != nil {
+	if err := g.bridgeEIPAddrManager.syncEgressIP(eips); err != nil {
 		return err
 	}
 	if err := g.Reconcile(); err != nil {
@@ -553,7 +552,7 @@ type bridgeConfiguration struct {
 	ofPortPhys  string
 	ofPortHost  string
 	netConfig   map[string]*bridgeUDNConfiguration
-	eipMarkIPs  *egressip.MarkIPsCache
+	eipMarkIPs  *markIPsCache
 	nextHops    []net.IP
 }
 
@@ -607,7 +606,7 @@ func bridgeForInterface(intfName, nodeName,
 		netConfig: map[string]*bridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
-		eipMarkIPs: egressip.NewMarkIPsCache(),
+		eipMarkIPs: newMarkIPsCache(),
 	}
 	if len(gwNextHops) > 0 {
 		res.nextHops = gwNextHops
