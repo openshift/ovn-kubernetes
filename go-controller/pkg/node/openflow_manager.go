@@ -112,6 +112,10 @@ func (c *openflowManager) requestFlowSync() {
 }
 
 func (c *openflowManager) syncFlows() {
+	// protect gwBridge config from being updated by gw.nodeIPManager
+	c.defaultBridge.Mutex.Lock()
+	defer c.defaultBridge.Mutex.Unlock()
+
 	c.flowMutex.Lock()
 	defer c.flowMutex.Unlock()
 
@@ -126,6 +130,9 @@ func (c *openflowManager) syncFlows() {
 	}
 
 	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.Mutex.Lock()
+		defer c.externalGatewayBridge.Mutex.Unlock()
+
 		c.exGWFlowMutex.Lock()
 		defer c.exGWFlowMutex.Unlock()
 

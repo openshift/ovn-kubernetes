@@ -34,8 +34,8 @@ func TestBridgeConfig(brName string) *BridgeConfiguration {
 }
 
 func (b *BridgeConfiguration) GetNetConfigLen() int {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+	b.Mutex.Lock()
+	defer b.Mutex.Unlock()
 	return len(b.netConfig)
 }
 

@@ -15,8 +15,8 @@ import (
 )
 
 func (b *BridgeConfiguration) DefaultBridgeFlows(hostSubnets []*net.IPNet, extraIPs []net.IP) ([]string, error) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+	b.Mutex.Lock()
+	defer b.Mutex.Unlock()
 	dftFlows, err := b.flowsForDefaultBridge(extraIPs)
 	if err != nil {
 		return nil, err
@@ -29,8 +29,8 @@ func (b *BridgeConfiguration) DefaultBridgeFlows(hostSubnets []*net.IPNet, extra
 }
 
 func (b *BridgeConfiguration) ExternalBridgeFlows(hostSubnets []*net.IPNet) ([]string, error) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+	b.Mutex.Lock()
+	defer b.Mutex.Unlock()
 	return b.commonFlows(hostSubnets)
 }
 
@@ -861,8 +861,8 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 }
 
 func (b *BridgeConfiguration) PMTUDDropFlows(ipAddrs []string) []string {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+	b.Mutex.Lock()
+	defer b.Mutex.Unlock()
 	var flows []string
 	if config.Gateway.Mode != config.GatewayModeShared {
 		return nil
