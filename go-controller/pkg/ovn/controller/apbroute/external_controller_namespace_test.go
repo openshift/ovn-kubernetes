@@ -201,32 +201,14 @@ var _ = Describe("OVN External Gateway namespace", func() {
 					"k8s.ovn.org/routing-network": "",
 					nettypes.NetworkStatusAnnot:   fmt.Sprintf(network_status, annotatedPodIP)},
 			},
-			Status: corev1.PodStatus{
-				PodIPs: []corev1.PodIP{{IP: annotatedPodIP}},
-				Phase:  corev1.PodRunning,
-				Conditions: []corev1.PodCondition{
-					{
-						Type:   corev1.PodReady,
-						Status: corev1.ConditionTrue,
-					},
-				},
-			},
+			Status: corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: annotatedPodIP}}, Phase: corev1.PodRunning},
 		}
 
 		podGW = &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: namespaceGW.Name,
 				Labels:      map[string]string{"name": "pod"},
 				Annotations: map[string]string{nettypes.NetworkStatusAnnot: fmt.Sprintf(network_status, dynamicHopHostNetPodIP)}},
-			Status: corev1.PodStatus{
-				PodIPs: []corev1.PodIP{{IP: dynamicHopHostNetPodIP}},
-				Phase:  corev1.PodRunning,
-				Conditions: []corev1.PodCondition{
-					{
-						Type:   corev1.PodReady,
-						Status: corev1.ConditionTrue,
-					},
-				},
-			},
+			Status: corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: dynamicHopHostNetPodIP}}, Phase: corev1.PodRunning},
 		}
 		namespaceTargetWithPod, namespaceTarget2WithPod, namespaceTarget2WithoutPod, namespaceGWWithPod *namespaceWithPods
 	)

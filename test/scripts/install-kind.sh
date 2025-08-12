@@ -78,5 +78,8 @@ else
     ./kind.sh
 fi
 
+if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
+    sudo mv ./bin/virtctl /usr/local/bin/virtctl
+fi
 popd # go our of $SCRIPT_DIR/../../contrib
 
