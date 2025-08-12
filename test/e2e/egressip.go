@@ -972,7 +972,7 @@ spec:
 				if isClusterDefaultNetwork(netConfigParams) {
 					pod2IP = getPodAddress(pod2Name, f.Namespace.Name)
 				} else {
-					pod2IP, err = getPodAnnotationIPsForAttachmentByIndex(
+					pod2IP, err = podIPsForUserDefinedPrimaryNetwork(
 						f.ClientSet,
 						f.Namespace.Name,
 						pod2Name,
