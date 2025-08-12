@@ -44,7 +44,7 @@ func (netConfig *BridgeUDNConfiguration) ShallowCopy() *BridgeUDNConfiguration {
 		Subnets:     netConfig.Subnets,
 		NodeSubnets: netConfig.NodeSubnets,
 	}
-	copy.Advertised.Store(netConfig.Advertised.Load())
+	netConfig.Advertised.Store(netConfig.Advertised.Load())
 	return copy
 }
 
