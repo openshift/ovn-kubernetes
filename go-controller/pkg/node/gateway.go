@@ -60,8 +60,6 @@ type gateway struct {
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
-
-	nextHops []net.IP
 }
 
 func (g *gateway) AddService(svc *corev1.Service) error {
@@ -359,13 +357,13 @@ func setupUDPAggregationUplink(ifname string) error {
 func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, nodeSubnets, gwIPs []*net.IPNet,
 	advertised bool, nodeAnnotator kube.Annotator) (
 	*bridgeconfig.BridgeConfiguration, *bridgeconfig.BridgeConfiguration, error) {
-	gatewayBridge, err := bridgeconfig.NewBridgeConfiguration(gwIntf, nodeName, types.PhysicalNetworkName, nodeSubnets, gwIPs, advertised)
+	gatewayBridge, err := bridgeconfig.NewBridgeConfiguration(gwIntf, nodeName, types.PhysicalNetworkName, nodeSubnets, gwIPs, gwNextHops, advertised)
 	if err != nil {
 		return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", gwIntf, err)
 	}
 	var egressGWBridge *bridgeconfig.BridgeConfiguration
 	if egressGatewayIntf != "" {
-		egressGWBridge, err = bridgeconfig.NewBridgeConfiguration(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nodeSubnets, nil, false)
+		egressGWBridge, err = bridgeconfig.NewBridgeConfiguration(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nodeSubnets, nil, nil, false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", egressGatewayIntf, err)
 		}
