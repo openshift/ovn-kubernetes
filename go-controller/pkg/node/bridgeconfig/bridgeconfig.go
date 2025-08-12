@@ -336,8 +336,9 @@ func (b *BridgeConfiguration) GetActiveNetworkBridgeConfigCopy(networkName strin
 	return nil
 }
 
-// must be called with mutex held
-func (b *BridgeConfiguration) patchedNetConfigs() []*BridgeUDNConfiguration {
+func (b *BridgeConfiguration) PatchedNetConfigs() []*BridgeUDNConfiguration {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	result := make([]*BridgeUDNConfiguration, 0, len(b.netConfig))
 	for _, netConfig := range b.netConfig {
 		if netConfig.OfPortPatch == "" {
