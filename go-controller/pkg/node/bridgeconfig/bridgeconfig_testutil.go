@@ -20,7 +20,7 @@ func TestDefaultBridgeConfig() *BridgeConfiguration {
 		OfPortPatch: "patch-breth0_ov",
 	}
 	return &BridgeConfiguration{
-		netConfig: map[string]*BridgeUDNConfiguration{
+		NetConfig: map[string]*BridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
 	}
@@ -28,15 +28,9 @@ func TestDefaultBridgeConfig() *BridgeConfiguration {
 
 func TestBridgeConfig(brName string) *BridgeConfiguration {
 	return &BridgeConfiguration{
-		bridgeName: brName,
-		gwIface:    brName,
+		BridgeName: brName,
+		GwIface:    brName,
 	}
-}
-
-func (b *BridgeConfiguration) GetNetConfigLen() int {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	return len(b.netConfig)
 }
 
 func CheckUDNSvcIsolationOVSFlows(flows []string, netConfig *BridgeUDNConfiguration, netName string, svcCIDR *net.IPNet, expectedNFlows int) {

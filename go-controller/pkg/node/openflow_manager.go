@@ -34,19 +34,19 @@ type openflowManager struct {
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
 
 func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string) {
-	return c.defaultBridge.GetPortConfigurations()
+	return c.defaultBridge.GetBridgePortConfigurations()
 }
 
 func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string) {
-	return c.externalGatewayBridge.GetPortConfigurations()
+	return c.externalGatewayBridge.GetBridgePortConfigurations()
 }
 
 func (c *openflowManager) addNetwork(nInfo util.NetInfo, nodeSubnets []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
-	if err := c.defaultBridge.AddNetworkConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
+	if err := c.defaultBridge.AddNetworkBridgeConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
 		return err
 	}
 	if c.externalGatewayBridge != nil {
-		if err := c.externalGatewayBridge.AddNetworkConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
+		if err := c.externalGatewayBridge.AddNetworkBridgeConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
 			return err
 		}
 	}
@@ -54,9 +54,9 @@ func (c *openflowManager) addNetwork(nInfo util.NetInfo, nodeSubnets []*net.IPNe
 }
 
 func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
-	c.defaultBridge.DelNetworkConfig(nInfo)
+	c.defaultBridge.DelNetworkBridgeConfig(nInfo)
 	if c.externalGatewayBridge != nil {
-		c.externalGatewayBridge.DelNetworkConfig(nInfo)
+		c.externalGatewayBridge.DelNetworkBridgeConfig(nInfo)
 	}
 }
 
@@ -124,7 +124,7 @@ func (c *openflowManager) syncFlows() {
 		flows = append(flows, entry...)
 	}
 
-	_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.GetBridgeName(), flows)
+	_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.BridgeName, flows)
 	if err != nil {
 		klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.flowCache)
 	}
@@ -141,7 +141,7 @@ func (c *openflowManager) syncFlows() {
 			flows = append(flows, entry...)
 		}
 
-		_, stderr, err := util.ReplaceOFFlows(c.externalGatewayBridge.GetBridgeName(), flows)
+		_, stderr, err := util.ReplaceOFFlows(c.externalGatewayBridge.BridgeName, flows)
 		if err != nil {
 			klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.exGWFlowCache)
 		}

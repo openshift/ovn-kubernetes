@@ -1480,8 +1480,8 @@ func newGateway(
 			}
 		}
 		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
-			gw.bridgeEIPAddrManager = egressip.NewBridgeEIPAddrManager(nodeName, gwBridge.GetBridgeName(), linkManager, kube, watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
-			gwBridge.SetEIPMarkIPs(gw.bridgeEIPAddrManager.GetCache())
+			gw.bridgeEIPAddrManager = egressip.NewBridgeEIPAddrManager(nodeName, gwBridge.BridgeName, linkManager, kube, watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+			gwBridge.EipMarkIPs = gw.bridgeEIPAddrManager.GetCache()
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, mgmtPort, watchFactory, gwBridge)
 
@@ -1565,10 +1565,10 @@ func newNodePortWatcher(
 
 	// Get ofport of physical interface
 	ofportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get",
-		"interface", gwBridge.GetUplinkName(), "ofport")
+		"interface", gwBridge.UplinkName, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-			gwBridge.GetUplinkName(), stderr, err)
+			gwBridge.UplinkName, stderr, err)
 	}
 
 	// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured
@@ -1621,7 +1621,7 @@ func newNodePortWatcher(
 	}
 
 	// Get Physical IPs of Node, Can be IPV4 IPV6 or both
-	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gwBridge.GetIPs())
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gwBridge.Ips)
 
 	npw := &nodePortWatcher{
 		dpuMode:        dpuMode,

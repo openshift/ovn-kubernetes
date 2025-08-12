@@ -63,25 +63,20 @@ func (netConfig *BridgeUDNConfiguration) setOfPatchPort() error {
 }
 
 type BridgeConfiguration struct {
-	Mutex sync.Mutex
-
-	// variables that are only set on creation and never changed
-	// don't require mutex lock to read
-	nodeName    string
-	bridgeName  string
-	uplinkName  string
-	gwIface     string
-	gwIfaceRep  string
-	interfaceID string
-
-	// variables that can be updated (read/write access should be done with mutex held)
-	ofPortHost string
-	ips        []*net.IPNet
-	macAddress net.HardwareAddr
-	ofPortPhys string
-	netConfig  map[string]*BridgeUDNConfiguration
-	eipMarkIPs *egressip.MarkIPsCache
-	nextHops   []net.IP
+	Mutex       sync.Mutex
+	NodeName    string
+	BridgeName  string
+	UplinkName  string
+	GwIface     string
+	GwIfaceRep  string
+	Ips         []*net.IPNet
+	InterfaceID string
+	MacAddress  net.HardwareAddr
+	OfPortPhys  string
+	OfPortHost  string
+	NetConfig   map[string]*BridgeUDNConfiguration
+	EipMarkIPs  *egressip.MarkIPsCache
+	NextHops    []net.IP
 }
 
 func NewBridgeConfiguration(intfName, nodeName,
@@ -100,16 +95,16 @@ func NewBridgeConfiguration(intfName, nodeName,
 		NodeSubnets: nodeSubnets,
 	}
 	res := BridgeConfiguration{
-		nodeName: nodeName,
-		netConfig: map[string]*BridgeUDNConfiguration{
+		NodeName: nodeName,
+		NetConfig: map[string]*BridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
-		eipMarkIPs: egressip.NewMarkIPsCache(),
+		EipMarkIPs: egressip.NewMarkIPsCache(),
 	}
 	if len(gwNextHops) > 0 {
-		res.nextHops = gwNextHops
+		res.NextHops = gwNextHops
 	}
-	res.netConfig[types.DefaultNetworkName].Advertised.Store(advertised)
+	res.NetConfig[types.DefaultNetworkName].Advertised.Store(advertised)
 
 	if config.Gateway.GatewayAcceleratedInterface != "" {
 		// Try to get representor for the specified gateway device.
@@ -143,20 +138,20 @@ func NewBridgeConfiguration(intfName, nodeName,
 		if err != nil {
 			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)
 		}
-		res.bridgeName = bridgeName
-		res.uplinkName = uplinkName
-		res.gwIfaceRep = intfRep
-		res.gwIface = gwIntf
-		res.macAddress = link.Attrs().HardwareAddr
+		res.BridgeName = bridgeName
+		res.UplinkName = uplinkName
+		res.GwIfaceRep = intfRep
+		res.GwIface = gwIntf
+		res.MacAddress = link.Attrs().HardwareAddr
 	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)
 		}
-		res.bridgeName = bridgeName
-		res.gwIface = bridgeName
-		res.uplinkName = uplinkName
+		res.BridgeName = bridgeName
+		res.GwIface = bridgeName
+		res.UplinkName = uplinkName
 		gwIntf = bridgeName
 	} else if _, _, err := util.RunOVSVsctl("br-exists", intfName); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
@@ -165,9 +160,9 @@ func NewBridgeConfiguration(intfName, nodeName,
 		if err != nil {
 			return nil, fmt.Errorf("nicToBridge failed for %s: %w", intfName, err)
 		}
-		res.bridgeName = bridgeName
-		res.gwIface = bridgeName
-		res.uplinkName = intfName
+		res.BridgeName = bridgeName
+		res.GwIface = bridgeName
+		res.UplinkName = intfName
 		gwIntf = bridgeName
 	} else {
 		// gateway interface is an OVS bridge
@@ -179,62 +174,60 @@ func NewBridgeConfiguration(intfName, nodeName,
 				return nil, fmt.Errorf("failed to find intfName for %s: %w", intfName, err)
 			}
 		} else {
-			res.uplinkName = uplinkName
+			res.UplinkName = uplinkName
 		}
-		res.bridgeName = intfName
-		res.gwIface = intfName
+		res.BridgeName = intfName
+		res.GwIface = intfName
 	}
 	// Now, we get IP addresses for the bridge
 	if len(gwIPs) > 0 {
 		// use gwIPs if provided
-		res.ips = gwIPs
+		res.Ips = gwIPs
 	} else {
 		// get IP addresses from OVS bridge. If IP does not exist,
 		// error out.
-		res.ips, err = nodeutil.GetNetworkInterfaceIPAddresses(gwIntf)
+		res.Ips, err = nodeutil.GetNetworkInterfaceIPAddresses(gwIntf)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get interface details for %s: %w", gwIntf, err)
 		}
 	}
 
 	if !isGWAcclInterface { // We do not have an accelerated device for Gateway interface
-		res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)
+		res.MacAddress, err = util.GetOVSPortMACAddress(gwIntf)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get MAC address for ovs port %s: %w", gwIntf, err)
 		}
 	}
 
-	res.interfaceID, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, physicalNetworkName)
+	res.InterfaceID, err = bridgedGatewayNodeSetup(nodeName, res.BridgeName, physicalNetworkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	defaultNetConfig.PatchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
+	defaultNetConfig.PatchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.BridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		hostRep, err := util.GetDPUHostInterface(res.bridgeName)
+		hostRep, err := util.GetDPUHostInterface(res.BridgeName)
 		if err != nil {
 			return nil, err
 		}
-		res.macAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+		res.MacAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	// If gwIface is set, then accelerated GW interface is present and we use it. Else use external bridge instead.
-	if res.gwIface == "" {
-		res.gwIface = res.bridgeName
-	}
-
 	return &res, nil
 }
 
 func (b *BridgeConfiguration) GetGatewayIface() string {
-	return b.gwIface
+	// If GwIface is set, then accelerated GW interface is present and we use it. If else use external bridge instead.
+	if b.GwIface != "" {
+		return b.GwIface
+	}
+	return b.BridgeName
 }
 
 // UpdateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -263,24 +256,24 @@ func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*
 		}
 	}
 
-	b.ips = ifAddrs
+	b.Ips = ifAddrs
 	return ifAddrs, nil
 }
 
-// GetPortConfigurations returns a slice of Network port configurations along with the
+// GetBridgePortConfigurations returns a slice of Network port configurations along with the
 // uplinkName and physical port's ofport value
-func (b *BridgeConfiguration) GetPortConfigurations() ([]*BridgeUDNConfiguration, string, string) {
+func (b *BridgeConfiguration) GetBridgePortConfigurations() ([]*BridgeUDNConfiguration, string, string) {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
 	var netConfigs []*BridgeUDNConfiguration
-	for _, netConfig := range b.netConfig {
+	for _, netConfig := range b.NetConfig {
 		netConfigs = append(netConfigs, netConfig.ShallowCopy())
 	}
-	return netConfigs, b.uplinkName, b.ofPortPhys
+	return netConfigs, b.UplinkName, b.OfPortPhys
 }
 
-// AddNetworkConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
-func (b *BridgeConfiguration) AddNetworkConfig(
+// AddNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
+func (b *BridgeConfiguration) AddNetworkBridgeConfig(
 	nInfo util.NetInfo,
 	nodeSubnets []*net.IPNet,
 	masqCTMark, pktMark uint,
@@ -289,9 +282,9 @@ func (b *BridgeConfiguration) AddNetworkConfig(
 	defer b.Mutex.Unlock()
 
 	netName := nInfo.GetNetworkName()
-	patchPort := nInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+	patchPort := nInfo.GetNetworkScopedPatchPortName(b.BridgeName, b.NodeName)
 
-	_, found := b.netConfig[netName]
+	_, found := b.NetConfig[netName]
 	if !found {
 		netConfig := &BridgeUDNConfiguration{
 			PatchPort:   patchPort,
@@ -302,9 +295,9 @@ func (b *BridgeConfiguration) AddNetworkConfig(
 			Subnets:     nInfo.Subnets(),
 			NodeSubnets: nodeSubnets,
 		}
-		netConfig.Advertised.Store(util.IsPodNetworkAdvertisedAtNode(nInfo, b.nodeName))
+		netConfig.Advertised.Store(util.IsPodNetworkAdvertisedAtNode(nInfo, b.NodeName))
 
-		b.netConfig[netName] = netConfig
+		b.NetConfig[netName] = netConfig
 	} else {
 		klog.Warningf("Trying to update bridge config for network %s which already"+
 			"exists in cache...networks are not mutable...ignoring update", nInfo.GetNetworkName())
@@ -312,18 +305,18 @@ func (b *BridgeConfiguration) AddNetworkConfig(
 	return nil
 }
 
-// DelNetworkConfig deletes the provided netInfo from the bridge configuration cache
-func (b *BridgeConfiguration) DelNetworkConfig(nInfo util.NetInfo) {
+// DelNetworkBridgeConfig deletes the provided netInfo from the bridge configuration cache
+func (b *BridgeConfiguration) DelNetworkBridgeConfig(nInfo util.NetInfo) {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
 
-	delete(b.netConfig, nInfo.GetNetworkName())
+	delete(b.NetConfig, nInfo.GetNetworkName())
 }
 
-func (b *BridgeConfiguration) GetNetworkConfig(networkName string) *BridgeUDNConfiguration {
+func (b *BridgeConfiguration) GetNetworkBridgeConfig(networkName string) *BridgeUDNConfiguration {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
-	return b.netConfig[networkName]
+	return b.NetConfig[networkName]
 }
 
 // GetActiveNetworkBridgeConfigCopy returns a shallow copy of the network configuration corresponding to the
@@ -335,17 +328,15 @@ func (b *BridgeConfiguration) GetActiveNetworkBridgeConfigCopy(networkName strin
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
 
-	if netConfig, found := b.netConfig[networkName]; found && netConfig.OfPortPatch != "" {
+	if netConfig, found := b.NetConfig[networkName]; found && netConfig.OfPortPatch != "" {
 		return netConfig.ShallowCopy()
 	}
 	return nil
 }
 
 func (b *BridgeConfiguration) PatchedNetConfigs() []*BridgeUDNConfiguration {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	result := make([]*BridgeUDNConfiguration, 0, len(b.netConfig))
-	for _, netConfig := range b.netConfig {
+	result := make([]*BridgeUDNConfiguration, 0, len(b.NetConfig))
+	for _, netConfig := range b.NetConfig {
 		if netConfig.OfPortPatch == "" {
 			continue
 		}
@@ -359,7 +350,7 @@ func (b *BridgeConfiguration) PatchedNetConfigs() []*BridgeUDNConfiguration {
 func (b *BridgeConfiguration) IsGatewayReady() bool {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
-	for _, netConfig := range b.netConfig {
+	for _, netConfig := range b.NetConfig {
 		ready := gatewayReady(netConfig.PatchPort)
 		if !ready {
 			return false
@@ -372,44 +363,44 @@ func (b *BridgeConfiguration) SetOfPorts() error {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
 	// Get ofport of patchPort
-	for _, netConfig := range b.netConfig {
+	for _, netConfig := range b.NetConfig {
 		if err := netConfig.setOfPatchPort(); err != nil {
 			return fmt.Errorf("error setting bridge openflow ports for network with patchport %v: err: %v", netConfig.PatchPort, err)
 		}
 	}
 
-	if b.uplinkName != "" {
+	if b.UplinkName != "" {
 		// Get ofport of physical interface
-		ofportPhys, stderr, err := util.GetOVSOfPort("get", "interface", b.uplinkName, "ofport")
+		ofportPhys, stderr, err := util.GetOVSOfPort("get", "interface", b.UplinkName, "ofport")
 		if err != nil {
 			return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-				b.uplinkName, stderr, err)
+				b.UplinkName, stderr, err)
 		}
-		b.ofPortPhys = ofportPhys
+		b.OfPortPhys = ofportPhys
 	}
 
 	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		var stderr string
-		hostRep, err := util.GetDPUHostInterface(b.bridgeName)
+		hostRep, err := util.GetDPUHostInterface(b.BridgeName)
 		if err != nil {
 			return err
 		}
 
-		b.ofPortHost, stderr, err = util.RunOVSVsctl("get", "interface", hostRep, "ofport")
+		b.OfPortHost, stderr, err = util.RunOVSVsctl("get", "interface", hostRep, "ofport")
 		if err != nil {
 			return fmt.Errorf("failed to get ofport of host interface %s, stderr: %q, error: %v",
 				hostRep, stderr, err)
 		}
 	} else {
 		var err error
-		if b.gwIfaceRep != "" {
-			b.ofPortHost, _, err = util.RunOVSVsctl("get", "interface", b.gwIfaceRep, "ofport")
+		if b.GwIfaceRep != "" {
+			b.OfPortHost, _, err = util.RunOVSVsctl("get", "interface", b.GwIfaceRep, "ofport")
 			if err != nil {
-				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", b.gwIfaceRep, err)
+				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", b.GwIfaceRep, err)
 			}
 		} else {
-			b.ofPortHost = nodetypes.OvsLocalPort
+			b.OfPortHost = nodetypes.OvsLocalPort
 		}
 	}
 
@@ -419,72 +410,36 @@ func (b *BridgeConfiguration) SetOfPorts() error {
 func (b *BridgeConfiguration) GetIPs() []*net.IPNet {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
-	return b.ips
+	return b.Ips
 }
 
 func (b *BridgeConfiguration) GetBridgeName() string {
-	return b.bridgeName
-}
-
-func (b *BridgeConfiguration) GetUplinkName() string {
-	return b.uplinkName
+	b.Mutex.Lock()
+	defer b.Mutex.Unlock()
+	return b.BridgeName
 }
 
 func (b *BridgeConfiguration) GetMAC() net.HardwareAddr {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
-	return b.macAddress
+	return b.MacAddress
 }
 
 func (b *BridgeConfiguration) SetMAC(macAddr net.HardwareAddr) {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
-	b.macAddress = macAddr
+	b.MacAddress = macAddr
 }
 
 func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
 	b.Mutex.Lock()
 	defer b.Mutex.Unlock()
 
-	netConfig, found := b.netConfig[netName]
+	netConfig, found := b.NetConfig[netName]
 	if !found {
-		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, b.bridgeName)
+		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, b.BridgeName)
 	}
 	return netConfig.setOfPatchPort()
-}
-
-func (b *BridgeConfiguration) GetInterfaceID() string {
-	return b.interfaceID
-}
-
-func (b *BridgeConfiguration) GetOfPortHost() string {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	return b.ofPortHost
-}
-
-func (b *BridgeConfiguration) GetEIPMarkIPs() *egressip.MarkIPsCache {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	return b.eipMarkIPs
-}
-
-func (b *BridgeConfiguration) SetEIPMarkIPs(eipMarkIPs *egressip.MarkIPsCache) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	b.eipMarkIPs = eipMarkIPs
-}
-
-func (b *BridgeConfiguration) GetNextHops() []net.IP {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	return b.nextHops
-}
-
-func (b *BridgeConfiguration) SetNextHops(nextHops []net.IP) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	b.nextHops = nextHops
 }
 
 func gatewayReady(patchPort string) bool {
