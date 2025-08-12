@@ -40,14 +40,6 @@ skip() {
   SKIPPED_TESTS+=$*
 }
 
-SKIPPED_LABELED_TESTS=""
-skip_label() {
-  if [ "$SKIPPED_LABELED_TESTS" != "" ]; then
-  	SKIPPED_LABELED_TESTS+=" && "
-  fi
-  SKIPPED_LABELED_TESTS+="!($*)"
-}
-
 if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
 	  # No support for these features in dual-stack yet
@@ -146,11 +138,6 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
   skip $BGP_TESTS
 else
   if [ "$ADVERTISE_DEFAULT_NETWORK" = true ]; then
-    # Filter out extended RouteAdvertisements tests to keep job run time down
-    if [ "$ENABLE_NETWORK_SEGMENTATION" = true ]; then
-      skip_label "Feature:RouteAdvertisements && EXTENDED"
-    fi
-    
     # Some test don't work when the default network is advertised, either because
     # the configuration that the test excercises does not make sense for an advertised network, or
     # there is some bug or functional gap
@@ -216,7 +203,6 @@ go test -test.timeout ${GO_TEST_TIMEOUT}m -v . \
         -ginkgo.timeout ${TEST_TIMEOUT}m \
         -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
-        ${SKIPPED_LABELED_TESTS:+-ginkgo.label-filter="${SKIPPED_LABELED_TESTS}"} \
         -ginkgo.junit-report=${E2E_REPORT_DIR}/junit_${E2E_REPORT_PREFIX}report.xml \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
