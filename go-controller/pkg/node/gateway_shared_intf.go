@@ -233,7 +233,9 @@ type cidrAndFlags struct {
 
 func (npw *nodePortWatcher) updateGatewayIPs(addressManager *addressManager) {
 	// Get Physical IPs of Node, Can be IPV4 IPV6 or both
-	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(addressManager.gatewayBridge.GetIPs())
+	addressManager.gatewayBridge.Mutex.Lock()
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(addressManager.gatewayBridge.Ips)
+	addressManager.gatewayBridge.Mutex.Unlock()
 
 	npw.gatewayIPLock.Lock()
 	defer npw.gatewayIPLock.Unlock()
