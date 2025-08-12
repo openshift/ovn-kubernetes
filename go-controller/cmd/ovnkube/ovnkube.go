@@ -531,7 +531,16 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		}()
 	}
 
-	var ovsClient client.Client
+	getOVSClient := sync.OnceValues(
+		func() (client.Client, error) {
+			c, err := libovsdb.NewOVSClient(ctx.Done())
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+			}
+			return c, nil
+		},
+	)
+
 	if runMode.node {
 		wg.Add(1)
 		go func() {
@@ -547,10 +556,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			metrics.RegisterNodeMetrics(ctx.Done())
 
 			// OVS is not running on dpu-host nodes
+			var ovsClient client.Client
 			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-				ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
+				ovsClient, err = getOVSClient()
 				if err != nil {
-					nodeErr = fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+					nodeErr = fmt.Errorf("failed to create node network controller: %w", err)
 					return
 				}
 			}
@@ -585,23 +595,24 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
 	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
+	startMetricsErr := func() error {
+		if config.OvnKubeNode.Mode == types.NodeModeDPUHost || config.Metrics.OVNMetricsBindAddress == "" {
+			return nil
+		}
 		metricsScrapeInterval := 30
-		defer cancel()
-
-		if ovsClient == nil {
-			ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
-			if err != nil {
-				return fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
-			}
+		ovsClient, err := getOVSClient()
+		if err != nil {
+			return fmt.Errorf("failed to starte metrics server: %w", err)
 		}
 		if config.Metrics.ExportOVSMetrics {
 			metrics.RegisterOvsMetricsWithOvnMetrics(ovsClient, metricsScrapeInterval, ctx.Done())
 		}
-		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity,
-			ovsClient, metricsScrapeInterval, ctx.Done())
-		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wg)
+		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity, ovsClient, metricsScrapeInterval, ctx.Done())
+		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress, config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wg)
+		return nil
+	}()
+	if startMetricsErr != nil {
+		cancel()
 	}
 
 	// run until cancelled
@@ -612,7 +623,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	wg.Wait()
 	klog.Infof("Stopped ovnkube")
 
-	err = utilerrors.Join(managerErr, controllerErr, nodeErr)
+	err = utilerrors.Join(managerErr, controllerErr, nodeErr, startMetricsErr)
 	if err != nil {
 		return fmt.Errorf("failed to run ovnkube: %w", err)
 	}
