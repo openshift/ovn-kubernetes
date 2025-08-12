@@ -1,8 +1,8 @@
 package cudn
 
-import "github.com/ovn-org/ovn-kubernetes/test/e2e/testscenario"
+import "github.com/ovn-org/ovn-kubernetes/test/e2e/testdata"
 
-var LocalnetInvalidPhyNetName = []testscenario.ValidateCRScenario{
+var LocalnetInvalidPhyNetName = []testdata.ValidateCRScenario{
 	{
 		Description: "unset PhysicalNetworkName",
 		ExpectedErr: `spec.network.localnet.physicalNetworkName: Required value`,
