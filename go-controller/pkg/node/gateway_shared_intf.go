@@ -2422,19 +2422,37 @@ func newGateway(
 
 	if exGwBridge != nil {
 		gw.readyFunc = func() (bool, error) {
-			if !gwBridge.IsGatewayReady() {
-				return false, nil
+			gwBridge.Mutex.Lock()
+			for _, netConfig := range gwBridge.NetConfig {
+				ready, err := gatewayReady(netConfig.PatchPort)
+				if err != nil || !ready {
+					gwBridge.Mutex.Unlock()
+					return false, err
+				}
 			}
-			if !exGwBridge.IsGatewayReady() {
-				return false, nil
+			gwBridge.Mutex.Unlock()
+			exGwBridge.Mutex.Lock()
+			for _, netConfig := range exGwBridge.NetConfig {
+				exGWReady, err := gatewayReady(netConfig.PatchPort)
+				if err != nil || !exGWReady {
+					exGwBridge.Mutex.Unlock()
+					return false, err
+				}
 			}
+			exGwBridge.Mutex.Unlock()
 			return true, nil
 		}
 	} else {
 		gw.readyFunc = func() (bool, error) {
-			if !gwBridge.IsGatewayReady() {
-				return false, nil
+			gwBridge.Mutex.Lock()
+			for _, netConfig := range gwBridge.NetConfig {
+				ready, err := gatewayReady(netConfig.PatchPort)
+				if err != nil || !ready {
+					gwBridge.Mutex.Unlock()
+					return false, err
+				}
 			}
+			gwBridge.Mutex.Unlock()
 			return true, nil
 		}
 	}
