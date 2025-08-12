@@ -190,7 +190,7 @@ type nodePortWatcher struct {
 	gatewayIPv6   string
 	gatewayIPLock sync.Mutex
 	ofportPhys    string
-	gwBridge      *bridgeconfig.BridgeConfiguration
+	gwBridge      string
 	// Map of service name to programmed iptables/OF rules
 	serviceInfo     map[ktypes.NamespacedName]*serviceConfig
 	serviceInfoLock sync.Mutex
@@ -216,9 +216,9 @@ type cidrAndFlags struct {
 	validLifetime     int
 }
 
-func (npw *nodePortWatcher) updateGatewayIPs() {
+func (npw *nodePortWatcher) updateGatewayIPs(addressManager *addressManager) {
 	// Get Physical IPs of Node, Can be IPV4 IPV6 or both
-	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(npw.gwBridge.GetIPs())
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(addressManager.gatewayBridge.GetIPs())
 
 	npw.gatewayIPLock.Lock()
 	defer npw.gatewayIPLock.Unlock()
@@ -368,7 +368,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 		var ofPorts []string
 		// don't get the ports unless we need to as it is a costly operation
 		if (len(extParsedIPs) > 0 || len(ingParsedIPs) > 0) && add {
-			ofPorts, err = util.GetOpenFlowPorts(npw.gwBridge.GetGatewayIface(), false)
+			ofPorts, err = util.GetOpenFlowPorts(npw.gwBridge, false)
 			if err != nil {
 				// in the odd case that getting all ports from the bridge should not work,
 				// simply output to LOCAL (this should work well in the vast majority of cases, anyway)
@@ -1523,7 +1523,7 @@ func newGateway(
 			}
 			if gw.nodePortWatcher != nil {
 				npw, _ := gw.nodePortWatcher.(*nodePortWatcher)
-				npw.updateGatewayIPs()
+				npw.updateGatewayIPs(gw.nodeIPManager)
 			}
 			// Services create OpenFlow flows as well, need to update them all
 			if gw.servicesRetryFramework != nil {
@@ -1630,7 +1630,7 @@ func newNodePortWatcher(
 		gatewayIPv4:    gatewayIPv4,
 		gatewayIPv6:    gatewayIPv6,
 		ofportPhys:     ofportPhys,
-		gwBridge:       gwBridge,
+		gwBridge:       gwBridge.GetGatewayIface(),
 		serviceInfo:    make(map[ktypes.NamespacedName]*serviceConfig),
 		nodeIPManager:  nodeIPManager,
 		ofm:            ofm,
