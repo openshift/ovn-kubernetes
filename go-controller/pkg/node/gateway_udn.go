@@ -97,8 +97,8 @@ type UserDefinedNetworkGateway struct {
 // END UDN UTILs for BridgeConfiguration
 
 func setBridgeNetworkOfPorts(bridge *bridgeconfig.BridgeConfiguration, netName string) error {
-	bridge.Mutex.Lock()
-	defer bridge.Mutex.Unlock()
+	bridge.Lock()
+	defer bridge.Unlock()
 
 	netConfig, found := bridge.NetConfig[netName]
 	if !found {

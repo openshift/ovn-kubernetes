@@ -63,7 +63,7 @@ func (netConfig *BridgeUDNConfiguration) SetBridgeNetworkOfPortsInternal() error
 }
 
 type BridgeConfiguration struct {
-	Mutex       sync.Mutex
+	sync.Mutex
 	NodeName    string
 	BridgeName  string
 	UplinkName  string
@@ -89,8 +89,8 @@ func (b *BridgeConfiguration) GetGatewayIface() string {
 
 // UpdateInterfaceIPAddresses sets and returns the bridge's current ips
 func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*net.IPNet, error) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.Lock()
+	defer b.Unlock()
 	ifAddrs, err := nodeutil.GetNetworkInterfaceIPAddresses(b.GetGatewayIface())
 	if err != nil {
 		return nil, err
@@ -272,8 +272,8 @@ func getRepresentor(intfName string) (string, error) {
 // GetBridgePortConfigurations returns a slice of Network port configurations along with the
 // uplinkName and physical port's ofport value
 func (b *BridgeConfiguration) GetBridgePortConfigurations() ([]*BridgeUDNConfiguration, string, string) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.Lock()
+	defer b.Unlock()
 	var netConfigs []*BridgeUDNConfiguration
 	for _, netConfig := range b.NetConfig {
 		netConfigs = append(netConfigs, netConfig.ShallowCopy())
@@ -287,8 +287,8 @@ func (b *BridgeConfiguration) AddNetworkBridgeConfig(
 	nodeSubnets []*net.IPNet,
 	masqCTMark, pktMark uint,
 	v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.Lock()
+	defer b.Unlock()
 
 	netName := nInfo.GetNetworkName()
 	patchPort := nInfo.GetNetworkScopedPatchPortName(b.BridgeName, b.NodeName)
@@ -316,15 +316,15 @@ func (b *BridgeConfiguration) AddNetworkBridgeConfig(
 
 // DelNetworkBridgeConfig deletes the provided netInfo from the bridge configuration cache
 func (b *BridgeConfiguration) DelNetworkBridgeConfig(nInfo util.NetInfo) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.Lock()
+	defer b.Unlock()
 
 	delete(b.NetConfig, nInfo.GetNetworkName())
 }
 
 func (b *BridgeConfiguration) GetNetworkBridgeConfig(networkName string) *BridgeUDNConfiguration {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.Lock()
+	defer b.Unlock()
 	return b.NetConfig[networkName]
 }
 
@@ -334,8 +334,8 @@ func (b *BridgeConfiguration) GetNetworkBridgeConfig(networkName string) *Bridge
 // NOTE: if the network configuration can't be found or if the network is not patched by OVN
 // yet this returns nil.
 func (b *BridgeConfiguration) GetActiveNetworkBridgeConfigCopy(networkName string) *BridgeUDNConfiguration {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
+	b.Lock()
+	defer b.Unlock()
 
 	if netConfig, found := b.NetConfig[networkName]; found && netConfig.OfPortPatch != "" {
 		return netConfig.ShallowCopy()

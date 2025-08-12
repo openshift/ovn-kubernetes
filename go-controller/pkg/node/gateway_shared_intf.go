@@ -235,9 +235,9 @@ type cidrAndFlags struct {
 
 func (npw *nodePortWatcher) updateGatewayIPs(addressManager *addressManager) {
 	// Get Physical IPs of Node, Can be IPV4 IPV6 or both
-	addressManager.gatewayBridge.Mutex.Lock()
+	addressManager.gatewayBridge.Lock()
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(addressManager.gatewayBridge.Ips)
-	addressManager.gatewayBridge.Mutex.Unlock()
+	addressManager.gatewayBridge.Unlock()
 
 	npw.gatewayIPLock.Lock()
 	defer npw.gatewayIPLock.Unlock()
@@ -2342,8 +2342,8 @@ func hostNetworkNormalActionFlows(netConfig *bridgeconfig.BridgeUDNConfiguration
 }
 
 func setBridgeOfPorts(bridge *bridgeconfig.BridgeConfiguration) error {
-	bridge.Mutex.Lock()
-	defer bridge.Mutex.Unlock()
+	bridge.Lock()
+	defer bridge.Unlock()
 	// Get ofport of patchPort
 	for _, netConfig := range bridge.NetConfig {
 		if err := netConfig.SetBridgeNetworkOfPortsInternal(); err != nil {
@@ -2422,37 +2422,37 @@ func newGateway(
 
 	if exGwBridge != nil {
 		gw.readyFunc = func() (bool, error) {
-			gwBridge.Mutex.Lock()
+			gwBridge.Lock()
 			for _, netConfig := range gwBridge.NetConfig {
 				ready, err := gatewayReady(netConfig.PatchPort)
 				if err != nil || !ready {
-					gwBridge.Mutex.Unlock()
+					gwBridge.Unlock()
 					return false, err
 				}
 			}
-			gwBridge.Mutex.Unlock()
-			exGwBridge.Mutex.Lock()
+			gwBridge.Unlock()
+			exGwBridge.Lock()
 			for _, netConfig := range exGwBridge.NetConfig {
 				exGWReady, err := gatewayReady(netConfig.PatchPort)
 				if err != nil || !exGWReady {
-					exGwBridge.Mutex.Unlock()
+					exGwBridge.Unlock()
 					return false, err
 				}
 			}
-			exGwBridge.Mutex.Unlock()
+			exGwBridge.Unlock()
 			return true, nil
 		}
 	} else {
 		gw.readyFunc = func() (bool, error) {
-			gwBridge.Mutex.Lock()
+			gwBridge.Lock()
 			for _, netConfig := range gwBridge.NetConfig {
 				ready, err := gatewayReady(netConfig.PatchPort)
 				if err != nil || !ready {
-					gwBridge.Mutex.Unlock()
+					gwBridge.Unlock()
 					return false, err
 				}
 			}
-			gwBridge.Mutex.Unlock()
+			gwBridge.Unlock()
 			return true, nil
 		}
 	}
