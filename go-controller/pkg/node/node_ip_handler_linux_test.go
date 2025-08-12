@@ -21,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	nodemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
@@ -402,7 +401,7 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 	mpmock := &nodemocks.ManagementPort{}
 	mpmock.On("GetAddresses").Return([]*net.IPNet{tc.mgmtPortIP4, tc.mgmtPortIP6})
 
-	fakeBridgeConfiguration := &bridgeconfig.BridgeConfiguration{BridgeName: "breth0", GwIface: "breth0"}
+	fakeBridgeConfiguration := &bridgeConfiguration{bridgeName: "breth0", gwIface: "breth0"}
 
 	k := &kube.Kube{KClient: tc.fakeClient}
 	tc.ipManager = newAddressManagerInternal(nodeName, k, mpmock, tc.watchFactory, fakeBridgeConfiguration, useNetlink)
