@@ -14,7 +14,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
-	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -211,12 +210,12 @@ func (c *openflowManager) updateBridgePMTUDFlowCache(key string, ipAddrs []strin
 	c.defaultBridge.Mutex.Lock()
 	defer c.defaultBridge.Mutex.Unlock()
 
-	dftFlows := bridgeconfig.PmtudDropFlows(c.defaultBridge, ipAddrs)
+	dftFlows := pmtudDropFlows(c.defaultBridge, ipAddrs)
 	c.updateFlowCacheEntry(key, dftFlows)
 	if c.externalGatewayBridge != nil {
 		c.externalGatewayBridge.Mutex.Lock()
 		defer c.externalGatewayBridge.Mutex.Unlock()
-		exGWBridgeDftFlows := bridgeconfig.PmtudDropFlows(c.externalGatewayBridge, ipAddrs)
+		exGWBridgeDftFlows := pmtudDropFlows(c.externalGatewayBridge, ipAddrs)
 		c.updateExBridgeFlowCacheEntry(key, exGWBridgeDftFlows)
 	}
 }
@@ -231,11 +230,11 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 
-	dftFlows, err := bridgeconfig.FlowsForDefaultBridge(c.defaultBridge, hostIPs)
+	dftFlows, err := flowsForDefaultBridge(c.defaultBridge, hostIPs)
 	if err != nil {
 		return err
 	}
-	dftCommonFlows, err := bridgeconfig.CommonFlows(hostSubnets, c.defaultBridge)
+	dftCommonFlows, err := commonFlows(hostSubnets, c.defaultBridge)
 	if err != nil {
 		return err
 	}
@@ -249,7 +248,7 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 		c.externalGatewayBridge.Mutex.Lock()
 		defer c.externalGatewayBridge.Mutex.Unlock()
 		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows, err := bridgeconfig.CommonFlows(hostSubnets, c.externalGatewayBridge)
+		exGWBridgeDftFlows, err := commonFlows(hostSubnets, c.externalGatewayBridge)
 		if err != nil {
 			return err
 		}
@@ -358,10 +357,10 @@ func bootstrapOVSFlows(nodeName string) error {
 	// for non-IP packets that would normally be forwarded with NORMAL action (table 0, priority 0 flow).
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_src=%s, actions=output:NORMAL",
-			nodetypes.DefaultOpenFlowCookie, ofportPatch, bridgeMACAddress))
+			defaultOpenFlowCookie, ofportPatch, bridgeMACAddress))
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=9, table=0, in_port=%s, actions=drop",
-			nodetypes.DefaultOpenFlowCookie, ofportPatch))
+			defaultOpenFlowCookie, ofportPatch))
 	dftFlows = append(dftFlows, "priority=0, table=0, actions=output:NORMAL")
 
 	_, stderr, err = util.ReplaceOFFlows(bridge, dftFlows)

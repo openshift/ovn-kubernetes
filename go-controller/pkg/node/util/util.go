@@ -7,7 +7,6 @@ import (
 	net2 "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	pkgutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -90,29 +89,4 @@ func GetDPUHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*ne
 		}
 	}
 	return gwIps, nil
-}
-
-func GenerateICMPFragmentationFlow(ipAddr, outputPort, inPort, cookie string, priority int) string {
-	// we send any ICMP destination unreachable, fragmentation needed to the OVN pipeline too so that
-	// path MTU discovery continues to work.
-	icmpMatch := "icmp"
-	icmpType := 3
-	icmpCode := 4
-	nwDst := "nw_dst"
-	if net2.IsIPv6String(ipAddr) {
-		icmpMatch = "icmp6"
-		icmpType = 2
-		icmpCode = 0
-		nwDst = "ipv6_dst"
-	}
-
-	action := fmt.Sprintf("output:%s", outputPort)
-	if outputPort == nodetypes.OutputPortDrop {
-		action = "drop"
-	}
-
-	icmpFragmentationFlow := fmt.Sprintf("cookie=%s, priority=%d, in_port=%s, %s, %s=%s, icmp_type=%d, "+
-		"icmp_code=%d, actions=%s",
-		cookie, priority, inPort, icmpMatch, nwDst, ipAddr, icmpType, icmpCode, action)
-	return icmpFragmentationFlow
 }
