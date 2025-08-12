@@ -89,9 +89,7 @@ spec:
   networkSelectors:
     - networkSelectionType: DefaultNetwork
   nodeSelector: {}
-  frrConfigurationSelector:
-    matchLabels:
-      name: receive-all
+  frrConfigurationSelector: {}
   advertisements:
     - "PodNetwork"
 {%- endif %}
