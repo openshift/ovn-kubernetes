@@ -117,7 +117,7 @@ func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*
 	return ifAddrs, nil
 }
 
-func NewBridgeConfiguration(intfName, nodeName,
+func BridgeForInterface(intfName, nodeName,
 	physicalNetworkName string,
 	nodeSubnets, gwIPs []*net.IPNet,
 	gwNextHops []net.IP,
