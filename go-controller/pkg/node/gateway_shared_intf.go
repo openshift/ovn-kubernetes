@@ -50,6 +50,8 @@ const (
 	// pmtudOpenFlowCookie identifies the flows used to drop ICMP type (3) destination unreachable,
 	// fragmentation-needed (4)
 	pmtudOpenFlowCookie = "0x0304"
+	// ovsLocalPort is the name of the OVS bridge local port
+	ovsLocalPort = "LOCAL"
 
 	// ctMarkHost is the conntrack mark value for host traffic
 	ctMarkHost = "0x2"
@@ -389,7 +391,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 			if err != nil {
 				// in the odd case that getting all ports from the bridge should not work,
 				// simply output to LOCAL (this should work well in the vast majority of cases, anyway)
-				klog.Warningf("Unable to get port list from bridge. Using OvsLocalPort as output only: error: %v",
+				klog.Warningf("Unable to get port list from bridge. Using ovsLocalPort as output only: error: %v",
 					err)
 			}
 		}
@@ -573,7 +575,7 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ofPortPatch,
 		// simply output to LOCAL (this should work well in the vast majority of cases, anyway)
 		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
 			"actions=output:%s",
-			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, nodetypes.OvsLocalPort)
+			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, ovsLocalPort)
 	} else {
 		// cover the case where breth0 has more than 3 ports, e.g. if an admin adds a 4th port
 		// and the ExternalIP would be on that port
@@ -1550,7 +1552,7 @@ func flowsForDefaultBridge(bridge *bridgeconfig.BridgeConfiguration, extraIPs []
 			// table0, Geneve packets coming from LOCAL. Skip conntrack and send to external
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
-					"actions=output:%s", defaultOpenFlowCookie, nodetypes.OvsLocalPort, config.Default.EncapPort, ofPortPhys))
+					"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
 		}
 
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
@@ -2155,7 +2157,7 @@ func commonFlows(hostSubnets []*net.IPNet, bridge *bridgeconfig.BridgeConfigurat
 				// but holding this until
 				// https://issues.redhat.com/browse/FDP-646 is fixed, for now we
 				// are assuming MEG & BGP are not used together
-				output = nodetypes.OvsLocalPort
+				output = ovsLocalPort
 			}
 			for _, clusterEntry := range netConfig.Subnets {
 				cidr := clusterEntry.CIDR
@@ -2173,7 +2175,7 @@ func commonFlows(hostSubnets []*net.IPNet, bridge *bridgeconfig.BridgeConfigurat
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=16, table=1, %s, %s_dst=%s, "+
 							"actions=output:%s",
-							defaultOpenFlowCookie, ipv, ipv, mgmtIP.IP, nodetypes.OvsLocalPort),
+							defaultOpenFlowCookie, ipv, ipv, mgmtIP.IP, ovsLocalPort),
 					)
 				}
 			}
@@ -2305,7 +2307,7 @@ func hostNetworkNormalActionFlows(netConfig *bridgeconfig.BridgeUDNConfiguration
 		if utilnet.IsIPv6(hostSubnet.IP) != isV6 {
 			continue
 		}
-		flows = append(flows, formatFlow(nodetypes.OvsLocalPort, hostSubnet.String(), ctMarkHost))
+		flows = append(flows, formatFlow(ovsLocalPort, hostSubnet.String(), ctMarkHost))
 	}
 
 	if isV6 {
@@ -2333,10 +2335,58 @@ func hostNetworkNormalActionFlows(netConfig *bridgeconfig.BridgeUDNConfiguration
 
 			// Traffic path (a) for ICMP: OVN->localnet for local gw mode
 			// Traffic path (b) for ICMP: host->localnet for both gw modes
-			flows = append(flows, formatICMPFlow(nodetypes.OvsLocalPort, ctMarkHost, icmpType))
+			flows = append(flows, formatICMPFlow(ovsLocalPort, ctMarkHost, icmpType))
 		}
 	}
 	return flows
+}
+
+func setBridgeOfPorts(bridge *bridgeconfig.BridgeConfiguration) error {
+	bridge.Mutex.Lock()
+	defer bridge.Mutex.Unlock()
+	// Get ofport of patchPort
+	for _, netConfig := range bridge.NetConfig {
+		if err := netConfig.SetBridgeNetworkOfPortsInternal(); err != nil {
+			return fmt.Errorf("error setting bridge openflow ports for network with patchport %v: err: %v", netConfig.PatchPort, err)
+		}
+	}
+
+	if bridge.UplinkName != "" {
+		// Get ofport of physical interface
+		ofportPhys, stderr, err := util.GetOVSOfPort("get", "interface", bridge.UplinkName, "ofport")
+		if err != nil {
+			return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
+				bridge.UplinkName, stderr, err)
+		}
+		bridge.OfPortPhys = ofportPhys
+	}
+
+	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		var stderr string
+		hostRep, err := util.GetDPUHostInterface(bridge.BridgeName)
+		if err != nil {
+			return err
+		}
+
+		bridge.OfPortHost, stderr, err = util.RunOVSVsctl("get", "interface", hostRep, "ofport")
+		if err != nil {
+			return fmt.Errorf("failed to get ofport of host interface %s, stderr: %q, error: %v",
+				hostRep, stderr, err)
+		}
+	} else {
+		var err error
+		if bridge.GwIfaceRep != "" {
+			bridge.OfPortHost, _, err = util.RunOVSVsctl("get", "interface", bridge.GwIfaceRep, "ofport")
+			if err != nil {
+				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", bridge.GwIfaceRep, err)
+			}
+		} else {
+			bridge.OfPortHost = ovsLocalPort
+		}
+	}
+
+	return nil
 }
 
 func newGateway(
@@ -2399,12 +2449,12 @@ func newGateway(
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
 		klog.Info("Creating Gateway Openflow Manager")
-		err := gwBridge.SetOfPorts()
+		err := setBridgeOfPorts(gwBridge)
 		if err != nil {
 			return err
 		}
 		if exGwBridge != nil {
-			err = exGwBridge.SetOfPorts()
+			err = setBridgeOfPorts(exGwBridge)
 			if err != nil {
 				return err
 			}
