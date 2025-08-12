@@ -941,7 +941,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						Image:      images.AgnHost(),
 						Network:    underlayNetwork,
 						Entrypoint: "bash",
-						CmdArgs:    []string{"-c", fmt.Sprintf("ip a add %s/24 dev eth0 && ./agnhost netexec --http-port=%d", underlayServiceIP, servicePort)},
+						Args:       []string{"-c", fmt.Sprintf("ip a add %s/24 dev eth0 && ./agnhost netexec --http-port=%d", underlayServiceIP, servicePort)},
 						ExtPort:    servicePort,
 					}
 					_, err = providerCtx.CreateExternalContainer(serviceContainerSpec)
@@ -1310,7 +1310,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						Network:    underlayNetwork,
 						Entrypoint: "bash",
 						ExtPort:    servicePort,
-						CmdArgs: []string{"-c", fmt.Sprintf(`
+						Args: []string{"-c", fmt.Sprintf(`
 ip link add link %[1]s name %[2]s type vlan id %[3]d
 ip link set dev %[2]s up
 ip a add %[4]s/24 dev %[2]s

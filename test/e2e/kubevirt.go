@@ -1762,7 +1762,7 @@ write_files:
 					Name:    externalContainerName,
 					Image:   images.IPerf3(),
 					Network: providerNetwork,
-					CmdArgs: []string{"sleep infinity"},
+					Args:    []string{"sleep infinity"},
 					ExtPort: externalContainerPort,
 				}
 				externalContainer, err = providerCtx.CreateExternalContainer(externalContainerSpec)
