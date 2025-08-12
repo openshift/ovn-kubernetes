@@ -733,9 +733,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		k := &kube.Kube{KClient: kubeFakeClient}
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
-		err = util.SetNodePrimaryDPUHostAddr(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
-		config.Gateway.RouterSubnet = nodeSubnet
-		Expect(err).NotTo(HaveOccurred())
 
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
@@ -904,11 +901,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			k := &kube.Kube{KClient: kubeFakeClient}
 
-			nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
-
-			err := nc.initGatewayDPUHost(net.ParseIP(hostIP), nodeAnnotator)
+			err := nc.initGatewayDPUHost(net.ParseIP(hostIP))
 			Expect(err).NotTo(HaveOccurred())
 
 			link, err := netlink.LinkByName(uplinkName)
