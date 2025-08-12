@@ -79,6 +79,44 @@ type BridgeConfiguration struct {
 	NextHops    []net.IP
 }
 
+func (b *BridgeConfiguration) GetGatewayIface() string {
+	// If GwIface is set, then accelerated GW interface is present and we use it. If else use external bridge instead.
+	if b.GwIface != "" {
+		return b.GwIface
+	}
+	return b.BridgeName
+}
+
+// UpdateInterfaceIPAddresses sets and returns the bridge's current ips
+func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*net.IPNet, error) {
+	b.Mutex.Lock()
+	defer b.Mutex.Unlock()
+	ifAddrs, err := nodeutil.GetNetworkInterfaceIPAddresses(b.GetGatewayIface())
+	if err != nil {
+		return nil, err
+	}
+
+	// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
+	// host internal IP address instead of the DPU's external bridge IP address.
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		nodeAddrStr, err := util.GetNodePrimaryIP(node)
+		if err != nil {
+			return nil, err
+		}
+		nodeAddr := net.ParseIP(nodeAddrStr)
+		if nodeAddr == nil {
+			return nil, fmt.Errorf("failed to parse node IP address. %v", nodeAddrStr)
+		}
+		ifAddrs, err = nodeutil.GetDPUHostPrimaryIPAddresses(nodeAddr, ifAddrs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	b.Ips = ifAddrs
+	return ifAddrs, nil
+}
+
 func NewBridgeConfiguration(intfName, nodeName,
 	physicalNetworkName string,
 	nodeSubnets, gwIPs []*net.IPNet,
@@ -222,42 +260,13 @@ func NewBridgeConfiguration(intfName, nodeName,
 	return &res, nil
 }
 
-func (b *BridgeConfiguration) GetGatewayIface() string {
-	// If GwIface is set, then accelerated GW interface is present and we use it. If else use external bridge instead.
-	if b.GwIface != "" {
-		return b.GwIface
-	}
-	return b.BridgeName
-}
-
-// UpdateInterfaceIPAddresses sets and returns the bridge's current ips
-func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*net.IPNet, error) {
-	b.Mutex.Lock()
-	defer b.Mutex.Unlock()
-	ifAddrs, err := nodeutil.GetNetworkInterfaceIPAddresses(b.GetGatewayIface())
+func getRepresentor(intfName string) (string, error) {
+	deviceID, err := util.GetDeviceIDFromNetdevice(intfName)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
-	// host internal IP address instead of the DPU's external bridge IP address.
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		nodeAddrStr, err := util.GetNodePrimaryIP(node)
-		if err != nil {
-			return nil, err
-		}
-		nodeAddr := net.ParseIP(nodeAddrStr)
-		if nodeAddr == nil {
-			return nil, fmt.Errorf("failed to parse node IP address. %v", nodeAddrStr)
-		}
-		ifAddrs, err = nodeutil.GetDPUHostPrimaryIPAddresses(nodeAddr, ifAddrs)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	b.Ips = ifAddrs
-	return ifAddrs, nil
+	return util.GetFunctionRepresentorName(deviceID)
 }
 
 // GetBridgePortConfigurations returns a slice of Network port configurations along with the
@@ -411,13 +420,4 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 
 	ifaceID := bridgeName + "_" + nodeName
 	return ifaceID, nil
-}
-
-func getRepresentor(intfName string) (string, error) {
-	deviceID, err := util.GetDeviceIDFromNetdevice(intfName)
-	if err != nil {
-		return "", err
-	}
-
-	return util.GetFunctionRepresentorName(deviceID)
 }
