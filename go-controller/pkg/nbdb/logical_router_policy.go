@@ -15,6 +15,7 @@ var (
 	LogicalRouterPolicyActionAllow   LogicalRouterPolicyAction = "allow"
 	LogicalRouterPolicyActionDrop    LogicalRouterPolicyAction = "drop"
 	LogicalRouterPolicyActionReroute LogicalRouterPolicyAction = "reroute"
+	LogicalRouterPolicyActionJump    LogicalRouterPolicyAction = "jump"
 )
 
 // LogicalRouterPolicy defines an object in Logical_Router_Policy table
@@ -22,7 +23,9 @@ type LogicalRouterPolicy struct {
 	UUID        string                    `ovsdb:"_uuid"`
 	Action      LogicalRouterPolicyAction `ovsdb:"action"`
 	BFDSessions []string                  `ovsdb:"bfd_sessions"`
+	Chain       *string                   `ovsdb:"chain"`
 	ExternalIDs map[string]string         `ovsdb:"external_ids"`
+	JumpChain   *string                   `ovsdb:"jump_chain"`
 	Match       string                    `ovsdb:"match"`
 	Nexthop     *string                   `ovsdb:"nexthop"`
 	Nexthops    []string                  `ovsdb:"nexthops"`
@@ -66,6 +69,28 @@ func equalLogicalRouterPolicyBFDSessions(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalRouterPolicy) GetChain() *string {
+	return a.Chain
+}
+
+func copyLogicalRouterPolicyChain(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterPolicyChain(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
 func (a *LogicalRouterPolicy) GetExternalIDs() map[string]string {
 	return a.ExternalIDs
 }
@@ -94,6 +119,28 @@ func equalLogicalRouterPolicyExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouterPolicy) GetJumpChain() *string {
+	return a.JumpChain
+}
+
+func copyLogicalRouterPolicyJumpChain(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterPolicyJumpChain(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
 }
 
 func (a *LogicalRouterPolicy) GetMatch() string {
@@ -187,7 +234,9 @@ func (a *LogicalRouterPolicy) GetPriority() int {
 func (a *LogicalRouterPolicy) DeepCopyInto(b *LogicalRouterPolicy) {
 	*b = *a
 	b.BFDSessions = copyLogicalRouterPolicyBFDSessions(a.BFDSessions)
+	b.Chain = copyLogicalRouterPolicyChain(a.Chain)
 	b.ExternalIDs = copyLogicalRouterPolicyExternalIDs(a.ExternalIDs)
+	b.JumpChain = copyLogicalRouterPolicyJumpChain(a.JumpChain)
 	b.Nexthop = copyLogicalRouterPolicyNexthop(a.Nexthop)
 	b.Nexthops = copyLogicalRouterPolicyNexthops(a.Nexthops)
 	b.Options = copyLogicalRouterPolicyOptions(a.Options)
@@ -212,7 +261,9 @@ func (a *LogicalRouterPolicy) Equals(b *LogicalRouterPolicy) bool {
 	return a.UUID == b.UUID &&
 		a.Action == b.Action &&
 		equalLogicalRouterPolicyBFDSessions(a.BFDSessions, b.BFDSessions) &&
+		equalLogicalRouterPolicyChain(a.Chain, b.Chain) &&
 		equalLogicalRouterPolicyExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalLogicalRouterPolicyJumpChain(a.JumpChain, b.JumpChain) &&
 		a.Match == b.Match &&
 		equalLogicalRouterPolicyNexthop(a.Nexthop, b.Nexthop) &&
 		equalLogicalRouterPolicyNexthops(a.Nexthops, b.Nexthops) &&
