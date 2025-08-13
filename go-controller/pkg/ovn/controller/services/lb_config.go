@@ -105,6 +105,21 @@ func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, c *lbConfi
 		targetIPsV6 = localIPsV6
 	}
 
+	// OCP HACK BEGIN
+	if _, set := service.Annotations[localWithFallbackAnnotation]; set && c.externalTrafficLocal {
+		// if service is annotated and is ETP=local, fallback to ETP=cluster on nodes with no local endpoints:
+		// include endpoints from other nodes
+		if len(targetIPsV4) == 0 {
+			zeroRouterLocalEndpointsV4 = true
+			targetIPsV4 = c.clusterEndpoints.V4IPs
+		}
+		if len(targetIPsV6) == 0 {
+			zeroRouterLocalEndpointsV6 = true
+			targetIPsV6 = c.clusterEndpoints.V6IPs
+		}
+	}
+	// OCP HACK END
+
 	// TODO: For all scenarios the lbAddress should be set to hostAddressesStr but this is breaking CI needs more investigation
 	lbAddresses := node.hostAddressesStr()
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
