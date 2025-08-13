@@ -105,25 +105,16 @@ func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, c *lbConfi
 		targetIPsV6 = localIPsV6
 	}
 
-	// OCP HACK BEGIN
-	if _, set := service.Annotations[localWithFallbackAnnotation]; set && c.externalTrafficLocal {
-		// if service is annotated and is ETP=local, fallback to ETP=cluster on nodes with no local endpoints:
-		// include endpoints from other nodes
-		if len(targetIPsV4) == 0 {
-			zeroRouterLocalEndpointsV4 = true
-			targetIPsV4 = c.clusterEndpoints.V4IPs
-		}
-		if len(targetIPsV6) == 0 {
-			zeroRouterLocalEndpointsV6 = true
-			targetIPsV6 = c.clusterEndpoints.V6IPs
-		}
+	// TODO: For all scenarios the lbAddress should be set to hostAddressesStr but this is breaking CI needs more investigation
+	lbAddresses := node.hostAddressesStr()
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		lbAddresses = node.l3gatewayAddressesStr()
 	}
-	// OCP HACK END
 
 	// Any targets local to the node need to have a special
 	// harpin IP added, but only for the router LB
-	targetIPsV4, v4Updated := util.UpdateIPsSlice(targetIPsV4, node.l3gatewayAddressesStr(), []string{hostMasqueradeIPV4})
-	targetIPsV6, v6Updated := util.UpdateIPsSlice(targetIPsV6, node.l3gatewayAddressesStr(), []string{hostMasqueradeIPV6})
+	targetIPsV4, v4Updated := util.UpdateIPsSlice(targetIPsV4, lbAddresses, []string{hostMasqueradeIPV4})
+	targetIPsV6, v6Updated := util.UpdateIPsSlice(targetIPsV6, lbAddresses, []string{hostMasqueradeIPV6})
 
 	// Local endpoints are a subset of cluster endpoints, so it is enough to compare their length
 	v4Changed = len(targetIPsV4) != len(c.clusterEndpoints.V4IPs) || v4Updated
