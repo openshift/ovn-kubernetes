@@ -453,7 +453,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	wg := &sync.WaitGroup{}
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
-	var managerErr, controllerErr, nodeErr error
+	var managerErr, controllerErr, nodeErr, ovsCLIErr error
 
 	if runMode.clusterManager {
 		wg.Add(1)
@@ -587,21 +587,23 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
 		metricsScrapeInterval := 30
-		defer cancel()
 
 		if ovsClient == nil {
 			ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
 			if err != nil {
-				return fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+				ovsCLIErr = fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+				cancel()
 			}
 		}
-		if config.Metrics.ExportOVSMetrics {
-			metrics.RegisterOvsMetricsWithOvnMetrics(ovsClient, metricsScrapeInterval, ctx.Done())
+		if ovsClient != nil {
+			if config.Metrics.ExportOVSMetrics {
+				metrics.RegisterOvsMetricsWithOvnMetrics(ovsClient, metricsScrapeInterval, ctx.Done())
+			}
+			metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity,
+				ovsClient, metricsScrapeInterval, ctx.Done())
+			metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
+				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wg)
 		}
-		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity,
-			ovsClient, metricsScrapeInterval, ctx.Done())
-		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wg)
 	}
 
 	// run until cancelled
@@ -612,7 +614,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	wg.Wait()
 	klog.Infof("Stopped ovnkube")
 
-	err = utilerrors.Join(managerErr, controllerErr, nodeErr)
+	err = utilerrors.Join(managerErr, controllerErr, nodeErr, ovsCLIErr)
 	if err != nil {
 		return fmt.Errorf("failed to run ovnkube: %w", err)
 	}
