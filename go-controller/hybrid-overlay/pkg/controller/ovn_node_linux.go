@@ -261,7 +261,7 @@ func (n *NodeController) AddNode(node *corev1.Node) error {
 	} else {
 		// Make sure the local node has been initialized before adding a hybridOverlay remote node
 		if atomic.LoadUint32(n.initState) < hotypes.DistributedRouterInitialized {
-			localNode, err := n.kube.GetNode(n.nodeName)
+			localNode, err := n.nodeLister.Get(n.nodeName)
 			if err != nil {
 				return fmt.Errorf("cannot get local node: %s: %w", n.nodeName, err)
 			}
