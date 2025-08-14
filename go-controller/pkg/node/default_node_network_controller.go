@@ -607,6 +607,59 @@ func handleNetdevResources(resourceName string) (string, error) {
 	return netdevice, nil
 }
 
+// configureMgmtPortNetdevFromResource uses device plugin resources to determine and set
+// the management port netdevice if a DP resource name is provided via configuration.
+func configureMgmtPortNetdevFromResource() error {
+	if config.OvnKubeNode.MgmtPortDPResourceName == "" {
+		return nil
+	}
+	if err := handleDevicePluginResources(); err != nil {
+		return err
+	}
+	netdevice, err := handleNetdevResources(config.OvnKubeNode.MgmtPortDPResourceName)
+	if err != nil {
+		return err
+	}
+	if config.OvnKubeNode.MgmtPortNetdev != "" {
+		klog.Warningf("MgmtPortNetdev is set explicitly (%s), overriding with resource...",
+			config.OvnKubeNode.MgmtPortNetdev)
+	}
+	config.OvnKubeNode.MgmtPortNetdev = netdevice
+	klog.V(5).Infof("Using MgmtPortNetdev (Netdev %s) passed via resource %s",
+		config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortDPResourceName)
+	return nil
+}
+
+// Resolve gateway interface from PCI address when configured as "derive-from-mgmt-port"
+// configureGatewayInterfaceFromMgmtPort resolves and sets the gateway interface derived
+// from the management port's PF when `config.Gateway.Interface` is set to derive-from-mgmt-port.
+func configureGatewayInterfaceFromMgmtPort() error {
+	if config.Gateway.Interface != types.DeriveFromMgmtPort {
+		return nil
+	}
+	netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+	if err != nil {
+		return err
+	}
+	pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+	if err != nil {
+		return err
+	}
+	pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
+	if err != nil {
+		return err
+	}
+	netdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
+	if err != nil {
+		return err
+	}
+	if len(netdevs) == 0 {
+		return fmt.Errorf("no netdevs found for pci address %s", pfPciAddr)
+	}
+	config.Gateway.Interface = netdevs[0]
+	return nil
+}
+
 func exportManagementPortAnnotation(netdevName string, nodeAnnotator kube.Annotator) error {
 	klog.Infof("Exporting management port annotation for netdev '%v'", netdevName)
 	deviceID, err := util.GetDeviceIDFromNetdevice(netdevName)
@@ -927,6 +980,17 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 
+	// Use the device from environment when the DP resource name is specified.
+	if err := configureMgmtPortNetdevFromResource(); err != nil {
+		return err
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		if err := configureGatewayInterfaceFromMgmtPort(); err != nil {
+			return err
+		}
+	}
+
 	// Setup management ports
 	nc.mgmtPortController, err = createNodeManagementPortController(
 		node,
@@ -1011,58 +1075,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	waiter := newStartupWaiter()
 
-	// Use the device from environment when the DP resource name is specified.
-	if config.OvnKubeNode.MgmtPortDPResourceName != "" {
-		if err := handleDevicePluginResources(); err != nil {
-			return err
-		}
-
-		netdevice, err := handleNetdevResources(config.OvnKubeNode.MgmtPortDPResourceName)
-		if err != nil {
-			return err
-		}
-
-		if config.OvnKubeNode.MgmtPortNetdev != "" {
-			klog.Warningf("MgmtPortNetdev is set explicitly (%s), overriding with resource...",
-				config.OvnKubeNode.MgmtPortNetdev)
-		}
-		config.OvnKubeNode.MgmtPortNetdev = netdevice
-		klog.V(5).Infof("Using MgmtPortNetdev (Netdev %s) passed via resource %s",
-			config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortDPResourceName)
-	}
-
 	// Complete gateway initialization
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		// Resolve gateway interface from PCI address when configured as "derive-from-mgmt-port"
-		// This performs the following steps:
-		// Get the management port network device name
-		// Retrieve the PCI address of the management port device
-		// Get the Physical Function (PF) PCI address from the Virtual Function (VF) PCI address
-		// Retrieve all network devices associated with the PF PCI address
-		// Select the first available network device as the gateway interface
-		if config.Gateway.Interface == types.DeriveFromMgmtPort {
-			netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
-			if err != nil {
-				return err
-			}
-			pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
-			if err != nil {
-				return err
-			}
-			pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
-			if err != nil {
-				return err
-			}
-			netdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
-			if err != nil {
-				return err
-			}
-			if len(netdevs) == 0 {
-				return fmt.Errorf("no netdevs found for pci address %s", pfPciAddr)
-			}
-			netdevName = netdevs[0]
-			config.Gateway.Interface = netdevName
-		}
 		err = nc.initGatewayDPUHost(nc.nodeAddress, nodeAnnotator)
 		if err != nil {
 			return err
