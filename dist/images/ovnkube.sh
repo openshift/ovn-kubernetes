@@ -10,7 +10,7 @@ fi
 . /root/ovndb-raft-functions.sh
 
 # This script is the entrypoint to the image.
-# Supports version 1.0.0 daemonsets
+# Supports version 1.1.0 daemonsets
 #    Keep the daemonset versioning aligned with the ovnkube release versions
 # Commands ($1 values)
 #    ovs-server     Runs the ovs daemons - ovsdb-server and ovs-switchd (v3)
@@ -28,7 +28,7 @@ fi
 #    ovn_debug      Displays ovn/ovs configuration and flows
 
 # NOTE: The script/image must be compatible with the daemonset.
-# This script supports version 1.0.0 daemonsets
+# This script supports version 1.1.0 daemonsets
 #      When called, it starts all needed daemons.
 # Currently the version here is used to match with the image version
 # It must be updated during every release
@@ -41,7 +41,7 @@ fi
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
 # K8S_NODE - hostname of the node - v3
 #
-# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.0.0
+# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.1.0
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
 # OVN_CONTROLLER_OPTS - the options for ovn-ctl
@@ -121,11 +121,11 @@ ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE:-}
 
 # ovnkube.sh version (Update during each release)
-ovnkube_version="1.0.0"
+ovnkube_version="1.1.0"
 
 # The daemonset version must be compatible with this script.
 # The default when OVN_DAEMONSET_VERSION is not set is version 3
-ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.0.0"}
+ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.1.0"}
 
 # hostname is the host's hostname when using host networking,
 # This is useful on the master
@@ -416,6 +416,19 @@ wait_for_event() {
   done
 }
 
+# wait_ovnkube_controller_with_node_done - Wait for ovnkube-controller-with-node process to complete
+# Checks if the ovnkube-controller-with-node process is running by looking for its PID file.
+# If the PID file exists, waits for that process to finish before continuing.
+# If the PID file doesnt exist, it means the process has already exited.
+wait_ovnkube_controller_with_node_done() {
+  local pid_file=${OVN_RUNDIR}/ovnkube-controller-with-node.pid
+   if [[ -f ${pid_file} ]]; then
+     echo "info: waiting on ovnkube-controller-with-node process to end"
+     wait $(cat $pid_file)
+     echo "info: done waiting for ovn-controller-with-node to end"
+  fi
+}
+
 # The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
 # before various OVN K8s containers can come up. This functions checks for that.
 # If OVN dbs are configured to listen only on unix sockets, then there will not be
@@ -488,6 +501,36 @@ ovs_ready() {
     return 1
   done
   return 0
+}
+
+# get_bridge_name_for_physnet - Extract OVS bridge name for a given OVN physical network
+# Takes an OVN network name for physical networks (physnet) and returns the corresponding
+# OVS bridge name from the ovn-bridge-mappings configuration.
+# Return empty string if not found.
+get_bridge_name_for_physnet() {
+      local physnet="$1"
+      local mappings
+      mappings=$(ovs-vsctl --if-exists get open_vswitch . external_ids:ovn-bridge-mappings)
+      # Extract bridge name after physnet: and before next comma (or end)
+      # regex matches zero or more non-comma characters
+      # cut on colon and return field number 2
+      echo "$mappings" | tr -d "\"" | grep -o "$physnet:[^,]*" | cut -d: -f2
+}
+
+# Adds drop flows for GARPs on patch port to br-int for specified bridge.
+add_garp_drop_flow() {
+    local bridge="$1"
+    local cookie="0x0305"
+    local priority="499"
+    # if bridge exists, and the patch port is created, we expect to add at least one flow to a patch port ending in to-br-int.
+    # FIXME: can we generate the exact name. Its possible we add these flows to the incorrect port when selecting on substring
+    for port_name in $(ovs-vsctl list-ports $bridge); do
+        if [[ "$port_name" == *to-br-int ]]; then
+            local of_port=$(ovs-vsctl get interface $port_name ofport)
+            ovs-ofctl add-flow $bridge "cookie=$cookie,table=0,priority=$priority,in_port=$of_port,arp,arp_op=1,actions=drop" > /dev/null
+            break
+        fi
+    done
 }
 
 # Verify that the process is running either by checking for the PID in `ps` output
@@ -815,8 +858,12 @@ function memory_trim_on_compaction_supported {
 function get_node_zone() {
   zone=$(kubectl --subresource=status --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
      get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
-  if [ "$zone" == "" ]; then
-    zone="global"
+  if [ -z "$zone" ]; then
+    if [[ ${ovn_enable_interconnect} == "true" ]]; then
+      zone="${K8S_NODE}"
+    else
+      zone="global"
+    fi
   fi
   echo "$zone"
 }
@@ -830,10 +877,10 @@ function get_ovnkube_zone_db_ep() {
   fi
 }
 
-# v1.0.0 - run nb_ovsdb in a separate container
+# v1.1.0 - run nb_ovsdb in a separate container
 nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   if [[ ${ovn_db_host} == "" ]]; then
@@ -883,10 +930,10 @@ nb-ovsdb() {
   echo "=============== run nb_ovsdb ========== terminated"
 }
 
-# v1.0.0 - run sb_ovsdb in a separate container
+# v1.1.0 - run sb_ovsdb in a separate container
 sb-ovsdb() {
   trap 'ovsdb_cleanup sb' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   if [[ ${ovn_db_host} == "" ]]; then
@@ -924,10 +971,10 @@ sb-ovsdb() {
   echo "=============== run sb_ovsdb ========== terminated"
 }
 
-# v1.0.0 - Runs ovn-dbchecker on ovnkube-db pod.
+# v1.1.0 - Runs ovn-dbchecker on ovnkube-db pod.
 ovn-dbchecker() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
 
   # wait for ready_to_start_node
@@ -978,7 +1025,7 @@ ovn-dbchecker() {
 # unix sockets
 local-nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   echo "=============== run nb-ovsdb (unix sockets only) =========="
@@ -1012,7 +1059,7 @@ local-nb-ovsdb() {
 # unix sockets
 local-sb-ovsdb() {
   trap 'ovsdb_cleanup sb' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   echo "=============== run sb-ovsdb (unix sockets only) ========== "
@@ -1030,10 +1077,10 @@ local-sb-ovsdb() {
   echo "=============== run sb-ovsdb (unix sockets only) ========== terminated"
 }
 
-# v1.0.0 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
+# v1.1.0 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd() {
   trap 'ovn-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovn-northd.pid
   rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
 
@@ -1082,10 +1129,10 @@ run-ovn-northd() {
   exit 8
 }
 
-# v1.0.0 -  run ovnkube-identity
+# v1.1.0 -  run ovnkube-identity
 ovnkube-identity() {
     trap 'kill $(jobs -p); exit 0' TERM
-    check_ovn_daemonset_version "1.0.0"
+    check_ovn_daemonset_version "1.1.0"
     rm -f ${OVN_RUNDIR}/ovnkube-identity.pid
 
     ovnkube_enable_interconnect_flag=
@@ -1112,10 +1159,10 @@ ovnkube-identity() {
     exit 9
 }
 
-# v1.0.0 - run ovnkube --master (both cluster-manager and ovnkube-controller)
+# v1.1.0 - run ovnkube --master (both cluster-manager and ovnkube-controller)
 ovn-master() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnkube-master.pid
 
   echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
@@ -1398,10 +1445,10 @@ ovn-master() {
   exit 9
 }
 
-# v1.0.0 - run ovnkube --ovnkube-controller
+# v1.1.0 - run ovnkube --ovnkube-controller
 ovnkube-controller() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller.pid
 
   echo "=============== ovnkube-controller (wait for ready_to_start_node) =========="
@@ -1713,8 +1760,11 @@ ovnkube-controller() {
 }
 
 ovnkube-controller-with-node() {
-  trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
-  check_ovn_daemonset_version "1.0.0"
+  # send sig term to background job (ovnkube-node process), remove CNI conf and resume background job until it ends.
+  # currently we only send ovnkube node process to background, therefore when using fg we are resuming this process and
+  # waiting for it to end.
+  trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; wait_ovnkube_controller_with_node_done; exit 0' TERM
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller-with-node.pid
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
@@ -1736,6 +1786,23 @@ ovnkube-controller-with-node() {
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovnkube-controller-with-node - (ovn-node  wait for ovn-controller.pid)"
     wait_for_event process_ready ovn-controller
+  fi
+
+  # start temp work around
+  # remove when https://issues.redhat.com/browse/FDP-1537 is avilable
+  if [[ ${ovnkube_node_mode} == "full" && ${ovn_enable_interconnect} == "true" && ${ovn_egressip_enable} == "true" ]]; then
+    echo "=============== ovnkube-controller-with-node - (add GARP drop flows if external bridge exists)"
+    # bridge may not yet exist
+    local bridge_name="$(get_bridge_name_for_physnet 'physnet')"
+    if [[ "$bridge_name" != "" ]]; then
+      echo "=============== ovnkube-controller-with-node - found bridge mapping for physnet: $bridge_name"
+      # nothing to do if the external bridge isn't created.
+      if ovs-vsctl br-exists $bridge_name; then
+        echo "=============== ovnkube-controller-with-node - found bridge $bridge_name"
+        add_garp_drop_flow "$bridge_name"
+        echo "=============== ovnkube-controller-with-node - (finished adding GARP drop flows)"
+      fi
+    fi
   fi
 
   ovn_routable_mtu_flag=
@@ -2097,6 +2164,12 @@ ovnkube-controller-with-node() {
           ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
   fi
 
+  ovn_disable_requestedchassis_flag=
+  if [[ ${ovn_disable_requestedchassis} == "true" ]]; then
+          ovn_disable_requestedchassis_flag="--disable-requestedchassis"
+  fi
+  echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
+
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -2150,6 +2223,7 @@ ovnkube-controller-with-node() {
     ${ssl_opts} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${ovn_disable_requestedchassis_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --export-ovs-metrics \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
@@ -2183,7 +2257,7 @@ ovnkube-controller-with-node() {
 # run ovnkube --cluster-manager.
 ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
 
   ovn_encap_port_flag=
     if [[ -n "${ovn_encap_port}" ]]; then
@@ -2398,7 +2472,7 @@ ovn-cluster-manager() {
 
 # ovn-controller - all nodes
 ovn-controller() {
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovn-controller.pid
 
   echo "=============== ovn-controller - (wait for ovs)"
@@ -2441,7 +2515,7 @@ ovn-controller() {
 # ovn-node - all nodes
 ovn-node() {
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
@@ -2832,7 +2906,7 @@ ovn-node() {
 
 # cleanup-ovn-node - all nodes
 cleanup-ovn-node() {
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
 
   rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
 
@@ -2856,9 +2930,9 @@ cleanup-ovn-node() {
 
 }
 
-# v1.0.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+# v1.1.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
 ovs-metrics() {
-  check_ovn_daemonset_version "1.0.0"
+  check_ovn_daemonset_version "1.1.0"
 
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready

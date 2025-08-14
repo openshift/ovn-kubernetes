@@ -82,7 +82,6 @@ type NetInfo interface {
 	GetNetworkScopedExtPortName(bridgeID, nodeName string) string
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
-	GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string
 
 	// GetNetInfo is an identity method used to get the specific NetInfo
 	// implementation
@@ -543,10 +542,6 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
-func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(_ string) string {
-	return ""
-}
-
 func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
 	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
@@ -736,13 +731,6 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerName(lbName string) s
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string {
 	return nInfo.GetNetworkScopedName(lbGroupName)
-}
-
-func (nInfo *secondaryNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string {
-	if nInfo.TopologyType() != types.Layer2Topology {
-		return ""
-	}
-	return fmt.Sprintf("outport == %q", types.GWRouterToExtSwitchPrefix+nInfo.GetNetworkScopedGWRouterName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network
@@ -1000,8 +988,7 @@ func parseSubnets(subnetsString, excludeSubnetsString, topology string) ([]confi
 				}
 			}
 			if !found {
-				return nil, nil, fmt.Errorf("the provided network subnets %v do not contain exluded subnets %v",
-					subnets, excludeSubnet.CIDR)
+				return nil, nil, config.NewExcludedSubnetNotContainedError(excludeSubnet.CIDR)
 			}
 			excludeIPNets = append(excludeIPNets, excludeSubnet.CIDR)
 		}
@@ -1258,7 +1245,7 @@ func subnetOverlapCheck(netconf *ovncnitypes.NetConf) error {
 	}
 	err = allSubnets.CheckForOverlaps()
 	if err != nil {
-		return fmt.Errorf("pod or join subnet overlaps with already configured internal subnets: %v", err)
+		return fmt.Errorf("pod or join subnet overlaps with already configured internal subnets: %w", err)
 	}
 
 	return nil
@@ -1321,6 +1308,21 @@ func GetPodNADToNetworkMapping(pod *corev1.Pod, nInfo NetInfo) (bool, map[string
 	return true, networkSelections, nil
 }
 
+// overrideActiveNSEWithDefaultNSE overrides the provided active NetworkSelectionElement with the IP and MAC requests from
+// the default NetworkSelectionElement after validating its namespace and name.
+func overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE *nettypes.NetworkSelectionElement) error {
+	if defaultNSE.Namespace != config.Kubernetes.OVNConfigNamespace {
+		return fmt.Errorf("unexpected default NSE namespace %q, expected %q", defaultNSE.Namespace, config.Kubernetes.OVNConfigNamespace)
+	}
+	if defaultNSE.Name != types.DefaultNetworkName {
+		return fmt.Errorf("unexpected default NSE name %q, expected %q", defaultNSE.Name, types.DefaultNetworkName)
+	}
+	activeNSE.IPRequest = defaultNSE.IPRequest
+	activeNSE.MacRequest = defaultNSE.MacRequest
+	activeNSE.IPAMClaimReference = defaultNSE.IPAMClaimReference
+	return nil
+}
+
 // GetPodNADToNetworkMappingWithActiveNetwork will call `GetPodNADToNetworkMapping` passing "nInfo" which correspond
 // to the NetInfo representing the NAD, the resulting NetworkSelectingElements will be decorated with the ones
 // from found active network
@@ -1349,18 +1351,39 @@ func GetPodNADToNetworkMappingWithActiveNetwork(pod *corev1.Pod, nInfo NetInfo, 
 	if len(networkSelections) == 0 {
 		networkSelections = map[string]*nettypes.NetworkSelectionElement{}
 	}
-	networkSelections[activeNetworkNADs[0]] = &nettypes.NetworkSelectionElement{
+
+	activeNSE := &nettypes.NetworkSelectionElement{
 		Namespace: activeNetworkNADKey[0],
 		Name:      activeNetworkNADKey[1],
 	}
 
-	if nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo) {
-		ipamClaimName, wasPersistentIPRequested := pod.Annotations[OvnUDNIPAMClaimName]
-		if wasPersistentIPRequested {
-			networkSelections[activeNetworkNADs[0]].IPAMClaimReference = ipamClaimName
+	// Feature gate integration: EnablePreconfiguredUDNAddresses controls default network IP/MAC transfer to active network
+	if IsPreconfiguredUDNAddressesEnabled() {
+		// Limit the static ip and mac requests to the layer2 primary UDN when EnablePreconfiguredUDNAddresses is enabled, we
+		// don't need to explicitly check this is primary UDN since
+		// the "active network" concept is exactly that.
+		if activeNetwork.TopologyType() == types.Layer2Topology {
+			defaultNSE, err := GetK8sPodDefaultNetworkSelection(pod)
+			if err != nil {
+				return false, nil, fmt.Errorf("failed getting default-network annotation for pod %q: %w", pod.Namespace+"/"+pod.Name, err)
+			}
+			// If there are static IPs and MACs at the default NSE, override the active NSE with them
+			if defaultNSE != nil {
+				if err := overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE); err != nil {
+					return false, nil, err
+				}
+			}
 		}
 	}
 
+	if nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo) && activeNSE.IPAMClaimReference == "" {
+		ipamClaimName, wasPersistentIPRequested := pod.Annotations[OvnUDNIPAMClaimName]
+		if wasPersistentIPRequested {
+			activeNSE.IPAMClaimReference = ipamClaimName
+		}
+	}
+
+	networkSelections[activeNetworkNADs[0]] = activeNSE
 	return true, networkSelections, nil
 }
 
@@ -1376,6 +1399,12 @@ func IsRouteAdvertisementsEnabled() bool {
 	// for now, we require multi-network to be enabled because we rely on NADs,
 	// even for the default network
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
+}
+
+// IsPreconfiguredUDNAddressesEnabled indicates if user defined IPs / MAC
+// addresses can be set in primary UDNs
+func IsPreconfiguredUDNAddressesEnabled() bool {
+	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses
 }
 
 func DoesNetworkRequireIPAM(netInfo NetInfo) bool {

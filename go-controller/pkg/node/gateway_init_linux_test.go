@@ -80,6 +80,17 @@ add chain inet ovn-kubernetes udn-service-prerouting { type filter hook prerouti
 add rule inet ovn-kubernetes udn-service-prerouting iifname != %s jump udn-service-mark
 add chain inet ovn-kubernetes udn-service-output { type filter hook output priority -150 ; comment "UDN services packet mark - Output" ; }
 add rule inet ovn-kubernetes udn-service-output jump udn-service-mark
+add chain inet ovn-kubernetes ovn-kube-udn-masq { comment "OVN UDN masquerade" ; }
+add rule inet ovn-kubernetes ovn-kube-udn-masq ip saddr != 169.254.169.0/29 ip daddr != 172.16.1.0/24 ip saddr 169.254.169.0/24 masquerade
+add rule inet ovn-kubernetes ovn-kube-local-gw-masq jump ovn-kube-udn-masq
+`
+
+const baseLGWNFTablesRules = `
+add rule inet ovn-kubernetes ovn-kube-local-gw-masq ip saddr 169.254.169.1 masquerade
+add chain inet ovn-kubernetes ovn-kube-local-gw-masq { type nat hook postrouting priority 101 ; comment "OVN local gateway masquerade" ; }
+add rule inet ovn-kubernetes ovn-kube-local-gw-masq jump ovn-kube-pod-subnet-masq
+add rule inet ovn-kubernetes ovn-kube-pod-subnet-masq ip saddr 10.1.1.0/24 masquerade
+add chain inet ovn-kubernetes ovn-kube-pod-subnet-masq
 `
 
 func getBaseNFTRules(mgmtPort string) string {
@@ -88,6 +99,10 @@ func getBaseNFTRules(mgmtPort string) string {
 		ret += fmt.Sprintf(baseUDNNFTRulesFmt, mgmtPort)
 	}
 	return ret
+}
+
+func getBaseLGWNFTablesRules(mgmtPort string) string {
+	return getBaseNFTRules(mgmtPort) + baseLGWNFTablesRules
 }
 
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
@@ -572,7 +587,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		// exec Mocks
 		fexec := ovntest.NewLooseCompareFakeExec()
 		// gatewayInitInternal
-		// bridgeForInterface
+		// BridgeForInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br " + brphys,
 			Err: fmt.Errorf(""),
@@ -733,6 +748,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		k := &kube.Kube{KClient: kubeFakeClient}
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
+		err = util.SetNodePrimaryDPUHostAddr(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
+		config.Gateway.RouterSubnet = nodeSubnet
+		Expect(err).NotTo(HaveOccurred())
 
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
@@ -901,8 +919,11 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
+			k := &kube.Kube{KClient: kubeFakeClient}
 
-			err := nc.initGatewayDPUHost(net.ParseIP(hostIP))
+			nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
+
+			err := nc.initGatewayDPUHost(net.ParseIP(hostIP), nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
 
 			link, err := netlink.LinkByName(uplinkName)
@@ -1352,10 +1373,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				"OVN-KUBE-EXTERNALIP": []string{
 					fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 				},
-				"POSTROUTING": []string{
-					"-s 169.254.169.1 -j MASQUERADE",
-					"-s 10.1.1.0/24 -j MASQUERADE",
-				},
 				"OVN-KUBE-ETP": []string{},
 				"OVN-KUBE-ITP": []string{},
 			},
@@ -1415,7 +1432,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		err = f6.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
+		expectedNFT := getBaseLGWNFTablesRules(types.K8sMgmtIntfName)
 		err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -1669,47 +1686,6 @@ var _ = Describe("Gateway unit tests", func() {
 
 	AfterEach(func() {
 		util.SetNetLinkOpMockInst(origNetlinkInst)
-	})
-
-	Context("getDPUHostPrimaryIPAddresses", func() {
-
-		It("returns Gateway IP/Subnet for kubernetes node IP", func() {
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
-			nodeIP := net.ParseIP("10.0.0.11")
-			expectedGwSubnet := []*net.IPNet{
-				{IP: nodeIP, Mask: net.CIDRMask(24, 32)},
-			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(gwSubnet).To(Equal(expectedGwSubnet))
-		})
-
-		It("Fails if node IP is not in host subnets", func() {
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
-			nodeIP := net.ParseIP("10.0.1.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("returns node IP with config.Gateway.RouterSubnet subnet", func() {
-			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
-			nodeIP := net.ParseIP("10.1.0.11")
-			expectedGwSubnet := []*net.IPNet{
-				{IP: nodeIP, Mask: net.CIDRMask(16, 32)},
-			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(gwSubnet).To(Equal(expectedGwSubnet))
-		})
-
-		It("Fails if node IP is not in config.Gateway.RouterSubnet subnet", func() {
-			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
-			nodeIP := net.ParseIP("10.0.0.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
-			Expect(err).To(HaveOccurred())
-		})
 	})
 
 	Context("getInterfaceByIP", func() {
