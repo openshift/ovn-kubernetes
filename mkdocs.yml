@@ -7,7 +7,7 @@ extra_css:
   - stylesheets/extra.css
 site_dir: site
 docs_dir: docs
-copyright: The Linux Foundation® (TLF) has registered trademarks and uses trademarks. For a list of TLF trademarks, see <a href="https://www.linuxfoundation.org/legal/trademark-usage">Trademark Usage</a>.
+copyright: Copyright © OVN-Kubernetes a Series of LF Projects, LLC. For website terms of use, trademark policy and other project policies please see <a href="https://lfprojects.org/policies/">LF Projects Policies</a>.
 theme:
   name: material
   icon:
@@ -42,6 +42,7 @@ plugins:
   - macros:
       #include_dir: examples
       j2_line_comment_prefix: "#$"
+  - mermaid2
   - blog:
       # NOTE: configuration options can be found at
       # https://squidfunk.github.io/mkdocs-material/setup/setting-up-a-blog/
@@ -58,7 +59,11 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.highlight
   - pymdownx.inlinehilite
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
   - pymdownx.snippets:
       base_path: site-src
       check_paths: true

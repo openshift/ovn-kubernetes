@@ -47,6 +47,8 @@ const (
 	// pmtudOpenFlowCookie identifies the flows used to drop ICMP type (3) destination unreachable,
 	// fragmentation-needed (4)
 	pmtudOpenFlowCookie = "0x0304"
+	// dropARPReplyRouteSolicitationCookie identifies the flows used to drop ARP replies and Neighbour Discovery Router Advertisements
+	dropARPReplyRouteSolicitationCookie = "0x0305"
 	// ovsLocalPort is the name of the OVS bridge local port
 	ovsLocalPort = "LOCAL"
 	// ctMarkOVN is the conntrack mark value for OVN traffic
@@ -601,6 +603,18 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ofPortPatch,
 	}
 
 	return arpFlow
+}
+
+func generateARPReplyDropFlow(inPort string, priority int) string {
+	// matches ARP replies (opcode 2) for IPv4
+	return fmt.Sprintf("cookie=%s,table=0,priority=%d,in_port=%s,arp,arp_op=2,actions=drop",
+		dropARPReplyRouteSolicitationCookie, priority, inPort)
+}
+
+func generateRouteAdvDropFlow(inPort string, priority int) string {
+	// matches ND route advertisements (type 134) for IPv6
+	return fmt.Sprintf("cookie=%s,table=0,priority=%d,in_port=%s,icmpv6_type=134,actions=drop",
+		dropARPReplyRouteSolicitationCookie, priority, inPort)
 }
 
 func generateICMPFragmentationFlow(ipAddr, outputPort, inPort, cookie string, priority int) string {
@@ -1473,6 +1487,18 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		mod_vlan_id = fmt.Sprintf("mod_vlan_vid:%d,", config.Gateway.VLANID)
 	}
 
+	// Problem: ovn-controller connects to SB DB and then GARPs for any EIPs configured however for IC, SB DB maybe stale if
+	// ovnkube-controller is not processing.
+	// Solution: add a logical flow to drop GARPs on startup and remove when ovnkube-controller has sync and changes
+	// propagated to OVN SB DB.
+	// remove when ovn contains native support for logical router ports to contain an option to silence garp / unsolicited
+	// route advertisements when it starts.
+	// https://issues.redhat.com/browse/FDP-1537
+	if bridge.dropARPRplRouteAdv {
+		// priority 499 flows
+		dftFlows = append(dftFlows, arpReplyAndRouteAdvertisementDropFlows(bridge)...)
+	}
+
 	if config.IPv4Mode {
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
 		// if dest mac is the shared mac send directly to host.
@@ -1676,7 +1702,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			// at the GR load balancer or switch load balancer. It means the correct port wasn't provided.
 			// nodeCIDR->serviceCIDR traffic flow is internal and it shouldn't be carried to outside the cluster
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=105, in_port=%s, %s, %s_dst=%s,"+
+				fmt.Sprintf("cookie=%s, priority=115, in_port=%s, %s, %s_dst=%s,"+
 					"actions=drop", defaultOpenFlowCookie, netConfig.ofPortPatch, protoPrefix, protoPrefix, svcCIDR))
 		}
 	}
@@ -2232,6 +2258,26 @@ func commonFlows(hostSubnets []*net.IPNet, bridge *bridgeConfiguration) ([]strin
 	}
 
 	return dftFlows, nil
+}
+
+func arpReplyAndRouteAdvertisementDropFlows(bridge *bridgeConfiguration) []string {
+	const priority = 499
+	var flows []string
+	for _, netConfig := range bridge.patchedNetConfigs() {
+		// skip non patch ports. we wish to exclude the interface and LOCAL patch ports.
+		if !strings.HasPrefix(netConfig.patchPort, types.PatchPortPrefix) {
+			continue
+		}
+		// network may not support IPv4 even if IPv4 mode is enabled
+		if config.IPv4Mode {
+			flows = append(flows, generateARPReplyDropFlow(netConfig.ofPortPatch, priority))
+		}
+		// network may not support IPv6 even if IPv6 mode is enabled
+		if config.IPv6Mode {
+			flows = append(flows, generateRouteAdvDropFlow(netConfig.ofPortPatch, priority))
+		}
+	}
+	return flows
 }
 
 func pmtudDropFlows(bridge *bridgeConfiguration, ipAddrs []string) []string {
@@ -3046,8 +3092,8 @@ func getIPv(ipnet *net.IPNet) string {
 //	chain udn-bgp-drop {
 //	  comment "Drop traffic generated locally towards advertised UDN subnets"
 //	   type filter hook output priority filter; policy accept;
-//	   ip daddr @advertised-udn-subnets-v4 counter packets 0 bytes 0 drop
-//	   ip6 daddr @advertised-udn-subnets-v6 counter packets 0 bytes 0 drop
+//	   ct state new ip daddr @advertised-udn-subnets-v4 counter packets 0 bytes 0 drop
+//	   ct state new ip6 daddr @advertised-udn-subnets-v6 counter packets 0 bytes 0 drop
 //	 }
 func configureAdvertisedUDNIsolationNFTables() error {
 	counterIfDebug := ""
@@ -3089,11 +3135,11 @@ func configureAdvertisedUDNIsolationNFTables() error {
 
 	tx.Add(&knftables.Rule{
 		Chain: nftablesUDNBGPOutputChain,
-		Rule:  knftables.Concat(fmt.Sprintf("ip daddr @%s", nftablesAdvertisedUDNsSetV4), counterIfDebug, "drop"),
+		Rule:  knftables.Concat("ct state new", fmt.Sprintf("ip daddr @%s", nftablesAdvertisedUDNsSetV4), counterIfDebug, "drop"),
 	})
 	tx.Add(&knftables.Rule{
 		Chain: nftablesUDNBGPOutputChain,
-		Rule:  knftables.Concat(fmt.Sprintf("ip6 daddr @%s", nftablesAdvertisedUDNsSetV6), counterIfDebug, "drop"),
+		Rule:  knftables.Concat("ct state new", fmt.Sprintf("ip6 daddr @%s", nftablesAdvertisedUDNsSetV6), counterIfDebug, "drop"),
 	})
 	return nft.Run(context.TODO(), tx)
 }

@@ -35,6 +35,7 @@ type Gateway interface {
 	GetGatewayIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
 	SetDefaultPodNetworkAdvertised(bool)
+	SetDefaultBridgeARPRplRouteAdvDropFlows(bool)
 	Reconcile() error
 }
 
@@ -482,6 +483,15 @@ func (g *gateway) GetDefaultPodNetworkAdvertised() bool {
 	return g.openflowManager.defaultBridge.netConfig[types.DefaultNetworkName].advertised.Load()
 }
 
+// SetDefaultBridgeARPRplRouteAdvDropFlows will enable flows to drop ARP reply and route advertisement if the openflow
+// manager has been initialized.
+func (g *gateway) SetDefaultBridgeARPRplRouteAdvDropFlows(isDropped bool) {
+	if g.openflowManager == nil {
+		return
+	}
+	g.openflowManager.setDefaultBridgeARPRplRouteAdvDrop(isDropped)
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
 func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
@@ -536,19 +546,20 @@ func (g *gateway) updateSNATRules() error {
 
 type bridgeConfiguration struct {
 	sync.Mutex
-	nodeName    string
-	bridgeName  string
-	uplinkName  string
-	gwIface     string
-	gwIfaceRep  string
-	ips         []*net.IPNet
-	interfaceID string
-	macAddress  net.HardwareAddr
-	ofPortPhys  string
-	ofPortHost  string
-	netConfig   map[string]*bridgeUDNConfiguration
-	eipMarkIPs  *markIPsCache
-	nextHops    []net.IP
+	nodeName           string
+	bridgeName         string
+	uplinkName         string
+	gwIface            string
+	gwIfaceRep         string
+	ips                []*net.IPNet
+	interfaceID        string
+	macAddress         net.HardwareAddr
+	ofPortPhys         string
+	ofPortHost         string
+	netConfig          map[string]*bridgeUDNConfiguration
+	eipMarkIPs         *markIPsCache
+	nextHops           []net.IP
+	dropARPRplRouteAdv bool // true will add flows to drop ARP replies and ND route advertisements. Implementation depends on openflow mgmt init'd.
 }
 
 func (b *bridgeConfiguration) getGatewayIface() string {
@@ -615,6 +626,11 @@ func bridgeForInterface(intfName, nodeName,
 		res.nextHops = gwNextHops
 	}
 	res.netConfig[types.DefaultNetworkName].advertised.Store(advertised)
+
+	if config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeFull {
+		// drop by default - set to false later when ovnkube controller has sync'd and changes propagated to OVN southbound database
+		res.dropARPRplRouteAdv = true
+	}
 
 	if config.Gateway.GatewayAcceleratedInterface != "" {
 		// Try to get representor for the specified gateway device.
