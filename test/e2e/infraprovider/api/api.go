@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 // Provider represents the infrastructure provider
@@ -37,6 +39,21 @@ type Provider interface {
 	GetK8HostPort() uint16 // supported K8 host ports
 }
 
+// Underlay represents the configuration for an underlay network.
+// Note: The physical network referenced by PhysicalNetworkName must be pre-created and available.
+type Underlay struct {
+	// PhysicalNetworkName is the name of the pre-created physical network to use.
+	PhysicalNetworkName string
+	// LogicalNetworkName is the logical network name to be used.
+	LogicalNetworkName string
+	// BridgeName is the name of the bridge associated with the underlay.
+	BridgeName string
+	// PortName is the name of the port on the bridge.
+	PortName string
+	// VlanID is the VLAN identifier for the underlay network.
+	VlanID int
+}
+
 type Context interface {
 	CreateExternalContainer(container ExternalContainer) (ExternalContainer, error)
 	DeleteExternalContainer(container ExternalContainer) error
@@ -46,6 +63,7 @@ type Context interface {
 	AttachNetwork(network Network, instance string) (NetworkInterface, error)
 	DetachNetwork(network Network, instance string) error
 	GetAttachedNetworks() (Networks, error)
+	SetupUnderlay(f *framework.Framework, underlay Underlay) error
 
 	AddCleanUpFn(func() error)
 }
@@ -164,13 +182,15 @@ func (n NetworkInterface) GetMAC() string {
 }
 
 type ExternalContainer struct {
-	Name    string
-	Image   string
-	Network Network
-	Args    []string
-	ExtPort uint16
-	IPv4    string
-	IPv6    string
+	Name        string
+	Image       string
+	Network     Network
+	Entrypoint  string
+	CmdArgs     []string
+	ExtPort     uint16
+	IPv4        string
+	IPv6        string
+	RuntimeArgs []string
 }
 
 func (ec ExternalContainer) GetName() string {
@@ -208,7 +228,7 @@ func (ec ExternalContainer) IsIPv6() bool {
 }
 
 func (ec ExternalContainer) String() string {
-	str := fmt.Sprintf("Name: %q, Image: %q, Network: %q, Command: %q", ec.Name, ec.Image, ec.Network, strings.Join(ec.Args, " "))
+	str := fmt.Sprintf("Name: %q, Image: %q, Network: %q, RuntimeArgs: %q, Command: %q", ec.Name, ec.Image, ec.Network, strings.Join(ec.RuntimeArgs, " "), strings.Join(ec.CmdArgs, " "))
 	if ec.IsIPv4() {
 		str = fmt.Sprintf("%s, IPv4 address: %q", str, ec.GetIPv4())
 	}
@@ -228,9 +248,6 @@ func (ec ExternalContainer) IsValidPreCreateContainer() (bool, error) {
 	}
 	if ec.Network.String() == "" {
 		errs = append(errs, errors.New("network is not set"))
-	}
-	if ec.ExtPort == 0 {
-		errs = append(errs, errors.New("port is not set"))
 	}
 	if len(errs) == 0 {
 		return true, nil
