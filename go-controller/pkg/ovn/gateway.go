@@ -927,21 +927,23 @@ func GetNetworkScopedClusterSubnetSNATMatch(nbClient libovsdbclient.Client, netI
 			return "", nil
 		}
 		return fmt.Sprintf("outport == %q", types.GWRouterToExtSwitchPrefix+netInfo.GetNetworkScopedGWRouterName(nodeName)), nil
-	} else {
-		// if the network is advertised, we need to ensure that the SNAT exists with the correct conditional destination match
-		dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, DefaultNetworkControllerName)
-		addressSetFactory := addressset.NewOvnAddressSetFactory(nbClient, config.IPv4Mode, config.IPv6Mode)
-		addrSet, err := addressSetFactory.GetAddressSet(dbIDs)
-		if err != nil {
-			return "", fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
-		}
-		ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS := addrSet.GetASHashNames()
-		destinationMatch := getClusterNodesDestinationBasedSNATMatch(ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS, ipFamily)
-		if netInfo.TopologyType() != types.Layer2Topology {
-			return destinationMatch, nil
-		}
-		return fmt.Sprintf("outport == %q && (%s)", types.GWRouterToExtSwitchPrefix+netInfo.GetNetworkScopedGWRouterName(nodeName), destinationMatch), nil
 	}
+
+	// if the network is advertised, we need to ensure that the SNAT exists with the correct conditional destination match
+	dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, DefaultNetworkControllerName)
+	addressSetFactory := addressset.NewOvnAddressSetFactory(nbClient, config.IPv4Mode, config.IPv6Mode)
+	addrSet, err := addressSetFactory.GetAddressSet(dbIDs)
+	if err != nil {
+		return "", fmt.Errorf("cannot ensure that addressSet %v exists: %w", dbIDs, err)
+	}
+	destinationMatch := getClusterNodesDestinationBasedSNATMatch(ipFamily, addrSet)
+	if destinationMatch == "" {
+		return "", fmt.Errorf("could not build a destination based SNAT match because no addressSet %v exists for IP family %v", dbIDs, ipFamily)
+	}
+	if netInfo.TopologyType() != types.Layer2Topology {
+		return destinationMatch, nil
+	}
+	return fmt.Sprintf("outport == %q && %s", types.GWRouterToExtSwitchPrefix+netInfo.GetNetworkScopedGWRouterName(nodeName), destinationMatch), nil
 }
 
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
