@@ -8,14 +8,14 @@ import (
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // Descriptors used by the ANPControllerCollector below.
 var (
 	anpRuleCountDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(metrics.MetricOvnkubeNamespace, metrics.MetricOvnkubeSubsystemController, "admin_network_policies_rules"),
+		prometheus.BuildFQName(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemController, "admin_network_policies_rules"),
 		"The total number of rules across all admin network policies in the cluster",
 		[]string{
 			"direction", // direction is either "ingress" or "egress"; so cardinality is max 2 for this label
@@ -23,7 +23,7 @@ var (
 		}, nil,
 	)
 	banpRuleCountDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(metrics.MetricOvnkubeNamespace, metrics.MetricOvnkubeSubsystemController, "baseline_admin_network_policies_rules"),
+		prometheus.BuildFQName(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemController, "baseline_admin_network_policies_rules"),
 		"The total number of rules across all baseline admin network policies in the cluster",
 		[]string{
 			"direction", // direction is either "ingress" or "egress"; so cardinality is max 2 for this label
