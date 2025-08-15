@@ -58,6 +58,7 @@ import (
 	ipamclaimsv1alpha1 "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 
@@ -111,6 +112,7 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 		httpServerTestPods  = []*corev1.Pod{}
 		iperfServerTestPods = []*corev1.Pod{}
 		clientSet           kubernetes.Interface
+		nadClient           nadclient.K8sCniCncfIoV1Interface
 		providerCtx         infraapi.Context
 		// Systemd resolvd prevent resolving kube api service by fqdn, so
 		// we replace it here with NetworkManager
@@ -1329,6 +1331,15 @@ fi
 				return ra.Status.Status
 			}, 30*time.Second, time.Second).Should(Equal("Accepted"))
 		}
+
+		getJoinIPs = func(cudn *udnv1.ClusterUserDefinedNetwork) []string {
+			nad, err := nadClient.NetworkAttachmentDefinitions(namespace).Get(context.TODO(), cudn.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			var result map[string]interface{}
+			err = json.Unmarshal([]byte(nad.Spec.Config), &result)
+			Expect(err).NotTo(HaveOccurred())
+			return strings.Split(result["joinSubnet"].(string), ",")
+		}
 	)
 	BeforeEach(func() {
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
@@ -1340,6 +1351,9 @@ fi
 		Expect(err).NotTo(HaveOccurred())
 
 		virtClient, err = kubevirt.NewClient("/tmp")
+		Expect(err).NotTo(HaveOccurred())
+
+		nadClient, err = nadclient.NewForConfig(fr.ClientConfig())
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -1882,7 +1896,7 @@ ip route add %[3]s via %[4]s
 					nodeRunningVMI, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.NodeName, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(nodeRunningVMI, networkName)
+					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(nodeRunningVMI, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(kubevirt.RetrieveIPv6Gateways).
 						WithArguments(virtClient, vmi).
@@ -1953,7 +1967,7 @@ ip route add %[3]s via %[4]s
 					targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, networkName)
+					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred(), step)
 
 					Expect(err).NotTo(HaveOccurred(), step)
@@ -1969,7 +1983,7 @@ ip route add %[3]s via %[4]s
 					targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(targetNode, networkName)
+					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(targetNode, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(kubevirt.RetrieveIPv6Gateways).
 						WithArguments(virtClient, vmi).
