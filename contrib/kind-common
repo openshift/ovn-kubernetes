@@ -34,7 +34,7 @@ if_error_exit() {
 
 set_common_default_params() {
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.32.3}
+  K8S_VERSION=${K8S_VERSION:-v1.33.1}
 }
 
 run_kubectl() {
@@ -55,6 +55,37 @@ run_kubectl() {
   done
 }
 
+setup_kubectl_bin() {
+    ###########################################################################
+    # Description:                                                            #
+    # setup kubectl for querying the cluster                                  #
+    #                                                                         #
+    # Arguments:                                                              #
+    #   $1 - error message if not provided, it will just exit                 #
+    ###########################################################################
+    if [ ! -d "./bin" ]
+    then
+        mkdir -p ./bin
+        if_error_exit "Failed to create bin dir!"
+    fi
+
+    if [[ "$OSTYPE" == "linux-gnu" ]]; then
+        OS_TYPE="linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS_TYPE="darwin"
+    fi
+
+    pushd ./bin
+       if [ ! -f ./kubectl ]; then
+           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS_TYPE}/${ARCH}/kubectl"
+           if_error_exit "Failed to download kubectl failed!"
+       fi
+    popd
+
+    chmod +x ./bin/kubectl
+    export PATH=${PATH}:$(pwd)/bin
+}
+
 command_exists() {
   cmd="$1"
   command -v ${cmd} >/dev/null 2>&1
@@ -63,12 +94,20 @@ command_exists() {
 detect_apiserver_url() {
   # Detect API_URL used for in-cluster communication
   #
-  # Despite OVN run in pod they will only obtain the VIRTUAL apiserver address
-  # and since OVN has to provide the connectivity to service
-  # it can not be bootstrapped
-  #
-  # This is the address of the node with the control-plane
-  API_URL=$(kind get kubeconfig --internal --name "${KIND_CLUSTER_NAME}" | grep server | awk '{ print $2 }')
+  # This will return apiserver address in format https://<node-name>:<port>
+  DNS_NAME_URL=$(kind get kubeconfig --internal --name "${KIND_CLUSTER_NAME}" | grep server | awk '{ print $2 }')
+  # cut https:// from the URL
+  CP_NODE=${DNS_NAME_URL#*//}
+  # cut port from the URL
+  CP_NODE=${CP_NODE%:*}
+  # find node IP address in the kind network
+  if [ "$PLATFORM_IPV4_SUPPORT" == false ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+    NODE_IP="[$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.GlobalIPv6Address}}' $CP_NODE)]"
+  else
+    NODE_IP=$($OCI_BIN inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' "$CP_NODE")
+  fi
+  # replace node name with node IP address
+  API_URL=${DNS_NAME_URL/$CP_NODE/$NODE_IP}
 }
 
 docker_disable_ipv6() {
@@ -421,7 +460,7 @@ install_mpolicy_crd() {
 
 install_ipamclaim_crd() {
   echo "Installing IPAMClaim CRD ..."
-  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
+  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.5.1-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
   run_kubectl apply -f "$ipamclaims_manifest"
 }
 
@@ -835,5 +874,11 @@ EOF
         fi
       fi
     done
+  fi
+}
+
+interconnect_arg_check() {
+  if [ "${IC_ARG_PROVIDED:-}" = "true" ]; then
+    echo "INFO: Interconnect mode is now the default mode, you do not need to use pass -ic or --enable-interconnect anymore"
   fi
 }
