@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	v1pod "k8s.io/kubernetes/pkg/api/v1/pod"
 
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
@@ -565,10 +566,14 @@ func (m *externalPolicyManager) onPodUpdate(oldObj, newObj interface{}) {
 		utilruntime.HandleError(errors.New("invalid Pod provided to onPodUpdate()"))
 		return
 	}
-	// if labels AND assigned Pod IPs AND the multus network status annotations are the same, skip processing changes to the pod.
+	// if labels AND assigned Pod IPs AND the multus network status annotations AND
+	// pod PodReady condition AND deletion timestamp (PodTerminating) are
+	// the same, skip processing changes to the pod.
 	if reflect.DeepEqual(o.Labels, n.Labels) &&
 		reflect.DeepEqual(o.Status.PodIPs, n.Status.PodIPs) &&
-		reflect.DeepEqual(o.Annotations[nettypes.NetworkStatusAnnot], n.Annotations[nettypes.NetworkStatusAnnot]) {
+		reflect.DeepEqual(o.Annotations[nettypes.NetworkStatusAnnot], n.Annotations[nettypes.NetworkStatusAnnot]) &&
+		reflect.DeepEqual(v1pod.GetPodReadyCondition(o.Status), v1pod.GetPodReadyCondition(n.Status)) &&
+		reflect.DeepEqual(o.DeletionTimestamp, n.DeletionTimestamp) {
 		return
 	}
 	m.podQueue.Add(n)
