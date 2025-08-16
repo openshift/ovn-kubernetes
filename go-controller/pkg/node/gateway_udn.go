@@ -247,10 +247,14 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 	}
 
 	nodeSubnets, err := udng.getLocalSubnets()
+	var mgmtIPs []*net.IPNet
+	for _, subnet := range nodeSubnets {
+		mgmtIPs = append(mgmtIPs, udng.GetNodeManagementIP(subnet))
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get node subnets for network %s: %w", udng.GetNetworkName(), err)
 	}
-	if err = udng.openflowManager.addNetwork(udng.NetInfo, nodeSubnets, udng.masqCTMark, udng.pktMark, udng.v6MasqIPs, udng.v4MasqIPs); err != nil {
+	if err = udng.openflowManager.addNetwork(udng.NetInfo, nodeSubnets, mgmtIPs, udng.masqCTMark, udng.pktMark, udng.v6MasqIPs, udng.v4MasqIPs); err != nil {
 		return fmt.Errorf("could not add network %s: %v", udng.GetNetworkName(), err)
 	}
 
@@ -351,7 +355,7 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, err
 	if len(networkLocalSubnets) == 0 {
 		return nil, fmt.Errorf("cannot determine subnets while configuring management port for network: %s", udng.GetNetworkName())
 	}
-	macAddr := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(networkLocalSubnets[0]).IP)
+	macAddr := util.IPAddrToHWAddr(udng.GetNodeManagementIP(networkLocalSubnets[0]).IP)
 
 	// STEP1
 	stdout, stderr, err := util.RunOVSVsctl(
@@ -422,7 +426,7 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 	// extract management port IP from subnets and add it to link
 	for _, subnet := range networkLocalSubnets {
 		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) || config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) {
-			ip := util.GetNodeManagementIfAddr(subnet)
+			ip := udng.GetNodeManagementIP(subnet)
 			var err error
 			var exists bool
 			if exists, err = util.LinkAddrExist(mpLink, ip); err == nil && !exists {
@@ -527,7 +531,7 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 		return nil, err
 	}
 	for _, localSubnet := range networkLocalSubnets {
-		gwIP := util.GetNodeGatewayIfAddr(localSubnet)
+		gwIP := udng.GetNodeGatewayIP(localSubnet)
 		if gwIP == nil {
 			return nil, fmt.Errorf("unable to find gateway IP for network %s, subnet: %s", udng.GetNetworkName(), localSubnet)
 		}
@@ -644,17 +648,20 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 
 // constructUDNVRFIPRules constructs rules that redirect matching packets
 // into the corresponding UDN VRF routing table.
-// If the network is not advertised, an example of the rules we set for a
-// network is:
-// 2000:   from all fwmark 0x1001 lookup 1007
-// 2000:   from all to 169.254.0.12 lookup 1007
-// 2000:   from all fwmark 0x1002 lookup 1009
-// 2000:   from all to 169.254.0.14 lookup 1009
-// If the network is advertised, an example of the rules we set for a network is:
+// If the network is not advertised, an example of the rules we set for two
+// networks is:
+// 2000:	from all fwmark 0x1001 lookup 1007
+// 2000:	from all to 169.254.0.12 lookup 1007
+// 2000:	from all fwmark 0x1002 lookup 1009
+// 2000:	from all to 169.254.0.14 lookup 1009
+// If the network is advertised, an example of the rules we set for two
+// networks is:
 // 2000:	from all fwmark 0x1001 lookup 1007
 // 2000:	from all to 10.132.0.0/14 lookup 1007
+// 2000:	from all to 169.254.0.12 lookup 1007
 // 2000:	from all fwmark 0x1001 lookup 1009
 // 2000:	from all to 10.134.0.0/14 lookup 1009
+// 2000:	from all to 169.254.0.14 lookup 1009
 func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(isNetworkAdvertised bool) ([]netlink.Rule, []netlink.Rule, error) {
 	var addIPRules []netlink.Rule
 	var delIPRules []netlink.Rule
@@ -693,7 +700,7 @@ func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules(isNetworkAdvertise
 		delIPRules = append(delIPRules, subnetIPRules...)
 	default:
 		addIPRules = append(addIPRules, subnetIPRules...)
-		delIPRules = append(delIPRules, masqIPRules...)
+		addIPRules = append(addIPRules, masqIPRules...)
 	}
 	return addIPRules, delIPRules, nil
 }

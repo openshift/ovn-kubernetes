@@ -53,7 +53,7 @@ import (
 const (
 	// OvnPodAnnotationName is the constant string representing the POD annotation key
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
-	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
+	// DefNetworkAnnotation is the pod annotation for the cluster-wide active network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 	// OvnUDNIPAMClaimName is used for workload owners to instruct OVN-K which
 	// IPAMClaim will hold the allocation for the workload
@@ -583,7 +583,7 @@ func AddRoutesGatewayIP(
 				if err != nil {
 					return err
 				}
-				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
+				gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
 				// Ensure default service network traffic always goes to OVN
 				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
 				// Ensure UDN join subnet traffic always goes to UDN LSP
@@ -613,7 +613,7 @@ func AddRoutesGatewayIP(
 				if err != nil {
 					return err
 				}
-				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
+				gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
 				for _, clusterSubnet := range netinfo.Subnets() {
 					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
@@ -665,7 +665,7 @@ func AddRoutesGatewayIP(
 			return err
 		}
 
-		gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
+		gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
 
 		// Ensure default pod network traffic always goes to OVN
 		for _, clusterSubnet := range config.Default.ClusterSubnets {
