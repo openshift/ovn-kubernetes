@@ -1398,7 +1398,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				"OVN-KUBE-ITP": []string{},
 			},
 		}
-<<<<<<< HEAD
 		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
 		expectedMCSRules := []string{
 			"-p tcp -m tcp --dport 22624 --syn -j REJECT",
@@ -1417,8 +1416,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				"-s 169.254.169.0/24 -j MASQUERADE", // this guarantees we SNAT all UDN MasqueradeIPs traffic leaving the node
 			)
 		}
-=======
->>>>>>> upstream/master
 		f4 := iptV4.(*util.FakeIPTables)
 		err = f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
 			Table: "filter",
