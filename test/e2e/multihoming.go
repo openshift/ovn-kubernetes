@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,12 +35,16 @@ import (
 )
 
 const (
-	PolicyForAnnotation     = "k8s.v1.cni.cncf.io/policy-for"
-	nodeHostnameKey         = "kubernetes.io/hostname"
-	fromHostSubnet          = "host-subnet"           // the test will generate an IP from the host subnet.
-	fromBGPAdvertisedSubnet = "bgp-advertised-subnet" // the test will generate an IP from the advertised BGP subnet
-	bgpServerSubnetV4EnvVar = "BGP_SERVER_NET_SUBNET_IPV4"
-	bgpServerSubnetV6EnvVar = "BGP_SERVER_NET_SUBNET_IPV6"
+	PolicyForAnnotation         = "k8s.v1.cni.cncf.io/policy-for"
+	nodeHostnameKey             = "kubernetes.io/hostname"
+	fromHostSubnet              = "host-subnet"                // the test will generate an IP from the host subnet.
+	fromBGPAdvertisedSubnet     = "bgp-advertised-subnet"      // the test will generate an IP from the advertised BGP subnet
+	fromBGPAdvertisedVLANSubnet = "bgp-advertised-vlan-subnet" // the test will generate an IP from the advertised BGP VLAN subnet
+	bgpServerSubnetV4EnvVar     = "BGP_SERVER_NET_SUBNET_IPV4"
+	bgpServerSubnetV6EnvVar     = "BGP_SERVER_NET_SUBNET_IPV6"
+	bgpServerVLANSubnetV4EnvVar = "BGP_SERVER_VLAN_NET_SUBNET_IPV4"
+	bgpServerVLANSubnetV6EnvVar = "BGP_SERVER_VLAN_NET_SUBNET_IPV6"
+	bgpServerVLANIDEnvVar       = "BGP_SERVER_VLAN_ID"
 )
 
 var _ = Describe("Multi Homing", feature.MultiHoming, func() {
@@ -470,6 +475,59 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 					),
 				)
 			}
+
+			if os.Getenv(bgpServerVLANIDEnvVar) != "" && (os.Getenv(bgpServerVLANSubnetV4EnvVar) != "" || os.Getenv(bgpServerSubnetV6EnvVar) != "") {
+				vlan_id, _ := strconv.Atoi(os.Getenv(bgpServerVLANIDEnvVar))
+
+				entries = append(entries,
+					Entry(
+						"can be reached by a client pod in the default network on a different node, when the localnet uses a VLAN and an IP in a BGP-advertised subnet",
+						networkAttachmentConfigParams{
+							name:     secondaryNetworkName,
+							topology: "localnet",
+							vlanID:   vlan_id,
+						},
+						podConfiguration{ // client on default network
+							name:         clientPodName,
+							isPrivileged: true,
+						},
+						podConfiguration{ // server attached to localnet secondary network
+							attachments: []nadapi.NetworkSelectionElement{{
+								Name: secondaryNetworkName,
+							}},
+							name:                podName,
+							containerCmd:        httpServerContainerCmd(port),
+							ipRequestFromSubnet: fromBGPAdvertisedVLANSubnet,
+							isPrivileged:        true,
+						},
+						false, // scheduled on distinct Nodes
+						Label("BUG", "OCPBUGS-59657"),
+					),
+					Entry(
+						"can be reached by a client pod in the default network on the same node, when the localnet uses a VLAN and an IP in the BGP-advertised subnet",
+						networkAttachmentConfigParams{
+							name:     secondaryNetworkName,
+							topology: "localnet",
+							vlanID:   vlan_id,
+						},
+						podConfiguration{ // client on default network
+							name:         clientPodName,
+							isPrivileged: true,
+						},
+						podConfiguration{ // server attached to localnet secondary network
+							attachments: []nadapi.NetworkSelectionElement{{
+								Name: secondaryNetworkName,
+							}},
+							name:                podName,
+							containerCmd:        httpServerContainerCmd(port),
+							ipRequestFromSubnet: fromBGPAdvertisedVLANSubnet,
+							isPrivileged:        true,
+						},
+						true, // scheduled on the same node
+						Label("BUG", "OCPBUGS-59657"),
+					),
+				)
+			}
 		}
 
 		DescribeTable("attached to a localnet network mapped to external primary interface bridge", //nolint:lll
@@ -527,6 +585,11 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 
 				By("instantiating the client pod")
 				kickstartPod(cs, clientPodConfig)
+
+				err = addRouteViaExternalContainer(f, cs, clientPodConfig)
+				Expect(err).NotTo(HaveOccurred(), "failed to add route to client pod %s/%s", clientPodConfig.namespace, clientPodConfig.name)
+				err = addRouteViaExternalContainer(f, cs, serverPodConfig)
+				Expect(err).NotTo(HaveOccurred(), "failed to add route to server pod %s/%s", serverPodConfig.namespace, serverPodConfig.name)
 
 				// Check that the client pod can reach the server pod on the server localnet interface
 				var serverIPs []string
@@ -2365,6 +2428,11 @@ func addIPRequestToPodConfig(cs clientset.Interface, podConfig *podConfiguration
 	case fromBGPAdvertisedSubnet:
 		subnets := subnetsFromEnv(bgpServerSubnetV4EnvVar, bgpServerSubnetV6EnvVar)
 		IPsToRequest, err = generateIPsFromSubnets(subnets, offset)
+
+	case fromBGPAdvertisedVLANSubnet:
+		subnets := subnetsFromEnv(bgpServerVLANSubnetV4EnvVar, bgpServerVLANSubnetV6EnvVar)
+		IPsToRequest, err = generateIPsFromSubnets(subnets, offset)
+
 	default:
 		return fmt.Errorf("unknown or unimplemented subnet source: %q", podConfig.ipRequestFromSubnet)
 	}
@@ -2420,6 +2488,26 @@ func addRouteViaExternalContainer(f *framework.Framework, cs clientset.Interface
 		bgpV4, bgpV6, _ := getExternalContainerInterfaceIPsOnNetwork(serverContainerName, bgpExternalNetworkName)
 		cmds = buildRouteToHostSubnetViaExternalContainer(cs, f, nodeName, bgpV4, bgpV6)
 
+	} else if podConfig.ipRequestFromSubnet == fromBGPAdvertisedVLANSubnet {
+		vlanID, err := strconv.Atoi(os.Getenv(bgpServerVLANIDEnvVar))
+		if err != nil {
+			return fmt.Errorf("invalid BGP_SERVER_VLAN_ID: %w", err)
+		}
+		gwV4IPs, gwV6IPs, _ := getExternalContainerVLANInterfaceIPs(serverContainerName, "eth0", vlanID)
+		var gwIPV4, gwIPV6 string
+		if len(gwV4IPs) > 0 {
+			gwIPV4 = gwV4IPs[0]
+		}
+
+		for _, ip := range gwV6IPs {
+			// filter out link local addresses
+			if !netip.MustParseAddr(ip).IsLinkLocalUnicast() {
+				gwIPV6 = ip
+				break
+			}
+		}
+
+		cmds = buildRouteToHostSubnetViaExternalContainer(cs, f, nodeName, gwIPV4, gwIPV6)
 	}
 
 	for _, cmd := range cmds {

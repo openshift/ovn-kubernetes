@@ -838,6 +838,61 @@ func getExternalContainerInterfaceIPsOnNetwork(containerName, networkName string
 	}
 	return ni.IPv4, ni.IPv6, nil
 }
+
+// getExternalContainerVLANInterfaceIPs returns IPv4 and IPv6 addresses configured
+// on the VLAN subinterface <baseIfName>.<vlanID> inside the given external container.
+func getExternalContainerVLANInterfaceIPs(containerName, baseIfName string, vlanID int) ([]string, []string, error) {
+	ifaceName := fmt.Sprintf("%s.%d", baseIfName, vlanID)
+	container := infraapi.ExternalContainer{Name: containerName}
+
+	type addrInfo struct {
+		Local string `json:"local"`
+	}
+	type ipAddrJSON struct {
+		AddrInfo []addrInfo `json:"addr_info"`
+	}
+
+	fetch := func(ipFamilyFlag string) ([]string, error) {
+		cmd := []string{"sh", "-c", fmt.Sprintf("ip -j %s addr show dev %s", ipFamilyFlag, ifaceName)}
+		out, err := infraprovider.Get().ExecExternalContainerCommand(container, cmd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to exec on container %q: %w", containerName, err)
+		}
+		var parsed []ipAddrJSON
+		if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+			return nil, fmt.Errorf("failed to parse ip -j output: %w", err)
+		}
+		var addrs []string
+		for _, entry := range parsed {
+			for _, ai := range entry.AddrInfo {
+				if ai.Local != "" {
+					addrs = append(addrs, ai.Local)
+				}
+			}
+		}
+		return addrs, nil
+	}
+
+	v4, err := fetch("-4")
+	if err != nil {
+		return nil, nil, err
+	}
+	v6, err := fetch("-6")
+	if err != nil {
+		return nil, nil, err
+	}
+	// normalize: ensure no CIDR suffixes are returned
+	norm := func(ins []string) []string {
+		outs := make([]string, 0, len(ins))
+		for _, a := range ins {
+			parts := strings.SplitN(strings.TrimSpace(a), "/", 2)
+			outs = append(outs, parts[0])
+		}
+		return outs
+	}
+	return norm(v4), norm(v6), nil
+}
+
 // patchServiceStringValue patches service serviceName in namespace serviceNamespace with provided string value.
 func patchServiceStringValue(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath, value string) error {
 	patch := []struct {
