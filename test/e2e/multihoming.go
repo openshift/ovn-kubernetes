@@ -336,6 +336,49 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				Label("BUG", "OCPBUGS-43004"),
 			),
 			Entry(
+				"can reach a client pod in the default network on a different node, when the localnet uses an IP in the host subnet",
+				networkAttachmentConfigParams{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+				},
+				podConfiguration{ // client attached to localnet secondary network
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name: secondaryNetworkName,
+					}},
+					name:                podName,
+					containerCmd:        httpServerContainerCmd(port),
+					ipRequestFromSubnet: fromHostSubnet, // override attachments with an IPRequest from host subnet
+				},
+				podConfiguration{ // server on default network
+					name:         clientPodName,
+					isPrivileged: true,
+				},
+				false, // scheduled on distinct Nodes
+				Label("BUG", "OCPBUGS-43004"),
+			),
+			Entry(
+				"can reach a client pod in the default network on the same node, when the localnet uses an IP in the host subnet",
+				networkAttachmentConfigParams{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+				},
+				podConfiguration{ // client attached to localnet secondary network
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name: secondaryNetworkName,
+					}},
+					name:                podName,
+					containerCmd:        httpServerContainerCmd(port),
+					ipRequestFromSubnet: fromHostSubnet,
+				},
+				podConfiguration{ // server on default network
+					name:         clientPodName,
+					isPrivileged: true,
+				},
+				true, // collocated on same Node
+				Label("BUG", "OCPBUGS-43004"),
+			),
+
+			Entry(
 				"can reach a host-networked pod on a different node, when the localnet uses an IP in the host subnet",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
