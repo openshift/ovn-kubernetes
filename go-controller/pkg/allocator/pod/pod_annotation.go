@@ -467,8 +467,8 @@ func allocatePodAnnotationWithRollback(
 		netInfo.TopologyType() == types.Layer2Topology {
 		ownerID := GetPoolAddressOwner(pod, netInfo)
 		if addressPool.IsMACConflict(networkName, tentative.MAC, ownerID) {
-			err = fmt.Errorf("MAC address conflict detected %s already allocated in network attachment %s",
-				tentative.MAC.String(), nadName)
+			err = fmt.Errorf("%w: %s already allocated in network attachment %s",
+				pool.ErrMACConflict, tentative.MAC.String(), nadName)
 			klog.Warningf("%v, network-name: %s", err, networkName)
 			return
 		}

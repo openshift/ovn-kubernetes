@@ -1,11 +1,19 @@
 package pool
 
 import (
+	"errors"
 	"net"
 	"sync"
 
 	"k8s.io/klog/v2"
 )
+
+var ErrMACConflict = errors.New("MAC address conflict detected")
+
+// IsErrMACConflict returns true if err is of type ErrMACConflict
+func IsErrMACConflict(err error) bool {
+	return errors.Is(err, ErrMACConflict)
+}
 
 // pool tracks allocated MAC addresses for a specific UDN network
 type pool struct {

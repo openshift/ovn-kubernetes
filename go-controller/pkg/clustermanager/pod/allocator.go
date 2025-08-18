@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/pool"
 )
 
 // PodAllocator acts on pods events handed off by the cluster network controller
@@ -364,7 +365,8 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 	)
 
 	if err != nil {
-		if errors.Is(err, ipallocator.ErrFull) {
+		if errors.Is(err, ipallocator.ErrFull) ||
+			pool.IsErrMACConflict(err) {
 			a.recordPodErrorEvent(pod, err)
 		}
 		return err
