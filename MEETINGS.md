@@ -6,7 +6,7 @@ All are welcome to join our meetings! If you want to discuss something with the 
 
 ## Meeting time
 
-We meet alternate Monday's at 6:00 PM CET/CEST.
+We meet alternate Monday's at 5:00 PM CET/CEST.
 In order to figure out when our next meeting is, please check our agenda for previous meeting history.
 The meetings last up to 1 hour.
 
