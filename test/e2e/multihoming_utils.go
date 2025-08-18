@@ -72,7 +72,7 @@ func filterIPs(cs clientset.Interface, ips ...string) []string {
 }
 
 func filterIPsAndJoin(cs clientset.Interface, ips string) string {
-	return joinStrings(filterIPs(cs,  strings.Split(ips, ",")...)...)
+	return joinStrings(filterIPs(cs, strings.Split(ips, ",")...)...)
 }
 
 func getNetCIDRSubnet(netCIDR string) (string, error) {
@@ -200,6 +200,7 @@ type podConfiguration struct {
 	requiresExtraNamespace bool
 	hostNetwork            bool
 	ipRequestFromSubnet    string
+	usesExternalRouter     bool
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
@@ -405,7 +406,11 @@ func podIPsForAttachment(k8sClient clientset.Interface, podNamespace string, pod
 	if err != nil {
 		return nil, err
 	}
-	if len(netStatus) != 1 {
+
+	if len(netStatus) == 0 {
+		return nil, fmt.Errorf("no status entry for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
+	}
+	if len(netStatus) > 1 {
 		return nil, fmt.Errorf("more than one status entry for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
 	}
 	if len(netStatus[0].IPs) == 0 {
