@@ -479,6 +479,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 			if os.Getenv(bgpServerVLANIDEnvVar) != "" && (os.Getenv(bgpServerVLANSubnetV4EnvVar) != "" || os.Getenv(bgpServerSubnetV6EnvVar) != "") {
 				vlan_id, _ := strconv.Atoi(os.Getenv(bgpServerVLANIDEnvVar))
 
+				fmt.Printf("*************** Enabling BGP related tests with VLAN ID %d ***************\n", vlan_id)
 				entries = append(entries,
 					Entry(
 						"can be reached by a client pod in the default network on a different node, when the localnet uses a VLAN and an IP in a BGP-advertised subnet",
@@ -587,8 +588,19 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				kickstartPod(cs, clientPodConfig)
 
 				err = addRouteViaExternalContainer(f, cs, clientPodConfig)
+				if err != nil {
+					fmt.Printf("Failed to add route to client pod %s/%s: %v\n", clientPodConfig.namespace, clientPodConfig.name, err)
+					fmt.Printf("Sleeping to allow for debugging (NAD VLAN ID=%d ; from env: %s)\n", netConfig.vlanID, os.Getenv(bgpServerVLANIDEnvVar))
+					time.Sleep(30 * time.Hour)
+				}
 				Expect(err).NotTo(HaveOccurred(), "failed to add route to client pod %s/%s", clientPodConfig.namespace, clientPodConfig.name)
+
 				err = addRouteViaExternalContainer(f, cs, serverPodConfig)
+				if err != nil {
+					fmt.Printf("Failed to add route to server pod %s/%s: %v\n", serverPodConfig.namespace, serverPodConfig.name, err)
+					fmt.Printf("Sleeping to allow for debugging (NAD VLAN ID=%d ; from env: %s)\n", netConfig.vlanID, os.Getenv(bgpServerVLANIDEnvVar))
+					time.Sleep(30 * time.Hour)
+				}
 				Expect(err).NotTo(HaveOccurred(), "failed to add route to server pod %s/%s", serverPodConfig.namespace, serverPodConfig.name)
 
 				// Check that the client pod can reach the server pod on the server localnet interface
@@ -610,11 +622,23 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						curlArgs = []string{"--interface", "net1"}
 						pingArgs = []string{"-I", "net1"}
 					}
+					// err := reachServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, port, curlArgs...)
+					// if err != nil {
+					// 	fmt.Printf("Failed to reach server pod %s from client pod %s: %v\n", serverPodConfig.name, clientPodConfig.name, err)
+					// 	fmt.Printf("Sleeping to allow for debugging (NAD VLAN ID=%d ; from env: %s)\n", netConfig.vlanID, os.Getenv(bgpServerVLANIDEnvVar))
+					// 	time.Sleep(30 * time.Hour)
+					// }
 					Eventually(func() error {
 						return reachServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, port, curlArgs...)
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 
 					By(fmt.Sprintf("asserting the *client* can ping the server pod exposed endpoint: %q", serverIP))
+					// err = pingServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, pingArgs...)
+					// if err != nil {
+					// 	fmt.Printf("Failed to reach server pod %s from client pod %s: %v\n", serverPodConfig.name, clientPodConfig.name, err)
+					// 	fmt.Printf("Sleeping to allow for debugging")
+					// 	time.Sleep(30 * time.Hour)
+					// }
 					Eventually(func() error {
 						return pingServerPodFromClient(cs, serverPodConfig, clientPodConfig, serverIP, pingArgs...)
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
@@ -2369,6 +2393,7 @@ func buildRouteToHostSubnetViaExternalContainer(cs clientset.Interface, f *frame
 	cmds := []string{}
 	hostSubnets, err := getHostSubnetsForNode(cs, nodeName)
 	Expect(err).NotTo(HaveOccurred())
+	fmt.Printf("*************BGP host subnets: %v\n", hostSubnets)
 	for _, hostSubnet := range hostSubnets {
 		if utilnet.IsIPv4CIDRString(hostSubnet) && gwV4 != "" {
 			cmds = append(cmds, fmt.Sprintf(cmdTemplate, hostSubnet, gwV4))
@@ -2378,6 +2403,7 @@ func buildRouteToHostSubnetViaExternalContainer(cs clientset.Interface, f *frame
 		}
 	}
 
+	fmt.Printf("*************BGP host route commands: %v\n", cmds)
 	return cmds
 }
 
