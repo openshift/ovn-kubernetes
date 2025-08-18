@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	e2eframework "k8s.io/kubernetes/test/e2e/framework"
@@ -2359,4 +2360,80 @@ chpasswd: { expire: False }
 		)
 	})
 
+	Context("MAC conflicts detection", func() {
+		newTestVMI := func(name, mac string) *kubevirtv1.VirtualMachineInstance {
+			vm := fedoraWithTestToolingVMI(nil, nil, nil, kubevirtv1.NetworkSource{Pod: &kubevirtv1.PodNetwork{}}, "#", "")
+			vm.Name = name
+			vm.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+			vm.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
+			vm.Spec.Domain.Devices.Interfaces[0].MacAddress = mac
+			return vm
+		}
+
+		It("should fail when creating second VM with duplicate static IP", func() {
+			if !isPreConfiguredUdnAddressesEnabled() {
+				Fail("ENABLE_PRE_CONF_UDN_ADDR not configured")
+			}
+			By("Create test namespace")
+			l := map[string]string{
+				"e2e-framework":           fr.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			}
+			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, l)
+			Expect(err).NotTo(HaveOccurred())
+			fr.Namespace = ns
+			namespace = fr.Namespace.Name
+
+			cudnName := uniqueMetaName("test")
+			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR("10.128.0.0/24"), udnv1.CIDR("2010:100:200::0/60")})
+			testCudn, _ := kubevirt.GenerateCUDN(namespace, cudnName, udnv1.NetworkTopologyLayer2, udnv1.NetworkRolePrimary, dualCIDRs)
+			createCUDN(testCudn)
+
+			testMAC := "02:a1:b2:c3:d4:e5"
+			vmi1 := newTestVMI("vm-static-mac", testMAC)
+			vm1 := generateVM(vmi1)
+			vm1.Name = vmi1.Name
+			createVirtualMachine(vm1)
+
+			By("Asserting VM with static MAC is running as expected")
+			Eventually(func(g Gomega) []kubevirtv1.VirtualMachineInstanceCondition {
+				err := crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi1), vmi1)
+				g.Expect(err).To(SatisfyAny(WithTransform(apierrors.IsNotFound, BeTrue()), Succeed()))
+				return vmi1.Status.Conditions
+			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(ContainElement(SatisfyAll(
+				HaveField("Type", kubevirtv1.VirtualMachineInstanceAgentConnected),
+				HaveField("Status", corev1.ConditionTrue),
+			)))
+			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi1), vmi1)).To(Succeed())
+			Expect(vmi1.Status.Interfaces[0].MAC).To(Equal(testMAC), "vmi status should report the specified mac")
+
+			By("Create second VM with the same MAC")
+			vmi2 := newTestVMI("vm-conflict-mac", testMAC)
+			vm2 := generateVM(vmi2)
+			vm2.Name = vmi2.Name
+			createVirtualMachine(vm2)
+			By("Asserting second VM pod has event attached reflecting MAC conflict error")
+			expectedErr := fmt.Sprintf("MAC address conflict detected: %[1]s already allocated in network attachment %[2]s/%[2]s-%[3]s",
+				testMAC, namespace, cudnName)
+			Eventually(func(g Gomega) []corev1.Event {
+				podList, err := fr.ClientSet.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+					LabelSelector: fmt.Sprintf("%s=%s", kubevirtv1.VirtualMachineNameLabel, vm2.Name),
+				})
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(podList.Items).ToNot(BeEmpty())
+				events, err := fr.ClientSet.CoreV1().Events(namespace).Search(scheme.Scheme, &podList.Items[0])
+				g.Expect(err).ToNot(HaveOccurred())
+				return events.Items
+			}).WithTimeout(time.Minute * 1).WithPolling(time.Second * 3).Should(ContainElement(SatisfyAll(
+				HaveField("Type", "Warning"),
+				HaveField("Reason", "ErrorAllocatingPod"),
+				HaveField("Message", ContainSubstring(expectedErr)),
+			)))
+			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi2), vmi2)).To(Succeed())
+			Expect(vmi2.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", kubevirtv1.VirtualMachineInstanceReady),
+				HaveField("Status", corev1.ConditionFalse),
+			)), "second VM should not be ready due to MAC conflict")
+		})
+	})
 })
