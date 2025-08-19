@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	e2eframework "k8s.io/kubernetes/test/e2e/framework"
@@ -58,6 +59,7 @@ import (
 	ipamclaimsv1alpha1 "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 
@@ -111,6 +113,7 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 		httpServerTestPods  = []*corev1.Pod{}
 		iperfServerTestPods = []*corev1.Pod{}
 		clientSet           kubernetes.Interface
+		nadClient           nadclient.K8sCniCncfIoV1Interface
 		providerCtx         infraapi.Context
 		// Systemd resolvd prevent resolving kube api service by fqdn, so
 		// we replace it here with NetworkManager
@@ -1329,6 +1332,15 @@ fi
 				return ra.Status.Status
 			}, 30*time.Second, time.Second).Should(Equal("Accepted"))
 		}
+
+		getJoinIPs = func(cudn *udnv1.ClusterUserDefinedNetwork) []string {
+			nad, err := nadClient.NetworkAttachmentDefinitions(namespace).Get(context.TODO(), cudn.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			var result map[string]interface{}
+			err = json.Unmarshal([]byte(nad.Spec.Config), &result)
+			Expect(err).NotTo(HaveOccurred())
+			return strings.Split(result["joinSubnet"].(string), ",")
+		}
 	)
 	BeforeEach(func() {
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
@@ -1340,6 +1352,9 @@ fi
 		Expect(err).NotTo(HaveOccurred())
 
 		virtClient, err = kubevirt.NewClient("/tmp")
+		Expect(err).NotTo(HaveOccurred())
+
+		nadClient, err = nadclient.NewForConfig(fr.ClientConfig())
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -1531,12 +1546,15 @@ fi
 			cmd         func() string
 		}
 		var (
-			cudn     *udnv1.ClusterUserDefinedNetwork
-			vm       *kubevirtv1.VirtualMachine
-			vmi      *kubevirtv1.VirtualMachineInstance
-			cidrIPv4 = "10.128.0.0/24"
-			cidrIPv6 = "2010:100:200::0/60"
-			restart  = testCommand{
+			cudn       *udnv1.ClusterUserDefinedNetwork
+			vm         *kubevirtv1.VirtualMachine
+			vmi        *kubevirtv1.VirtualMachineInstance
+			cidrIPv4   = "10.128.0.0/24"
+			cidrIPv6   = "2010:100:200::0/60"
+			staticIPv4 = "10.128.0.101"
+			staticIPv6 = "2010:100:200::101"
+			staticMAC  = "02:00:00:00:00:01"
+			restart    = testCommand{
 				description: "restart",
 				cmd: func() {
 					By("Restarting vm")
@@ -1619,6 +1637,29 @@ write_files:
 				},
 			}
 
+			virtualMachineWithUDNAndStaticIPsAndMAC = resourceCommand{
+				description: "VirtualMachine with interface binding for UDN and statics IPs and MAC",
+				cmd: func() string {
+					GinkgoHelper()
+					if !isPreConfiguredUdnAddressesEnabled() {
+						Skip("ENABLE_PRE_CONF_UDN_ADDR not configured")
+					}
+
+					annotations, err := kubevirt.GenerateAddressesAnnotations("net1", filterIPs(fr.ClientSet, staticIPv4, staticIPv6))
+					Expect(err).NotTo(HaveOccurred())
+
+					vm = fedoraWithTestToolingVM(nil /*labels*/, annotations, nil, /*nodeSelector*/
+						kubevirtv1.NetworkSource{
+							Pod: &kubevirtv1.PodNetwork{},
+						}, userDataWithIperfServer, networkDataDualStack)
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC
+					createVirtualMachine(vm)
+					return vm.Name
+				},
+			}
+
 			virtualMachineInstance = resourceCommand{
 				description: "VirtualMachineInstance",
 				cmd: func() string {
@@ -1669,6 +1710,8 @@ write_files:
 			topology    udnv1.NetworkTopology
 			role        udnv1.NetworkRole
 			ingress     string
+			ipRequests  []string
+			macRequest  string
 		}
 		var (
 			containerNetwork = func(td testData) (infraapi.Network, error) {
@@ -1817,6 +1860,12 @@ ip route add %[3]s via %[4]s
 			step = by(vmi.Name, "Wait for addresses at the virtual machine")
 			expectedNumberOfAddresses := len(dualCIDRs)
 			expectedAddreses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			if _, hasIPRequests := vmi.Annotations[kubevirt.AddressesAnnotation]; hasIPRequests {
+				Expect(expectedAddreses).To(ConsistOf(filterIPs(fr.ClientSet, staticIPv4, staticIPv6)), "expected addresses should be consistent with the static IPs")
+			}
+			if vmi.Spec.Domain.Devices.Interfaces[0].MacAddress != "" {
+				Expect(vmi.Spec.Domain.Devices.Interfaces[0].MacAddress).To(Equal(vmi.Status.Interfaces[0].MAC), "expected mac address should be consistent with the static MAC")
+			}
 			expectedAddresesAtGuest := expectedAddreses
 			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, podNetworkStatusByNetConfigPredicate(namespace, cudn.Name, strings.ToLower(string(td.role))))
 
@@ -1848,7 +1897,7 @@ ip route add %[3]s via %[4]s
 					nodeRunningVMI, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.NodeName, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(nodeRunningVMI, networkName)
+					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(nodeRunningVMI, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(kubevirt.RetrieveIPv6Gateways).
 						WithArguments(virtClient, vmi).
@@ -1919,7 +1968,7 @@ ip route add %[3]s via %[4]s
 					targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, networkName)
+					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred(), step)
 
 					Expect(err).NotTo(HaveOccurred(), step)
@@ -1935,7 +1984,7 @@ ip route add %[3]s via %[4]s
 					targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(targetNode, networkName)
+					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(targetNode, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(kubevirt.RetrieveIPv6Gateways).
 						WithArguments(virtClient, vmi).
@@ -1987,6 +2036,25 @@ ip route add %[3]s via %[4]s
 				test:     liveMigrate,
 				topology: udnv1.NetworkTopologyLayer2,
 				role:     udnv1.NetworkRolePrimary,
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDNAndStaticIPsAndMAC,
+				test:     liveMigrate,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDNAndStaticIPsAndMAC,
+				test:     restart,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDNAndStaticIPsAndMAC,
+				test:     liveMigrate,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+				ingress:  "routed",
 			}),
 			Entry(nil, testData{
 				resource: virtualMachineWithUDN,
@@ -2170,7 +2238,6 @@ ip route add %[3]s via %[4]s
 			vmiIPv4              = "10.128.0.100/24"
 			vmiIPv6              = "2010:100:200::100/60"
 			vmiMAC               = "0A:58:0A:80:00:64"
-			cidrs                = []string{ipv4CIDR, ipv6CIDR}
 			staticIPsNetworkData = func(ips []string) (string, error) {
 				type Ethernet struct {
 					Addresses []string `json:"addresses,omitempty"`
@@ -2209,7 +2276,7 @@ chpasswd: { expire: False }
 			selectedNodes = workerNodeList.Items
 			Expect(selectedNodes).NotTo(BeEmpty())
 
-			iperfServerTestPods, err = createIperfServerPods(selectedNodes, cudn.Name, cudn.Spec.Network.Localnet.Role, filterCIDRs(fr.ClientSet, cidrs...))
+			iperfServerTestPods, err = createIperfServerPods(selectedNodes, cudn.Name, cudn.Spec.Network.Localnet.Role, filterCIDRs(fr.ClientSet, ipv4CIDR, ipv6CIDR))
 			Expect(err).NotTo(HaveOccurred())
 
 			networkData, err := staticIPsNetworkData(filterCIDRs(fr.ClientSet, vmiIPv4, vmiIPv6))
@@ -2293,4 +2360,80 @@ chpasswd: { expire: False }
 		)
 	})
 
+	Context("MAC conflicts detection", func() {
+		newTestVMI := func(name, mac string) *kubevirtv1.VirtualMachineInstance {
+			vm := fedoraWithTestToolingVMI(nil, nil, nil, kubevirtv1.NetworkSource{Pod: &kubevirtv1.PodNetwork{}}, "#", "")
+			vm.Name = name
+			vm.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+			vm.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
+			vm.Spec.Domain.Devices.Interfaces[0].MacAddress = mac
+			return vm
+		}
+
+		It("should fail when creating second VM with duplicate static IP", func() {
+			if !isPreConfiguredUdnAddressesEnabled() {
+				Fail("ENABLE_PRE_CONF_UDN_ADDR not configured")
+			}
+			By("Create test namespace")
+			l := map[string]string{
+				"e2e-framework":           fr.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			}
+			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, l)
+			Expect(err).NotTo(HaveOccurred())
+			fr.Namespace = ns
+			namespace = fr.Namespace.Name
+
+			cudnName := uniqueMetaName("test")
+			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR("10.128.0.0/24"), udnv1.CIDR("2010:100:200::0/60")})
+			testCudn, _ := kubevirt.GenerateCUDN(namespace, cudnName, udnv1.NetworkTopologyLayer2, udnv1.NetworkRolePrimary, dualCIDRs)
+			createCUDN(testCudn)
+
+			testMAC := "02:a1:b2:c3:d4:e5"
+			vmi1 := newTestVMI("vm-static-mac", testMAC)
+			vm1 := generateVM(vmi1)
+			vm1.Name = vmi1.Name
+			createVirtualMachine(vm1)
+
+			By("Asserting VM with static MAC is running as expected")
+			Eventually(func(g Gomega) []kubevirtv1.VirtualMachineInstanceCondition {
+				err := crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi1), vmi1)
+				g.Expect(err).To(SatisfyAny(WithTransform(apierrors.IsNotFound, BeTrue()), Succeed()))
+				return vmi1.Status.Conditions
+			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(ContainElement(SatisfyAll(
+				HaveField("Type", kubevirtv1.VirtualMachineInstanceAgentConnected),
+				HaveField("Status", corev1.ConditionTrue),
+			)))
+			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi1), vmi1)).To(Succeed())
+			Expect(vmi1.Status.Interfaces[0].MAC).To(Equal(testMAC), "vmi status should report the specified mac")
+
+			By("Create second VM with the same MAC")
+			vmi2 := newTestVMI("vm-conflict-mac", testMAC)
+			vm2 := generateVM(vmi2)
+			vm2.Name = vmi2.Name
+			createVirtualMachine(vm2)
+			By("Asserting second VM pod has event attached reflecting MAC conflict error")
+			expectedErr := fmt.Sprintf("MAC address conflict detected: %[1]s already allocated in network attachment %[2]s/%[2]s-%[3]s",
+				testMAC, namespace, cudnName)
+			Eventually(func(g Gomega) []corev1.Event {
+				podList, err := fr.ClientSet.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+					LabelSelector: fmt.Sprintf("%s=%s", kubevirtv1.VirtualMachineNameLabel, vm2.Name),
+				})
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(podList.Items).ToNot(BeEmpty())
+				events, err := fr.ClientSet.CoreV1().Events(namespace).Search(scheme.Scheme, &podList.Items[0])
+				g.Expect(err).ToNot(HaveOccurred())
+				return events.Items
+			}).WithTimeout(time.Minute * 1).WithPolling(time.Second * 3).Should(ContainElement(SatisfyAll(
+				HaveField("Type", "Warning"),
+				HaveField("Reason", "ErrorAllocatingPod"),
+				HaveField("Message", ContainSubstring(expectedErr)),
+			)))
+			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi2), vmi2)).To(Succeed())
+			Expect(vmi2.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", kubevirtv1.VirtualMachineInstanceReady),
+				HaveField("Status", corev1.ConditionFalse),
+			)), "second VM should not be ready due to MAC conflict")
+		})
+	})
 })
