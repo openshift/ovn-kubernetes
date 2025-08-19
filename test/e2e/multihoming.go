@@ -282,7 +282,6 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 		)
 
 		DescribeTable("attached to a localnet network mapped to external primary interface bridge", //nolint:lll
-
 			func(netConfigParams networkAttachmentConfigParams, clientPodConfig, serverPodConfig podConfiguration, isCollocatedPods bool) {
 				By("Get two scheduable nodes and ensure client and server are located on distinct Nodes")
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), f.ClientSet, 2)
@@ -369,8 +368,34 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 				}
 			},
+
+			// The first setup we test is that of a localnet that uses IPs in the host subnet.
+			// Pod A is a pod in the default network, podL is a pod in a localnet.
+			//
+			//                         +-----------------------+
+			//                         |     Kubernetes Node   |
+			//                         |       ovn-worker2     |
+			//                         |                       |
+			// podA (10.244.1.10/24)---+-------[ br-int ]------+--- podL (172.18.0.4/16, net1)
+			// (default network)       |           |           |   (localnet)
+			//                         |       [ br-ex ]       |
+			//                         |        172.18.0.2     |
+			//                         |           |           |
+			//                         +-----------|-----------+
+			//                                     |
+			//                               host network
+			//                               172.18.0.0/16
+			//                                     |
+			//              +------------------------------------------+
+			//              |   other hosts / routers / services       |
+			//              |   (directly reachable in 172.18.0.0/16)  |
+			//              +------------------------------------------+
+			//
+			// We test podA when it sits on top of the overlay network, as depicted above, and
+			// when it is host-networked.
 			Entry(
-				"can be reached by a client pod in the default network on a different node",
+				// default network -> localnet, different nodes
+				"can be reached by a client pod in the default network on a different node, when the localnet uses an IP in the host subnet",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -390,7 +415,8 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				false, // scheduled on distinct Nodes
 			),
 			Entry(
-				"can be reached by a client pod in the default network on the same node",
+				// default network -> localnet, same node
+				"can be reached by a client pod in the default network on the same node, when the localnet uses an IP in the host subnet",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -410,7 +436,8 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				true, // collocated on same Node
 			),
 			Entry(
-				"can reach a host-networked pod on a different node",
+				// localnet -> host network, different nodes
+				"can reach a host-networked pod on a different node, when the localnet uses an IP in the host subnet",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
@@ -431,7 +458,8 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				false, // not collocated on the same node
 			),
 			Entry(
-				"can reach a host-networked pod on the same node",
+				// localnet -> host network, same node
+				"can reach a host-networked pod on the same node, when the localnet uses an IP in the host subnet",
 				networkAttachmentConfigParams{
 					name:     secondaryNetworkName,
 					topology: "localnet",
