@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/pool"
 )
 
 // PodAllocator acts on pods events handed off by the cluster network controller
@@ -294,6 +295,7 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, network *net
 	doRelease := releaseFromAllocator && !a.isPodReleased(nad, uid)
 	doReleaseIDs := doRelease && hasIDAllocation
 	doReleaseIPs := doRelease && hasIPAM && !hasIPAMClaim
+	doReleaseMAC := doRelease && hasIPAM
 
 	if doReleaseIDs {
 		name := podIdAllocationName(nad, uid)
@@ -313,6 +315,18 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nad string, network *net
 			)
 		}
 		klog.V(5).Infof("Released IPs %v", util.StringSlice(podAnnotation.IPs))
+	}
+
+	if doReleaseMAC {
+		if config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses &&
+			a.netInfo.IsPrimaryNetwork() &&
+			a.netInfo.TopologyType() == types.Layer2Topology {
+			err := a.podAnnotationAllocator.ReleasePodAddressPoolResources(pod, nad)
+			if err != nil {
+				// do not return error to allow the caller handle this state
+				klog.Errorf("Failed to release address pool resources for pod %s/%s, nad %s: %v", pod.Namespace, pod.Name, nad, err)
+			}
+		}
 	}
 
 	if podDeleted {
@@ -365,7 +379,8 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 
 	if err != nil {
 		if errors.Is(err, ipallocator.ErrFull) ||
-			errors.Is(err, ipallocator.ErrAllocated) {
+			errors.Is(err, ipallocator.ErrAllocated) ||
+			pool.IsErrMACConflict(err) {
 			a.recordPodErrorEvent(pod, err)
 		}
 		return err

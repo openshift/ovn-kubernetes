@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/pool"
 )
 
 // PodAnnotationAllocator is a utility to handle allocation of the PodAnnotation to Pods.
@@ -30,6 +31,7 @@ type PodAnnotationAllocator struct {
 
 	netInfo              util.NetInfo
 	ipamClaimsReconciler persistentips.PersistentAllocations
+	addressPool          *pool.NetworkPool
 }
 
 func NewPodAnnotationAllocator(
@@ -43,6 +45,7 @@ func NewPodAnnotationAllocator(
 		kube:                 kube,
 		netInfo:              netInfo,
 		ipamClaimsReconciler: claimsReconciler,
+		addressPool:          pool.NewNetworkPool(),
 	}
 }
 
@@ -75,6 +78,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		pod,
 		network,
 		allocator.ipamClaimsReconciler,
+		allocator.addressPool,
 		reallocateIP,
 		networkRole,
 	)
@@ -89,6 +93,7 @@ func allocatePodAnnotation(
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
+	addressPool *pool.NetworkPool,
 	reallocateIP bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
@@ -108,6 +113,7 @@ func allocatePodAnnotation(
 			pod,
 			network,
 			claimsReconciler,
+			addressPool,
 			reallocateIP,
 			networkRole,
 		)
@@ -159,6 +165,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		pod,
 		network,
 		allocator.ipamClaimsReconciler,
+		allocator.addressPool,
 		reallocateIP,
 		networkRole,
 	)
@@ -174,6 +181,7 @@ func allocatePodAnnotationWithTunnelID(
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
+	addressPool *pool.NetworkPool,
 	reallocateIP bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
@@ -190,6 +198,7 @@ func allocatePodAnnotationWithTunnelID(
 			pod,
 			network,
 			claimsReconciler,
+			addressPool,
 			reallocateIP,
 			networkRole,
 		)
@@ -264,6 +273,7 @@ func allocatePodAnnotationWithRollback(
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
+	addressPool *pool.NetworkPool,
 	reallocateIP bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
@@ -283,11 +293,21 @@ func allocatePodAnnotationWithRollback(
 	// for defer to work correctly.
 	var releaseIPs []*net.IPNet
 	var releaseID int
+	var releaseMAC net.HardwareAddr
+	networkName := netInfo.GetNetworkName()
 	rollback = func() {
 		if releaseID != 0 {
 			idAllocator.ReleaseID()
 			klog.V(5).Infof("Released ID %d", releaseID)
 			releaseID = 0
+		}
+		if config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses &&
+			netInfo.IsPrimaryNetwork() &&
+			netInfo.TopologyType() == types.Layer2Topology &&
+			releaseMAC != nil {
+			addressPool.RemoveMACFromPool(networkName, releaseMAC)
+			klog.V(5).Infof("Released MAC %s", releaseMAC.String())
+			releaseMAC = nil
 		}
 		if len(releaseIPs) == 0 {
 			return
@@ -298,7 +318,6 @@ func allocatePodAnnotationWithRollback(
 			releaseIPs = nil
 			return
 		}
-		klog.V(5).Infof("Released IPs %v", util.StringSlice(releaseIPs))
 		releaseIPs = nil
 	}
 	defer func() {
@@ -442,6 +461,20 @@ func allocatePodAnnotationWithRollback(
 		if err != nil {
 			return
 		}
+	}
+
+	if config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses &&
+		netInfo.IsPrimaryNetwork() &&
+		netInfo.TopologyType() == types.Layer2Topology {
+		ownerID := GetPoolAddressOwner(pod, netInfo)
+		if addressPool.IsMACConflict(networkName, tentative.MAC, ownerID) {
+			err = fmt.Errorf("%w: %s already allocated in network attachment %s",
+				pool.ErrMACConflict, tentative.MAC.String(), nadName)
+			klog.Warningf("%v, network-name: %s", err, networkName)
+			return
+		}
+		addressPool.AddMACToPool(networkName, tentative.MAC, ownerID)
+		releaseMAC = tentative.MAC
 	}
 
 	needsAnnotationUpdate := needsIPOrMAC || needsID
@@ -641,6 +674,29 @@ func AddRoutesGatewayIP(
 		// Ensure default join subnet traffic always goes to OVN
 		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
 	}
+
+	return nil
+}
+
+// ReleasePodAddressPoolResources releases MAC addresses from the address pool
+// when a pod is deleted, to clean up addresses and prevent conflicts.
+func (allocator *PodAnnotationAllocator) ReleasePodAddressPoolResources(pod *corev1.Pod, nadName string) error {
+	podNetwork, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to unmarshal pod annotation: %w", err)
+	}
+	if podNetwork.MAC == nil {
+		return nil
+	}
+
+	networkName := allocator.netInfo.GetNetworkName()
+	allocator.addressPool.RemoveMACFromPool(networkName, podNetwork.MAC)
+
+	klog.V(5).Infof("Removed MAC %s from address pool for network %s, pod %s/%s, nad %s",
+		podNetwork.MAC, networkName, pod.Namespace, pod.Name, nadName)
 
 	return nil
 }
