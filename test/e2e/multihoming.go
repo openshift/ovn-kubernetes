@@ -284,10 +284,10 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 
 		DescribeTable("attached to a localnet network mapped to external primary interface bridge", //nolint:lll
 			func(netConfigParams networkAttachmentConfigParams, clientPodConfig, serverPodConfig podConfiguration, isCollocatedPods bool) {
-				By("Get two scheduable nodes and ensure client and server are located on distinct Nodes")
+				By("Get two schedulable nodes and ensure client and server are located on distinct Nodes")
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), f.ClientSet, 2)
-				framework.ExpectNoError(err, "2 scheduable nodes are required")
-				Expect(len(nodes.Items)).To(BeNumerically(">=", 1), "cluster should have at least 2 nodes")
+				framework.ExpectNoError(err, "2 schedulable nodes are required")
+				Expect(len(nodes.Items)).To(BeNumerically(">", 1), "cluster should have at least 2 nodes")
 				if isCollocatedPods {
 					clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].GetName()}
 					serverPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].GetName()}
@@ -629,10 +629,10 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				By("Get two scheduable nodes and schedule client and server to be on distinct Nodes")
+				By("Get two schedulable nodes and schedule client and server to be on distinct Nodes")
 				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), f.ClientSet, 2)
-				framework.ExpectNoError(err, "2 scheduable nodes are required")
-				Expect(len(nodes.Items)).To(BeNumerically(">=", 1), "cluster should have at least 2 nodes")
+				framework.ExpectNoError(err, "2 schedulable nodes are required")
+				Expect(len(nodes.Items)).To(BeNumerically(">", 1), "cluster should have at least 2 nodes")
 				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].GetName()}
 				serverPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].GetName()}
 
