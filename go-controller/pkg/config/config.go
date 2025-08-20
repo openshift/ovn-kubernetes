@@ -206,6 +206,10 @@ var (
 		V4TransitSubnet: "100.88.0.0/16",
 		V6TransitSubnet: "fd97::/64",
 	}
+
+	// Layer2UsesTransitRouter indicated whether the layer2 primary networks will use transit router.
+	// It is a per-node setting and is also reflected in the node annotations.
+	Layer2UsesTransitRouter bool
 )
 
 const (
