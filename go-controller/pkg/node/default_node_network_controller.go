@@ -72,6 +72,9 @@ type BaseNodeNetworkController struct {
 	// network information
 	util.ReconcilableNetInfo
 
+	// networkManager used for getting network information
+	networkManager networkmanager.Interface
+
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
 	// is nadName; value is DPU_ConnectionDetails when VF representor is successfully configured for that
@@ -126,8 +129,6 @@ type DefaultNodeNetworkController struct {
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	networkManager networkmanager.Interface
-
 	cniServer *cni.Server
 
 	udnHostIsolationManager *UDNHostIsolationManager
@@ -139,12 +140,13 @@ type DefaultNodeNetworkController struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup, routeManager *routemanager.Controller, ovsClient client.Client) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller, networkManager networkmanager.Interface, ovsClient client.Client) *DefaultNodeNetworkController {
 
 	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			ReconcilableNetInfo:             &util.DefaultNetInfo{},
+			networkManager:                  networkManager,
 			stopChan:                        stopChan,
 			wg:                              wg,
 		},
@@ -164,7 +166,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, ovsClient)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, networkManager, ovsClient)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -184,11 +186,9 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 		return nil, err
 	}
 
-	nc.networkManager = networkManager
-
 	nc.initRetryFrameworkForNode()
 
-	err = setupPMTUDNFTSets()
+	err = setupRemoteNodeNFTSets()
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup PMTUD nftables sets: %w", err)
 	}
@@ -607,6 +607,59 @@ func handleNetdevResources(resourceName string) (string, error) {
 	return netdevice, nil
 }
 
+// configureMgmtPortNetdevFromResource uses device plugin resources to determine and set
+// the management port netdevice if a DP resource name is provided via configuration.
+func configureMgmtPortNetdevFromResource() error {
+	if config.OvnKubeNode.MgmtPortDPResourceName == "" {
+		return nil
+	}
+	if err := handleDevicePluginResources(); err != nil {
+		return err
+	}
+	netdevice, err := handleNetdevResources(config.OvnKubeNode.MgmtPortDPResourceName)
+	if err != nil {
+		return err
+	}
+	if config.OvnKubeNode.MgmtPortNetdev != "" {
+		klog.Warningf("MgmtPortNetdev is set explicitly (%s), overriding with resource...",
+			config.OvnKubeNode.MgmtPortNetdev)
+	}
+	config.OvnKubeNode.MgmtPortNetdev = netdevice
+	klog.V(5).Infof("Using MgmtPortNetdev (Netdev %s) passed via resource %s",
+		config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortDPResourceName)
+	return nil
+}
+
+// Resolve gateway interface from PCI address when configured as "derive-from-mgmt-port"
+// configureGatewayInterfaceFromMgmtPort resolves and sets the gateway interface derived
+// from the management port's PF when `config.Gateway.Interface` is set to derive-from-mgmt-port.
+func configureGatewayInterfaceFromMgmtPort() error {
+	if config.Gateway.Interface != types.DeriveFromMgmtPort {
+		return nil
+	}
+	netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+	if err != nil {
+		return err
+	}
+	pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+	if err != nil {
+		return err
+	}
+	pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
+	if err != nil {
+		return err
+	}
+	netdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
+	if err != nil {
+		return err
+	}
+	if len(netdevs) == 0 {
+		return fmt.Errorf("no netdevs found for pci address %s", pfPciAddr)
+	}
+	config.Gateway.Interface = netdevs[0]
+	return nil
+}
+
 func exportManagementPortAnnotation(netdevName string, nodeAnnotator kube.Annotator) error {
 	klog.Infof("Exporting management port annotation for netdev '%v'", netdevName)
 	deviceID, err := util.GetDeviceIDFromNetdevice(netdevName)
@@ -927,6 +980,17 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 
+	// Use the device from environment when the DP resource name is specified.
+	if err := configureMgmtPortNetdevFromResource(); err != nil {
+		return err
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		if err := configureGatewayInterfaceFromMgmtPort(); err != nil {
+			return err
+		}
+	}
+
 	// Setup management ports
 	nc.mgmtPortController, err = createNodeManagementPortController(
 		node,
@@ -1011,58 +1075,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 	waiter := newStartupWaiter()
 
-	// Use the device from environment when the DP resource name is specified.
-	if config.OvnKubeNode.MgmtPortDPResourceName != "" {
-		if err := handleDevicePluginResources(); err != nil {
-			return err
-		}
-
-		netdevice, err := handleNetdevResources(config.OvnKubeNode.MgmtPortDPResourceName)
-		if err != nil {
-			return err
-		}
-
-		if config.OvnKubeNode.MgmtPortNetdev != "" {
-			klog.Warningf("MgmtPortNetdev is set explicitly (%s), overriding with resource...",
-				config.OvnKubeNode.MgmtPortNetdev)
-		}
-		config.OvnKubeNode.MgmtPortNetdev = netdevice
-		klog.V(5).Infof("Using MgmtPortNetdev (Netdev %s) passed via resource %s",
-			config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortDPResourceName)
-	}
-
 	// Complete gateway initialization
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		// Resolve gateway interface from PCI address when configured as "derive-from-mgmt-port"
-		// This performs the following steps:
-		// Get the management port network device name
-		// Retrieve the PCI address of the management port device
-		// Get the Physical Function (PF) PCI address from the Virtual Function (VF) PCI address
-		// Retrieve all network devices associated with the PF PCI address
-		// Select the first available network device as the gateway interface
-		if config.Gateway.Interface == types.DeriveFromMgmtPort {
-			netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
-			if err != nil {
-				return err
-			}
-			pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
-			if err != nil {
-				return err
-			}
-			pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
-			if err != nil {
-				return err
-			}
-			netdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
-			if err != nil {
-				return err
-			}
-			if len(netdevs) == 0 {
-				return fmt.Errorf("no netdevs found for pci address %s", pfPciAddr)
-			}
-			netdevName = netdevs[0]
-			config.Gateway.Interface = netdevName
-		}
 		err = nc.initGatewayDPUHost(nc.nodeAddress, nodeAnnotator)
 		if err != nil {
 			return err
@@ -1515,25 +1529,34 @@ func (nc *DefaultNodeNetworkController) WatchNodes() error {
 func (nc *DefaultNodeNetworkController) addOrUpdateNode(node *corev1.Node) error {
 	var nftElems []*knftables.Element
 	var addrs []string
-	for _, address := range node.Status.Addresses {
-		if address.Type != corev1.NodeInternalIP {
-			continue
-		}
-		nodeIP := net.ParseIP(address.Address)
-		if nodeIP == nil {
-			continue
-		}
 
+	// Use GetNodeAddresses to get all node IPs (including current node for openflow)
+	ipsv4, ipsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, node)
+	if err != nil {
+		return fmt.Errorf("failed to get node addresses for node %q: %w", node.Name, err)
+	}
+
+	// Process IPv4 addresses
+	for _, nodeIP := range ipsv4 {
 		addrs = append(addrs, nodeIP.String())
 		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
-		if utilnet.IsIPv4(nodeIP) {
+		// Only add to nftables if this is remote node
+		if node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{
-				Set: types.NFTNoPMTUDRemoteNodeIPsv4,
+				Set: types.NFTRemoteNodeIPsv4,
 				Key: []string{nodeIP.String()},
 			})
-		} else {
+		}
+	}
+
+	// Process IPv6 addresses
+	for _, nodeIP := range ipsv6 {
+		addrs = append(addrs, nodeIP.String())
+		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
+		// Only add to nftables if this is remote node
+		if node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{
-				Set: types.NFTNoPMTUDRemoteNodeIPsv6,
+				Set: types.NFTRemoteNodeIPsv6,
 				Key: []string{nodeIP.String()},
 			})
 		}
@@ -1557,12 +1580,12 @@ func removePMTUDNodeNFTRules(nodeIPs []net.IP) error {
 		// Remove IPs from NFT sets
 		if utilnet.IsIPv4(nodeIP) {
 			nftElems = append(nftElems, &knftables.Element{
-				Set: types.NFTNoPMTUDRemoteNodeIPsv4,
+				Set: types.NFTRemoteNodeIPsv4,
 				Key: []string{nodeIP.String()},
 			})
 		} else {
 			nftElems = append(nftElems, &knftables.Element{
-				Set: types.NFTNoPMTUDRemoteNodeIPsv6,
+				Set: types.NFTRemoteNodeIPsv6,
 				Key: []string{nodeIP.String()},
 			})
 		}
@@ -1578,17 +1601,17 @@ func removePMTUDNodeNFTRules(nodeIPs []net.IP) error {
 func (nc *DefaultNodeNetworkController) deleteNode(node *corev1.Node) {
 	gw := nc.Gateway.(*gateway)
 	gw.openflowManager.deleteFlowsByKey(getPMTUDKey(node.Name))
-	ipsToRemove := make([]net.IP, 0)
-	for _, address := range node.Status.Addresses {
-		if address.Type != corev1.NodeInternalIP {
-			continue
-		}
-		nodeIP := net.ParseIP(address.Address)
-		if nodeIP == nil {
-			continue
-		}
-		ipsToRemove = append(ipsToRemove, nodeIP)
+
+	// Use GetNodeAddresses to get node IPs
+	ipsv4, ipsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, node)
+	if err != nil {
+		klog.Errorf("Failed to get node addresses for node %q: %v", node.Name, err)
+		return
 	}
+
+	ipsToRemove := make([]net.IP, 0, len(ipsv4)+len(ipsv6))
+	ipsToRemove = append(ipsToRemove, ipsv4...)
+	ipsToRemove = append(ipsToRemove, ipsv6...)
 
 	klog.Infof("Deleting NFT elements for node: %s", node.Name)
 	if err := removePMTUDNodeNFTRules(ipsToRemove); err != nil {
@@ -1610,33 +1633,34 @@ func (nc *DefaultNodeNetworkController) syncNodes(objs []interface{}) error {
 		if node.Name == nc.name {
 			continue
 		}
-		for _, address := range node.Status.Addresses {
-			if address.Type != corev1.NodeInternalIP {
-				continue
-			}
-			nodeIP := net.ParseIP(address.Address)
-			if nodeIP == nil {
-				continue
-			}
 
-			// Remove IPs from NFT sets
-			if utilnet.IsIPv4(nodeIP) {
-				keepNFTSetElemsV4 = append(keepNFTSetElemsV4, &knftables.Element{
-					Set: types.NFTNoPMTUDRemoteNodeIPsv4,
-					Key: []string{nodeIP.String()},
-				})
-			} else {
-				keepNFTSetElemsV6 = append(keepNFTSetElemsV6, &knftables.Element{
-					Set: types.NFTNoPMTUDRemoteNodeIPsv6,
-					Key: []string{nodeIP.String()},
-				})
-			}
+		// Use GetNodeAddresses to get node IPs
+		ipsv4, ipsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, node)
+		if err != nil {
+			klog.Errorf("Failed to get node addresses for node %q: %v", node.Name, err)
+			continue
+		}
+
+		// Process IPv4 addresses
+		for _, nodeIP := range ipsv4 {
+			keepNFTSetElemsV4 = append(keepNFTSetElemsV4, &knftables.Element{
+				Set: types.NFTRemoteNodeIPsv4,
+				Key: []string{nodeIP.String()},
+			})
+		}
+
+		// Process IPv6 addresses
+		for _, nodeIP := range ipsv6 {
+			keepNFTSetElemsV6 = append(keepNFTSetElemsV6, &knftables.Element{
+				Set: types.NFTRemoteNodeIPsv6,
+				Key: []string{nodeIP.String()},
+			})
 		}
 	}
-	if err := recreateNFTSet(types.NFTNoPMTUDRemoteNodeIPsv4, keepNFTSetElemsV4); err != nil {
+	if err := recreateNFTSet(types.NFTRemoteNodeIPsv4, keepNFTSetElemsV4); err != nil {
 		errors = append(errors, err)
 	}
-	if err := recreateNFTSet(types.NFTNoPMTUDRemoteNodeIPsv6, keepNFTSetElemsV6); err != nil {
+	if err := recreateNFTSet(types.NFTRemoteNodeIPsv6, keepNFTSetElemsV6); err != nil {
 		errors = append(errors, err)
 	}
 

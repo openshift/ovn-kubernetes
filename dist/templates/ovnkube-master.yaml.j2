@@ -102,7 +102,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.0.0"
+          value: "1.1.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
@@ -199,7 +199,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.0.0"
+          value: "1.1.0"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_master_loglevel }}"
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -261,6 +261,8 @@ spec:
           value: "{{ ovn_network_segmentation_enable }}"
         - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE
           value: "{{ ovn_route_advertisements_enable }}"
+        - name: OVN_ADVERTISED_UDN_ISOLATION_MODE
+          value: "{{ ovn_advertised_udn_isolation_mode }}"
         - name: OVN_EGRESSSERVICE_ENABLE
           value: "{{ ovn_egress_service_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
