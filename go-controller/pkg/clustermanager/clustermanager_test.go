@@ -19,6 +19,7 @@ import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -34,10 +35,9 @@ const (
 
 var _ = ginkgo.Describe("Cluster Manager", func() {
 	var (
-		app      *cli.App
-		f        *factory.WatchFactory
-		stopChan chan struct{}
-		wg       *sync.WaitGroup
+		app *cli.App
+		f   *factory.WatchFactory
+		wg  *sync.WaitGroup
 	)
 
 	const (
@@ -54,12 +54,10 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
-		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
 	})
 
 	ginkgo.AfterEach(func() {
-		close(stopChan)
 		if f != nil {
 			f.Shutdown()
 		}
@@ -896,7 +894,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 							return err
 						}
 
-						gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, ovntypes.DefaultNetworkName)
+						gwLRPAddrs, err := udn.GetGWRouterIPs(updatedNode, &util.DefaultNetInfo{})
 						if err != nil {
 							return err
 						}
@@ -907,239 +905,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 					}).ShouldNot(gomega.HaveOccurred())
 				}
 
-				return nil
-			}
-
-			err := app.Run([]string{
-				app.Name,
-				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
-				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
-			})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("clear the node annotations for gateway router port ips and check", func() {
-			app.Action = func(ctx *cli.Context) error {
-				nodes := []corev1.Node{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node1",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node2",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node3",
-						},
-					},
-				}
-				kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
-					Items: nodes,
-				})
-				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient: kubeFakeClient,
-				}
-
-				_, err := config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
-
-				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = f.Start()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
-				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = clusterManager.Start(ctx.Context)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				defer clusterManager.Stop()
-
-				nodeAddrs := make(map[string]string)
-				// Check that cluster manager has set the node-gateway-router-lrp-ifaddr annotation for each node.
-				for _, n := range nodes {
-					gomega.Eventually(func() error {
-						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
-						if err != nil {
-							return err
-						}
-
-						gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, ovntypes.DefaultNetworkName)
-						if err != nil {
-							return err
-						}
-						gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
-						gomega.Expect(gwLRPAddrs).To(gomega.HaveLen(2))
-						nodeAddrs[n.Name] = updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
-						return nil
-					}).ShouldNot(gomega.HaveOccurred())
-				}
-
-				// Clear the node-gateway-router-lrp-ifaddr annotation of nodes and make sure it is reset by cluster manager
-				// with the same addrs.
-				for _, n := range nodes {
-					nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, n.Name)
-
-					nodeAnnotations := n.Annotations
-					for k, v := range nodeAnnotations {
-						gomega.Expect(nodeAnnotator.Set(k, v)).To(gomega.Succeed())
-					}
-					nodeAnnotator.Delete(util.OVNNodeGRLRPAddrs)
-					err = nodeAnnotator.Run()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				}
-
-				for _, n := range nodes {
-					gomega.Eventually(func() error {
-						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
-						if err != nil {
-							return err
-						}
-
-						nodeGWRPIPs, ok := updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
-						if !ok {
-							return fmt.Errorf("expected node annotation for node %s to have node gateway-router-lrp-ifaddr allocated", n.Name)
-						}
-
-						gomega.Expect(nodeGWRPIPs).To(gomega.Equal(nodeAddrs[n.Name]))
-						return nil
-					}).ShouldNot(gomega.HaveOccurred())
-				}
-				return nil
-			}
-
-			err := app.Run([]string{
-				app.Name,
-				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
-				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
-			})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("Stop cluster manager, change id of a node and verify the gateway router port addr node annotation", func() {
-			app.Action = func(ctx *cli.Context) error {
-				nodes := []corev1.Node{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node1",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node2",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node3",
-						},
-					},
-				}
-				kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
-					Items: nodes,
-				})
-				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient: kubeFakeClient,
-				}
-
-				_, err := config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
-
-				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = f.Start()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				wg1 := &sync.WaitGroup{}
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
-				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = clusterManager.Start(ctx.Context)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				node3GWRPAnnotation := ""
-				// Check that cluster manager has set the node-gateway-router-lrp-ifaddr annotation for each node.
-				for _, n := range nodes {
-					gomega.Eventually(func() error {
-						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
-						if err != nil {
-							return err
-						}
-
-						gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, ovntypes.DefaultNetworkName)
-						if err != nil {
-							return err
-						}
-						gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
-						gomega.Expect(gwLRPAddrs).To(gomega.HaveLen(2))
-
-						// Store the node 3's gw router port addresses
-						if updatedNode.Name == "node3" {
-							node3GWRPAnnotation = updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
-						}
-						return nil
-					}).ShouldNot(gomega.HaveOccurred())
-				}
-
-				// stop the cluster manager.
-				clusterManager.Stop()
-				wg1.Wait()
-
-				updatedNodes := []corev1.Node{}
-
-				for _, n := range nodes {
-					updatedNode, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
-					if updatedNode.Name == "node3" {
-						// Change the id of node3 duplicate.
-						updatedNode.Annotations[ovnNodeIDAnnotaton] = "50"
-					}
-					updatedNodes = append(updatedNodes, *updatedNode)
-				}
-
-				// Close the watch factory and create a new one
-				f.Shutdown()
-				kubeFakeClient = fake.NewSimpleClientset(&corev1.NodeList{
-					Items: updatedNodes,
-				})
-				fakeClient = &util.OVNClusterManagerClientset{
-					KubeClient: kubeFakeClient,
-				}
-				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = f.Start()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				// Start a new cluster manager
-				cm2, err := NewClusterManager(fakeClient, f, "cm2", nil)
-				gomega.Expect(cm2).NotTo(gomega.BeNil())
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = cm2.Start(ctx.Context)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				defer cm2.Stop()
-
-				gomega.Eventually(func() error {
-					updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node3", metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
-
-					node3UpdatedGWRPAnnotation := updatedNode.Annotations[util.OVNNodeGRLRPAddrs]
-					gomega.Expect(node3UpdatedGWRPAnnotation).NotTo(gomega.Equal(node3GWRPAnnotation))
-
-					gwLRPAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, ovntypes.DefaultNetworkName)
-					if err != nil {
-						return err
-					}
-					gomega.Expect(gwLRPAddrs).NotTo(gomega.BeNil())
-					gomega.Expect(gwLRPAddrs).To(gomega.HaveLen(2))
-					return nil
-				}).ShouldNot(gomega.HaveOccurred())
 				return nil
 			}
 
@@ -1436,4 +1201,102 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 		})
 	})
 
+	ginkgo.Context("starting the cluster manager", func() {
+		const networkName = "default"
+
+		var fakeClient *util.OVNClusterManagerClientset
+
+		ginkgo.BeforeEach(func() {
+			fakeClient = util.GetOVNClientset().GetClusterManagerClientset()
+		})
+
+		ginkgo.When("the required features are not enabled", func() {
+			ginkgo.It("does *not* automatically provision a NAD for the default network", func() {
+				app.Action = func(ctx *cli.Context) error {
+					_, err := config.InitConfig(ctx, nil, nil)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					clusterMngr, err := clusterManager(fakeClient, f)
+					gomega.Expect(clusterMngr).NotTo(gomega.BeNil())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(clusterMngr.Start(ctx.Context)).To(gomega.Succeed())
+
+					_, err = fakeClient.NetworkAttchDefClient.
+						K8sCniCncfIoV1().
+						NetworkAttachmentDefinitions(config.Kubernetes.OVNConfigNamespace).
+						Get(
+							context.Background(),
+							networkName,
+							metav1.GetOptions{},
+						)
+					gomega.Expect(err).To(
+						gomega.MatchError("network-attachment-definitions.k8s.cni.cncf.io \"default\" not found"),
+					)
+
+					return nil
+				}
+				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+			})
+		})
+
+		ginkgo.When("the multi-network, network-segmentation, and preconfigured-udn-addresses features are enabled", func() {
+			ginkgo.BeforeEach(func() {
+				config.OVNKubernetesFeature.EnableMultiNetwork = true
+				config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+				config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses = true
+			})
+
+			ginkgo.It("automatically provisions a NAD for the default network", func() {
+				app.Action = func(ctx *cli.Context) error {
+					_, err := config.InitConfig(ctx, nil, nil)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					clusterMngr, err := clusterManager(fakeClient, f)
+					gomega.Expect(clusterMngr).NotTo(gomega.BeNil())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					c, cancel := context.WithCancel(ctx.Context)
+					defer cancel()
+					gomega.Expect(clusterMngr.Start(c)).To(gomega.Succeed())
+					defer clusterMngr.Stop()
+
+					nad, err := fakeClient.NetworkAttchDefClient.
+						K8sCniCncfIoV1().
+						NetworkAttachmentDefinitions(config.Kubernetes.OVNConfigNamespace).
+						Get(
+							context.Background(),
+							networkName,
+							metav1.GetOptions{},
+						)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					const expectedNADContents = `{"cniVersion": "0.4.0", "name": "ovn-kubernetes", "type": "ovn-k8s-cni-overlay"}`
+					gomega.Expect(nad.Spec.Config).To(gomega.Equal(expectedNADContents))
+
+					return nil
+				}
+				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+			})
+		})
+	})
+
 })
+
+func clusterManager(client *util.OVNClusterManagerClientset, f *factory.WatchFactory) (*ClusterManager, error) {
+	if err := f.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start the CM watch factory: %w", err)
+	}
+
+	clusterMngr, err := NewClusterManager(client, f, "identity", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start the CM watch factory: %w", err)
+	}
+
+	return clusterMngr, nil
+}

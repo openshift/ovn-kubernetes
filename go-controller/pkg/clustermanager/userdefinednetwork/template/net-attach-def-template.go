@@ -72,6 +72,7 @@ func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*net
 			Name:            obj.GetName(),
 			OwnerReferences: []metav1.OwnerReference{ownerRef},
 			Labels:          renderNADLabels(obj),
+			Annotations:     renderNADAnnotations(obj),
 			Finalizers:      []string{FinalizerUserDefinedNetwork},
 		},
 		Spec: *nadSpec,
@@ -109,11 +110,26 @@ func renderNADLabels(obj client.Object) map[string]string {
 	return labels
 }
 
+// renderNADAnnotations copies annotations from UDN to corresponding NAD
+func renderNADAnnotations(obj client.Object) map[string]string {
+	udnAnnotations := obj.GetAnnotations()
+	annotations := make(map[string]string)
+	for k, v := range udnAnnotations {
+		if !strings.HasPrefix(k, types.OvnK8sPrefix) {
+			annotations[k] = v
+		}
+	}
+	if len(annotations) == 0 {
+		return nil
+	}
+	return annotations
+}
+
 func validateTopology(spec SpecGetter) error {
 	if spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLayer3 && spec.GetLayer3() == nil ||
 		spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLayer2 && spec.GetLayer2() == nil ||
 		spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLocalnet && spec.GetLocalnet() == nil {
-		return fmt.Errorf("topology %[1]s is specified but %[1]s config is nil", spec.GetTopology())
+		return config.NewTopologyConfigMismatchError(string(spec.GetTopology()))
 	}
 	return nil
 }
@@ -142,10 +158,10 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 			return nil, err
 		}
 		if ipamEnabled(cfg.IPAM) && len(cfg.Subnets) == 0 {
-			return nil, fmt.Errorf("subnets is required with ipam.mode is Enabled or unset")
+			return nil, config.NewSubnetsRequiredError()
 		}
 		if !ipamEnabled(cfg.IPAM) && len(cfg.Subnets) > 0 {
-			return nil, fmt.Errorf("subnets must be unset when ipam.mode is Disabled")
+			return nil, config.NewSubnetsMustBeUnsetError()
 		}
 
 		netConfSpec.Role = strings.ToLower(string(cfg.Role))
@@ -235,7 +251,7 @@ func validateIPAM(ipam *userdefinednetworkv1.IPAMConfig) error {
 		return nil
 	}
 	if ipam.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent && !ipamEnabled(ipam) {
-		return fmt.Errorf("lifecycle Persistent is only supported when ipam.mode is Enabled")
+		return config.NewIPAMLifecycleNotSupportedError()
 	}
 	return nil
 }

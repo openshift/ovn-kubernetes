@@ -6,37 +6,6 @@ DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Source the kind-common file from the same directory where this script is located
 source "${DIR}/kind-common"
 
-function setup_kubectl_bin() {
-    ###########################################################################
-    # Description:                                                            #
-    # setup kubectl for querying the cluster                                  #
-    #                                                                         #
-    # Arguments:                                                              #
-    #   $1 - error message if not provided, it will just exit                 #
-    ###########################################################################
-    if [ ! -d "./bin" ]
-    then
-        mkdir -p ./bin
-        if_error_exit "Failed to create bin dir!"
-    fi
-
-    if [[ "$OSTYPE" == "linux-gnu" ]]; then
-        OS_TYPE="linux"
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        OS_TYPE="darwin"
-    fi
-
-    pushd ./bin
-       if [ ! -f ./kubectl ]; then
-           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS_TYPE}/${ARCH}/kubectl"
-           if_error_exit "Failed to download kubectl failed!"
-       fi
-    popd
-
-    chmod +x ./bin/kubectl
-    export PATH=${PATH}:$(pwd)/bin
-}
-
 # Some environments (Fedora32,31 on desktop), have problems when the cluster
 # is deleted directly with kind `kind delete cluster --name ovn`, it restarts the host.
 # The root cause is unknown, this also can not be reproduced in Ubuntu 20.04 or
@@ -84,6 +53,7 @@ usage() {
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [-uae | --preconfigured-udn-addresses-enable]"
     echo "                 [-rae | --enable-route-advertisements]"
+    echo "                 [-rud | --routed-udn-isolation-disable]"
     echo "                 [-adv | --advertise-default-network]"
     echo "                 [-nqe | --network-qos-enable]"
     echo "                 [--isolated]"
@@ -144,7 +114,7 @@ echo "-ehp | --egress-ip-healthcheck-port           TCP port used for gRPC sessi
 echo "-is  | --ipsec                                Enable IPsec encryption (spawns ovn-ipsec pods)"
 echo "-sm  | --scale-metrics                        Enable scale metrics"
 echo "-cm  | --compact-mode                         Enable compact mode, ovnkube master and node run in the same process."
-echo "-ic  | --enable-interconnect                  Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
+echo "-ce  | --enable-central                       Deploy with OVN Central (Legacy Architecture)"
 echo "-nqe | --network-qos-enable                   Enable network QoS. DEFAULT: Disabled."
 echo "--disable-ovnkube-identity                    Disable per-node cert and ovnkube-identity webhook"
 echo "-npz | --nodes-per-zone                       If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
@@ -158,6 +128,7 @@ echo "-obs | --observability                        Enable OVN Observability fea
 echo "-uae | --preconfigured-udn-addresses-enable   Enable connecting workloads with preconfigured network to user-defined networks"
 echo "-rae | --enable-route-advertisements          Enable route advertisements"
 echo "-adv | --advertise-default-network            Applies a RouteAdvertisements configuration to advertise the default network on all nodes"
+echo "-rud | --routed-udn-isolation-disable         Disable isolation across BGP-advertised UDNs (sets advertised-udn-isolation-mode=loose). DEFAULT: strict."
 echo ""
 }
 
@@ -347,8 +318,14 @@ parse_args() {
                                                   ;;
             -adv | --advertise-default-network) ADVERTISE_DEFAULT_NETWORK=true
                                                   ;;
-            -ic | --enable-interconnect )       OVN_ENABLE_INTERCONNECT=true
-                                                ;;
+            -rud | --routed-udn-isolation-disable) ADVERTISED_UDN_ISOLATION_MODE=loose
+                                                  ;;
+            -ce | --enable-central )              OVN_ENABLE_INTERCONNECT=false
+                                                  CENTRAL_ARG_PROVIDED=true
+                                                  ;;
+            -ic | --enable-interconnect )         OVN_ENABLE_INTERCONNECT=true
+                                                  IC_ARG_PROVIDED=true
+                                                  ;;
             --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
                                                 ;;
             -mtu  )                             shift
@@ -375,6 +352,11 @@ parse_args() {
         esac
         shift
     done
+
+    if [[ -n "${CENTRAL_ARG_PROVIDED:-}" && -n "${IC_ARG_PROVIDED:-}" ]]; then
+      echo "Cannot specify both --enable-central and --enable-interconnect" >&2
+      exit 1
+    fi
 }
 
 print_params() {
@@ -439,6 +421,7 @@ print_params() {
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "ENABLE_NETWORK_SEGMENTATION= $ENABLE_NETWORK_SEGMENTATION"
      echo "ENABLE_ROUTE_ADVERTISEMENTS= $ENABLE_ROUTE_ADVERTISEMENTS"
+     echo "ADVERTISED_UDN_ISOLATION_MODE= $ADVERTISED_UDN_ISOLATION_MODE"
      echo "ADVERTISE_DEFAULT_NETWORK = $ADVERTISE_DEFAULT_NETWORK"
      echo "ENABLE_PRE_CONF_UDN_ADDR = $ENABLE_PRE_CONF_UDN_ADDR"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
@@ -618,7 +601,7 @@ set_default_params() {
   BGP_SERVER_NET_SUBNET_IPV6=${BGP_SERVER_NET_SUBNET_IPV6:-fc00:f853:ccd:e796::/64}
 
   KIND_NUM_MASTER=1
-  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
+  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-true}
   OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
   OVN_NETWORK_QOS_ENABLE=${OVN_NETWORK_QOS_ENABLE:-false}
 
@@ -685,6 +668,7 @@ set_default_params() {
     echo "Preconfigured UDN addresses requires interconnect to be enabled (-ic)"
     exit 1
   fi
+  ADVERTISED_UDN_ISOLATION_MODE=${ADVERTISED_UDN_ISOLATION_MODE:-strict}
   ADVERTISE_DEFAULT_NETWORK=${ADVERTISE_DEFAULT_NETWORK:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
@@ -858,9 +842,6 @@ build_ovn_image() {
   if [ "$OVN_IMAGE" == local ]; then
     set_ovn_image
 
-    # Build binaries
-    make -C ${DIR}/../go-controller
-
     # Build image
     make -C ${DIR}/../dist/images IMAGE="${OVN_IMAGE}" OVN_REPO="${OVN_REPO}" OVN_GITREF="${OVN_GITREF}" OCI_BIN="${OCI_BIN}" fedora-image
 
@@ -941,6 +922,7 @@ create_ovn_kube_manifests() {
     --preconfigured-udn-addresses-enable="${ENABLE_PRE_CONF_UDN_ADDR}" \
     --route-advertisements-enable="${ENABLE_ROUTE_ADVERTISEMENTS}" \
     --advertise-default-network="${ADVERTISE_DEFAULT_NETWORK}" \
+    --advertised-udn-isolation-mode="${ADVERTISED_UDN_ISOLATION_MODE}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
@@ -1285,3 +1267,5 @@ fi
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
   install_ffr_k8s
 fi
+
+interconnect_arg_check
