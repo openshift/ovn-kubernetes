@@ -681,6 +681,56 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 				},
 				true, // scheduled on the same node
 			),
+			Entry(
+				// localnet -> host network, different nodes
+				"can reach a host-network pod on a different node, when the localnet uses a VLAN and an external router",
+				networkAttachmentConfigParams{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					vlanID:   localnetVLANID,
+				},
+				podConfiguration{ // client attached to localnet secondary network
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name: secondaryNetworkName,
+					}},
+					name:                clientPodName,
+					ipRequestFromSubnet: fromExternalNetwork,
+					isPrivileged:        true,
+					usesExternalRouter:  true,
+				},
+				podConfiguration{ // server on host network
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					hostNetwork:  true,
+					isPrivileged: true,
+				},
+				false, // scheduled on distinct Nodes
+			),
+			Entry(
+				// localnet -> host network, same node
+				"can reach a host-network pod on the same node, when the localnet uses a VLAN and an external router",
+				networkAttachmentConfigParams{
+					name:     secondaryNetworkName,
+					topology: "localnet",
+					vlanID:   localnetVLANID,
+				},
+				podConfiguration{ // client attached to localnet secondary network
+					attachments: []nadapi.NetworkSelectionElement{{
+						Name: secondaryNetworkName,
+					}},
+					name:                clientPodName,
+					ipRequestFromSubnet: fromExternalNetwork,
+					isPrivileged:        true,
+					usesExternalRouter:  true,
+				},
+				podConfiguration{ // server on host network
+					name:         podName,
+					containerCmd: httpServerContainerCmd(port),
+					hostNetwork:  true,
+					isPrivileged: true,
+				},
+				true, // scheduled on the same node
+			),
 		)
 	})
 
