@@ -587,7 +587,8 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to user-defined network controller of %s network %s", nadName, topoType, netName))
 	mutableNetInfo := util.NewMutableNetInfo(userDefinedNetworkController.GetNetInfo())
 	mutableNetInfo.AddNADs(nadName)
-	_ = util.ReconcileNetInfo(userDefinedNetworkController.ReconcilableNetInfo, mutableNetInfo)
+	err = util.ReconcileNetInfo(userDefinedNetworkController.ReconcilableNetInfo, mutableNetInfo)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	return nil
 }
 
