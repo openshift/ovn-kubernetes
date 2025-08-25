@@ -713,7 +713,7 @@ func (nInfo *userDefinedNetInfo) GetNetworkScopedName(name string) string {
 // by a previous call to GetNetworkScopedName
 func (nInfo *userDefinedNetInfo) RemoveNetworkScopeFromName(name string) string {
 	// for the default network, names are not scoped
-	return strings.Trim(name, nInfo.getPrefix())
+	return strings.TrimPrefix(name, nInfo.getPrefix())
 }
 
 func (nInfo *userDefinedNetInfo) GetNetworkScopedK8sMgmtIntfName(nodeName string) string {
