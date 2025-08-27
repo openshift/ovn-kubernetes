@@ -58,6 +58,7 @@ import (
 	ipamclaimsv1alpha1 "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 
@@ -111,6 +112,7 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 		httpServerTestPods  = []*corev1.Pod{}
 		iperfServerTestPods = []*corev1.Pod{}
 		clientSet           kubernetes.Interface
+		nadClient           nadclient.K8sCniCncfIoV1Interface
 		providerCtx         infraapi.Context
 		// Systemd resolvd prevent resolving kube api service by fqdn, so
 		// we replace it here with NetworkManager
@@ -1329,6 +1331,15 @@ fi
 				return ra.Status.Status
 			}, 30*time.Second, time.Second).Should(Equal("Accepted"))
 		}
+
+		getJoinIPs = func(cudn *udnv1.ClusterUserDefinedNetwork) []string {
+			nad, err := nadClient.NetworkAttachmentDefinitions(namespace).Get(context.TODO(), cudn.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			var result map[string]interface{}
+			err = json.Unmarshal([]byte(nad.Spec.Config), &result)
+			Expect(err).NotTo(HaveOccurred())
+			return strings.Split(result["joinSubnet"].(string), ",")
+		}
 	)
 	BeforeEach(func() {
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
@@ -1340,6 +1351,9 @@ fi
 		Expect(err).NotTo(HaveOccurred())
 
 		virtClient, err = kubevirt.NewClient("/tmp")
+		Expect(err).NotTo(HaveOccurred())
+
+		nadClient, err = nadclient.NewForConfig(fr.ClientConfig())
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -1531,12 +1545,15 @@ fi
 			cmd         func() string
 		}
 		var (
-			cudn     *udnv1.ClusterUserDefinedNetwork
-			vm       *kubevirtv1.VirtualMachine
-			vmi      *kubevirtv1.VirtualMachineInstance
-			cidrIPv4 = "10.128.0.0/24"
-			cidrIPv6 = "2010:100:200::0/60"
-			restart  = testCommand{
+			cudn       *udnv1.ClusterUserDefinedNetwork
+			vm         *kubevirtv1.VirtualMachine
+			vmi        *kubevirtv1.VirtualMachineInstance
+			cidrIPv4   = "10.128.0.0/24"
+			cidrIPv6   = "2010:100:200::0/60"
+			staticIPv4 = "10.128.0.101"
+			staticIPv6 = "2010:100:200::101"
+			staticMAC  = "02:00:00:00:00:01"
+			restart    = testCommand{
 				description: "restart",
 				cmd: func() {
 					By("Restarting vm")
@@ -1619,6 +1636,29 @@ write_files:
 				},
 			}
 
+			virtualMachineWithUDNAndStaticIPsAndMAC = resourceCommand{
+				description: "VirtualMachine with interface binding for UDN and statics IPs and MAC",
+				cmd: func() string {
+					GinkgoHelper()
+					if !isPreConfiguredUdnAddressesEnabled() {
+						Skip("ENABLE_PRE_CONF_UDN_ADDR not configured")
+					}
+
+					annotations, err := kubevirt.GenerateAddressesAnnotations("net1", filterIPs(fr.ClientSet, staticIPv4, staticIPv6))
+					Expect(err).NotTo(HaveOccurred())
+
+					vm = fedoraWithTestToolingVM(nil /*labels*/, annotations, nil, /*nodeSelector*/
+						kubevirtv1.NetworkSource{
+							Pod: &kubevirtv1.PodNetwork{},
+						}, userDataWithIperfServer, networkDataDualStack)
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC
+					createVirtualMachine(vm)
+					return vm.Name
+				},
+			}
+
 			virtualMachineInstance = resourceCommand{
 				description: "VirtualMachineInstance",
 				cmd: func() string {
@@ -1669,6 +1709,8 @@ write_files:
 			topology    udnv1.NetworkTopology
 			role        udnv1.NetworkRole
 			ingress     string
+			ipRequests  []string
+			macRequest  string
 		}
 		var (
 			containerNetwork = func(td testData) (infraapi.Network, error) {
@@ -1817,6 +1859,12 @@ ip route add %[3]s via %[4]s
 			step = by(vmi.Name, "Wait for addresses at the virtual machine")
 			expectedNumberOfAddresses := len(dualCIDRs)
 			expectedAddreses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			if _, hasIPRequests := vmi.Annotations[kubevirt.AddressesAnnotation]; hasIPRequests {
+				Expect(expectedAddreses).To(ConsistOf(filterIPs(fr.ClientSet, staticIPv4, staticIPv6)), "expected addresses should be consistent with the static IPs")
+			}
+			if vmi.Spec.Domain.Devices.Interfaces[0].MacAddress != "" {
+				Expect(vmi.Spec.Domain.Devices.Interfaces[0].MacAddress).To(Equal(vmi.Status.Interfaces[0].MAC), "expected mac address should be consistent with the static MAC")
+			}
 			expectedAddresesAtGuest := expectedAddreses
 			testPodsIPs := podsMultusNetworkIPs(iperfServerTestPods, podNetworkStatusByNetConfigPredicate(namespace, cudn.Name, strings.ToLower(string(td.role))))
 
@@ -1848,7 +1896,7 @@ ip route add %[3]s via %[4]s
 					nodeRunningVMI, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.NodeName, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(nodeRunningVMI, networkName)
+					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(nodeRunningVMI, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(kubevirt.RetrieveIPv6Gateways).
 						WithArguments(virtClient, vmi).
@@ -1919,7 +1967,7 @@ ip route add %[3]s via %[4]s
 					targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, networkName)
+					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(targetNode, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred(), step)
 
 					Expect(err).NotTo(HaveOccurred(), step)
@@ -1935,7 +1983,7 @@ ip route add %[3]s via %[4]s
 					targetNode, err := fr.ClientSet.CoreV1().Nodes().Get(context.Background(), vmi.Status.MigrationState.TargetNode, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred(), step)
 
-					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(targetNode, networkName)
+					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(targetNode, getJoinIPs(cudn))
 					Expect(err).NotTo(HaveOccurred())
 					Eventually(kubevirt.RetrieveIPv6Gateways).
 						WithArguments(virtClient, vmi).
@@ -1987,6 +2035,25 @@ ip route add %[3]s via %[4]s
 				test:     liveMigrate,
 				topology: udnv1.NetworkTopologyLayer2,
 				role:     udnv1.NetworkRolePrimary,
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDNAndStaticIPsAndMAC,
+				test:     liveMigrate,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDNAndStaticIPsAndMAC,
+				test:     restart,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDNAndStaticIPsAndMAC,
+				test:     liveMigrate,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+				ingress:  "routed",
 			}),
 			Entry(nil, testData{
 				resource: virtualMachineWithUDN,
@@ -2170,7 +2237,6 @@ ip route add %[3]s via %[4]s
 			vmiIPv4              = "10.128.0.100/24"
 			vmiIPv6              = "2010:100:200::100/60"
 			vmiMAC               = "0A:58:0A:80:00:64"
-			cidrs                = []string{ipv4CIDR, ipv6CIDR}
 			staticIPsNetworkData = func(ips []string) (string, error) {
 				type Ethernet struct {
 					Addresses []string `json:"addresses,omitempty"`
@@ -2209,7 +2275,7 @@ chpasswd: { expire: False }
 			selectedNodes = workerNodeList.Items
 			Expect(selectedNodes).NotTo(BeEmpty())
 
-			iperfServerTestPods, err = createIperfServerPods(selectedNodes, cudn.Name, cudn.Spec.Network.Localnet.Role, filterCIDRs(fr.ClientSet, cidrs...))
+			iperfServerTestPods, err = createIperfServerPods(selectedNodes, cudn.Name, cudn.Spec.Network.Localnet.Role, filterCIDRs(fr.ClientSet, ipv4CIDR, ipv6CIDR))
 			Expect(err).NotTo(HaveOccurred())
 
 			networkData, err := staticIPsNetworkData(filterCIDRs(fr.ClientSet, vmiIPv4, vmiIPv6))
