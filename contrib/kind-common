@@ -426,9 +426,7 @@ install_kubevirt() {
 
     kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/developerConfiguration","value":{"featureGates":[]}},{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"NetworkBindingPlugins"},{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"DynamicPodInterfaceNaming"}]'
 
-    local kubevirt_stable_release_url=$(get_kubevirt_release_url "stable")
     kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"l2bridge":{"domainAttachmentType":"managedTap","migration":{}}}}]'
-
 }
 
 install_cert_manager() {
