@@ -49,6 +49,9 @@ RUN INSTALL_PKGS=" \
 	eval "dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $(cat /more-pkgs)" && \
 	dnf clean all && rm -rf /var/cache/*
 
+COPY libreswan-5.3-2.el9fdp.x86_64.rpm /root/
+RUN rpm -Uhv --nodeps --force /root/libreswan*.rpm
+
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-identity /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
