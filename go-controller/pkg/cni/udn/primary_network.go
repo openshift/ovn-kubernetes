@@ -2,14 +2,7 @@ package udn
 
 import (
 	"fmt"
-	"strings"
 
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadv1Listers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
@@ -17,37 +10,18 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// wait on a certain pod annotation related condition. in case of non-nil error,
-// return error to abort the retry attempt
-type podAnnotWaitCond = func(*corev1.Pod, string) (*util.PodAnnotation, bool, error)
-
-const resourceNameAnnot = "k8s.v1.cni.cncf.io/resourceName"
+// wait on a certain pod annotation related condition
+type podAnnotWaitCond = func(map[string]string, string) (*util.PodAnnotation, bool)
 
 type UserDefinedPrimaryNetwork struct {
 	networkManager networkmanager.Interface
-	nadLister      nadv1Listers.NetworkAttachmentDefinitionLister
 	annotation     *util.PodAnnotation
-
-	// the pod's UDN primary network, and its associated NAD name and the resourceName defined in the NAD
-	activeNetwork util.NetInfo
-	nadName       string
-	resourceName  string
-
-	// the pod's UDN primary interface's device information (when UDN's resourceName is defined)
-	// deviceInfo is extra device information stored by SRIOV device plugin in /var/run/k8s.cni.cncf.io/devinfo/dp
-	deviceInfo *nadapi.DeviceInfo
-	// deviceID is either a PCI address or an Auxiliary address (format <driver>.<type>.<id>, i.e. mlx5_core.sf.2) of the VF assigned to the pod
-	deviceID string
-	// netdevName is the linux network device name (such as enps0) when the VF device is bound to a kernel driver
-	netdevName string
-	// isVFIO indicates if the VF device is bound to the VFIO driver, exposing direct device access to userspace applications or virtual machines
-	isVFIO bool
+	activeNetwork  util.NetInfo
 }
 
-func NewPrimaryNetwork(networkManager networkmanager.Interface, nadLister nadv1Listers.NetworkAttachmentDefinitionLister) *UserDefinedPrimaryNetwork {
+func NewPrimaryNetwork(networkManager networkmanager.Interface) *UserDefinedPrimaryNetwork {
 	return &UserDefinedPrimaryNetwork{
 		networkManager: networkManager,
-		nadLister:      nadLister,
 	}
 }
 
@@ -56,11 +30,8 @@ func (p *UserDefinedPrimaryNetwork) InterfaceName() string {
 }
 
 func (p *UserDefinedPrimaryNetwork) NetworkDevice() string {
-	return p.netdevName
-}
-
-func (p *UserDefinedPrimaryNetwork) NetworkDeviceInfo() (string, *nadapi.DeviceInfo, bool) {
-	return p.deviceID, p.deviceInfo, p.isVFIO
+	// TODO: Support for non VFIO devices like SRIOV have to be implemented
+	return ""
 }
 
 func (p *UserDefinedPrimaryNetwork) Annotation() *util.PodAnnotation {
@@ -75,7 +46,14 @@ func (p *UserDefinedPrimaryNetwork) NetworkName() string {
 }
 
 func (p *UserDefinedPrimaryNetwork) NADName() string {
-	return p.nadName
+	if p.activeNetwork == nil || p.activeNetwork.IsDefault() {
+		return ""
+	}
+	nads := p.activeNetwork.GetNADs()
+	if len(nads) < 1 {
+		return ""
+	}
+	return nads[0]
 }
 
 func (p *UserDefinedPrimaryNetwork) MTU() int {
@@ -86,38 +64,38 @@ func (p *UserDefinedPrimaryNetwork) MTU() int {
 }
 
 func (p *UserDefinedPrimaryNetwork) Found() bool {
-	// if the primary UDN interface is not VF backed, its deviceInfo is empty but not nil.
-	return p.annotation != nil && p.activeNetwork != nil && p.deviceInfo != nil
+	return p.annotation != nil && p.activeNetwork != nil
 }
 
-func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(annotCondFn podAnnotWaitCond) podAnnotWaitCond {
-	return func(pod *corev1.Pod, nadName string) (*util.PodAnnotation, bool, error) {
-		annotation, isReady, err := annotCondFn(pod, nadName)
-		if err != nil || !isReady {
-			return annotation, isReady, err
+func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(podName, namespace string, annotCondFn podAnnotWaitCond) podAnnotWaitCond {
+	return func(annotations map[string]string, nadName string) (*util.PodAnnotation, bool) {
+		annotation, isReady := annotCondFn(annotations, nadName)
+		if annotation == nil {
+			return nil, false
 		}
-		isReady, err = p.ensure(pod, nadName, annotation)
-		if err == nil && isReady {
-			return annotation, isReady, err
+		if err := p.ensure(namespace, annotations, nadName, annotation); err != nil {
+			klog.Errorf("Failed ensuring user defined primary network for pod '%s/%s': %v", namespace, podName, err)
+			return nil, false
 		}
-		return nil, false, err
+		return annotation, isReady
 	}
 }
 
-func (p *UserDefinedPrimaryNetwork) ensure(pod *corev1.Pod, nadName string, annotation *util.PodAnnotation) (bool, error) {
+func (p *UserDefinedPrimaryNetwork) Ensure(namespace string, annotations map[string]string, nadName string) error {
+	return p.ensure(namespace, annotations, nadName, nil /* parse annotation */)
+}
+
+func (p *UserDefinedPrimaryNetwork) ensure(namespace string, annotations map[string]string, nadName string, annotation *util.PodAnnotation) error {
 	// non default network is not related to primary UDNs
 	if nadName != types.DefaultNetworkName {
-		return true, nil
+		return nil
 	}
 
 	if annotation == nil {
 		var err error
-		annotation, err = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+		annotation, err = util.UnmarshalPodAnnotation(annotations, nadName)
 		if err != nil {
-			if util.IsAnnotationNotSetError(err) {
-				return false, nil
-			}
-			return false, err
+			return fmt.Errorf("failed looking for ovn pod annotations: %w", err)
 		}
 	}
 
@@ -129,19 +107,16 @@ func (p *UserDefinedPrimaryNetwork) ensure(pod *corev1.Pod, nadName string, anno
 
 	// If default network is the primary there is nothing else to do
 	if annotation.Role == types.NetworkRolePrimary {
-		return true, nil
+		return nil
 	}
 
-	ready, err := p.ensureAnnotation(pod)
-	if !ready || err != nil {
-		return ready, err
+	if err := p.ensureAnnotation(annotations); err != nil {
+		return fmt.Errorf("failed looking for primary network annotation: %w", err)
 	}
-	err = p.ensureActiveNetwork(pod.Namespace)
-	if err != nil {
-		return false, err
+	if err := p.ensureActiveNetwork(namespace); err != nil {
+		return fmt.Errorf("failed ensuring primary network for namespace: %q: %w", namespace, err)
 	}
-	err = p.ensureNetworkDevice(pod)
-	return err == nil, err
+	return nil
 }
 
 func (p *UserDefinedPrimaryNetwork) ensureActiveNetwork(namespace string) error {
@@ -155,98 +130,30 @@ func (p *UserDefinedPrimaryNetwork) ensureActiveNetwork(namespace string) error 
 	if activeNetwork.IsDefault() {
 		return fmt.Errorf("missing primary user defined network NAD for namespace '%s'", namespace)
 	}
-
 	p.activeNetwork = activeNetwork
 	return nil
 }
 
-func (p *UserDefinedPrimaryNetwork) ensureAnnotation(pod *corev1.Pod) (bool, error) {
+func (p *UserDefinedPrimaryNetwork) ensureAnnotation(annotations map[string]string) error {
 	if p.annotation != nil {
-		return true, nil
+		return nil
 	}
-	annotations := pod.GetAnnotations()
 	podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(annotations)
 	if err != nil {
-		return false, err
+		return err
 	}
-	for nadFullName, podNetwork := range podNetworks {
+	for nadName, podNetwork := range podNetworks {
 		if podNetwork.Role != types.NetworkRolePrimary {
 			continue
 		}
-		annotation, err := util.UnmarshalPodAnnotation(annotations, nadFullName)
+		p.annotation, err = util.UnmarshalPodAnnotation(annotations, nadName)
 		if err != nil {
-			if util.IsAnnotationNotSetError(err) {
-				return false, nil
-			}
-			return false, err
+			return err
 		}
-		// To support for non VFIO devices like SRIOV, get the primary UDN's resource name
-		nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(nadFullName)
-		if err != nil {
-			return false, fmt.Errorf("invalid NAD name %s", nadFullName)
-		}
-		nad, err := p.nadLister.NetworkAttachmentDefinitions(nadNamespace).Get(nadName)
-		if err != nil {
-			return false, fmt.Errorf("failed to get primary UDN's network-attachment-definition %s: %v", nadFullName, err)
-		}
-		p.annotation = annotation
-		p.nadName = nadFullName
-		p.resourceName = nad.Annotations[resourceNameAnnot]
-		klog.Infof("Primary UDN for pod %s/%s NAD %s resource %s", pod.Namespace, pod.Name, p.nadName, p.resourceName)
-
-		return true, nil
+		break
 	}
-	return false, nil
-}
-
-func (p *UserDefinedPrimaryNetwork) ensureNetworkDevice(pod *corev1.Pod) error {
-	// everything has already been set, no need to retry
-	if p.deviceInfo != nil && (p.resourceName == "" || p.isVFIO || p.netdevName != "") {
-		return nil
+	if p.annotation == nil {
+		return fmt.Errorf("missing network annotation with primary role '%+v'", annotations)
 	}
-	// this UDN primary network interface does not request specific device
-	if p.resourceName == "" {
-		p.deviceInfo = &nadapi.DeviceInfo{}
-		return nil
-	}
-	deviceID, err := GetPodPrimaryUDNDeviceID(pod, p.resourceName)
-	if err != nil {
-		return fmt.Errorf("failed to get primary UDN device ID for pod %s/%s resource %s: %v",
-			pod.Namespace, pod.Name, p.resourceName, err)
-	}
-	if util.IsPCIDeviceName(deviceID) {
-		// DeviceID is a PCI address
-		p.isVFIO = util.GetSriovnetOps().IsVfPciVfioBound(deviceID)
-	} else if util.IsAuxDeviceName(deviceID) {
-		// DeviceID is an Auxiliary device name - <driver_name>.<kind_of_a_type>.<id>
-		chunks := strings.Split(deviceID, ".")
-		if chunks[1] != "sf" {
-			return fmt.Errorf("primary UDN's device info for pod %s/%s resource %s deviceID %s: only SF auxiliary devices are supported",
-				pod.Namespace, pod.Name, p.resourceName, deviceID)
-		}
-	} else {
-		return fmt.Errorf("primary UDN's device info for pod %s/%s resource %s deviceID %s: unexpected PCI or Auxiliary device name",
-			pod.Namespace, pod.Name, p.resourceName, deviceID)
-	}
-	p.deviceID = deviceID
-
-	deviceInfo, err := nadutils.LoadDeviceInfoFromDP(p.resourceName, deviceID)
-	if err != nil {
-		return fmt.Errorf("failed to load primary UDN's device info for pod %s/%s resource %s deviceID %s: %w",
-			pod.Namespace, pod.Name, p.resourceName, deviceID, err)
-	}
-	p.deviceInfo = deviceInfo
-
-	if !p.isVFIO {
-		netdevName, err := util.GetNetdevNameFromDeviceId(deviceID, *deviceInfo)
-		if err != nil {
-			return fmt.Errorf("failed to get primary UDN's netdev name for pod %s/%s resource %s deviceID %s: %w",
-				pod.Namespace, pod.Name, p.resourceName, deviceID, err)
-		}
-		p.netdevName = netdevName
-	}
-
-	klog.Infof("Primary UDN %s for pod %s/%s NAD %s resource %s deviceID %s deviceInfo %v netdevName %v isVFIO %v",
-		p.activeNetwork.GetNetworkName(), pod.Namespace, pod.Name, p.nadName, p.resourceName, deviceID, p.deviceInfo, p.netdevName, p.isVFIO)
 	return nil
 }

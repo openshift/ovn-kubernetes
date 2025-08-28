@@ -17,7 +17,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -337,7 +336,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset
 			// can only be deterministic when WatchNamespaces() handles this host network namespace.
 
-			gwLRPIPs, err := udn.GetGWRouterIPs(&testNode, &util.DefaultNetInfo{})
+			gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(&testNode, ovntypes.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(gwLRPIPs).ToNot(gomega.BeEmpty())
 

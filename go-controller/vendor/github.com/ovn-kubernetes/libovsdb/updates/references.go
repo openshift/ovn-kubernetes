@@ -351,10 +351,10 @@ func (rt *referenceTracker) processWeakReferences() (ModelUpdates, error) {
 					// a map referencing the row
 					// generate the mutation to remove the entry form the map
 					originalMap := originalRows[uuid][spec.FromColumn].(ovsdb.OvsMap).GoMap
-					var mutationMap map[any]any
+					var mutationMap map[interface{}]interface{}
 					value, ok := updatedRows[uuid][spec.FromColumn]
 					if !ok {
-						mutationMap = map[any]any{}
+						mutationMap = map[interface{}]interface{}{}
 					} else {
 						mutationMap = value.(ovsdb.OvsMap).GoMap
 					}
@@ -371,10 +371,10 @@ func (rt *referenceTracker) processWeakReferences() (ModelUpdates, error) {
 				case ovsdb.TypeSet:
 					// a set referencing the row
 					// generate the mutation to remove the entry form the set
-					var mutationSet []any
+					var mutationSet []interface{}
 					value, ok := updatedRows[uuid][spec.FromColumn]
 					if !ok {
-						mutationSet = []any{}
+						mutationSet = []interface{}{}
 					} else {
 						mutationSet = value.(ovsdb.OvsSet).GoSet
 					}
@@ -423,7 +423,7 @@ func (rt *referenceTracker) processWeakReferences() (ModelUpdates, error) {
 	return updates, nil
 }
 
-func copyMapKeyValues(from, to map[any]any, isKey bool, keyValue ovsdb.UUID) map[any]any {
+func copyMapKeyValues(from, to map[interface{}]interface{}, isKey bool, keyValue ovsdb.UUID) map[interface{}]interface{} {
 	if isKey {
 		to[keyValue] = from[keyValue]
 		return to
@@ -501,7 +501,7 @@ func (rt *referenceTracker) updateRow(table, uuid string, row ovsdb.Row) (ModelU
 			mutations = append(mutations, *ovsdb.NewMutation(column, ovsdb.MutateOperationDelete, value))
 			continue
 		}
-		update[column] = ovsdb.OvsSet{GoSet: []any{}}
+		update[column] = ovsdb.OvsSet{GoSet: []interface{}{}}
 	}
 
 	updates := ModelUpdates{}
@@ -588,7 +588,7 @@ func (rt *referenceTracker) rowExists(table, uuid string) (bool, error) {
 func getReferenceModificationsFromRow(dbModel *model.DatabaseModel, table, uuid string, modify, old *ovsdb.Row) database.References {
 	refs := database.References{}
 	for column, value := range *modify {
-		var oldValue any
+		var oldValue interface{}
 		if old != nil {
 			oldValue = (*old)[column]
 		}
@@ -598,7 +598,7 @@ func getReferenceModificationsFromRow(dbModel *model.DatabaseModel, table, uuid 
 	return refs
 }
 
-func getReferenceModificationsFromColumn(dbModel *model.DatabaseModel, table, uuid, column string, modify, old any) database.References {
+func getReferenceModificationsFromColumn(dbModel *model.DatabaseModel, table, uuid, column string, modify, old interface{}) database.References {
 	switch v := modify.(type) {
 	case ovsdb.UUID:
 		var oldUUID ovsdb.UUID

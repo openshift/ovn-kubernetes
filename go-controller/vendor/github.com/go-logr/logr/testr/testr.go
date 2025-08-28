@@ -130,12 +130,12 @@ type testloggerInterface struct {
 }
 
 func (l testloggerInterface) WithName(name string) logr.LogSink {
-	l.AddName(name) // via Formatter
+	l.Formatter.AddName(name)
 	return &l
 }
 
 func (l testloggerInterface) WithValues(kvList ...any) logr.LogSink {
-	l.AddValues(kvList) // via Formatter
+	l.Formatter.AddValues(kvList)
 	return &l
 }
 

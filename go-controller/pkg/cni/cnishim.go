@@ -262,16 +262,6 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 			klog.Error(err.Error())
 			return err
 		}
-		if response.PrimaryUDNPodInfo != nil {
-			primaryUDNPodRequest := response.PrimaryUDNPodReq
-			primaryUDNPodRequest.ctx, primaryUDNPodRequest.cancel = context.WithCancel(pr.ctx)
-			defer primaryUDNPodRequest.cancel()
-			err = primaryUDNCmdAddGetCNIResultFunc(result, getCNIResult, primaryUDNPodRequest, clientset, response.PrimaryUDNPodInfo)
-			if err != nil {
-				klog.Error(err.Error())
-				return err
-			}
-		}
 	}
 
 	return types.PrintResult(result, conf.CNIVersion)

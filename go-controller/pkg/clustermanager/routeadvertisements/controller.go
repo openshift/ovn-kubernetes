@@ -593,13 +593,14 @@ func (c *Controller) generateFRRConfiguration(
 	matchedNetworks sets.Set[string],
 ) (*frrtypes.FRRConfiguration, error) {
 	routers := []frrtypes.Router{}
+	advertisements := sets.New(ra.Spec.Advertisements...)
 
 	// go over the source routers
 	for i, router := range source.Spec.BGP.Routers {
 
 		targetVRF := ra.Spec.TargetVRF
 		var matchedVRF, matchedNetwork string
-		var advertisePrefixes []string
+		var receivePrefixes, advertisePrefixes []string
 
 		// We will use the router if:
 		// - the router VRF matches the target VRF
@@ -607,25 +608,33 @@ func (c *Controller) generateFRRConfiguration(
 		// Prepare each scenario with a switch statement and check after that
 		switch {
 		case targetVRF == "auto" && router.VRF == "":
-			// match on default network/VRF, advertise node prefixes
+			// match on default network/VRF, advertise node prefixes and receive
+			// any prefix of default network.
 			matchedVRF = ""
 			matchedNetwork = types.DefaultNetworkName
 			advertisePrefixes = selectedNetworks.hostNetworkSubnets[matchedNetwork]
+			receivePrefixes = selectedNetworks.networkSubnets[matchedNetwork]
 		case targetVRF == "auto":
-			// match router.VRF to network.VRF, advertise node prefixes
+			// match router.VRF to network.VRF, advertise node prefixes and
+			// receive any prefix of the matched network
 			matchedVRF = router.VRF
 			matchedNetwork = selectedNetworks.networkVRFs[matchedVRF]
 			advertisePrefixes = selectedNetworks.hostNetworkSubnets[matchedNetwork]
+			receivePrefixes = selectedNetworks.networkSubnets[matchedNetwork]
 		case targetVRF == "":
-			// match on default network/VRF, advertise node prefixes
+			// match on default network/VRF, advertise node prefixes and
+			// receive any prefix of selected networks
 			matchedVRF = ""
 			matchedNetwork = types.DefaultNetworkName
 			advertisePrefixes = selectedNetworks.hostSubnets
+			receivePrefixes = selectedNetworks.subnets
 		default:
-			// match router.VRF to network.VRF, advertise node prefixes
+			// match router.VRF to network.VRF, advertise node prefixes and
+			// receive any prefix of selected networks
 			matchedVRF = targetVRF
 			matchedNetwork = selectedNetworks.networkVRFs[matchedVRF]
 			advertisePrefixes = selectedNetworks.hostSubnets
+			receivePrefixes = selectedNetworks.subnets
 		}
 		if matchedVRF != router.VRF || len(advertisePrefixes) == 0 {
 			// either this router VRF does not match the target VRF or we don't
@@ -660,6 +669,7 @@ func (c *Controller) generateFRRConfiguration(
 
 			isIPV6 := utilnet.IsIPv6String(neighbor.Address)
 			advertisePrefixes := util.MatchAllIPNetsStringFamily(isIPV6, advertisePrefixes)
+			receivePrefixes := util.MatchAllIPNetsStringFamily(isIPV6, receivePrefixes)
 			if len(advertisePrefixes) == 0 {
 				continue
 			}
@@ -669,6 +679,22 @@ func (c *Controller) generateFRRConfiguration(
 					Mode:     frrtypes.AllowRestricted,
 					Prefixes: advertisePrefixes,
 				},
+			}
+			neighbor.ToReceive = frrtypes.Receive{
+				Allowed: frrtypes.AllowedInPrefixes{
+					Mode: frrtypes.AllowRestricted,
+				},
+			}
+			if advertisements.Has(ratypes.PodNetwork) {
+				for _, prefix := range receivePrefixes {
+					neighbor.ToReceive.Allowed.Prefixes = append(neighbor.ToReceive.Allowed.Prefixes,
+						frrtypes.PrefixSelector{
+							Prefix: prefix,
+							LE:     selectedNetworks.prefixLength[prefix],
+							GE:     selectedNetworks.prefixLength[prefix],
+						},
+					)
+				}
 			}
 			targetRouter.Neighbors = append(targetRouter.Neighbors, neighbor)
 		}
@@ -925,18 +951,10 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		return nil
 	}
 
-	var updateStatus bool
 	condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
-	switch {
-	case condition == nil:
-		fallthrough
-	case condition.ObservedGeneration != ra.Generation:
-		fallthrough
-	case (err == nil) != (condition.Status == metav1.ConditionTrue):
-		fallthrough
-	case hadUpdates:
-		updateStatus = true
-	}
+	updateStatus := hadUpdates || condition == nil || condition.ObservedGeneration != ra.Generation
+	updateStatus = updateStatus || err != nil
+
 	if !updateStatus {
 		return nil
 	}
@@ -990,7 +1008,7 @@ func (c *Controller) getSelectedNADs(networkSelectors apitypes.NetworkSelectors)
 		case apitypes.DefaultNetwork:
 			// if we are selecting the default networkdefault network label,
 			// make sure a NAD exists for it
-			nad, err := util.EnsureDefaultNetworkNAD(c.nadLister, c.nadClient)
+			nad, err := c.getOrCreateDefaultNetworkNAD()
 			if err != nil {
 				return nil, fmt.Errorf("failed to get/create default network NAD: %w", err)
 			}
@@ -1019,6 +1037,34 @@ func (c *Controller) getSelectedNADs(networkSelectors apitypes.NetworkSelectors)
 	}
 
 	return selected, nil
+}
+
+// getOrCreateDefaultNetworkNAD ensure that a well-known NAD exists for the
+// default network in ovn-k namespace.
+func (c *Controller) getOrCreateDefaultNetworkNAD() (*nadtypes.NetworkAttachmentDefinition, error) {
+	nad, err := c.nadLister.NetworkAttachmentDefinitions(config.Kubernetes.OVNConfigNamespace).Get(types.DefaultNetworkName)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	if nad != nil {
+		return nad, nil
+	}
+	return c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(config.Kubernetes.OVNConfigNamespace).Create(
+		context.Background(),
+		&nadtypes.NetworkAttachmentDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      types.DefaultNetworkName,
+				Namespace: config.Kubernetes.OVNConfigNamespace,
+			},
+			Spec: nadtypes.NetworkAttachmentDefinitionSpec{
+				Config: fmt.Sprintf("{\"cniVersion\": \"0.4.0\", \"name\": \"ovn-kubernetes\", \"type\": \"%s\"}", config.CNI.Plugin),
+			},
+		},
+		// note we don't set ourselves as field manager for this create as we
+		// want to process the resulting event that would otherwise be filtered
+		// out in nadNeedsUpdate
+		metav1.CreateOptions{},
+	)
 }
 
 // getEgressIPsByNodesByNetworks iterates all existing egress IPs that apply to

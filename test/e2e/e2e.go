@@ -671,7 +671,7 @@ func findOvnKubeControlPlaneNode(namespace, controlPlanePodName, leaseName strin
 	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (%s)"+
 		"from %s %v", leaseName, namespace, err))
 
-	framework.Logf("master instance of %s is running on node %s", controlPlanePodName, ovnkubeControlPlaneNode)
+	framework.Logf(fmt.Sprintf("master instance of %s is running on node %s", controlPlanePodName, ovnkubeControlPlaneNode))
 	// Strip leading and trailing quotes if present
 	if ovnkubeControlPlaneNode[0] == '\'' || ovnkubeControlPlaneNode[0] == '"' {
 		ovnkubeControlPlaneNode = ovnkubeControlPlaneNode[1 : len(ovnkubeControlPlaneNode)-1]
@@ -712,7 +712,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 		secondaryExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
 		secondaryExternalContainerSpec := infraapi.ExternalContainer{Name: "e2e-ovn-k", Image: images.AgnHost(),
-			Network: secondaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(secondaryExternalContainerPort), ExtPort: secondaryExternalContainerPort}
+			Network: secondaryProviderNetwork, Args: getAgnHostHTTPPortBindCMDArgs(secondaryExternalContainerPort), ExtPort: secondaryExternalContainerPort}
 		ginkgo.By("creating container on secondary provider network")
 		secondaryExternalContainer, err = providerCtx.CreateExternalContainer(secondaryExternalContainerSpec)
 		framework.ExpectNoError(err, "failed to create external container")
@@ -897,7 +897,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 		}
 
-		framework.Logf("Killed all pods running on node %s", ovnKubeControlPlaneNode)
+		framework.Logf(fmt.Sprintf("Killed all pods running on node %s", ovnKubeControlPlaneNode))
 
 		framework.ExpectNoError(<-errChan)
 	})
@@ -1275,7 +1275,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer = infraapi.ExternalContainer{Name: "e2e-ingress", Image: images.AgnHost(), Network: primaryProviderNetwork,
-				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "failed to create external service", externalContainer.String())
 		})
@@ -1298,11 +1298,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
-			if isDualStack {
-				expectedEndpointsNum = expectedEndpointsNum * 2
-			}
-			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, expectedEndpointsNum, time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -1498,11 +1494,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
-			if isDualStack {
-				expectedEndpointsNum = expectedEndpointsNum * 2
-			}
-			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, expectedEndpointsNum, time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -1586,11 +1578,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
-			if isDualStack {
-				expectedEndpointsNum = expectedEndpointsNum * 2
-			}
-			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, expectedEndpointsNum, time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, externalAddress := range addresses {
@@ -1684,7 +1672,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer = infraapi.ExternalContainer{Name: "e2e-ingress-add-more", Image: images.AgnHost(), Network: primaryProviderNetwork,
-				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "external container %s must be created successfully", externalContainer.Name)
 
@@ -1737,11 +1725,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
-			if isDualStack {
-				expectedEndpointsNum = expectedEndpointsNum * 2
-			}
-			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, expectedEndpointsNum, time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -1789,7 +1773,6 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 	maxTries := 0
 	var nodes *v1.NodeList
 	var providerCtx infraapi.Context
-	var isDualStack bool
 
 	ginkgo.BeforeEach(func() {
 		providerCtx = infraprovider.Get().NewTestContext()
@@ -1819,8 +1802,6 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 					"Test requires >= 3 Ready nodes, but there are only %v nodes",
 					len(nodes.Items))
 			}
-
-			isDualStack = isDualStackCluster(nodes)
 
 			ginkgo.By("Creating the endpoints pod, one for each worker")
 			for _, node := range nodes.Items {
@@ -1853,7 +1834,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer = infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "external container %s must be created successfully", externalContainer.Name)
 		})
@@ -1874,11 +1855,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
-			if isDualStack {
-				expectedEndpointsNum = expectedEndpointsNum * 2
-			}
-			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, expectedEndpointsNum, time.Second, wait.ForeverTestTimeout)
+			err = framework.WaitForServiceEndpointsNum(context.TODO(), f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
 			for _, protocol := range []string{"http", "udp"} {
@@ -1966,7 +1943,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
 			collectorExternalContainer := infraapi.ExternalContainer{Name: getContainerName(collectorPort), Image: "cloudflare/goflow",
-				Network: primaryProviderNetwork, CmdArgs: []string{"-kafka=false"}, ExtPort: collectorPort}
+				Network: primaryProviderNetwork, Args: []string{"-kafka=false"}, ExtPort: collectorPort}
 			collectorExternalContainer, err = providerCtx.CreateExternalContainer(collectorExternalContainer)
 			if err != nil {
 				framework.Failf("failed to start flow collector container %s: %v", getContainerName(collectorPort), err)
@@ -2051,7 +2028,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 
 })
 
-func getNodePodCIDRs(nodeName, netName string) (string, string, error) {
+func getNodePodCIDRs(nodeName string) (string, string, error) {
 	// retrieve the pod cidr for the worker node
 	jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
 	kubectlOut, err := e2ekubectl.RunKubectl("default", "get", "node", nodeName, "-o", jsonFlag)
@@ -2066,7 +2043,7 @@ func getNodePodCIDRs(nodeName, netName string) (string, string, error) {
 	ssSubnets := make(map[string]string)
 	if err := json.Unmarshal([]byte(annotation), &ssSubnets); err == nil {
 		// If only one subnet, determine if it's v4 or v6
-		if subnet, ok := ssSubnets[netName]; ok {
+		if subnet, ok := ssSubnets["default"]; ok {
 			if strings.Contains(subnet, ":") {
 				ipv6CIDR = subnet
 			} else {
@@ -2078,7 +2055,7 @@ func getNodePodCIDRs(nodeName, netName string) (string, string, error) {
 
 	dsSubnets := make(map[string][]string)
 	if err := json.Unmarshal([]byte(annotation), &dsSubnets); err == nil {
-		if subnets, ok := dsSubnets[netName]; ok && len(subnets) > 0 {
+		if subnets, ok := dsSubnets["default"]; ok && len(subnets) > 0 {
 			// Classify each subnet as IPv4 or IPv6
 			for _, subnet := range subnets {
 				if strings.Contains(subnet, ":") {
@@ -2091,7 +2068,7 @@ func getNodePodCIDRs(nodeName, netName string) (string, string, error) {
 		}
 	}
 
-	return "", "", fmt.Errorf("could not parse annotation %q for network %s", annotation, netName)
+	return "", "", fmt.Errorf("could not parse annotation %q", annotation)
 }
 
 var _ = ginkgo.Describe("e2e delete databases", func() {
@@ -2252,7 +2229,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		for {
 			select {
 			case msg := <-syncChan:
-				framework.Logf("%s: finish connectivity test.", msg)
+				framework.Logf(msg + ": finish connectivity test.")
 				break L
 			default:
 				stdout, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname",
@@ -2302,7 +2279,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 			select {
 			case msg := <-syncChan:
 				// wait for the connectivity test pods to be ready
-				framework.Logf("%s: delete and restart db pods.", msg)
+				framework.Logf(msg + ": delete and restart db pods.")
 			case err := <-errChan:
 				// fail if error is returned before test pods are ready
 				framework.Fail(err.Error())

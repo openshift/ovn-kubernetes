@@ -60,6 +60,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 					) {
 						By("creating the network")
 						netConfig.namespace = f.Namespace.Name
+						netConfig.cidr = filterCIDRsAndJoin(f.ClientSet, netConfig.cidr)
 						Expect(createNetworkFn(netConfig)).To(Succeed())
 
 						replicas := int32(3)
@@ -125,7 +126,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						false,
@@ -135,7 +136,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						false,
@@ -145,7 +146,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						true,
@@ -155,7 +156,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						true,
@@ -164,12 +165,12 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 			},
 			Entry("NetworkAttachmentDefinitions", func(c networkAttachmentConfigParams) error {
 				netConfig := newNetworkAttachmentConfig(c)
-				nad := generateNAD(netConfig, f.ClientSet)
+				nad := generateNAD(netConfig)
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(context.Background(), nad, metav1.CreateOptions{})
 				return err
 			}),
 			Entry("UserDefinedNetwork", func(c networkAttachmentConfigParams) error {
-				udnManifest := generateUserDefinedNetworkManifest(&c, f.ClientSet)
+				udnManifest := generateUserDefinedNetworkManifest(&c)
 				cleanup, err := createManifest(f.Namespace.Name, udnManifest)
 				DeferCleanup(cleanup)
 				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, c.name), 5*time.Second, time.Second).Should(Succeed())
@@ -195,6 +196,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 						Expect(err).NotTo(HaveOccurred())
 						By("creating the network")
 						netConfig.namespace = defaultNetNamespace.Name
+						netConfig.cidr = filterCIDRsAndJoin(f.ClientSet, netConfig.cidr)
 						Expect(createNetworkFn(netConfig)).To(Succeed())
 
 						replicas := int32(3)
@@ -233,7 +235,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "secondary",
 						},
 					),
@@ -242,7 +244,7 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 						networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "secondary",
 						},
 					),
@@ -250,12 +252,12 @@ var _ = Describe("Network Segmentation EndpointSlices mirroring", feature.Networ
 			},
 			Entry("NetworkAttachmentDefinitions", func(c networkAttachmentConfigParams) error {
 				netConfig := newNetworkAttachmentConfig(c)
-				nad := generateNAD(netConfig, f.ClientSet)
+				nad := generateNAD(netConfig)
 				_, err := nadClient.NetworkAttachmentDefinitions(fmt.Sprintf("%s-default", f.Namespace.Name)).Create(context.Background(), nad, metav1.CreateOptions{})
 				return err
 			}),
 			Entry("UserDefinedNetwork", func(c networkAttachmentConfigParams) error {
-				udnManifest := generateUserDefinedNetworkManifest(&c, f.ClientSet)
+				udnManifest := generateUserDefinedNetworkManifest(&c)
 				cleanup, err := createManifest(fmt.Sprintf("%s-default", f.Namespace.Name), udnManifest)
 				DeferCleanup(cleanup)
 				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, fmt.Sprintf("%s-default", f.Namespace.Name), c.name), 5*time.Second, time.Second).Should(Succeed())

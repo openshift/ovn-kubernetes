@@ -16,7 +16,6 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
-	k8snodeutil "k8s.io/component-helpers/node/util"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -577,10 +576,7 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		// 1. we missed an add event (bug in kapi informer code)
 		// 2. a user removed the annotation on the node
 		// Either way to play it safe for now do a partial json unmarshal check
-		_, nodeCondition := k8snodeutil.GetNodeCondition(&newNode.Status, corev1.NodeNetworkUnavailable)
-		nodeNetworkUnavailable := nodeCondition != nil && nodeCondition.Status == corev1.ConditionTrue
-		if !nodeFailed && util.NoHostSubnet(oldNode) == util.NoHostSubnet(newNode) &&
-			!h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) && !nodeNetworkUnavailable {
+		if !nodeFailed && util.NoHostSubnet(oldNode) == util.NoHostSubnet(newNode) && !h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) {
 			// no other node updates would require us to reconcile again
 			return nil
 		}
@@ -781,22 +777,22 @@ func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
 
 	subnets := netInfo.Subnets()
 	ipNets := make([]*net.IPNet, 0, len(subnets))
-	excludeSubnets := append(netInfo.ExcludeSubnets(), netInfo.InfrastructureSubnets()...)
-
+	excludeSubnets := netInfo.ExcludeSubnets()
 	for _, subnet := range subnets {
 		ipNets = append(ipNets, subnet.CIDR)
+		if isLayer2UserDefinedPrimaryNetwork(netInfo) {
+			excludeSubnets = append(
+				excludeSubnets,
+				autoExcludeCIDRs(subnet.CIDR)...,
+			)
+		}
 	}
 
-	if isLayer2UserDefinedPrimaryNetwork(netInfo) && len(netInfo.InfrastructureSubnets()) == 0 {
-		excludeSubnets = append(excludeSubnets, infrastructureExcludeCIDRs(netInfo)...)
-	}
-
-	if err := ipAllocator.AddOrUpdateSubnet(subnet.SubnetConfig{
-		Name:            netInfo.GetNetworkName(),
-		Subnets:         ipNets,
-		ReservedSubnets: netInfo.ReservedSubnets(),
-		ExcludeSubnets:  excludeSubnets,
-	}); err != nil {
+	if err := ipAllocator.AddOrUpdateSubnet(
+		netInfo.GetNetworkName(),
+		ipNets,
+		excludeSubnets...,
+	); err != nil {
 		return nil, err
 	}
 
@@ -807,17 +803,11 @@ func isLayer2UserDefinedPrimaryNetwork(netInfo util.NetInfo) bool {
 	return netInfo.IsPrimaryNetwork() && netInfo.TopologyType() == types.Layer2Topology
 }
 
-// infrastructureExcludeCIDRs returns a list of IPs that should be excluded from IP allocation (gateway and management port IPs)
-func infrastructureExcludeCIDRs(netInfo util.NetInfo) []*net.IPNet {
-	var excludeCIDRs []*net.IPNet
-
-	for _, subnet := range netInfo.Subnets() {
-		gwIP := netInfo.GetNodeGatewayIP(subnet.CIDR).IP
-		mgmtPortIP := netInfo.GetNodeManagementIP(subnet.CIDR).IP
-		excludeCIDRs = append(excludeCIDRs,
-			&net.IPNet{IP: gwIP, Mask: util.GetIPFullMask(gwIP)},
-			&net.IPNet{IP: mgmtPortIP, Mask: util.GetIPFullMask(mgmtPortIP)},
-		)
+func autoExcludeCIDRs(subnet *net.IPNet) []*net.IPNet {
+	gwIP := util.GetNodeGatewayIfAddr(subnet).IP
+	mgmtPortIP := util.GetNodeManagementIfAddr(subnet).IP
+	return []*net.IPNet{
+		{IP: gwIP, Mask: util.GetIPFullMask(gwIP)},
+		{IP: mgmtPortIP, Mask: util.GetIPFullMask(mgmtPortIP)},
 	}
-	return excludeCIDRs
 }

@@ -16,7 +16,6 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -521,14 +520,19 @@ func (r *DefaultGatewayReconciler) ReconcileIPv4AfterLiveMigration(liveMigration
 		return err
 	}
 
-	lrpJoinAddress, err := udn.GetGWRouterIPv4(targetNode, r.netInfo)
+	lrpJoinAddress, err := util.ParseNodeGatewayRouterJoinNetwork(targetNode, r.netInfo.GetNetworkName())
 	if err != nil {
 		return err
 	}
 
-	lrpMAC := util.IPAddrToHWAddr(lrpJoinAddress)
+	lrpJoinIPv4, _, err := net.ParseCIDR(lrpJoinAddress.IPv4)
+	if err != nil {
+		return err
+	}
+
+	lrpMAC := util.IPAddrToHWAddr(lrpJoinIPv4)
 	for _, subnet := range r.netInfo.Subnets() {
-		gwIP := r.netInfo.GetNodeGatewayIP(subnet.CIDR).IP.To4()
+		gwIP := util.GetNodeGatewayIfAddr(subnet.CIDR).IP.To4()
 		if gwIP == nil {
 			continue
 		}
@@ -577,7 +581,7 @@ func (r *DefaultGatewayReconciler) ReconcileIPv6AfterLiveMigration(liveMigration
 			// skip the target node since this is the proper gateway
 			continue
 		}
-		nodeJoinAddrs, err := udn.GetGWRouterIPs(node, r.netInfo)
+		nodeJoinAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(node, r.netInfo.GetNetworkName())
 		if err != nil {
 			return ovntypes.NewSuppressedError(fmt.Errorf("failed parsing join addresss from node %q and network %q to reconcile ipv6 gateway: %w", node.Name, r.netInfo.GetNetworkName(), err))
 		}
@@ -593,7 +597,7 @@ func (r *DefaultGatewayReconciler) ReconcileIPv6AfterLiveMigration(liveMigration
 	if err != nil {
 		return fmt.Errorf("failed fetching node %q to reconcile ipv6 gateway: %w", liveMigration.TargetPod.Spec.NodeName, err)
 	}
-	targetNodeJoinAddrs, err := udn.GetGWRouterIPs(targetNode, r.netInfo)
+	targetNodeJoinAddrs, err := util.ParseNodeGatewayRouterJoinAddrs(targetNode, r.netInfo.GetNetworkName())
 	if err != nil {
 		return ovntypes.NewSuppressedError(fmt.Errorf("failed parsing join addresss from live migration target node %q and network %q to reconcile ipv6 gateway: %w", targetNode.Name, r.netInfo.GetNetworkName(), err))
 	}

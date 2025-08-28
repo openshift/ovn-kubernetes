@@ -12,7 +12,7 @@ type MonitorCondSinceReply struct {
 }
 
 func (m MonitorCondSinceReply) MarshalJSON() ([]byte, error) {
-	v := []any{m.Found, m.LastTransactionID, m.Updates}
+	v := []interface{}{m.Found, m.LastTransactionID, m.Updates}
 	return json.Marshal(v)
 }
 

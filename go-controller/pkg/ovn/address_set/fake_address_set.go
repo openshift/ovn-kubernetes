@@ -11,7 +11,6 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -125,7 +124,7 @@ func (f *FakeAddressSetFactory) GetAddressSet(dbIDs *libovsdbops.DbObjectIDs) (A
 	if ok {
 		return set, nil
 	}
-	return nil, fmt.Errorf("error fetching address set: %w", client.ErrNotFound)
+	return nil, fmt.Errorf("error fetching address set")
 }
 
 func (f *FakeAddressSetFactory) ProcessEachAddressSet(ownerController string, indexT *libovsdbops.ObjectIDsType, iteratorFn AddressSetIterFunc) error {

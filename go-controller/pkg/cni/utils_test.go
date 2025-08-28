@@ -53,15 +53,7 @@ func newFakeClientSet(pod *corev1.Pod, podNamespaceLister *mocks.PodNamespaceLis
 
 var _ = Describe("CNI Utils tests", func() {
 	var defaultPodAnnotation string
-	var pod *corev1.Pod
-
-	const (
-		namespace = "some-ns"
-		podName   = "some-pod"
-	)
-
 	BeforeEach(func() {
-		pod = newPod(namespace, podName, nil)
 		defaultPodAnnotation = `{
   "default":{"ip_addresses":["192.168.2.3/24"],
   "mac_address":"0a:58:c0:a8:02:03",
@@ -74,15 +66,13 @@ var _ = Describe("CNI Utils tests", func() {
 	Context("isOvnReady", func() {
 		It("Returns true if OVN pod network annotation exists", func() {
 			podAnnot := map[string]string{util.OvnPodAnnotationName: defaultPodAnnotation}
-			pod.Annotations = podAnnot
-			_, ready, _ := isOvnReady(pod, ovntypes.DefaultNetworkName)
+			_, ready := isOvnReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(BeTrue())
 		})
 
 		It("Returns false if OVN pod network annotation does not exist", func() {
 			podAnnot := map[string]string{}
-			pod.Annotations = podAnnot
-			_, ready, _ := isOvnReady(pod, ovntypes.DefaultNetworkName)
+			_, ready := isOvnReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(BeFalse())
 		})
 	})
@@ -92,9 +82,7 @@ var _ = Describe("CNI Utils tests", func() {
 			podAnnot := map[string]string{
 				util.OvnPodAnnotationName:     defaultPodAnnotation,
 				util.DPUConnectionStatusAnnot: `{"Status":"Ready"}`}
-			pod.Annotations = podAnnot
-			_, ready, err := isDPUReady(nil, ovntypes.DefaultNetworkName)(pod, ovntypes.DefaultNetworkName)
-			Expect(err).ToNot(HaveOccurred())
+			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(BeTrue())
 		})
 
@@ -102,9 +90,7 @@ var _ = Describe("CNI Utils tests", func() {
 			podAnnot := map[string]string{
 				util.OvnPodAnnotationName:     defaultPodAnnotation,
 				util.DPUConnectionStatusAnnot: `{"Status":"NotReady"}`}
-			pod.Annotations = podAnnot
-			_, ready, err := isDPUReady(nil, ovntypes.DefaultNetworkName)(pod, ovntypes.DefaultNetworkName)
-			Expect(err).To(HaveOccurred())
+			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(BeFalse())
 		})
 
@@ -112,34 +98,35 @@ var _ = Describe("CNI Utils tests", func() {
 			podAnnot := map[string]string{
 				util.OvnPodAnnotationName:     defaultPodAnnotation,
 				util.DPUConnectionStatusAnnot: `{"Foo":"Bar"}`}
-			pod.Annotations = podAnnot
-			_, ready, err := isDPUReady(nil, ovntypes.DefaultNetworkName)(pod, ovntypes.DefaultNetworkName)
-			Expect(err).To(HaveOccurred())
+			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(BeFalse())
 		})
 
 		It("Returns false if dpu.connection-status is not present", func() {
 			podAnnot := map[string]string{util.OvnPodAnnotationName: defaultPodAnnotation}
-			pod.Annotations = podAnnot
-			_, ready, err := isDPUReady(nil, ovntypes.DefaultNetworkName)(pod, ovntypes.DefaultNetworkName)
-			Expect(err).ToNot(HaveOccurred())
+			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(BeFalse())
 		})
 
-		It("Returns false if OVN pod annotation is empty", func() {
+		It("Returns false if OVN pod-networks is not present", func() {
 			podAnnot := map[string]string{}
-			pod.Annotations = podAnnot
-			_, ready, err := isDPUReady(nil, ovntypes.DefaultNetworkName)(pod, ovntypes.DefaultNetworkName)
-			Expect(err).ToNot(HaveOccurred())
+			_, ready := isDPUReady(podAnnot, ovntypes.DefaultNetworkName)
 			Expect(ready).To(BeFalse())
 		})
 	})
 
 	Context("GetPodWithAnnotations", func() {
 		var podNamespaceLister mocks.PodNamespaceLister
+		var pod *corev1.Pod
+
+		const (
+			namespace = "some-ns"
+			podName   = "some-pod"
+		)
 
 		BeforeEach(func() {
 			podNamespaceLister = mocks.PodNamespaceLister{}
+			pod = newPod(namespace, podName, nil)
 		})
 
 		It("Returns Pod annotation if annotation condition is met", func() {
@@ -148,11 +135,11 @@ var _ = Describe("CNI Utils tests", func() {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancelFunc()
 
-			cond := func(pod *corev1.Pod, _ string) (*util.PodAnnotation, bool, error) {
-				if _, ok := pod.Annotations["foo"]; ok {
-					return nil, true, nil
+			cond := func(podAnnotation map[string]string, _ string) (*util.PodAnnotation, bool) {
+				if _, ok := podAnnotation["foo"]; ok {
+					return nil, true
 				}
-				return nil, false, nil
+				return nil, false
 			}
 
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
@@ -167,8 +154,8 @@ var _ = Describe("CNI Utils tests", func() {
 		It("Returns with Error if context is canceled", func() {
 			ctx, cancelFunc := context.WithCancel(context.Background())
 
-			cond := func(*corev1.Pod, string) (*util.PodAnnotation, bool, error) {
-				return nil, false, nil
+			cond := func(map[string]string, string) (*util.PodAnnotation, bool) {
+				return nil, false
 			}
 
 			go func() {
@@ -188,12 +175,12 @@ var _ = Describe("CNI Utils tests", func() {
 			defer cancelFunc()
 
 			calledOnce := false
-			cond := func(*corev1.Pod, string) (*util.PodAnnotation, bool, error) {
+			cond := func(map[string]string, string) (*util.PodAnnotation, bool) {
 				if calledOnce {
-					return nil, true, nil
+					return nil, true
 				}
 				calledOnce = true
-				return nil, false, nil
+				return nil, false
 			}
 
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
@@ -207,8 +194,8 @@ var _ = Describe("CNI Utils tests", func() {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancelFunc()
 
-			cond := func(*corev1.Pod, string) (*util.PodAnnotation, bool, error) {
-				return nil, false, nil
+			cond := func(map[string]string, string) (*util.PodAnnotation, bool) {
+				return nil, false
 			}
 
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
@@ -224,17 +211,17 @@ var _ = Describe("CNI Utils tests", func() {
 			defer cancelFunc()
 
 			calledOnce := false
-			cond := func(*corev1.Pod, string) (*util.PodAnnotation, bool, error) {
+			cond := func(map[string]string, string) (*util.PodAnnotation, bool) {
 				if calledOnce {
-					return nil, true, nil
+					return nil, true
 				}
 				calledOnce = true
-				return nil, false, nil
+				return nil, false
 			}
 
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
 
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, apierrors.NewNotFound(corev1.Resource("pod"), podName))
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, apierrors.NewNotFound(corev1.Resource("pod"), name))
 			_, _, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -243,13 +230,13 @@ var _ = Describe("CNI Utils tests", func() {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancelFunc()
 
-			cond := func(*corev1.Pod, string) (*util.PodAnnotation, bool, error) {
-				return nil, false, nil
+			cond := func(map[string]string, string) (*util.PodAnnotation, bool) {
+				return nil, false
 			}
 
 			clientset := newFakeClientSet(nil, &podNamespaceLister)
 
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, apierrors.NewNotFound(corev1.Resource("pod"), podName))
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, apierrors.NewNotFound(corev1.Resource("pod"), name))
 			_, _, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("timed out waiting for pod after 1s"))

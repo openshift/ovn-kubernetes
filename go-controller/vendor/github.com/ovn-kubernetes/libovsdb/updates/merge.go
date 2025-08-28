@@ -89,7 +89,7 @@ func mergeModifyRow(ts *ovsdb.TableSchema, o, a, b *ovsdb.Row) *ovsdb.Row {
 			continue
 		}
 
-		var result any
+		var result interface{}
 		var changed bool
 
 		// handle maps or sets first
@@ -106,7 +106,7 @@ func mergeModifyRow(ts *ovsdb.TableSchema, o, a, b *ovsdb.Row) *ovsdb.Row {
 				// set difference is a fully transitive operation so we dont
 				// need to do anything special to merge two differences
 				result, changed = setDifference(aSet.GoSet, bSet.GoSet)
-				result = ovsdb.OvsSet{GoSet: result.([]any)}
+				result = ovsdb.OvsSet{GoSet: result.([]interface{})}
 			}
 		case ovsdb.OvsMap:
 			aMap := aMod[k].(ovsdb.OvsMap)
@@ -119,7 +119,7 @@ func mergeModifyRow(ts *ovsdb.TableSchema, o, a, b *ovsdb.Row) *ovsdb.Row {
 			// value so we have to take the original value into account when
 			// merging
 			result, changed = mergeMapDifference(originalMap.GoMap, aMap.GoMap, bMap.GoMap)
-			result = ovsdb.OvsMap{GoMap: result.(map[any]any)}
+			result = ovsdb.OvsMap{GoMap: result.(map[interface{}]interface{})}
 		}
 
 		// was neither a map nor a set
@@ -138,7 +138,7 @@ func mergeModifyRow(ts *ovsdb.TableSchema, o, a, b *ovsdb.Row) *ovsdb.Row {
 				// instead of a nil set so that mergeAtomicDifference notices
 				// that we are returning to the original value
 				if set.GoSet == nil {
-					set.GoSet = []any{}
+					set.GoSet = []interface{}{}
 				}
 				o = set
 			}

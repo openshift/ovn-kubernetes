@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -813,7 +814,11 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 	}
 	var ops []ovsdb.Operation
 	for _, nodeInfo := range c.nodeInfos {
-		mgmtIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6String(service.Spec.ClusterIP), nodeInfo.mgmtIPs)
+		var mgmtPortIPs []net.IP
+		for _, subnet := range nodeInfo.podSubnets {
+			mgmtPortIPs = append(mgmtPortIPs, util.GetNodeManagementIfAddr(&subnet).IP)
+		}
+		mgmtIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6String(service.Spec.ClusterIP), mgmtPortIPs)
 		if err != nil {
 			return err
 		}

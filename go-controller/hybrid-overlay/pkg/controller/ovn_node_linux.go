@@ -22,7 +22,6 @@ import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -500,7 +499,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *corev1.Node) error {
 		return nil
 	}
 	if n.gwLRPIP == nil {
-		gwLRPIP, err := udn.GetGWRouterIPv4(node, &util.DefaultNetInfo{})
+		gwLRPIP, err := util.ParseNodeGatewayRouterJoinIPv4(node, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
 		}

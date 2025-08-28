@@ -303,6 +303,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.2.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.2/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
 				},
@@ -320,6 +321,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.3.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.3/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
 				},
@@ -337,6 +339,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"default\":[\"10.244.4.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.4/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.4/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"default\":\"0\"}",
 					},
 				},
@@ -596,6 +599,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.2.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.2/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
 				},
@@ -613,6 +617,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.3.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.3/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.3/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
 				},
@@ -630,6 +635,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"blue\":[\"10.244.4.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.4/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.4/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"blue\":\"1\"}",
 					},
 				},
@@ -751,6 +757,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"red\":[\"10.244.2.0/24\"], \"blue\":[\"11.244.2.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.2/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"red\":\"2\", \"blue\":\"1\"}",
 					},
 				},
@@ -768,6 +775,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"red\":[\"10.244.3.0/24\"], \"blue\":[\"11.244.3.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.3/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"defalut\":{\"ipv4\":\"100.64.0.3/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"red\":\"2\", \"blue\":\"1\"}",
 					},
 				},
@@ -785,6 +793,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"red\":[\"10.244.4.0/24\"], \"blue\":[\"11.244.4.0/24\"]}",
 						ovnTransitSwitchPortAddrAnnotation: "{\"ipv4\":\"100.88.0.4/16\"}",
+						util.OVNNodeGRLRPAddrs:             "{\"default\":{\"ipv4\":\"100.64.0.4/16\"}}",
 						ovnNodeNetworkIDsAnnotation:        "{\"red\":\"2\", \"blue\":\"1\"}",
 					},
 				},
@@ -932,6 +941,11 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				testNode4.Annotations[ovnNodeSubnetsAnnotation] = "{\"default\":[\"10.244.5.0/24\"]}"
 
 				err = zoneICHandler.AddLocalZoneNode(&testNode4)
+				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to parse node node4 GR IPs annotation")
+
+				// Set node ovn-gw-router-port-ips annotation
+				testNode4.Annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.5/16\"}}"
+				err = zoneICHandler.AddLocalZoneNode(&testNode4)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				testNodesRouteInfo = map[string]map[string]string{
@@ -1030,8 +1044,12 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 				err = libovsdbops.CreateOrUpdateLogicalRouter(libovsdbOvnNBClient, r)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = zoneICHandler.AddRemoteZoneNode(&testNode4)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).To(gomega.HaveOccurred(), "failed to parse node node4 GR IPs annotation")
 
+				// Set node ovn-gw-router-port-ips annotation
+				testNode4.Annotations[util.OVNNodeGRLRPAddrs] = "{\"default\":{\"ipv4\":\"100.64.0.5/16\"}}"
+				err = zoneICHandler.AddRemoteZoneNode(&testNode4)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNodesRouteInfo = map[string]map[string]string{
 					"node4": {"node-subnets": "10.244.5.0/24", "ts-ip": "100.88.0.5", "host-route": "100.64.0.5/32"},
 				}

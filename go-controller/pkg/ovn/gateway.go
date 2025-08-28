@@ -25,7 +25,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gatewayrouter"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -43,6 +42,7 @@ type GatewayManager struct {
 	nbClient          libovsdbclient.Client
 	netInfo           util.NetInfo
 	watchFactory      *factory.WatchFactory
+
 	// Cluster wide Load_Balancer_Group UUID.
 	// Includes all node switches and node gateway routers.
 	clusterLoadBalancerGroupUUID string
@@ -143,8 +143,8 @@ func WithLoadBalancerGroups(routerLBGroup, clusterLBGroup, switchLBGroup string)
 }
 
 // cleanupStalePodSNATs removes pod SNATs against nodeIP for the given node if
-// the SNAT.logicalIP isn't an active podIP, or disableSNATMultipleGWs=false.
-// We don't have to worry about
+// the SNAT.logicalIP isn't an active podIP, the pod network is being advertised
+// on this node or disableSNATMultipleGWs=false. We don't have to worry about
 // missing SNATs that should be added because addLogicalPort takes care of this
 // for all pods when RequestRetryObjs is called for each node add.
 // Other non-pod SNATs like join subnet SNATs are ignored.
@@ -154,11 +154,11 @@ func WithLoadBalancerGroups(routerLBGroup, clusterLBGroup, switchLBGroup string)
 // pod->nodeSNATs which won't get cleared up unless explicitly deleted.
 // NOTE2: egressIP SNATs are synced in EIP controller.
 func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.IPNet, gwLRPIPs []net.IP) error {
-	// collect all the pod IPs for which we should be doing the SNAT;
-	// if DisableSNATMultipleGWs==false we consider all
+	// collect all the pod IPs for which we should be doing the SNAT; if the pod
+	// network is advertised or DisableSNATMultipleGWs==false we consider all
 	// the SNATs stale
 	podIPsWithSNAT := sets.New[string]()
-	if config.Gateway.DisableSNATMultipleGWs {
+	if !gw.isRoutingAdvertised(nodeName) && config.Gateway.DisableSNATMultipleGWs {
 		pods, err := gw.watchFactory.GetAllPods()
 		if err != nil {
 			return fmt.Errorf("unable to list existing pods on node: %s, %w",
@@ -231,6 +231,7 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 		}
 		natsToDelete = append(natsToDelete, routerNat)
 	}
+
 	if len(natsToDelete) > 0 {
 		err := libovsdbops.DeleteNATs(gw.nbClient, gatewayRouter, natsToDelete...)
 		if err != nil {
@@ -389,8 +390,8 @@ func (gw *GatewayManager) createGWRouterPort(hostSubnets []*net.IPNet, gwLRPJoin
 		// one node per zone, since ARPs for .1 will not go beyond local switch.
 		// This is being done to add the ICMP SNATs for .1 podSubnet that OVN GR generates
 		for _, subnet := range hostSubnets {
-			gwLRPIPs = append(gwLRPIPs, gw.netInfo.GetNodeGatewayIP(subnet).IP)
-			gwLRPNetworks = append(gwLRPNetworks, gw.netInfo.GetNodeGatewayIP(subnet).String())
+			gwLRPIPs = append(gwLRPIPs, util.GetNodeGatewayIfAddr(subnet).IP)
+			gwLRPNetworks = append(gwLRPNetworks, util.GetNodeGatewayIfAddr(subnet).String())
 		}
 	}
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0])
@@ -611,7 +612,7 @@ func (gw *GatewayManager) updateClusterRouterStaticRoutes(hostSubnets []*net.IPN
 			// If migrating from local to shared gateway, let's remove the static routes towards
 			// management port interface for the hostSubnet prefix before adding the routes
 			// towards join switch.
-			mgmtIfAddr := gw.netInfo.GetNodeManagementIP(hostSubnet)
+			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 			gw.staticRouteCleanup([]net.IP{mgmtIfAddr.IP}, hostSubnet)
 
 			if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(
@@ -763,9 +764,7 @@ func (gw *GatewayManager) updateGWRouterNAT(nodeName string, clusterIPSubnet []*
 
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-	// DisableSNATMultipleGWs is only applicable to cluster default network and not to user defined networks.
-	// For user defined networks, we always add SNAT rules regardless of whether the network is advertised or not.
-	if !config.Gateway.DisableSNATMultipleGWs || gw.netInfo.IsPrimaryNetwork() {
+	if (!config.Gateway.DisableSNATMultipleGWs || gw.netInfo.IsPrimaryNetwork()) && !gw.isRoutingAdvertised(nodeName) {
 		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
 		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
 		for _, entry := range clusterIPSubnet {
@@ -775,17 +774,7 @@ func (gw *GatewayManager) updateGWRouterNAT(nodeName string, clusterIPSubnet []*
 					gw.gwRouterName, err)
 			}
 
-			// Get the match for this specific subnet's IP family
-			ipFamily := utilnet.IPv4
-			if utilnet.IsIPv6CIDR(entry) {
-				ipFamily = utilnet.IPv6
-			}
-			snatMatch, err := GetNetworkScopedClusterSubnetSNATMatch(gw.nbClient, gw.netInfo, nodeName, gw.isRoutingAdvertised(nodeName), ipFamily)
-			if err != nil {
-				return fmt.Errorf("failed to get SNAT match for node %s for network %s: %w", nodeName, gw.netInfo.GetNetworkName(), err)
-			}
-
-			nat = libovsdbops.BuildSNATWithMatch(&externalIP[0], entry, "", extIDs, snatMatch)
+			nat = libovsdbops.BuildSNATWithMatch(&externalIP[0], entry, "", extIDs, gw.netInfo.GetNetworkScopedClusterSubnetSNATMatch(nodeName))
 			nats = append(nats, nat)
 		}
 		err = libovsdbops.CreateOrUpdateNATs(gw.nbClient, gwRouter, nats...)
@@ -795,7 +784,7 @@ func (gw *GatewayManager) updateGWRouterNAT(nodeName string, clusterIPSubnet []*
 	} else {
 		// ensure we do not have any leftover SNAT entries after an upgrade
 		for _, logicalSubnet := range clusterIPSubnet {
-			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", extIDs)
+			nat = libovsdbops.BuildSNATWithMatch(nil, logicalSubnet, "", extIDs, gw.netInfo.GetNetworkScopedClusterSubnetSNATMatch(nodeName))
 			nats = append(nats, nat)
 		}
 		err = libovsdbops.DeleteNATs(gw.nbClient, gwRouter, nats...)
@@ -911,39 +900,6 @@ func (gw *GatewayManager) gatewayInit(
 	metrics.RecordEgressRoutingViaHost()
 
 	return nil
-}
-
-// GetNetworkScopedClusterSubnetSNATMatch returns the match for the SNAT rule for the cluster default network
-// and the match for the SNAT rule for the L3/L2 user defined network.
-// If the network is not advertised:
-// - For Layer2 topology, the match is the output port of the GR to the join switch since in L2 there is only 1 router but two cSNATs.
-// - For Layer3 topology, the match is empty.
-// If the network is advertised:
-// - For Layer2 topology, the match is the output port of the GR to the join switch and the destination must be a nodeIP in the cluster.
-// - For Layer3 topology, the match is the destination must be a nodeIP in the cluster.
-func GetNetworkScopedClusterSubnetSNATMatch(nbClient libovsdbclient.Client, netInfo util.NetInfo, nodeName string, isNetworkAdvertised bool, ipFamily utilnet.IPFamily) (string, error) {
-	if !isNetworkAdvertised {
-		if netInfo.TopologyType() != types.Layer2Topology {
-			return "", nil
-		}
-		return fmt.Sprintf("outport == %q", types.GWRouterToExtSwitchPrefix+netInfo.GetNetworkScopedGWRouterName(nodeName)), nil
-	}
-
-	// if the network is advertised, we need to ensure that the SNAT exists with the correct conditional destination match
-	dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, DefaultNetworkControllerName)
-	addressSetFactory := addressset.NewOvnAddressSetFactory(nbClient, config.IPv4Mode, config.IPv6Mode)
-	addrSet, err := addressSetFactory.GetAddressSet(dbIDs)
-	if err != nil {
-		return "", fmt.Errorf("cannot ensure that addressSet %v exists: %w", dbIDs, err)
-	}
-	destinationMatch := getClusterNodesDestinationBasedSNATMatch(ipFamily, addrSet)
-	if destinationMatch == "" {
-		return "", fmt.Errorf("could not build a destination based SNAT match because no addressSet %v exists for IP family %v", dbIDs, ipFamily)
-	}
-	if netInfo.TopologyType() != types.Layer2Topology {
-		return destinationMatch, nil
-	}
-	return fmt.Sprintf("outport == %q && %s", types.GWRouterToExtSwitchPrefix+netInfo.GetNetworkScopedGWRouterName(nodeName), destinationMatch), nil
 }
 
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
@@ -1401,7 +1357,7 @@ func (gw *GatewayManager) SyncGateway(
 		routerName = gw.gwRouterName
 	}
 	for _, subnet := range gwConfig.hostSubnets {
-		mgmtIfAddr := gw.netInfo.GetNodeManagementIP(subnet)
+		mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
 		if mgmtIfAddr == nil {
 			return fmt.Errorf("management interface address not found for subnet %q on network %q", subnet, gw.netInfo.GetNetworkName())
 		}

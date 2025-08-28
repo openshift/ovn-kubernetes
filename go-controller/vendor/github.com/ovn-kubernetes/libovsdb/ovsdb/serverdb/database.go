@@ -24,7 +24,7 @@ type Database struct {
 	Connected bool          `ovsdb:"connected"`
 	Index     *int          `ovsdb:"index"`
 	Leader    bool          `ovsdb:"leader"`
-	Model     DatabaseModel `ovsdb:"model" validate:"oneof='standalone' 'clustered' 'relay'"`
+	Model     DatabaseModel `ovsdb:"model"`
 	Name      string        `ovsdb:"name"`
 	Schema    *string       `ovsdb:"schema"`
 	Sid       *string       `ovsdb:"sid"`

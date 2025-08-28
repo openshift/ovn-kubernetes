@@ -212,7 +212,7 @@ func (zcc *zoneClusterController) syncNodeIDs(nodes []interface{}) error {
 			return fmt.Errorf("spurious object in syncNodes: %v", nodeObj)
 		}
 
-		nodeID, _ := util.GetNodeID(node)
+		nodeID := util.GetNodeID(node)
 		if nodeID != util.InvalidNodeID {
 			klog.Infof("Node %s has the id %d set", node.Name, nodeID)
 			if err := zcc.nodeIDAllocator.ReserveID(node.Name, nodeID); err != nil {
@@ -357,6 +357,9 @@ func (h *zoneClusterControllerEventHandler) AreResourcesEqual(obj1, obj2 interfa
 
 		// Check if the annotations have changed.
 		if util.NodeIDAnnotationChanged(node1, node2) {
+			return false, nil
+		}
+		if util.NodeGatewayRouterLRPAddrsAnnotationChanged(node1, node2) {
 			return false, nil
 		}
 		if util.NodeTransitSwitchPortAddrAnnotationChanged(node1, node2) {

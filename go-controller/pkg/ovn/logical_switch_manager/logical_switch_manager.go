@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net"
 
-	knet "k8s.io/utils/net"
-
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -16,8 +14,6 @@ var SwitchNotFound = subnet.ErrSubnetNotFound
 // LogicalSwitchManager provides switch info management APIs including IPAM for the host subnets
 type LogicalSwitchManager struct {
 	allocator  subnet.Allocator
-	gatewayIPs []*net.IPNet
-	mgmtIPs    []*net.IPNet
 	reserveIPs bool
 }
 
@@ -46,44 +42,25 @@ func NewL2SwitchManager() *LogicalSwitchManager {
 
 // NewL2SwitchManagerForUserDefinedPrimaryNetwork initializes a new logical
 // switch manager for L2 primary networks.
-// A user defined primary network auto-reserves the gateway and the node management IP addresses,
+// A user defined primary network auto-reserves the .1 and .2 IP addresses,
 // which are required for egressing the cluster over this user defined network.
-func NewL2SwitchManagerForUserDefinedPrimaryNetwork(gatewayIPs, mgmtIPs []*net.IPNet) *LogicalSwitchManager {
-	lsm := NewLogicalSwitchManager()
-	lsm.gatewayIPs = gatewayIPs
-	lsm.mgmtIPs = mgmtIPs
-	return lsm
+func NewL2SwitchManagerForUserDefinedPrimaryNetwork() *LogicalSwitchManager {
+	return NewLogicalSwitchManager()
 }
 
 // AddOrUpdateSwitch adds/updates a switch to the logical switch manager for subnet
 // and IPAM management.
-func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, reservedSubnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
+func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSubnets []*net.IPNet, excludeSubnets ...*net.IPNet) error {
 	if manager.reserveIPs {
 		for _, hostSubnet := range hostSubnets {
-			gwIP, _ := util.MatchFirstIPNetFamily(knet.IsIPv6CIDR(hostSubnet), manager.gatewayIPs)
-			if gwIP == nil {
-				gwIP = util.GetNodeGatewayIfAddr(hostSubnet)
-			}
-
-			mgmtIP, _ := util.MatchFirstIPNetFamily(knet.IsIPv6CIDR(hostSubnet), manager.mgmtIPs)
-			if mgmtIP == nil {
-				mgmtIP = util.GetNodeManagementIfAddr(hostSubnet)
-			}
-
-			for _, ip := range []*net.IPNet{gwIP, mgmtIP} {
-				excludeIP := &net.IPNet{IP: ip.IP, Mask: util.GetIPFullMask(ip.IP)}
-				if !util.IsContainedInAnyCIDR(excludeIP, excludeSubnets...) {
-					excludeSubnets = append(excludeSubnets, excludeIP)
-				}
+			for _, ip := range []*net.IPNet{util.GetNodeGatewayIfAddr(hostSubnet), util.GetNodeManagementIfAddr(hostSubnet)} {
+				excludeSubnets = append(excludeSubnets,
+					&net.IPNet{IP: ip.IP, Mask: util.GetIPFullMask(ip.IP)},
+				)
 			}
 		}
 	}
-	return manager.allocator.AddOrUpdateSubnet(subnet.SubnetConfig{
-		Name:            switchName,
-		Subnets:         hostSubnets,
-		ReservedSubnets: reservedSubnets,
-		ExcludeSubnets:  excludeSubnets,
-	})
+	return manager.allocator.AddOrUpdateSubnet(switchName, hostSubnets, excludeSubnets...)
 }
 
 // AddNoHostSubnetSwitch adds/updates a switch without any host subnets
@@ -92,7 +69,7 @@ func (manager *LogicalSwitchManager) AddNoHostSubnetSwitch(switchName string) er
 	// setting the hostSubnets slice argument to nil in the cache means an object
 	// exists for the switch but it was not assigned a hostSubnet by ovn-kubernetes
 	// this will be true for switches created on nodes that are marked as host-subnet only.
-	return manager.allocator.AddOrUpdateSubnet(subnet.SubnetConfig{Name: switchName})
+	return manager.allocator.AddOrUpdateSubnet(switchName, nil)
 }
 
 // Remove a switch from the the logical switch manager

@@ -22,7 +22,6 @@ import (
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -38,18 +37,18 @@ import (
 
 const v4PMTUDNFTRules = `
 add table inet ovn-kubernetes
-add rule inet ovn-kubernetes no-pmtud ip daddr @remote-node-ips-v4 meta l4proto icmp icmp type 3 icmp code 4 counter drop
+add rule inet ovn-kubernetes no-pmtud ip daddr @no-pmtud-remote-node-ips-v4 meta l4proto icmp icmp type 3 icmp code 4 counter drop
 add chain inet ovn-kubernetes no-pmtud { type filter hook output priority 0 ; comment "Block egress needs frag/packet too big to remote k8s nodes" ; }
-add set inet ovn-kubernetes remote-node-ips-v4 { type ipv4_addr ; comment "Block egress ICMP needs frag to remote Kubernetes nodes" ; }
-add set inet ovn-kubernetes remote-node-ips-v6 { type ipv6_addr ; comment "Block egress ICMPv6 packet too big to remote Kubernetes nodes" ; }
+add set inet ovn-kubernetes no-pmtud-remote-node-ips-v4 { type ipv4_addr ; comment "Block egress ICMP needs frag to remote Kubernetes nodes" ; }
+add set inet ovn-kubernetes no-pmtud-remote-node-ips-v6 { type ipv6_addr ; comment "Block egress ICMPv6 packet too big to remote Kubernetes nodes" ; }
 `
 
 const v6PMTUDNFTRules = `
 add table inet ovn-kubernetes
-add rule inet ovn-kubernetes no-pmtud meta l4proto icmpv6 icmpv6 type 2 icmpv6 code 0 ip6 daddr @remote-node-ips-v6 counter drop
+add rule inet ovn-kubernetes no-pmtud meta l4proto icmpv6 icmpv6 type 2 icmpv6 code 0 ip6 daddr @no-pmtud-remote-node-ips-v6 counter drop
 add chain inet ovn-kubernetes no-pmtud { type filter hook output priority 0 ; comment "Block egress needs frag/packet too big to remote k8s nodes" ; }
-add set inet ovn-kubernetes remote-node-ips-v4 { type ipv4_addr ; comment "Block egress ICMP needs frag to remote Kubernetes nodes" ; }
-add set inet ovn-kubernetes remote-node-ips-v6 { type ipv6_addr ; comment "Block egress ICMPv6 packet too big to remote Kubernetes nodes" ; }
+add set inet ovn-kubernetes no-pmtud-remote-node-ips-v4 { type ipv4_addr ; comment "Block egress ICMP needs frag to remote Kubernetes nodes" ; }
+add set inet ovn-kubernetes no-pmtud-remote-node-ips-v6 { type ipv6_addr ; comment "Block egress ICMPv6 packet too big to remote Kubernetes nodes" ; }
 `
 
 var _ = Describe("Node", func() {
@@ -755,9 +754,6 @@ var _ = Describe("Node", func() {
 					node := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: nodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/24"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -772,9 +768,6 @@ var _ = Describe("Node", func() {
 					otherNode := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: remoteNodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherNodeIP+"/24"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -810,16 +803,23 @@ var _ = Describe("Node", func() {
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil)
 					nc.initRetryFrameworkForNode()
-					err = setupRemoteNodeNFTSets()
+					err = setupPMTUDNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
 					Expect(err).NotTo(HaveOccurred())
+					defaultNetConfig := &bridgeUDNConfiguration{
+						ofPortPatch: "patch-breth0_ov",
+					}
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							flowCache: map[string][]string{},
+							defaultBridge: &bridgeConfiguration{
+								netConfig: map[string]*bridgeUDNConfiguration{
+									types.DefaultNetworkName: defaultNetConfig,
+								},
+							},
 						},
 					}
 
@@ -836,7 +836,7 @@ var _ = Describe("Node", func() {
 					err = nc.WatchNodes()
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v4PMTUDNFTRules + `
-add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
+add element inet ovn-kubernetes no-pmtud-remote-node-ips-v4 { 169.254.254.61 }
 `
 					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
 					Expect(err).NotTo(HaveOccurred())
@@ -866,9 +866,6 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					node := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: nodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/24"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -883,9 +880,6 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					otherNode := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: remoteNodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherSubnetNodeIP+"/24"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -921,16 +915,23 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil)
 					nc.initRetryFrameworkForNode()
-					err = setupRemoteNodeNFTSets()
+					err = setupPMTUDNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
 					Expect(err).NotTo(HaveOccurred())
+					defaultNetConfig := &bridgeUDNConfiguration{
+						ofPortPatch: "patch-breth0_ov",
+					}
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							flowCache: map[string][]string{},
+							defaultBridge: &bridgeConfiguration{
+								netConfig: map[string]*bridgeUDNConfiguration{
+									types.DefaultNetworkName: defaultNetConfig,
+								},
+							},
 						},
 					}
 
@@ -947,7 +948,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					err = nc.WatchNodes()
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v4PMTUDNFTRules + `
-add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
+add element inet ovn-kubernetes no-pmtud-remote-node-ips-v4 { 169.254.253.61 }
 `
 					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
 					Expect(err).NotTo(HaveOccurred())
@@ -1019,9 +1020,6 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					node := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: nodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/64"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -1036,9 +1034,6 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					otherNode := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: remoteNodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherNodeIP+"/64"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -1074,16 +1069,23 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil)
 					nc.initRetryFrameworkForNode()
-					err = setupRemoteNodeNFTSets()
+					err = setupPMTUDNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
 					Expect(err).NotTo(HaveOccurred())
+					defaultNetConfig := &bridgeUDNConfiguration{
+						ofPortPatch: "patch-breth0_ov",
+					}
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							flowCache: map[string][]string{},
+							defaultBridge: &bridgeConfiguration{
+								netConfig: map[string]*bridgeUDNConfiguration{
+									types.DefaultNetworkName: defaultNetConfig,
+								},
+							},
 						},
 					}
 
@@ -1100,7 +1102,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					err = nc.WatchNodes()
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v6PMTUDNFTRules + `
-add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
+add element inet ovn-kubernetes no-pmtud-remote-node-ips-v6 { 2001:db8:1::4 }
 `
 					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
 					Expect(err).NotTo(HaveOccurred())
@@ -1129,9 +1131,6 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					node := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: nodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/64"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -1146,9 +1145,6 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					otherNode := corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: remoteNodeName,
-							Annotations: map[string]string{
-								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherSubnetNodeIP+"/64"),
-							},
 						},
 						Status: corev1.NodeStatus{
 							Addresses: []corev1.NodeAddress{
@@ -1184,16 +1180,23 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil)
 					nc.initRetryFrameworkForNode()
-					err = setupRemoteNodeNFTSets()
+					err = setupPMTUDNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
 					Expect(err).NotTo(HaveOccurred())
+					defaultNetConfig := &bridgeUDNConfiguration{
+						ofPortPatch: "patch-breth0_ov",
+					}
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							flowCache: map[string][]string{},
+							defaultBridge: &bridgeConfiguration{
+								netConfig: map[string]*bridgeUDNConfiguration{
+									types.DefaultNetworkName: defaultNetConfig,
+								},
+							},
 						},
 					}
 
@@ -1210,7 +1213,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					err = nc.WatchNodes()
 					Expect(err).NotTo(HaveOccurred())
 					nftRules := v6PMTUDNFTRules + `
-add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
+add element inet ovn-kubernetes no-pmtud-remote-node-ips-v6 { 2002:db8:1::4 }
 `
 					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
 					Expect(err).NotTo(HaveOccurred())
@@ -1345,16 +1348,23 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil)
 					nc.initRetryFrameworkForNode()
-					err = setupRemoteNodeNFTSets()
+					err = setupPMTUDNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
 					Expect(err).NotTo(HaveOccurred())
+					defaultNetConfig := &bridgeUDNConfiguration{
+						ofPortPatch: "patch-breth0_ov",
+					}
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							flowCache: map[string][]string{},
+							defaultBridge: &bridgeConfiguration{
+								netConfig: map[string]*bridgeUDNConfiguration{
+									types.DefaultNetworkName: defaultNetConfig,
+								},
+							},
 						},
 					}
 
@@ -1466,16 +1476,23 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
-					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil)
 					nc.initRetryFrameworkForNode()
-					err = setupRemoteNodeNFTSets()
+					err = setupPMTUDNFTSets()
 					Expect(err).NotTo(HaveOccurred())
 					err = setupPMTUDNFTChain()
 					Expect(err).NotTo(HaveOccurred())
+					defaultNetConfig := &bridgeUDNConfiguration{
+						ofPortPatch: "patch-breth0_ov",
+					}
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							flowCache: map[string][]string{},
+							defaultBridge: &bridgeConfiguration{
+								netConfig: map[string]*bridgeUDNConfiguration{
+									types.DefaultNetworkName: defaultNetConfig,
+								},
+							},
 						},
 					}
 

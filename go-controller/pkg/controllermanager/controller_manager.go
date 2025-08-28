@@ -2,7 +2,6 @@ package controllermanager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -196,15 +195,15 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 		}
 	}
 
-	// Remove stale subnets from the advertised networks address set used for isolation
-	// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
-	// advertised.
-	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
-	advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
-	}
-	if advertisedSubnets != nil {
+	if util.IsRouteAdvertisementsEnabled() {
+		// Remove stale subnets from the advertised networks address set used for isolation
+		// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
+		// advertised.
+		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+		advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+		if err != nil {
+			return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
+		}
 		v4AdvertisedSubnets, v6AdvertisedSubnets := advertisedSubnets.GetAddresses()
 		var invalidSubnets []string
 		for _, subnet := range append(v4AdvertisedSubnets, v6AdvertisedSubnets...) {

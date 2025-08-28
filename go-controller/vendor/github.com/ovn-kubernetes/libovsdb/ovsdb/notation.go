@@ -74,7 +74,7 @@ func (o Operation) MarshalJSON() ([]byte, error) {
 
 // MonitorRequests represents a group of monitor requests according to RFC7047
 // We cannot use MonitorRequests by inlining the MonitorRequest Map structure till GoLang issue #6213 makes it.
-// The only option is to go with raw map[string]any option :-( that sucks !
+// The only option is to go with raw map[string]interface{} option :-( that sucks !
 // Refer to client.go : MonitorAll() function for more details
 type MonitorRequests struct {
 	Requests map[string]MonitorRequest `json:"requests"`
@@ -102,9 +102,9 @@ type OperationResult struct {
 	Rows    []Row  `json:"rows,omitempty"`
 }
 
-func ovsSliceToGoNotation(val any) (any, error) {
+func ovsSliceToGoNotation(val interface{}) (interface{}, error) {
 	switch sl := val.(type) {
-	case []any:
+	case []interface{}:
 		bsliced, err := json.Marshal(sl)
 		if err != nil {
 			return nil, err

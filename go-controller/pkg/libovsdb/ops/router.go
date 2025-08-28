@@ -932,11 +932,6 @@ func RemoveLoadBalancersFromLogicalRouterOps(nbClient libovsdbclient.Client, ops
 	return ops, err
 }
 
-func getNATMutableFields(nat *nbdb.NAT) []interface{} {
-	return []interface{}{&nat.Type, &nat.ExternalIP, &nat.LogicalIP, &nat.LogicalPort, &nat.ExternalMAC,
-		&nat.ExternalIDs, &nat.Match, &nat.Options, &nat.ExternalPortRange, &nat.GatewayPort, &nat.Priority}
-}
-
 func buildNAT(
 	natType nbdb.NATType,
 	externalIP string,
@@ -1040,7 +1035,7 @@ func BuildDNATAndSNATWithMatch(
 // isEquivalentNAT checks if the `searched` NAT is equivalent to `existing`.
 // Returns true if the UUID is set in `searched` and matches the UUID of `existing`.
 // Otherwise, perform the following checks:
-//   - Compare the Type.
+//   - Compare the Type and Match fields.
 //   - Compare ExternalIP if it is set in `searched`.
 //   - Compare LogicalIP if the Type in `searched` is SNAT.
 //   - Compare LogicalPort if it is set in `searched`.
@@ -1052,6 +1047,10 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 	}
 
 	if searched.Type != existing.Type {
+		return false
+	}
+
+	if searched.Match != existing.Match {
 		return false
 	}
 
@@ -1157,7 +1156,7 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation
 		}
 		opModel := operationModel{
 			Model:          inputNat,
-			OnModelUpdates: getNATMutableFields(inputNat),
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
 			ErrNotFound:    false,
 			BulkOp:         false,
 			DoAfter:        func() { router.Nat = append(router.Nat, inputNat.UUID) },
@@ -1285,7 +1284,7 @@ func UpdateNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nats ..
 		opModel := []operationModel{
 			{
 				Model:          nat,
-				OnModelUpdates: getNATMutableFields(nat),
+				OnModelUpdates: onModelUpdatesAllNonDefault(),
 				ErrNotFound:    true,
 				BulkOp:         false,
 			},

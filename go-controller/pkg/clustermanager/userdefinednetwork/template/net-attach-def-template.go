@@ -72,7 +72,6 @@ func RenderNetAttachDefManifest(obj client.Object, targetNamespace string) (*net
 			Name:            obj.GetName(),
 			OwnerReferences: []metav1.OwnerReference{ownerRef},
 			Labels:          renderNADLabels(obj),
-			Annotations:     renderNADAnnotations(obj),
 			Finalizers:      []string{FinalizerUserDefinedNetwork},
 		},
 		Spec: *nadSpec,
@@ -110,26 +109,11 @@ func renderNADLabels(obj client.Object) map[string]string {
 	return labels
 }
 
-// renderNADAnnotations copies annotations from UDN to corresponding NAD
-func renderNADAnnotations(obj client.Object) map[string]string {
-	udnAnnotations := obj.GetAnnotations()
-	annotations := make(map[string]string)
-	for k, v := range udnAnnotations {
-		if !strings.HasPrefix(k, types.OvnK8sPrefix) {
-			annotations[k] = v
-		}
-	}
-	if len(annotations) == 0 {
-		return nil
-	}
-	return annotations
-}
-
 func validateTopology(spec SpecGetter) error {
 	if spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLayer3 && spec.GetLayer3() == nil ||
 		spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLayer2 && spec.GetLayer2() == nil ||
 		spec.GetTopology() == userdefinednetworkv1.NetworkTopologyLocalnet && spec.GetLocalnet() == nil {
-		return config.NewTopologyConfigMismatchError(string(spec.GetTopology()))
+		return fmt.Errorf("topology %[1]s is specified but %[1]s config is nil", spec.GetTopology())
 	}
 	return nil
 }
@@ -158,21 +142,16 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 			return nil, err
 		}
 		if ipamEnabled(cfg.IPAM) && len(cfg.Subnets) == 0 {
-			return nil, config.NewSubnetsRequiredError()
+			return nil, fmt.Errorf("subnets is required with ipam.mode is Enabled or unset")
 		}
 		if !ipamEnabled(cfg.IPAM) && len(cfg.Subnets) > 0 {
-			return nil, config.NewSubnetsMustBeUnsetError()
+			return nil, fmt.Errorf("subnets must be unset when ipam.mode is Disabled")
 		}
 
 		netConfSpec.Role = strings.ToLower(string(cfg.Role))
 		netConfSpec.MTU = int(cfg.MTU)
 		netConfSpec.AllowPersistentIPs = cfg.IPAM != nil && cfg.IPAM.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent
 		netConfSpec.Subnets = cidrString(cfg.Subnets)
-		if util.IsPreconfiguredUDNAddressesEnabled() {
-			netConfSpec.ReservedSubnets = cidrString(cfg.ReservedSubnets)
-			netConfSpec.InfrastructureSubnets = cidrString(cfg.InfrastructureSubnets)
-			netConfSpec.DefaultGatewayIPs = ipString(cfg.DefaultGatewayIPs)
-		}
 		netConfSpec.JoinSubnet = cidrString(renderJoinSubnets(cfg.Role, cfg.JoinSubnets))
 	case userdefinednetworkv1.NetworkTopologyLocalnet:
 		cfg := spec.GetLocalnet()
@@ -230,20 +209,8 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 	if len(netConfSpec.ExcludeSubnets) > 0 {
 		cniNetConf["excludeSubnets"] = netConfSpec.ExcludeSubnets
 	}
-
 	if netConfSpec.VLANID != 0 {
 		cniNetConf["vlanID"] = netConfSpec.VLANID
-	}
-	if util.IsPreconfiguredUDNAddressesEnabled() {
-		if len(netConfSpec.ReservedSubnets) > 0 {
-			cniNetConf["reservedSubnets"] = netConfSpec.ReservedSubnets
-		}
-		if len(netConfSpec.InfrastructureSubnets) > 0 {
-			cniNetConf["infrastructureSubnets"] = netConfSpec.InfrastructureSubnets
-		}
-		if len(netConfSpec.DefaultGatewayIPs) > 0 {
-			cniNetConf["defaultGatewayIPs"] = netConfSpec.DefaultGatewayIPs
-		}
 	}
 	return cniNetConf, nil
 }
@@ -268,7 +235,7 @@ func validateIPAM(ipam *userdefinednetworkv1.IPAMConfig) error {
 		return nil
 	}
 	if ipam.Lifecycle == userdefinednetworkv1.IPAMLifecyclePersistent && !ipamEnabled(ipam) {
-		return config.NewIPAMLifecycleNotSupportedError()
+		return fmt.Errorf("lifecycle Persistent is only supported when ipam.mode is Enabled")
 	}
 	return nil
 }
@@ -311,14 +278,6 @@ func cidrString[T cidr](subnets T) string {
 		cidrs = append(cidrs, string(subnet))
 	}
 	return strings.Join(cidrs, ",")
-}
-
-func ipString(ips userdefinednetworkv1.DualStackIPs) string {
-	var ipStrings []string
-	for _, ip := range ips {
-		ipStrings = append(ipStrings, string(ip))
-	}
-	return strings.Join(ipStrings, ",")
 }
 
 func GetSpec(obj client.Object) SpecGetter {

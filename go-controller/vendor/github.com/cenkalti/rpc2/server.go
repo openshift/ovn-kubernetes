@@ -1,7 +1,6 @@
 package rpc2
 
 import (
-	"errors"
 	"io"
 	"log"
 	"net"
@@ -143,9 +142,7 @@ func (s *Server) Accept(lis net.Listener) {
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				log.Print("rpc.Serve: accept:", err.Error())
-			}
+			log.Print("rpc.Serve: accept:", err.Error())
 			return
 		}
 		go s.ServeConn(conn)

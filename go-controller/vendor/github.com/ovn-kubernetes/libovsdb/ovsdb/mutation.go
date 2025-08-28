@@ -28,11 +28,11 @@ const (
 type Mutation struct {
 	Column  string
 	Mutator Mutator
-	Value   any
+	Value   interface{}
 }
 
 // NewMutation returns a new mutation
-func NewMutation(column string, mutator Mutator, value any) *Mutation {
+func NewMutation(column string, mutator Mutator, value interface{}) *Mutation {
 	return &Mutation{
 		Column:  column,
 		Mutator: mutator,
@@ -42,13 +42,13 @@ func NewMutation(column string, mutator Mutator, value any) *Mutation {
 
 // MarshalJSON marshals a mutation to a 3 element JSON array
 func (m Mutation) MarshalJSON() ([]byte, error) {
-	v := []any{m.Column, m.Mutator, m.Value}
+	v := []interface{}{m.Column, m.Mutator, m.Value}
 	return json.Marshal(v)
 }
 
 // UnmarshalJSON converts a 3 element JSON array to a Mutation
 func (m *Mutation) UnmarshalJSON(b []byte) error {
-	var v []any
+	var v []interface{}
 	err := json.Unmarshal(b, &v)
 	if err != nil {
 		return err

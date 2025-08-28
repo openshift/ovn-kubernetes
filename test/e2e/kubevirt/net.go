@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	iputils "github.com/containernetworking/plugins/pkg/ip"
-
 	corev1 "k8s.io/api/core/v1"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -29,7 +27,7 @@ nmcli c mod %[1]s ipv4.addresses "" ipv6.addresses "" ipv4.gateway "" ipv6.gatew
 nmcli d reapply %[1]s`, iface)
 }
 
-func RetrieveCachedGatewayMAC(cli *Client, vmi *kubevirtv1.VirtualMachineInstance, dev, cidr string) (string, error) {
+func RetrieveCachedGatewayMAC(vmi *kubevirtv1.VirtualMachineInstance, dev, cidr string) (string, error) {
 	_, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return "", err
@@ -37,7 +35,7 @@ func RetrieveCachedGatewayMAC(cli *Client, vmi *kubevirtv1.VirtualMachineInstanc
 
 	gatewayIP := util.GetNodeGatewayIfAddr(ipNet).IP.String()
 
-	output, err := cli.RunCommand(vmi, fmt.Sprintf("ip neigh get %s dev %s", gatewayIP, dev), 2*time.Second)
+	output, err := RunCommand(vmi, fmt.Sprintf("ip neigh get %s dev %s", gatewayIP, dev), 2*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("%s: %v", output, err)
 	}
@@ -48,12 +46,12 @@ func RetrieveCachedGatewayMAC(cli *Client, vmi *kubevirtv1.VirtualMachineInstanc
 	return outputSplit[4], nil
 }
 
-func RetrieveIPv6Gateways(cli *Client, vmi *v1.VirtualMachineInstance) ([]string, error) {
+func RetrieveIPv6Gateways(vmi *v1.VirtualMachineInstance) ([]string, error) {
 	routes := []struct {
 		Gateway string `json:"gateway"`
 	}{}
 
-	output, err := cli.RunCommand(vmi, "ip -6 -j route list default", 2*time.Second)
+	output, err := RunCommand(vmi, "ip -6 -j route list default", 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", output, err)
 	}
@@ -67,62 +65,37 @@ func RetrieveIPv6Gateways(cli *Client, vmi *v1.VirtualMachineInstance) ([]string
 	return paths, nil
 }
 
-func GenerateGatewayMAC(node *corev1.Node, joinSubnets []string) (string, error) {
+func GenerateGatewayMAC(node *corev1.Node, networkName string) (string, error) {
 	config.IPv4Mode = true
-	lrpJoinAddress, err := GetDefaultUDNGWRouterIPs(node, joinSubnets)
+	lrpJoinAddress, err := util.ParseNodeGatewayRouterJoinNetwork(node, networkName)
 	if err != nil {
 		return "", err
 	}
 
-	if len(lrpJoinAddress) == 0 {
-		return "", fmt.Errorf("missing lrp join ip at node %q", node.Name)
+	lrpJoinIPString := lrpJoinAddress.IPv4
+	if lrpJoinIPString == "" {
+		lrpJoinIPString = lrpJoinAddress.IPv6
 	}
 
-	return util.IPAddrToHWAddr(*lrpJoinAddress[0]).String(), nil
+	if lrpJoinIPString == "" {
+		return "", fmt.Errorf("missing lrp join ip at node %q with network %q", node.Name)
+	}
+
+	lrpJoinIP, _, err := net.ParseCIDR(lrpJoinIPString)
+	if err != nil {
+		return "", err
+	}
+
+	return util.IPAddrToHWAddr(lrpJoinIP).String(), nil
 }
 
-func GenerateGatewayIPv6RouterLLA(node *corev1.Node, joinSubnets []string) (string, error) {
-	config.IPv4Mode = true
-	joinAddresses, err := GetDefaultUDNGWRouterIPs(node, joinSubnets)
+func GenerateGatewayIPv6RouterLLA(node *corev1.Node, networkName string) (string, error) {
+	joinAddresses, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
 	if err != nil {
 		return "", err
 	}
 	if len(joinAddresses) == 0 {
-		return "", fmt.Errorf("missing join addresses at node %q", node.Name)
+		return "", fmt.Errorf("missing join addresses at node %q for network %q", node.Name, networkName)
 	}
-	return util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(*joinAddresses[0])).String(), nil
-}
-
-func GetDefaultUDNGWRouterIPs(node *corev1.Node, joinSubnets []string) ([]*net.IP, error) {
-	nodeID, err := util.GetNodeID(node)
-	if err != nil {
-		// Don't consider this node as cluster-manager has not allocated node id yet.
-		return nil, err
-	}
-	var udnJoinNetv4, udnJoinNetv6 net.IP
-	for _, subnet := range joinSubnets {
-		ip, _, err := net.ParseCIDR(subnet)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse CIDR %q: %v", subnet, err)
-		}
-		if ip.To4() != nil {
-			udnJoinNetv4 = ip
-		} else {
-			udnJoinNetv6 = ip
-		}
-	}
-	res := []*net.IP{}
-	if config.IPv4Mode {
-		for range nodeID {
-			udnJoinNetv4 = iputils.NextIP(udnJoinNetv4)
-		}
-		res = append(res, &udnJoinNetv4)
-	}
-	if config.IPv6Mode {
-		for range nodeID {
-			udnJoinNetv6 = iputils.NextIP(udnJoinNetv6)
-		}
-		res = append(res, &udnJoinNetv6)
-	}
-	return res, nil
+	return util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(joinAddresses[0].IP)).String(), nil
 }

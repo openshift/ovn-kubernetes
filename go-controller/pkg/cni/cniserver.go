@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	nadv1Listers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -59,23 +58,17 @@ func NewCNIServer(
 	networkManager networkmanager.Interface,
 	ovsClient client.Client,
 ) (*Server, error) {
-	var nadLister nadv1Listers.NetworkAttachmentDefinitionLister
-
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
 
 	router := mux.NewRouter()
 
-	if util.IsNetworkSegmentationSupportEnabled() {
-		nadLister = factory.NADInformer().Lister()
-	}
 	s := &Server{
 		Server: http.Server{
 			Handler: router,
 		},
 		clientSet: &ClientSet{
-			nadLister: nadLister,
 			podLister: corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 			kclient:   kclient,
 		},

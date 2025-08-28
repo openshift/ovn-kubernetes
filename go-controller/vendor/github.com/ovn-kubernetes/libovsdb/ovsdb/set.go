@@ -14,12 +14,12 @@ import (
 // second element must be an array of zero or more <atom>s giving the
 // values in the set.  All of the <atom>s must have the same type.
 type OvsSet struct {
-	GoSet []any
+	GoSet []interface{}
 }
 
 // NewOvsSet creates a new OVSDB style set from a Go interface (object)
-func NewOvsSet(obj any) (OvsSet, error) {
-	ovsSet := make([]any, 0)
+func NewOvsSet(obj interface{}) (OvsSet, error) {
+	ovsSet := make([]interface{}, 0)
 	var v reflect.Value
 	if reflect.TypeOf(obj).Kind() == reflect.Ptr {
 		v = reflect.ValueOf(obj).Elem()
@@ -59,7 +59,7 @@ func (o OvsSet) MarshalJSON() ([]byte, error) {
 	case l == 1:
 		return json.Marshal(o.GoSet[0])
 	case l > 0:
-		var oSet []any
+		var oSet []interface{}
 		oSet = append(oSet, "set")
 		oSet = append(oSet, o.GoSet)
 		return json.Marshal(oSet)
@@ -69,8 +69,8 @@ func (o OvsSet) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON will unmarshal a JSON byte array to an OVSDB style Set
 func (o *OvsSet) UnmarshalJSON(b []byte) (err error) {
-	o.GoSet = make([]any, 0)
-	addToSet := func(o *OvsSet, v any) error {
+	o.GoSet = make([]interface{}, 0)
+	addToSet := func(o *OvsSet, v interface{}) error {
 		goVal, err := ovsSliceToGoNotation(v)
 		if err == nil {
 			o.GoSet = append(o.GoSet, goVal)
@@ -78,14 +78,14 @@ func (o *OvsSet) UnmarshalJSON(b []byte) (err error) {
 		return err
 	}
 
-	var inter any
+	var inter interface{}
 	if err = json.Unmarshal(b, &inter); err != nil {
 		return err
 	}
 	switch inter.(type) {
-	case []any:
-		var oSet []any
-		oSet = inter.([]any)
+	case []interface{}:
+		var oSet []interface{}
+		oSet = inter.([]interface{})
 		// it's a single uuid object
 		if len(oSet) == 2 && (oSet[0] == "uuid" || oSet[0] == "named-uuid") {
 			return addToSet(o, UUID{GoUUID: oSet[1].(string)})
@@ -94,7 +94,7 @@ func (o *OvsSet) UnmarshalJSON(b []byte) (err error) {
 			// it is a slice, but is not a set
 			return &json.UnmarshalTypeError{Value: reflect.ValueOf(inter).String(), Type: reflect.TypeOf(*o)}
 		}
-		innerSet := oSet[1].([]any)
+		innerSet := oSet[1].([]interface{})
 		for _, val := range innerSet {
 			err := addToSet(o, val)
 			if err != nil {

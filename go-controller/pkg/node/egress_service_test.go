@@ -19,7 +19,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -300,7 +299,7 @@ var _ = Describe("Egress Service Operations", func() {
 
 				c, err := egressservice.NewController(
 					stopChan,
-					nodetypes.OvnKubeNodeSNATMark,
+					ovnKubeNodeSNATMark,
 					"node",
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
@@ -406,7 +405,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "nam
 
 				c, err := egressservice.NewController(
 					stopChan,
-					nodetypes.OvnKubeNodeSNATMark,
+					ovnKubeNodeSNATMark,
 					"node",
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
@@ -611,7 +610,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "nam
 
 				c, err := egressservice.NewController(
 					stopChan,
-					nodetypes.OvnKubeNodeSNATMark,
+					ovnKubeNodeSNATMark,
 					"node",
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
@@ -806,7 +805,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 
 				c, err := egressservice.NewController(
 					stopChan,
-					nodetypes.OvnKubeNodeSNATMark,
+					ovnKubeNodeSNATMark,
 					"node",
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),
@@ -965,7 +964,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 
 				c, err := egressservice.NewController(
 					stopChan,
-					nodetypes.OvnKubeNodeSNATMark,
+					ovnKubeNodeSNATMark,
 					"node",
 					wf.EgressServiceInformer(),
 					wf.ServiceInformer(),

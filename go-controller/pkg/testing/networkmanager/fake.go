@@ -78,10 +78,6 @@ func (fnm *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {
 	return &util.DefaultNetInfo{}
 }
 
-func (fnm *FakeNetworkManager) GetActiveNetwork(networkName string) util.NetInfo {
-	return fnm.GetNetwork(networkName)
-}
-
 func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
 	namespaces := make([]string, 0)
 	for namespaceName, primaryNAD := range fnm.PrimaryNetworks {

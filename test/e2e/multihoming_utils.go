@@ -23,22 +23,28 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	utilnet "k8s.io/utils/net"
 )
 
 func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
 }
 
-func joinStrings(vals ...string) string {
-	return strings.Join(vals, ",")
+func joinCIDRs(cidrs ...string) string {
+	return strings.Join(cidrs, ",")
+}
+
+func splitCIDRs(cidrs string) []string {
+	if cidrs == "" {
+		return []string{}
+	}
+	return strings.Split(cidrs, ",")
 }
 
 func filterCIDRsAndJoin(cs clientset.Interface, cidrs string) string {
 	if cidrs == "" {
 		return "" // we may not always set CIDR - i.e. CDN
 	}
-	return joinStrings(filterCIDRs(cs, strings.Split(cidrs, ",")...)...)
+	return joinCIDRs(filterCIDRs(cs, splitCIDRs(cidrs)...)...)
 }
 
 func filterCIDRs(cs clientset.Interface, cidrs ...string) []string {
@@ -50,29 +56,6 @@ func filterCIDRs(cs clientset.Interface, cidrs ...string) []string {
 		supportedCIDRs = append(supportedCIDRs, cidr)
 	}
 	return supportedCIDRs
-}
-
-func filterSupportedNetworkConfig(client clientset.Interface, config *networkAttachmentConfigParams) {
-	config.cidr = filterCIDRsAndJoin(client, config.cidr)
-	config.excludeCIDRs = filterCIDRs(client, config.excludeCIDRs...)
-	config.reservedCIDRs = filterCIDRsAndJoin(client, config.reservedCIDRs)
-	config.infrastructureCIDRs = filterCIDRsAndJoin(client, config.infrastructureCIDRs)
-	config.defaultGatewayIPs = filterIPsAndJoin(client, config.defaultGatewayIPs)
-}
-
-func filterIPs(cs clientset.Interface, ips ...string) []string {
-	var supportedIPs []string
-	for _, ip := range ips {
-		isIPv6 := utilnet.IsIPv6String(ip)
-		if (!isIPv6 && isIPv4Supported(cs)) || (isIPv6 && isIPv6Supported(cs)) {
-			supportedIPs = append(supportedIPs, ip)
-		}
-	}
-	return supportedIPs
-}
-
-func filterIPsAndJoin(cs clientset.Interface, ips string) string {
-	return joinStrings(filterIPs(cs,  strings.Split(ips, ",")...)...)
 }
 
 func getNetCIDRSubnet(netCIDR string) (string, error) {
@@ -88,9 +71,6 @@ func getNetCIDRSubnet(netCIDR string) (string, error) {
 type networkAttachmentConfigParams struct {
 	cidr                string
 	excludeCIDRs        []string
-	infrastructureCIDRs string
-	defaultGatewayIPs   string
-	reservedCIDRs       string
 	namespace           string
 	name                string
 	topology            string
@@ -134,9 +114,6 @@ func generateNADSpec(config networkAttachmentConfig) string {
         "topology":%q,
         "subnets": %q,
         "excludeSubnets": %q,
-        "reservedSubnets": %q,
-        "infrastructureSubnets": %q,
-		"defaultGatewayIPs": %q,
         "mtu": %d,
         "netAttachDefName": %q,
         "vlanID": %d,
@@ -149,9 +126,6 @@ func generateNADSpec(config networkAttachmentConfig) string {
 		config.topology,
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
-		config.reservedCIDRs,
-		config.infrastructureCIDRs,
-		config.defaultGatewayIPs,
 		config.mtu,
 		namespacedName(config.namespace, config.name),
 		config.vlanID,
@@ -161,9 +135,7 @@ func generateNADSpec(config networkAttachmentConfig) string {
 	)
 }
 
-func generateNAD(config networkAttachmentConfig, client clientset.Interface) *nadapi.NetworkAttachmentDefinition {
-	filterSupportedNetworkConfig(client, &config.networkAttachmentConfigParams)
-
+func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
 	nadSpec := generateNADSpec(config)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }
@@ -731,40 +703,4 @@ func getNetworkGateway(cli *client.Client, networkName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("Gateway not found for network %q", networkName)
-}
-
-func getPodAnnotationForAttachment(pod *v1.Pod, attachmentName string) (PodAnnotation, error) {
-	podAnnotation, err := unmarshalPodAnnotation(pod.Annotations, attachmentName)
-	if err != nil {
-		return PodAnnotation{}, fmt.Errorf("failed to unmarshall annotations for pod %q: %v", pod.Name, err)
-	}
-
-	return *podAnnotation, nil
-}
-
-func getPodAnnotationIPsForAttachment(k8sClient clientset.Interface, podNamespace string, podName string, attachmentName string) ([]*net.IPNet, error) {
-	pod, err := k8sClient.CoreV1().Pods(podNamespace).Get(context.Background(), podName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	podAnnotation, err := getPodAnnotationForAttachment(pod, attachmentName)
-	if err != nil {
-		return nil, err
-	}
-	return podAnnotation.IPs, nil
-}
-
-// podIPsForNetworkByIndex returns the v4 or v6 IPs for a pod on the UDN
-func getPodAnnotationIPsForAttachmentByIndex(k8sClient clientset.Interface, podNamespace string, podName string, attachmentName string, index int) (string, error) {
-	ipnets, err := getPodAnnotationIPsForAttachment(k8sClient, podNamespace, podName, attachmentName)
-	if err != nil {
-		return "", err
-	}
-	if index >= len(ipnets) {
-		return "", fmt.Errorf("no IP at index %d for attachment %s on pod %s", index, attachmentName, namespacedName(podNamespace, podName))
-	}
-	if len(ipnets) > 2 {
-		return "", fmt.Errorf("attachment for network %q with more than two IPs", attachmentName)
-	}
-	return ipnets[index].IP.String(), nil
 }

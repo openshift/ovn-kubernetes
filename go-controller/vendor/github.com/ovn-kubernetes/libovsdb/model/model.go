@@ -16,14 +16,13 @@ import (
 // The struct may also have non-tagged fields (which will be ignored by the API calls)
 // The Model interface must be implemented by the pointer to such type
 // Example:
-//
-//	type MyLogicalRouter struct {
-//		UUID          string            `ovsdb:"_uuid"`
-//		Name          string            `ovsdb:"name"`
-//		ExternalIDs   map[string]string `ovsdb:"external_ids"`
-//		LoadBalancers []string          `ovsdb:"load_balancer"`
-//	}
-type Model any
+//type MyLogicalRouter struct {
+//	UUID          string            `ovsdb:"_uuid"`
+//	Name          string            `ovsdb:"name"`
+//	ExternalIDs   map[string]string `ovsdb:"external_ids"`
+//	LoadBalancers []string          `ovsdb:"load_balancer"`
+//}
+type Model interface{}
 
 type CloneableModel interface {
 	CloneModel() Model
@@ -81,21 +80,21 @@ func modelSetUUID(model Model, uuid string) error {
 // Condition is a model-based representation of an OVSDB Condition
 type Condition struct {
 	// Pointer to the field of the model where the operation applies
-	Field any
+	Field interface{}
 	// Condition function
 	Function ovsdb.ConditionFunction
 	// Value to use in the condition
-	Value any
+	Value interface{}
 }
 
 // Mutation is a model-based representation of an OVSDB Mutation
 type Mutation struct {
 	// Pointer to the field of the model that shall be mutated
-	Field any
+	Field interface{}
 	// String representing the mutator (as per RFC7047)
 	Mutator ovsdb.Mutator
 	// Value to use in the mutation
-	Value any
+	Value interface{}
 }
 
 // CreateModel creates a new Model instance based on an OVSDB Row information
