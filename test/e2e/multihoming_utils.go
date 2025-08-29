@@ -72,7 +72,7 @@ func filterIPs(cs clientset.Interface, ips ...string) []string {
 }
 
 func filterIPsAndJoin(cs clientset.Interface, ips string) string {
-	return joinStrings(filterIPs(cs,  strings.Split(ips, ",")...)...)
+	return joinStrings(filterIPs(cs, strings.Split(ips, ",")...)...)
 }
 
 func getNetCIDRSubnet(netCIDR string) (string, error) {
@@ -190,16 +190,17 @@ func patchNADSpec(nadClient nadclient.K8sCniCncfIoV1Interface, name, namespace s
 }
 
 type podConfiguration struct {
-	attachments                  []nadapi.NetworkSelectionElement
-	containerCmd                 []string
-	name                         string
-	namespace                    string
-	nodeSelector                 map[string]string
-	isPrivileged                 bool
-	labels                       map[string]string
-	requiresExtraNamespace       bool
-	hostNetwork                  bool
-	needsIPRequestFromHostSubnet bool
+	attachments            []nadapi.NetworkSelectionElement
+	containerCmd           []string
+	name                   string
+	namespace              string
+	nodeSelector           map[string]string
+	isPrivileged           bool
+	labels                 map[string]string
+	requiresExtraNamespace bool
+	hostNetwork            bool
+	ipRequestFromSubnet    string
+	usesExternalRouter     bool
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
@@ -355,7 +356,7 @@ func pingServer(clientPodConfig podConfiguration, serverIP string, args ...strin
 		clientPodConfig.name,
 		"--",
 		"ping",
-		"-c", "1", // send one ICMP echo request
+		"-c", "3", // send three ICMP echo requests
 		"-W", "2", // timeout after 2 seconds if no response
 	}
 	baseArgs = append(baseArgs, args...)
@@ -405,7 +406,11 @@ func podIPsForAttachment(k8sClient clientset.Interface, podNamespace string, pod
 	if err != nil {
 		return nil, err
 	}
-	if len(netStatus) != 1 {
+
+	if len(netStatus) == 0 {
+		return nil, fmt.Errorf("no status entry for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
+	}
+	if len(netStatus) > 1 {
 		return nil, fmt.Errorf("more than one status entry for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
 	}
 	if len(netStatus[0].IPs) == 0 {
