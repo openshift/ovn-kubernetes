@@ -30,6 +30,11 @@ KubeProxy
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 
+# NOT IMPLEMENTED: Service CIDR is a GA feature in K8s v1.33 which is not yet
+# supported in OVN-K.
+\[sig-network\].+Service CIDRs
+\[sig-network\].+ServiceCIDR
+
 # Clean up SCTP tests https://github.com/kubernetes/kubernetes/issues/96717
 should create a Pod with SCTP HostPort
 
@@ -38,9 +43,6 @@ service.kubernetes.io/headless
 
 # TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/95351
 should resolve connection reset issue #74839
-
-# TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/129049
-Services should be able to switch session affinity for NodePort service
 
 # api flakes
 sig-api-machinery
@@ -73,6 +75,7 @@ validates that there is no conflict between pods with same hostPort but differen
 
 # Skip Beta features by feature name for visibility
 \[FeatureGate:MultiCIDRServiceAllocator\] \[Beta\]
+
 
 # Skip unsupported GA features by feature name for visibility
 # TODO

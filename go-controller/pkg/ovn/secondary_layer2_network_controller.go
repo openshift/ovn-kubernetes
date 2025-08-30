@@ -180,8 +180,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, syncRerouteFailed := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
-				shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
-					joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName())
+				shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 				nodeSyncsParam = &nodeSyncs{
 					syncMgmtPort: shouldSyncMgmtPort,
 					syncGw:       shouldSyncGW,
@@ -313,9 +312,19 @@ func NewSecondaryLayer2NetworkController(
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 
-	lsManagerFactoryFn := lsm.NewL2SwitchManager
+	lsManager := lsm.NewL2SwitchManager()
 	if netInfo.IsPrimaryNetwork() {
-		lsManagerFactoryFn = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork
+		var gatewayIPs, mgmtIPs []*net.IPNet
+		for _, subnet := range netInfo.Subnets() {
+			if gwIP := netInfo.GetNodeGatewayIP(subnet.CIDR); gwIP != nil {
+				gatewayIPs = append(gatewayIPs, gwIP)
+			}
+			if mgmtIP := netInfo.GetNodeManagementIP(subnet.CIDR); mgmtIP != nil {
+				mgmtIPs = append(mgmtIPs, mgmtIP)
+			}
+		}
+
+		lsManager = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork(gatewayIPs, mgmtIPs)
 	}
 
 	oc := &SecondaryLayer2NetworkController{
@@ -326,7 +335,7 @@ func NewSecondaryLayer2NetworkController(
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
-					lsManager:                   lsManagerFactoryFn(),
+					lsManager:                   lsManager,
 					logicalPortCache:            portCache,
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
@@ -482,11 +491,14 @@ func (oc *SecondaryLayer2NetworkController) init() error {
 	oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
 	oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
 	oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
+	excludeSubnets := oc.ExcludeSubnets()
+	excludeSubnets = append(excludeSubnets, oc.InfrastructureSubnets()...)
 
 	_, err = oc.initializeLogicalSwitch(
 		oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
 		oc.Subnets(),
-		oc.ExcludeSubnets(),
+		excludeSubnets,
+		oc.ReservedSubnets(),
 		oc.clusterLoadBalancerGroupUUID,
 		oc.switchLoadBalancerGroupUUID,
 	)
@@ -575,36 +587,39 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 			gwManager := oc.gatewayManagerForNode(node.Name)
 			oc.gatewayManagers.Store(node.Name, gwManager)
 
-			gwConfig, err := oc.nodeGatewayConfig(node)
-			if err != nil {
-				errs = append(errs, err)
-				oc.gatewaysFailed.Store(node.Name, true)
-			} else {
+			err := func() error {
+				gwConfig, err := oc.nodeGatewayConfig(node)
+				if err != nil {
+					return err
+				}
 				if err := gwManager.SyncGateway(
 					node,
 					gwConfig,
 				); err != nil {
-					errs = append(errs, err)
-					oc.gatewaysFailed.Store(node.Name, true)
-				} else {
-					if !util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
-						err = oc.addUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName)
-						if err == nil && util.IsRouteAdvertisementsEnabled() {
-							err = oc.deleteAdvertisedNetworkIsolation(node.Name)
-						}
-					} else {
-						err = oc.deleteUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName)
-						if err == nil {
-							err = oc.addAdvertisedNetworkIsolation(node.Name)
-						}
+					return err
+				}
+				isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
+				err = oc.addOrUpdateUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, gwManager.gwRouterName, isUDNAdvertised)
+				if err != nil {
+					return err
+				}
+				shouldIsolate := isUDNAdvertised && config.OVNKubernetesFeature.AdvertisedUDNIsolationMode == config.AdvertisedUDNIsolationModeStrict
+				if shouldIsolate {
+					if err = oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
+						return err
 					}
-					if err != nil {
-						errs = append(errs, err)
-						oc.gatewaysFailed.Store(node.Name, true)
-					} else {
-						oc.gatewaysFailed.Delete(node.Name)
+				} else {
+					if err = oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
+						return err
 					}
 				}
+				oc.gatewaysFailed.Delete(node.Name)
+				return nil
+			}()
+
+			if err != nil {
+				errs = append(errs, err)
+				oc.gatewaysFailed.Store(node.Name, true)
 			}
 		}
 
@@ -678,7 +693,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev
 }
 
 func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.Node) error {
-	nodeJoinSubnetIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	nodeJoinSubnetIPs, err := udn.GetGWRouterIPs(node, oc.GetNetInfo())
 	if err != nil {
 		if util.IsAnnotationNotSetError(err) {
 			// remote node may not have the annotation yet, suppress it
@@ -741,7 +756,8 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 	return nil
 }
 
-// addUDNClusterSubnetEgressSNAT adds the SNAT on each node's GR in L2 networks
+// addOrUpdateUDNClusterSubnetEgressSNAT adds or updates the SNAT on each node's GR in L2 networks for each UDN
+// Based on the isUDNAdvertised flag, the SNAT matches are slightly different
 // snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 10.128.0.0/14
 // snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 2010:100:200::/64
 // these SNATs are required for pod2Egress traffic in LGW mode and pod2SameNode traffic in SGW mode to function properly on UDNs
@@ -751,9 +767,12 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, gwRouterName string) error {
+// If isUDNAdvertised is true, then we want to SNAT all packets that are coming from pods on this network
+// leaving towards nodeIPs on the cluster to masqueradeIP. If network is advertise then the SNAT looks like this:
+// "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/16"
+func (oc *SecondaryLayer2NetworkController) addOrUpdateUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, gwRouterName string, isUDNAdvertised bool) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + gwRouterName
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, isUDNAdvertised)
 	if err != nil {
 		return err
 	}
@@ -766,25 +785,6 @@ func (oc *SecondaryLayer2NetworkController) addUDNClusterSubnetEgressSNAT(localP
 	if err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, gwRouter, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for cluster on router: %q for network %q, error: %w",
 			gwRouterName, oc.GetNetworkName(), err)
-	}
-	return nil
-}
-
-func (oc *SecondaryLayer2NetworkController) deleteUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, routerName string) error {
-	outputPort := types.GWRouterToJoinSwitchPrefix + routerName
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
-	if err != nil {
-		return err
-	}
-	if len(nats) == 0 {
-		return nil // nothing to do
-	}
-	router := &nbdb.LogicalRouter{
-		Name: routerName,
-	}
-	if err := libovsdbops.DeleteNATs(oc.nbClient, router, nats...); err != nil {
-		return fmt.Errorf("failed to delete SNAT for cluster on router: %q for network %q, error: %w",
-			routerName, oc.GetNetworkName(), err)
 	}
 	return nil
 }
@@ -822,7 +822,7 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 
 	// at layer2 the GR LRP should be different per node same we do for layer3
 	// since they should not collide at the distributed switch later on
-	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
+	gwLRPJoinIPs, err := udn.GetGWRouterIPs(node, oc.GetNetInfo())
 	if err != nil {
 		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
 	}

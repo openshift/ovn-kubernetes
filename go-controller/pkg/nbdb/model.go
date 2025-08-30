@@ -52,7 +52,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "7.6.0",
+  "version": "7.11.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -819,6 +819,8 @@ var schema = `{
                   "eth_dst",
                   "ip_src",
                   "ip_dst",
+                  "ipv6_src",
+                  "ipv6_dst",
                   "tp_src",
                   "tp_dst"
                 ]
@@ -1026,7 +1028,8 @@ var schema = `{
                 [
                   "allow",
                   "drop",
-                  "reroute"
+                  "reroute",
+                  "jump"
                 ]
               ]
             }
@@ -1043,6 +1046,15 @@ var schema = `{
             "max": "unlimited"
           }
         },
+        "chain": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
         "external_ids": {
           "type": {
             "key": {
@@ -1053,6 +1065,15 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
+          }
+        },
+        "jump_chain": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": 1
           }
         },
         "match": {
@@ -1187,7 +1208,7 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 1,
+            "min": 0,
             "max": "unlimited"
           }
         },
@@ -1301,6 +1322,29 @@ var schema = `{
         },
         "route_table": {
           "type": "string"
+        },
+        "selection_fields": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "set",
+                [
+                  "eth_src",
+                  "eth_dst",
+                  "ip_proto",
+                  "ip_src",
+                  "ip_dst",
+                  "ipv6_src",
+                  "ipv6_dst",
+                  "tp_src",
+                  "tp_dst"
+                ]
+              ]
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
         }
       }
     },
@@ -1524,6 +1568,15 @@ var schema = `{
           }
         },
         "parent_name": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "peer": {
           "type": {
             "key": {
               "type": "string"
@@ -2090,6 +2143,9 @@ var schema = `{
           "type": "string"
         },
         "ssl_ciphers": {
+          "type": "string"
+        },
+        "ssl_ciphersuites": {
           "type": "string"
         },
         "ssl_protocols": {
