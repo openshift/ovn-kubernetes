@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -39,6 +40,16 @@ const (
 	externalGatewayPodIPsAnnotation = "k8s.ovn.org/external-gw-pod-ips"
 	defaultPolicyName               = "default-route-policy"
 	anyLink                         = "any"
+)
+
+// GatewayRemovalType defines ways to remove pod as external gateway
+type GatewayRemovalType string
+
+const (
+	GatewayUpdate            GatewayRemovalType = "GatewayUpdate"
+	GatewayDelete            GatewayRemovalType = "GatewayDelete"
+	GatewayDeletionTimestamp GatewayRemovalType = "GatewayDeletionTimestamp"
+	GatewayNotReady          GatewayRemovalType = "GatewayNotReady"
 )
 
 func getOverrideNetwork() (string, string, string) {
@@ -74,7 +85,7 @@ type gatewayTestIPs struct {
 	targetIPs  []string
 }
 
-var _ = ginkgo.Describe("External Gateway", func() {
+var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 	const (
 		gwTCPPort  = 80
@@ -133,7 +144,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			}
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer := infraapi.ExternalContainer{Name: getContainerName(gwContainerNameTemplate, externalContainerPort),
-				Image: images.AgnHost(), Network: network, ExtPort: externalContainerPort, Args: []string{"pause"}}
+				Image: images.AgnHost(), Network: network, ExtPort: externalContainerPort, CmdArgs: []string{"pause"}}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "failed to start external gateway test container")
 			if network.Name() == "host" {
@@ -183,7 +194,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			framework.Logf("Annotating the external gateway test namespace to a container gw: %s ", exGWIpAlt1)
 			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 
-			podCIDR, _, err := getNodePodCIDRs(node.Name)
+			podCIDR, _, err := getNodePodCIDRs(node.Name, "default")
 			if err != nil {
 				framework.Failf("Error retrieving the pod cidr from %s %v", node.Name, err)
 			}
@@ -227,7 +238,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			// start the container that will act as a new external gateway that the tests will be updated to use
 			externalContainer2Port := infraprovider.Get().GetExternalContainerPort()
 			externalContainer2 := infraapi.ExternalContainer{Name: getContainerName(gwContainerNameTemplate2, externalContainerPort),
-				Image: images.AgnHost(), Network: network, ExtPort: externalContainer2Port, Args: []string{"pause"}}
+				Image: images.AgnHost(), Network: network, ExtPort: externalContainer2Port, CmdArgs: []string{"pause"}}
 			externalContainer2, err = providerCtx.CreateExternalContainer(externalContainer2)
 			framework.ExpectNoError(err, "failed to start external gateway test container %s", getContainerName(gwContainerNameTemplate2, externalContainerPort))
 			if network.Name() == "host" {
@@ -354,7 +365,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			}
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer := infraapi.ExternalContainer{Name: getContainerName(gwContainerTemplate, externalContainerPort), Image: images.AgnHost(), Network: network,
-				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "failed to start external gateway test container %s", getContainerName(gwContainerTemplate, externalContainerPort))
 			if network.Name() == "host" {
@@ -390,7 +401,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				nodeIP = primaryNetworkInf.IPv6
 			}
 			framework.Logf("the pod side node is %s and the source node ip is %s", workerNodeInfo.name, nodeIP)
-			podCIDR, _, err := getNodePodCIDRs(workerNodeInfo.name)
+			podCIDR, _, err := getNodePodCIDRs(workerNodeInfo.name, "default")
 			if err != nil {
 				framework.Failf("Error retrieving the pod cidr from %s %v", workerNodeInfo.name, err)
 			}
@@ -846,7 +857,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				podConnEntriesWithMACLabelsSet := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 				totalPodConnEntries := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6)) // total conntrack entries for this pod/protocol
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // total conntrack entries for this pod/protocol
 
 				ginkgo.By("Remove second external gateway IP from the app namespace annotation")
 				annotateNamespaceForGateway(f.Namespace.Name, false, addresses.gatewayIPs[0])
@@ -856,7 +867,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(3))            // 4-1
 
 				ginkgo.By("Remove first external gateway IP from the app namespace annotation")
 				annotateNamespaceForGateway(f.Namespace.Name, false, "")
@@ -866,7 +877,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(2))            // 4-2
 
 			},
 				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
@@ -874,10 +885,15 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
 				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
 
-			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string, deletePod bool) {
+			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string, removalType GatewayRemovalType) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 				}
+
+				if removalType == GatewayNotReady {
+					recreatePodWithReadinessProbe(f, gatewayPodName2, nodes.Items[1].Name, servingNamespace, sleepCommand, nil)
+				}
+
 				ginkgo.By("Annotate the external gw pods to manage the src app pod namespace")
 				for i, gwPod := range []string{gatewayPodName1, gatewayPodName2} {
 					networkIPs := fmt.Sprintf("\"%s\"", addresses.gatewayIPs[i])
@@ -922,17 +938,11 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				podConnEntriesWithMACLabelsSet := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 				totalPodConnEntries := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6)) // total conntrack entries for this pod/protocol
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // total conntrack entries for this pod/protocol
 
-				if deletePod {
-					ginkgo.By(fmt.Sprintf("Delete second external gateway pod %s from ns %s", gatewayPodName2, servingNamespace))
-					err = f.ClientSet.CoreV1().Pods(servingNamespace).Delete(context.TODO(), gatewayPodName2, metav1.DeleteOptions{})
-					framework.ExpectNoError(err, "Delete the gateway pod failed: %v", err)
-					// give some time to handle pod delete event
-					time.Sleep(5 * time.Second)
-				} else {
-					ginkgo.By("Remove second external gateway pod's routing-namespace annotation")
-					annotatePodForGateway(gatewayPodName2, servingNamespace, "", addresses.gatewayIPs[1], false)
+				cleanUpFn := handleGatewayPodRemoval(f, removalType, gatewayPodName2, servingNamespace, addresses.gatewayIPs[1], true)
+				if cleanUpFn != nil {
+					defer cleanUpFn()
 				}
 
 				// ensure the conntrack deletion tracker annotation is updated
@@ -950,7 +960,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(1)) // we still have the conntrack entry for the remaining gateway
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(5))            // 6-1
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(3))            // 4-1
 
 				ginkgo.By("Remove first external gateway pod's routing-namespace annotation")
 				annotatePodForGateway(gatewayPodName1, servingNamespace, "", addresses.gatewayIPs[0], false)
@@ -970,14 +980,22 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				totalPodConnEntries = pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(2))            // 4-2
 			},
-				ginkgo.Entry("IPV4 udp", &addressesv4, "udp", false),
-				ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp", false),
-				ginkgo.Entry("IPV6 udp", &addressesv6, "udp", false),
-				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp", false),
-				ginkgo.Entry("IPV4 udp + pod delete", &addressesv4, "udp", true),
-				ginkgo.Entry("IPV6 tcp + pod delete", &addressesv6, "tcp", true),
+				ginkgo.Entry("IPV4 udp + pod annotation update", &addressesv4, "udp", GatewayUpdate),
+				ginkgo.Entry("IPV4 tcp + pod annotation update", &addressesv4, "tcp", GatewayUpdate),
+				ginkgo.Entry("IPV6 udp + pod annotation update", &addressesv6, "udp", GatewayUpdate),
+				ginkgo.Entry("IPV6 tcp + pod annotation update", &addressesv6, "tcp", GatewayUpdate),
+				ginkgo.Entry("IPV4 udp + pod delete", &addressesv4, "udp", GatewayDelete),
+				ginkgo.Entry("IPV6 tcp + pod delete", &addressesv6, "tcp", GatewayDelete),
+				ginkgo.Entry("IPV4 udp + pod deletion timestamp", &addressesv4, "udp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV4 tcp + pod deletion timestamp", &addressesv4, "tcp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV6 udp + pod deletion timestamp", &addressesv6, "udp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV6 tcp + pod deletion timestamp", &addressesv6, "tcp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV4 udp + pod not ready", &addressesv4, "udp", GatewayNotReady),
+				ginkgo.Entry("IPV4 tcp + pod not ready", &addressesv4, "tcp", GatewayNotReady),
+				ginkgo.Entry("IPV6 udp + pod not ready", &addressesv6, "udp", GatewayNotReady),
+				ginkgo.Entry("IPV6 tcp + pod not ready", &addressesv6, "tcp", GatewayNotReady),
 			)
 		})
 
@@ -1942,7 +1960,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are created for the 2 external gateways")
 				nodeName := getPod(f, srcPodName).Spec.NodeName
 				podConnEntriesWithMACLabelsSet := 2
-				totalPodConnEntries := 6
+				totalPodConnEntries := 4
 				gomega.Eventually(func() int {
 					return pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				}, time.Minute, 5).Should(gomega.Equal(podConnEntriesWithMACLabelsSet))
@@ -1952,7 +1970,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				updateAPBExternalRouteCRWithStaticHop(defaultPolicyName, f.Namespace.Name, false, addresses.gatewayIPs[0])
 
 				podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
-				totalPodConnEntries = 5            // 6-1
+				totalPodConnEntries = 3            // 4-1
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -1967,7 +1985,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 
 				podConnEntriesWithMACLabelsSet = 0 // we don't have any remaining gateways left
-				totalPodConnEntries = 4            // 6-2
+				totalPodConnEntries = 2            // 4-2
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -1982,9 +2000,13 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
 				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
 
-			ginkgo.DescribeTable("Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
+			ginkgo.DescribeTable("Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string, removalType GatewayRemovalType) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
+				}
+
+				if removalType == GatewayNotReady {
+					recreatePodWithReadinessProbe(f, gatewayPodName2, nodes.Items[1].Name, servingNamespace, sleepCommand, map[string]string{"name": gatewayPodName2, "gatewayPod": "true"})
 				}
 
 				for i, gwPod := range []string{gatewayPodName1, gatewayPodName2} {
@@ -2016,7 +2038,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.By("Check if conntrack entries for ECMP routes are created for the 2 external gateways")
 				nodeName := getPod(f, srcPodName).Spec.NodeName
 				podConnEntriesWithMACLabelsSet := 2 // TCP
-				totalPodConnEntries := 6            // TCP
+				totalPodConnEntries := 4            // TCP
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -2025,15 +2047,15 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				}, time.Minute, 5).Should(gomega.Equal(podConnEntriesWithMACLabelsSet))
 				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(totalPodConnEntries)) // total conntrack entries for this pod/protocol
 
-				ginkgo.By("Remove second external gateway pod's routing-namespace annotation")
-				p := getGatewayPod(f, servingNamespace, gatewayPodName2)
-				p.Labels = map[string]string{"name": gatewayPodName2}
-				updatePod(f, p)
+				cleanUpFn := handleGatewayPodRemoval(f, removalType, gatewayPodName2, servingNamespace, addresses.gatewayIPs[1], false)
+				if cleanUpFn != nil {
+					defer cleanUpFn()
+				}
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 
 				podConnEntriesWithMACLabelsSet = 1 // we still have the conntrack entry for the remaining gateway
-				totalPodConnEntries = 5            // 6-1
+				totalPodConnEntries = 3            // 4-1
 
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
@@ -2043,14 +2065,14 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(totalPodConnEntries))
 
 				ginkgo.By("Remove first external gateway pod's routing-namespace annotation")
-				p = getGatewayPod(f, servingNamespace, gatewayPodName1)
+				p := getGatewayPod(f, servingNamespace, gatewayPodName1)
 				p.Labels = map[string]string{"name": gatewayPodName1}
 				updatePod(f, p)
 
 				ginkgo.By("Check if conntrack entries for ECMP routes are removed for the deleted external gateway if traffic is UDP")
 
 				podConnEntriesWithMACLabelsSet = 0 //we don't have any remaining gateways left
-				totalPodConnEntries = 4
+				totalPodConnEntries = 2
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
@@ -2059,11 +2081,19 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(totalPodConnEntries))
 				checkAPBExternalRouteStatus(defaultPolicyName)
 			},
-				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
-				ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp"),
-				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
-				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
-
+				ginkgo.Entry("IPV4 udp + pod annotation update", &addressesv4, "udp", GatewayUpdate),
+				ginkgo.Entry("IPV4 tcp + pod annotation update", &addressesv4, "tcp", GatewayUpdate),
+				ginkgo.Entry("IPV6 udp + pod annotation update", &addressesv6, "udp", GatewayUpdate),
+				ginkgo.Entry("IPV6 tcp + pod annotation update", &addressesv6, "tcp", GatewayUpdate),
+				ginkgo.Entry("IPV4 udp + pod deletion timestamp", &addressesv4, "udp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV4 tcp + pod deletion timestamp", &addressesv4, "tcp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV6 udp + pod deletion timestamp", &addressesv6, "udp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV6 tcp + pod deletion timestamp", &addressesv6, "tcp", GatewayDeletionTimestamp),
+				ginkgo.Entry("IPV4 udp + pod not ready", &addressesv4, "udp", GatewayNotReady),
+				ginkgo.Entry("IPV4 tcp + pod not ready", &addressesv4, "tcp", GatewayNotReady),
+				ginkgo.Entry("IPV6 udp + pod not ready", &addressesv6, "udp", GatewayNotReady),
+				ginkgo.Entry("IPV6 tcp + pod not ready", &addressesv6, "tcp", GatewayNotReady),
+			)
 		})
 
 		// BFD Tests are dual of external gateway. The only difference is that they enable BFD on ovn and
@@ -2746,9 +2776,9 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				}
 
 				nodeName := getPod(f, srcPodName).Spec.NodeName
-				expectedTotalEntries := 6
+				expectedTotalEntries := 4
 				expectedMACEntries := 2
-				ginkgo.By("Check to ensure initial conntrack entries are 2 mac address label, and 6 total entries")
+				ginkgo.By("Check to ensure initial conntrack entries are 2 mac address label, and 4 total entries")
 				gomega.Eventually(func() int {
 					n := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 					klog.Infof("Number of entries with macAddressGW %s:%d", macAddressGW, n)
@@ -2818,7 +2848,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				podConnEntriesWithMACLabelsSet := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, macAddressGW)
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(2))
 				totalPodConnEntries := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
-				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6)) // total conntrack entries for this pod/protocol
+				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4)) // total conntrack entries for this pod/protocol
 				checkAPBExternalRouteStatus(defaultPolicyName)
 			},
 				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
@@ -2892,9 +2922,9 @@ func setupGatewayContainers(f *framework.Framework, providerCtx infraapi.Context
 
 	var err error
 	externalContainer1 := infraapi.ExternalContainer{Name: getContainerName(container1Template, uint16(gwTCPPort)),
-		Image: externalContainerImage, Network: network, Args: []string{}, ExtPort: uint16(gwTCPPort)}
+		Image: externalContainerImage, Network: network, CmdArgs: []string{}, ExtPort: uint16(gwTCPPort)}
 	externalContainer2 := infraapi.ExternalContainer{Name: getContainerName(container2Template, uint16(gwTCPPort)),
-		Image: externalContainerImage, Network: network, Args: []string{}, ExtPort: uint16(gwTCPPort)}
+		Image: externalContainerImage, Network: network, CmdArgs: []string{}, ExtPort: uint16(gwTCPPort)}
 
 	gwContainers := []infraapi.ExternalContainer{externalContainer1, externalContainer2}
 	addressesv4 := gatewayTestIPs{targetIPs: make([]string, 0)}
@@ -3145,12 +3175,12 @@ func setupGatewayContainersForConntrackTest(f *framework.Framework, providerCtx 
 	addressesv6 := gatewayTestIPs{gatewayIPs: make([]string, 2)}
 	ginkgo.By("Creating the gateway containers for the UDP test")
 	gwExternalContainer1 := infraapi.ExternalContainer{Name: getContainerName(gwContainer1Template, 12345),
-		Image: images.IPerf3(), Network: network, Args: []string{}, ExtPort: 12345}
+		Image: images.IPerf3(), Network: network, CmdArgs: []string{}, ExtPort: 12345}
 	gwExternalContainer1, err = providerCtx.CreateExternalContainer(gwExternalContainer1)
 	framework.ExpectNoError(err, "failed to create external container (%s)", gwExternalContainer1)
 
 	gwExternalContainer2 := infraapi.ExternalContainer{Name: getContainerName(gwContainer2Template, 12345),
-		Image: images.IPerf3(), Network: network, Args: []string{}, ExtPort: 12345}
+		Image: images.IPerf3(), Network: network, CmdArgs: []string{}, ExtPort: 12345}
 	gwExternalContainer2, err = providerCtx.CreateExternalContainer(gwExternalContainer2)
 	framework.ExpectNoError(err, "failed to create external container (%s)", gwExternalContainer2)
 	if network.Name() == "host" {
@@ -3592,5 +3622,135 @@ func resetGatewayAnnotations(f *framework.Framework) {
 			"namespace",
 			f.Namespace.Name,
 			annotation}...)
+	}
+}
+
+func setupPodWithReadinessProbe(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string) (*corev1.Pod, error) {
+	// Handle bash -c commands specially to preserve argument structure
+	if len(command) >= 3 && command[0] == "bash" && command[1] == "-c" {
+		// Extract the script part and wrap it to preserve logic
+		script := strings.Join(command[2:], " ")
+		command = []string{"bash", "-c", "touch /tmp/ready && (" + script + ")"}
+	} else {
+		// For non-bash commands, preserve their structure
+		var quotedArgs []string
+		for _, arg := range command {
+			// Escape single quotes and wrap in single quotes
+			escaped := strings.ReplaceAll(arg, "'", "'\"'\"'")
+			quotedArgs = append(quotedArgs, "'"+escaped+"'")
+		}
+		command = []string{"bash", "-c", "touch /tmp/ready && " + strings.Join(quotedArgs, " ")}
+	}
+	return createPod(f, podName, nodeSelector, namespace, command, labels, func(p *corev1.Pod) {
+		p.Spec.Containers[0].ReadinessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"cat", "/tmp/ready"},
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       5,
+			FailureThreshold:    1,
+		}
+	})
+}
+
+func recreatePodWithReadinessProbe(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string) {
+	ginkgo.By(fmt.Sprintf("Delete second external gateway pod %s from ns %s", podName, namespace))
+	err := deletePodWithWaitByName(context.TODO(), f.ClientSet, podName, namespace)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), fmt.Sprintf("Delete second external gateway pod %s from ns %s, failed: %v", podName, namespace, err))
+
+	ginkgo.By(fmt.Sprintf("Create second external gateway pod %s from ns %s with readiness probe", podName, namespace))
+	_, err = setupPodWithReadinessProbe(f, podName, nodeSelector, namespace, command, labels)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), fmt.Sprintf("Create second external gateway pod %s from ns %s with readiness probe, failed: %v", podName, namespace, err))
+	gomega.Eventually(func() bool {
+		var p *corev1.Pod
+		p, err = f.ClientSet.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		for _, condition := range p.Status.Conditions {
+			if condition.Type == corev1.PodReady {
+				return condition.Status == corev1.ConditionTrue
+			}
+		}
+		return false
+	}).Should(gomega.Equal(true), fmt.Sprintf("Readiness probe for second external gateway pod %s from ns %s, failed: %v", podName, namespace, err))
+}
+
+func handleGatewayPodRemoval(f *framework.Framework, removalType GatewayRemovalType, gatewayPodName, servingNamespace, gatewayIP string, isAnnotated bool) func() {
+	var err error
+	switch removalType {
+	case GatewayDelete:
+		ginkgo.By(fmt.Sprintf("Delete second external gateway pod %s from ns %s", gatewayPodName, servingNamespace))
+		err := deletePodWithWaitByName(context.TODO(), f.ClientSet, gatewayPodName, servingNamespace)
+		framework.ExpectNoError(err, "Delete the gateway pod failed: %v", err)
+		return nil
+	case GatewayUpdate:
+		if isAnnotated {
+			ginkgo.By("Remove second external gateway pod's routing-namespace annotation")
+			annotatePodForGateway(gatewayPodName, servingNamespace, "", gatewayIP, false)
+			return nil
+		}
+
+		ginkgo.By("Updating external gateway pod labels")
+		p := getGatewayPod(f, servingNamespace, gatewayPodName)
+		p.Labels = map[string]string{"name": gatewayPodName}
+		updatePod(f, p)
+		return nil
+	case GatewayDeletionTimestamp:
+		ginkgo.By("Setting finalizer then deleting external gateway pod with grace period to set deletion timestamp")
+		p := getGatewayPod(f, servingNamespace, gatewayPodName)
+		p.Finalizers = append(p.Finalizers, "k8s.ovn.org/external-gw-pod-finalizer")
+		updatePod(f, p)
+		gomega.Eventually(func() bool {
+			p, err = f.ClientSet.CoreV1().Pods(servingNamespace).Get(context.Background(), gatewayPodName, metav1.GetOptions{})
+			if err != nil {
+				return false
+			}
+			return strings.Contains(strings.Join(p.GetFinalizers(), ","), "k8s.ovn.org/external-gw-pod-finalizer")
+		}).Should(gomega.Equal(true), fmt.Sprintf("Update second external gateway pod %s from ns %s with finalizer, failed: %v", gatewayPodName, servingNamespace, err))
+
+		p = getGatewayPod(f, servingNamespace, gatewayPodName)
+		err = e2epod.DeletePodWithGracePeriod(context.Background(), f.ClientSet, p, 1000)
+		framework.ExpectNoError(err, fmt.Sprintf("unable to delete pod with grace period: %s, err: %v", p.Name, err))
+
+		gomega.Eventually(func() bool {
+			p, err = f.ClientSet.CoreV1().Pods(servingNamespace).Get(context.Background(), gatewayPodName, metav1.GetOptions{})
+			if err != nil {
+				return false
+			}
+			return p.DeletionTimestamp != nil
+		}).Should(gomega.BeTrue(), fmt.Sprintf("Gateway pod %s in ns %s should have deletion timestamp, failed: %v", gatewayPodName, servingNamespace, err))
+
+		// return a function to remove the finalizer
+		return func() {
+			p = getGatewayPod(f, servingNamespace, gatewayPodName)
+			p.Finalizers = []string{}
+			updatePod(f, p)
+		}
+	case GatewayNotReady:
+		ginkgo.By("Remove /tmp/ready in external gateway pod so that readiness probe fails")
+		_, err = e2ekubectl.RunKubectl(servingNamespace, "exec", gatewayPodName, "--", "rm", "/tmp/ready")
+		framework.ExpectNoError(err, fmt.Sprintf("unable to remove /tmp/ready in pod: %s, err: %v", gatewayPodName, err))
+		gomega.Eventually(func() bool {
+			var p *corev1.Pod
+			p, err = f.ClientSet.CoreV1().Pods(servingNamespace).Get(context.Background(), gatewayPodName, metav1.GetOptions{})
+			if err != nil {
+				return false
+			}
+			podReadyStatus := corev1.ConditionTrue
+			for _, condition := range p.Status.Conditions {
+				if condition.Type == corev1.PodReady {
+					podReadyStatus = condition.Status
+					break
+				}
+			}
+			return podReadyStatus == corev1.ConditionFalse
+		}).WithTimeout(5*time.Minute).Should(gomega.Equal(true), fmt.Sprintf("Mark second external gateway pod %s from ns %s not ready, failed: %v", gatewayPodName, servingNamespace, err))
+		return nil
+	default:
+		framework.Failf("unexpected GatewayRemovalType passed: %s", removalType)
+		return nil
 	}
 }

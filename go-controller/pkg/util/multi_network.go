@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -41,12 +42,16 @@ type NetInfo interface {
 	IPMode() (bool, bool)
 	Subnets() []config.CIDRNetworkEntry
 	ExcludeSubnets() []*net.IPNet
+	ReservedSubnets() []*net.IPNet
+	InfrastructureSubnets() []*net.IPNet
 	JoinSubnetV4() *net.IPNet
 	JoinSubnetV6() *net.IPNet
 	JoinSubnets() []*net.IPNet
 	Vlan() uint
 	AllowsPersistentIPs() bool
 	PhysicalNetworkName() string
+	GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet
+	GetNodeManagementIP(hostSubnet *net.IPNet) *net.IPNet
 
 	// dynamic information, can change over time
 	GetNADs() []string
@@ -82,7 +87,6 @@ type NetInfo interface {
 	GetNetworkScopedExtPortName(bridgeID, nodeName string) string
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
-	GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string
 
 	// GetNetInfo is an identity method used to get the specific NetInfo
 	// implementation
@@ -543,10 +547,6 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
-func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(_ string) string {
-	return ""
-}
-
 func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
 	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
@@ -575,6 +575,16 @@ func (nInfo *DefaultNetInfo) Subnets() []config.CIDRNetworkEntry {
 
 // ExcludeSubnets returns the defaultNetConfInfo's ExcludeSubnets value
 func (nInfo *DefaultNetInfo) ExcludeSubnets() []*net.IPNet {
+	return nil
+}
+
+// ReservedSubnets returns the defaultNetConfInfo's ReservedSubnets value
+func (nInfo *DefaultNetInfo) ReservedSubnets() []*net.IPNet {
+	return nil
+}
+
+// InfrastructureSubnets returns the defaultNetConfInfo's InfrastructureSubnets value
+func (nInfo *DefaultNetInfo) InfrastructureSubnets() []*net.IPNet {
 	return nil
 }
 
@@ -634,6 +644,14 @@ func (nInfo *DefaultNetInfo) PhysicalNetworkName() string {
 	return ""
 }
 
+func (nInfo *DefaultNetInfo) GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet {
+	return GetNodeGatewayIfAddr(hostSubnet)
+}
+
+func (nInfo *DefaultNetInfo) GetNodeManagementIP(hostSubnet *net.IPNet) *net.IPNet {
+	return GetNodeManagementIfAddr(hostSubnet)
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
 	mutableNetInfo
@@ -647,12 +665,16 @@ type secondaryNetInfo struct {
 	vlan               uint
 	allowPersistentIPs bool
 
-	ipv4mode, ipv6mode bool
-	subnets            []config.CIDRNetworkEntry
-	excludeSubnets     []*net.IPNet
-	joinSubnets        []*net.IPNet
+	ipv4mode, ipv6mode    bool
+	subnets               []config.CIDRNetworkEntry
+	excludeSubnets        []*net.IPNet
+	reservedSubnets       []*net.IPNet
+	infrastructureSubnets []*net.IPNet
+	joinSubnets           []*net.IPNet
 
 	physicalNetworkName string
+	defaultGatewayIPs   []net.IP
+	managementIPs       []net.IP
 }
 
 func (nInfo *secondaryNetInfo) GetNetInfo() NetInfo {
@@ -709,7 +731,7 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedGWRouterName(nodeName string) str
 func (nInfo *secondaryNetInfo) GetNetworkScopedSwitchName(nodeName string) string {
 	// In Layer2Topology there is just one global switch
 	if nInfo.TopologyType() == types.Layer2Topology {
-		return fmt.Sprintf("%s%s", nInfo.getPrefix(), types.OVNLayer2Switch)
+		return nInfo.GetNetworkScopedName(types.OVNLayer2Switch)
 	}
 	return nInfo.GetNetworkScopedName(nodeName)
 }
@@ -736,13 +758,6 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerName(lbName string) s
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string {
 	return nInfo.GetNetworkScopedName(lbGroupName)
-}
-
-func (nInfo *secondaryNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string {
-	if nInfo.TopologyType() != types.Layer2Topology {
-		return ""
-	}
-	return fmt.Sprintf("outport == %q", types.GWRouterToExtSwitchPrefix+nInfo.GetNetworkScopedGWRouterName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network
@@ -775,6 +790,30 @@ func (nInfo *secondaryNetInfo) PhysicalNetworkName() string {
 	return nInfo.physicalNetworkName
 }
 
+func (nInfo *secondaryNetInfo) GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet {
+	if IsPreconfiguredUDNAddressesEnabled() && nInfo.TopologyType() == types.Layer2Topology && nInfo.IsPrimaryNetwork() {
+		isIPV6 := knet.IsIPv6CIDR(hostSubnet)
+		gwIP, _ := MatchFirstIPFamily(isIPV6, nInfo.defaultGatewayIPs)
+		return &net.IPNet{
+			IP:   gwIP,
+			Mask: hostSubnet.Mask,
+		}
+	}
+	return GetNodeGatewayIfAddr(hostSubnet)
+}
+
+func (nInfo *secondaryNetInfo) GetNodeManagementIP(hostSubnet *net.IPNet) *net.IPNet {
+	if IsPreconfiguredUDNAddressesEnabled() && nInfo.TopologyType() == types.Layer2Topology && nInfo.IsPrimaryNetwork() {
+		isIPV6 := knet.IsIPv6CIDR(hostSubnet)
+		mgmtIP, _ := MatchFirstIPFamily(isIPV6, nInfo.managementIPs)
+		return &net.IPNet{
+			IP:   mgmtIP,
+			Mask: hostSubnet.Mask,
+		}
+	}
+	return GetNodeManagementIfAddr(hostSubnet)
+}
+
 // IPMode returns the ipv4/ipv6 mode
 func (nInfo *secondaryNetInfo) IPMode() (bool, bool) {
 	return nInfo.ipv4mode, nInfo.ipv6mode
@@ -788,6 +827,16 @@ func (nInfo *secondaryNetInfo) Subnets() []config.CIDRNetworkEntry {
 // ExcludeSubnets returns the ExcludeSubnets value
 func (nInfo *secondaryNetInfo) ExcludeSubnets() []*net.IPNet {
 	return nInfo.excludeSubnets
+}
+
+// ReservedSubnets returns the ReservedSubnets value
+func (nInfo *secondaryNetInfo) ReservedSubnets() []*net.IPNet {
+	return nInfo.reservedSubnets
+}
+
+// InfrastructureSubnets returns the InfrastructureSubnets value
+func (nInfo *secondaryNetInfo) InfrastructureSubnets() []*net.IPNet {
+	return nInfo.infrastructureSubnets
 }
 
 // JoinSubnetV4 returns the defaultNetConfInfo's JoinSubnetV4 value
@@ -822,6 +871,11 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo == nil && other == nil {
 		return true
 	}
+	// if network ID has changed, it means the network was re-created, and all controllers
+	// should execute delete+create instead of update
+	if nInfo.GetNetworkID() != types.InvalidID && other.GetNetworkID() != types.InvalidID && nInfo.GetNetworkID() != other.GetNetworkID() {
+		return false
+	}
 	if nInfo.netName != other.GetNetworkName() {
 		return false
 	}
@@ -853,24 +907,34 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	if !cmp.Equal(nInfo.excludeSubnets, other.ExcludeSubnets(), cmpopts.SortSlices(lessIPNet)) {
 		return false
 	}
+	if !cmp.Equal(nInfo.reservedSubnets, other.ReservedSubnets(), cmpopts.SortSlices(lessIPNet)) {
+		return false
+	}
+	if !cmp.Equal(nInfo.infrastructureSubnets, other.InfrastructureSubnets(), cmpopts.SortSlices(lessIPNet)) {
+		return false
+	}
 	return cmp.Equal(nInfo.joinSubnets, other.JoinSubnets(), cmpopts.SortSlices(lessIPNet))
 }
 
 func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 	// everything here is immutable
 	c := &secondaryNetInfo{
-		netName:             nInfo.netName,
-		primaryNetwork:      nInfo.primaryNetwork,
-		topology:            nInfo.topology,
-		mtu:                 nInfo.mtu,
-		vlan:                nInfo.vlan,
-		allowPersistentIPs:  nInfo.allowPersistentIPs,
-		ipv4mode:            nInfo.ipv4mode,
-		ipv6mode:            nInfo.ipv6mode,
-		subnets:             nInfo.subnets,
-		excludeSubnets:      nInfo.excludeSubnets,
-		joinSubnets:         nInfo.joinSubnets,
-		physicalNetworkName: nInfo.physicalNetworkName,
+		netName:               nInfo.netName,
+		primaryNetwork:        nInfo.primaryNetwork,
+		topology:              nInfo.topology,
+		mtu:                   nInfo.mtu,
+		vlan:                  nInfo.vlan,
+		allowPersistentIPs:    nInfo.allowPersistentIPs,
+		ipv4mode:              nInfo.ipv4mode,
+		ipv6mode:              nInfo.ipv6mode,
+		subnets:               nInfo.subnets,
+		excludeSubnets:        nInfo.excludeSubnets,
+		reservedSubnets:       nInfo.reservedSubnets,
+		infrastructureSubnets: nInfo.infrastructureSubnets,
+		joinSubnets:           nInfo.joinSubnets,
+		physicalNetworkName:   nInfo.physicalNetworkName,
+		defaultGatewayIPs:     nInfo.defaultGatewayIPs,
+		managementIPs:         nInfo.managementIPs,
 	}
 	// copy mutables
 	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
@@ -879,7 +943,7 @@ func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 }
 
 func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
-	subnets, _, err := parseSubnets(netconf.Subnets, "", types.Layer3Topology)
+	subnets, err := parseNetworkSubnets(netconf.Subnets, types.Layer3Topology)
 	if err != nil {
 		return nil, err
 	}
@@ -904,23 +968,65 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 }
 
 func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
-	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.Layer2Topology)
+	subnets, err := parseNetworkSubnets(netconf.Subnets, types.Layer2Topology)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+		return nil, fmt.Errorf("invalid network subnets for %s netconf %s: %v", netconf.Topology, netconf.Name, err)
 	}
+
+	excludes, err := parseSubnetList(netconf.ExcludeSubnets)
+	if err != nil {
+		return nil, fmt.Errorf("invalid exclude subnets for %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+	}
+	if err := validateSubnetContainment(excludes, subnets, config.NewExcludedSubnetNotContainedError); err != nil {
+		return nil, err
+	}
+
+	var reserved, infra []*net.IPNet
+	if IsPreconfiguredUDNAddressesEnabled() {
+		reserved, err = parseSubnetList(netconf.ReservedSubnets)
+		if err != nil {
+			return nil, fmt.Errorf("invalid reserved subnets for %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+		}
+		if err := validateSubnetContainment(reserved, subnets, config.NewReservedSubnetNotContainedError); err != nil {
+			return nil, err
+		}
+
+		infra, err = parseSubnetList(netconf.InfrastructureSubnets)
+		if err != nil {
+			return nil, fmt.Errorf("invalid infrastructure subnets for %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+		}
+		if err := validateSubnetContainment(infra, subnets, config.NewInfrastructureSubnetNotContainedError); err != nil {
+			return nil, err
+		}
+	}
+
 	joinSubnets, err := parseJoinSubnet(netconf.JoinSubnet)
 	if err != nil {
 		return nil, err
 	}
+
+	// Allocate infrastructure IPs for primary networks
+	var defaultGatewayIPs, managementIPs []net.IP
+	if IsPreconfiguredUDNAddressesEnabled() && netconf.Role == types.NetworkRolePrimary {
+		defaultGatewayIPs, managementIPs, err = allocateInfrastructureIPs(netconf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to allocate infrastructure IPs: %v", err)
+		}
+	}
+
 	ni := &secondaryNetInfo{
-		netName:            netconf.Name,
-		primaryNetwork:     netconf.Role == types.NetworkRolePrimary,
-		topology:           types.Layer2Topology,
-		subnets:            subnets,
-		joinSubnets:        joinSubnets,
-		excludeSubnets:     excludes,
-		mtu:                netconf.MTU,
-		allowPersistentIPs: netconf.AllowPersistentIPs,
+		netName:               netconf.Name,
+		primaryNetwork:        netconf.Role == types.NetworkRolePrimary,
+		topology:              types.Layer2Topology,
+		subnets:               subnets,
+		joinSubnets:           joinSubnets,
+		excludeSubnets:        excludes,
+		reservedSubnets:       reserved,
+		infrastructureSubnets: infra,
+		mtu:                   netconf.MTU,
+		allowPersistentIPs:    netconf.AllowPersistentIPs,
+		defaultGatewayIPs:     defaultGatewayIPs,
+		managementIPs:         managementIPs,
 		mutableNetInfo: mutableNetInfo{
 			id:   types.InvalidID,
 			nads: sets.Set[string]{},
@@ -931,9 +1037,18 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 }
 
 func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) {
-	subnets, excludes, err := parseSubnets(netconf.Subnets, netconf.ExcludeSubnets, types.LocalnetTopology)
+	subnets, err := parseNetworkSubnets(netconf.Subnets, types.LocalnetTopology)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+	}
+
+	excludes, err := parseSubnetList(netconf.ExcludeSubnets)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s netconf %s: %v", netconf.Topology, netconf.Name, err)
+	}
+
+	if err := validateSubnetContainment(excludes, subnets, config.NewExcludedSubnetNotContainedError); err != nil {
+		return nil, err
 	}
 
 	ni := &secondaryNetInfo{
@@ -954,55 +1069,60 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error
 	return ni, nil
 }
 
-func parseSubnets(subnetsString, excludeSubnetsString, topology string) ([]config.CIDRNetworkEntry, []*net.IPNet, error) {
-	var parseSubnets func(clusterSubnetCmd string) ([]config.CIDRNetworkEntry, error)
+// parseNetworkSubnets parses network subnets based on the topology, returns nil if subnets is an empty string
+func parseNetworkSubnets(subnets, topology string) ([]config.CIDRNetworkEntry, error) {
+	if strings.TrimSpace(subnets) == "" {
+		return nil, nil
+	}
+
 	switch topology {
 	case types.Layer3Topology:
 		// For L3 topology, subnet is validated
-		parseSubnets = config.ParseClusterSubnetEntries
+		return config.ParseClusterSubnetEntries(subnets)
 	case types.LocalnetTopology, types.Layer2Topology:
-		// For L2 topologies, host specific prefix length is ignored (using 0 as
-		// prefix length)
-		parseSubnets = func(clusterSubnetCmd string) ([]config.CIDRNetworkEntry, error) {
-			return config.ParseClusterSubnetEntriesWithDefaults(clusterSubnetCmd, 0, 0)
-		}
+		// For L2 topologies, host specific prefix length is ignored (using 0 as prefix length)
+		return config.ParseClusterSubnetEntriesWithDefaults(subnets, 0, 0)
+	default:
+		return nil, fmt.Errorf("unsupported topology: %s", topology)
+	}
+}
+
+// parseSubnetList parses a list of subnets, returns nil if subnets is an empty string
+func parseSubnetList(subnets string) ([]*net.IPNet, error) {
+	if strings.TrimSpace(subnets) == "" {
+		return nil, nil
 	}
 
-	var subnets []config.CIDRNetworkEntry
-	if strings.TrimSpace(subnetsString) != "" {
-		var err error
-		subnets, err = parseSubnets(subnetsString)
-		if err != nil {
-			return nil, nil, err
-		}
+	// For subnet lists, host specific prefix length is ignored (using 0 as prefix length)
+	entries, err := config.ParseClusterSubnetEntriesWithDefaults(subnets, 0, 0)
+	if err != nil {
+		return nil, err
 	}
 
-	var excludeIPNets []*net.IPNet
-	if strings.TrimSpace(excludeSubnetsString) != "" {
-		// For L2 topologies, host specific prefix length is ignored (using 0 as
-		// prefix length)
-		excludeSubnets, err := config.ParseClusterSubnetEntriesWithDefaults(excludeSubnetsString, 0, 0)
-		if err != nil {
-			return nil, nil, err
-		}
-		excludeIPNets = make([]*net.IPNet, 0, len(excludeSubnets))
-		for _, excludeSubnet := range excludeSubnets {
-			found := false
-			for _, subnet := range subnets {
-				if ContainsCIDR(subnet.CIDR, excludeSubnet.CIDR) {
-					found = true
-					break
-				}
+	nets := make([]*net.IPNet, 0, len(entries))
+	for _, entry := range entries {
+		nets = append(nets, entry.CIDR)
+	}
+	return nets, nil
+}
+
+// validateSubnetContainment checks if every subnet in subnets is contained in containerSubnets
+// and returns a typed error using the provided error constructor function
+func validateSubnetContainment(subnets []*net.IPNet, containerSubnets []config.CIDRNetworkEntry,
+	errorConstructor func(interface{}) *config.ValidationError) error {
+	for _, subnet := range subnets {
+		found := false
+		for _, containerSubnet := range containerSubnets {
+			if ContainsCIDR(containerSubnet.CIDR, subnet) {
+				found = true
+				break
 			}
-			if !found {
-				return nil, nil, fmt.Errorf("the provided network subnets %v do not contain exluded subnets %v",
-					subnets, excludeSubnet.CIDR)
-			}
-			excludeIPNets = append(excludeIPNets, excludeSubnet.CIDR)
+		}
+		if !found {
+			return errorConstructor(subnet)
 		}
 	}
-
-	return subnets, excludeIPNets, nil
+	return nil
 }
 
 func parseJoinSubnet(joinSubnet string) ([]*net.IPNet, error) {
@@ -1151,6 +1271,9 @@ func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnitypes.NetConf, error) {
 	netconf, err := config.ParseNetConf([]byte(netattachdef.Spec.Config))
 	if err != nil {
+		if err.Error() == ErrorAttachDefNotOvnManaged.Error() {
+			return nil, err
+		}
 		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
 	}
 
@@ -1196,6 +1319,18 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 
 	if netconf.Role == types.NetworkRolePrimary && netconf.Subnets == "" && netconf.Topology == types.Layer2Topology {
 		return fmt.Errorf("the subnet attribute must be defined for layer2 primary user defined networks")
+	}
+
+	if netconf.InfrastructureSubnets != "" && netconf.Topology != types.Layer2Topology {
+		return fmt.Errorf("infrastructureSubnets is only supported for layer2 topology")
+	}
+
+	if netconf.ReservedSubnets != "" && netconf.Topology != types.Layer2Topology {
+		return fmt.Errorf("reservedSubnets is only supported for layer2 topology")
+	}
+
+	if netconf.DefaultGatewayIPs != "" && netconf.Topology != types.Layer2Topology {
+		return fmt.Errorf("defaultGatewayIPs is only supported for layer2 topology")
 	}
 
 	if netconf.Topology != types.LocalnetTopology && netconf.Name != types.DefaultNetworkName {
@@ -1250,7 +1385,7 @@ func subnetOverlapCheck(netconf *ovncnitypes.NetConf) error {
 	}
 	err = allSubnets.CheckForOverlaps()
 	if err != nil {
-		return fmt.Errorf("pod or join subnet overlaps with already configured internal subnets: %v", err)
+		return fmt.Errorf("pod or join subnet overlaps with already configured internal subnets: %w", err)
 	}
 
 	return nil
@@ -1313,6 +1448,21 @@ func GetPodNADToNetworkMapping(pod *corev1.Pod, nInfo NetInfo) (bool, map[string
 	return true, networkSelections, nil
 }
 
+// overrideActiveNSEWithDefaultNSE overrides the provided active NetworkSelectionElement with the IP and MAC requests from
+// the default NetworkSelectionElement after validating its namespace and name.
+func overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE *nettypes.NetworkSelectionElement) error {
+	if defaultNSE.Namespace != config.Kubernetes.OVNConfigNamespace {
+		return fmt.Errorf("unexpected default NSE namespace %q, expected %q", defaultNSE.Namespace, config.Kubernetes.OVNConfigNamespace)
+	}
+	if defaultNSE.Name != types.DefaultNetworkName {
+		return fmt.Errorf("unexpected default NSE name %q, expected %q", defaultNSE.Name, types.DefaultNetworkName)
+	}
+	activeNSE.IPRequest = defaultNSE.IPRequest
+	activeNSE.MacRequest = defaultNSE.MacRequest
+	activeNSE.IPAMClaimReference = defaultNSE.IPAMClaimReference
+	return nil
+}
+
 // GetPodNADToNetworkMappingWithActiveNetwork will call `GetPodNADToNetworkMapping` passing "nInfo" which correspond
 // to the NetInfo representing the NAD, the resulting NetworkSelectingElements will be decorated with the ones
 // from found active network
@@ -1341,18 +1491,39 @@ func GetPodNADToNetworkMappingWithActiveNetwork(pod *corev1.Pod, nInfo NetInfo, 
 	if len(networkSelections) == 0 {
 		networkSelections = map[string]*nettypes.NetworkSelectionElement{}
 	}
-	networkSelections[activeNetworkNADs[0]] = &nettypes.NetworkSelectionElement{
+
+	activeNSE := &nettypes.NetworkSelectionElement{
 		Namespace: activeNetworkNADKey[0],
 		Name:      activeNetworkNADKey[1],
 	}
 
-	if nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo) {
-		ipamClaimName, wasPersistentIPRequested := pod.Annotations[OvnUDNIPAMClaimName]
-		if wasPersistentIPRequested {
-			networkSelections[activeNetworkNADs[0]].IPAMClaimReference = ipamClaimName
+	// Feature gate integration: EnablePreconfiguredUDNAddresses controls default network IP/MAC transfer to active network
+	if IsPreconfiguredUDNAddressesEnabled() {
+		// Limit the static ip and mac requests to the layer2 primary UDN when EnablePreconfiguredUDNAddresses is enabled, we
+		// don't need to explicitly check this is primary UDN since
+		// the "active network" concept is exactly that.
+		if activeNetwork.TopologyType() == types.Layer2Topology {
+			defaultNSE, err := GetK8sPodDefaultNetworkSelection(pod)
+			if err != nil {
+				return false, nil, fmt.Errorf("failed getting default-network annotation for pod %q: %w", pod.Namespace+"/"+pod.Name, err)
+			}
+			// If there are static IPs and MACs at the default NSE, override the active NSE with them
+			if defaultNSE != nil {
+				if err := overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE); err != nil {
+					return false, nil, err
+				}
+			}
 		}
 	}
 
+	if nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo) && activeNSE.IPAMClaimReference == "" {
+		ipamClaimName, wasPersistentIPRequested := pod.Annotations[OvnUDNIPAMClaimName]
+		if wasPersistentIPRequested {
+			activeNSE.IPAMClaimReference = ipamClaimName
+		}
+	}
+
+	networkSelections[activeNetworkNADs[0]] = activeNSE
 	return true, networkSelections, nil
 }
 
@@ -1368,6 +1539,12 @@ func IsRouteAdvertisementsEnabled() bool {
 	// for now, we require multi-network to be enabled because we rely on NADs,
 	// even for the default network
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
+}
+
+// IsPreconfiguredUDNAddressesEnabled indicates if user defined IPs / MAC
+// addresses can be set in primary UDNs
+func IsPreconfiguredUDNAddressesEnabled() bool {
+	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses
 }
 
 func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
@@ -1440,7 +1617,7 @@ func ParseNetworkIDFromVRFName(vrf string) int {
 // CanServeNamespace determines whether the given network can serve a specific namespace.
 //
 // For default and secondary networks it always returns true.
-// For primary networks, it checks if the namespace is explicitly listed in the network’s
+// For primary networks, it checks if the namespace is explicitly listed in the network's
 // associated namespaces.
 func CanServeNamespace(network NetInfo, namespace string) bool {
 	// Default network handles all namespaces
@@ -1553,4 +1730,95 @@ func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
 		return parts[0], parts[1]
 	}
 	return "", ""
+}
+
+// allocateInfrastructureIPs attempts to allocate gateway and management IPs from infrastructure subnets.
+// It searches through infrastructure subnets sequentially for each network subnet, allocating the first
+// available IP as gateway IP (if not already provided) and the second available IP as management IP.
+// If it isn't able to find the IPs in the infrastructure subnets it defers back to default values.
+func allocateInfrastructureIPs(netconf *ovncnitypes.NetConf) ([]net.IP, []net.IP, error) {
+	// Parse network subnets
+	subnets, err := parseNetworkSubnets(netconf.Subnets, types.Layer2Topology)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse subnets: %w", err)
+	}
+
+	// Parse infrastructure subnets
+	infra, err := parseSubnetList(netconf.InfrastructureSubnets)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse infrastructure subnets: %w", err)
+	}
+
+	// Parse default gateway IPs
+	defaultGatewayIPs, err := ParseIPList(netconf.DefaultGatewayIPs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid default gateway IPs: %w", err)
+	}
+
+	var gatewayIPs, managementIPs []net.IP
+
+	for _, netSubnet := range subnets {
+		isIPV6 := knet.IsIPv6CIDR(netSubnet.CIDR)
+		var gwIP, mgmtIP net.IP
+
+		gwIP, _ = MatchFirstIPFamily(isIPV6, defaultGatewayIPs)
+		infraSubnets := MatchAllIPNetFamily(isIPV6, infra)
+
+		// Try to allocate the gateway/management IPs from infra subnets
+		// Build set of IPs to exclude (network IP, broadcast IP, and existing gateway IP)
+		// NOTE: Even though the network IP is technically allowed for IPv6  we exclude it to be consistent the legacy behavior
+		excludeIPs := sets.New(netSubnet.CIDR.IP.String())
+		if !isIPV6 {
+			// Exclude the broadcast IP for IPv4, there is no broadcast IP for IPv6
+			excludeIPs.Insert(SubnetBroadcastIP(*netSubnet.CIDR).String())
+		}
+
+		if len(infraSubnets) > 0 {
+			if gwIP != nil {
+				excludeIPs.Insert(gwIP.String())
+			}
+
+			// Find gateway IP if not already set
+			if gwIP == nil {
+				gwIP = getFirstAvailableIP(infraSubnets, excludeIPs)
+				if gwIP != nil {
+					excludeIPs.Insert(gwIP.String())
+				}
+			}
+
+			// Find management IP
+			mgmtIP = getFirstAvailableIP(infraSubnets, excludeIPs)
+		}
+
+		// fallback to defaults
+		if gwIP == nil {
+			gwIP = GetNodeGatewayIfAddr(netSubnet.CIDR).IP
+		}
+		if mgmtIP == nil {
+			mgmtIP = GetNodeManagementIfAddr(netSubnet.CIDR).IP
+			if mgmtIP.Equal(gwIP) {
+				// Corner case: if the default management IP(.2) conflicts with the custom gateway IP,
+				// use the .1 address for the management IP.
+				mgmtIP = GetNodeGatewayIfAddr(netSubnet.CIDR).IP
+			}
+		}
+
+		gatewayIPs = append(gatewayIPs, gwIP)
+		managementIPs = append(managementIPs, mgmtIP)
+	}
+
+	return gatewayIPs, managementIPs, nil
+}
+
+// getFirstAvailableIP returns the first available IP in the given subnets that is not in the exclude set.
+// Returns nil if no available IP is found.
+func getFirstAvailableIP(subnets []*net.IPNet, excludeIPs sets.Set[string]) net.IP {
+	for _, subnet := range subnets {
+		for currentIP := subnet.IP; subnet.Contains(currentIP); currentIP = iputils.NextIP(currentIP) {
+			if !excludeIPs.Has(currentIP.String()) {
+				return currentIP
+			}
+		}
+	}
+	return nil
 }

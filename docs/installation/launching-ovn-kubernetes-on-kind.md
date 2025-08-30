@@ -14,19 +14,19 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
       sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
       ```
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-- Python and pip
+- Python 3 and [pipx](https://pipx.pypa.io/stable/installation/)
 - jq
 - openssl
 - openvswitch
-
-**NOTE :**  In certain operating systems such as CentOS 8.x, pip2 and pip3 binaries are installed instead of pip. In such situations create a softlink for "pip" that points to "pip2".
+- Go 1.23.0 or above
+- For podman users: skopeo
 
 For OVN kubernetes KIND deployment, use the `kind.sh` script.
 
 First Download and build the OVN-Kubernetes repo: 
 
-```
-git clone github.com/ovn-org/ovn-kubernetes; 
+```shell
+git clone https://github.com/ovn-kubernetes/ovn-kubernetes.git 
 cd ovn-kubernetes
 ```
 The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
@@ -79,13 +79,16 @@ To deploy KIND however, you need to start it as root and then copy root's kube c
 ```
 $ pushd contrib
 $ sudo ./kind.sh -ep podman
+$ mkdir -p ~/.kube
 $ sudo cp /root/ovn.conf ~/.kube/kind-config
 $ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
 $ export KUBECONFIG=~/.kube/kind-config
 $ popd
 ```
 
-This will launch a KIND deployment. By default the cluster is named `ovn`.
+**NOTE:** If you installed go via the official path on Linux and have encountered the "go: command not found" issue, you can preserve your environment when doing sudo: `sudo --preserve-env=PATH ./kind.sh -ep podman`
+
+This will launch a KIND deployment. By default, the cluster is named `ovn`.
 
 ```
 $ kubectl get nodes
@@ -372,7 +375,7 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.32.3
+$ K8S_VERSION=v1.33.1
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
 $ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
@@ -428,7 +431,7 @@ $ cd ../dist/images/
 $ make fedora-image
 
 $ cd ../../contrib/
-$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.32.3 ./kind.sh
+$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.33.1 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -454,7 +457,7 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.32.3 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.33.1 ./kind.sh
 ```
 
 ### Using kind local registry to deploy non ovn-k containers

@@ -18,11 +18,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	subnetipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	podallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -535,7 +536,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 	// rescheduled.
 
 	if !config.Kubernetes.DisableRequestedChassis {
-		lsp.Options["requested-chassis"] = pod.Spec.NodeName
+		lsp.Options[libovsdbops.RequestedChassis] = pod.Spec.NodeName
 	}
 
 	// let's calculate if this network controller's role for this pod
@@ -915,7 +916,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 		return nil, false, err
 	}
 
-	err = util.AddRoutesGatewayIP(bnc.GetNetInfo(), node, pod, podAnnotation, network)
+	err = podallocator.AddRoutesGatewayIP(bnc.GetNetInfo(), node, pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
@@ -20,6 +21,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,7 +46,7 @@ const openDefaultPortsAnnotation = "k8s.ovn.org/open-default-ports"
 const RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 const OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 
-var _ = Describe("Network Segmentation", func() {
+var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 	f := wrappedTestFramework("network-segmentation")
 	// disable automatic namespace creation, we need to add the required UDN label
 	f.SkipNamespaceCreation = true
@@ -55,12 +57,17 @@ var _ = Describe("Network Segmentation", func() {
 	)
 
 	const (
-		port                                = 9000
 		nodeHostnameKey                     = "kubernetes.io/hostname"
 		podClusterNetPort            uint16 = 9000
 		podClusterNetDefaultPort     uint16 = 8080
 		userDefinedNetworkIPv4Subnet        = "10.128.0.0/16"
 		userDefinedNetworkIPv6Subnet        = "2014:100:200::0/60"
+		customL2IPv4Gateway                 = "10.128.0.3"
+		customL2IPv6Gateway                 = "2014:100:200::3"
+		customL2IPv4ReservedCIDR            = "10.128.1.0/24"
+		customL2IPv6ReservedCIDR            = "2014:100:200::100/120"
+		customL2IPv4InfraCIDR               = "10.128.0.0/30"
+		customL2IPv6InfraCIDR               = "2014:100:200::/122"
 		userDefinedNetworkName              = "hogwarts"
 		nadName                             = "gryffindor"
 	)
@@ -89,6 +96,7 @@ var _ = Describe("Network Segmentation", func() {
 					func(netConfig *networkAttachmentConfigParams) {
 						By("creating the network")
 						netConfig.namespace = f.Namespace.Name
+						netConfig.cidr = filterCIDRsAndJoin(f.ClientSet, netConfig.cidr)
 						Expect(createNetworkFn(netConfig)).To(Succeed())
 
 						By("creating a pod on the udn namespace")
@@ -125,15 +133,26 @@ var _ = Describe("Network Segmentation", func() {
 						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
+						},
+					),
+					Entry("L2 primary UDN with custom network",
+						&networkAttachmentConfigParams{
+							name:                nadName,
+							topology:            "layer2",
+							cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:                "primary",
+							defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+							reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+							infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
 						},
 					),
 					Entry("L3 primary UDN",
 						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 					),
@@ -156,6 +175,7 @@ var _ = Describe("Network Segmentation", func() {
 
 						By("creating the network")
 						netConfig.namespace = f.Namespace.Name
+						netConfig.cidr = filterCIDRsAndJoin(f.ClientSet, netConfig.cidr)
 						Expect(createNetworkFn(netConfig)).To(Succeed())
 
 						By("creating client/server pods")
@@ -171,7 +191,7 @@ var _ = Describe("Network Segmentation", func() {
 						for i, cidr := range strings.Split(netConfig.cidr, ",") {
 							if cidr != "" {
 								By("asserting the server pod has an IP from the configured range")
-								serverIP, err = podIPsForUserDefinedPrimaryNetwork(
+								serverIP, err = getPodAnnotationIPsForAttachmentByIndex(
 									cs,
 									f.Namespace.Name,
 									serverPodConfig.name,
@@ -197,8 +217,29 @@ var _ = Describe("Network Segmentation", func() {
 						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
+						},
+						*podConfig(
+							"client-pod",
+						),
+						*podConfig(
+							"server-pod",
+							withCommand(func() []string {
+								return httpServerContainerCmd(podClusterNetPort)
+							}),
+						),
+					),
+					Entry(
+						"two pods connected over a L2 primary UDN with custom network",
+						&networkAttachmentConfigParams{
+							name:                nadName,
+							topology:            "layer2",
+							cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:                "primary",
+							defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+							reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+							infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
 						},
 						*podConfig(
 							"client-pod",
@@ -215,7 +256,7 @@ var _ = Describe("Network Segmentation", func() {
 						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						*podConfig(
@@ -384,52 +425,50 @@ var _ = Describe("Network Segmentation", func() {
 						}, 10*time.Second, 1*time.Second).Should(BeTrue())
 						Expect(udnPod.Status.ContainerStatuses[0].RestartCount).To(Equal(int32(0)))
 
-						if !isUDNHostIsolationDisabled() {
-							By("checking default network hostNetwork pod and non-kubelet host process can't reach the UDN pod")
-							hostNetPod, err := createPod(f, "host-net-pod", nodeName,
-								defaultNetNamespace, []string{}, nil, func(pod *v1.Pod) {
-									pod.Spec.HostNetwork = true
+						By("checking default network hostNetwork pod and non-kubelet host process can't reach the UDN pod")
+						hostNetPod, err := createPod(f, "host-net-pod", nodeName,
+							defaultNetNamespace, []string{}, nil, func(pod *v1.Pod) {
+								pod.Spec.HostNetwork = true
+							})
+						Expect(err).NotTo(HaveOccurred())
+
+						// positive check for reachable default network pod
+						for _, destIP := range []string{defaultIPv4, defaultIPv6} {
+							if destIP == "" {
+								continue
+							}
+							By("checking the default network hostNetwork can reach default pod on IP " + destIP)
+							Eventually(func() bool {
+								return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetDefaultPort) == nil
+							}).Should(BeTrue())
+							By("checking the non-kubelet host process can reach default pod on IP " + destIP)
+							Eventually(func() bool {
+								_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{
+									"curl", "--connect-timeout", "2",
+									net.JoinHostPort(destIP, fmt.Sprintf("%d", podClusterNetDefaultPort)),
 								})
-							Expect(err).NotTo(HaveOccurred())
-
-							// positive check for reachable default network pod
-							for _, destIP := range []string{defaultIPv4, defaultIPv6} {
-								if destIP == "" {
-									continue
-								}
-								By("checking the default network hostNetwork can reach default pod on IP " + destIP)
-								Eventually(func() bool {
-									return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetDefaultPort) == nil
-								}).Should(BeTrue())
-								By("checking the non-kubelet host process can reach default pod on IP " + destIP)
-								Eventually(func() bool {
-									_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{
-										"curl", "--connect-timeout", "2",
-										net.JoinHostPort(destIP, fmt.Sprintf("%d", podClusterNetDefaultPort)),
-									})
-									return err == nil
-								}).Should(BeTrue())
+								return err == nil
+							}).Should(BeTrue())
+						}
+						// negative check for UDN pod
+						for _, destIP := range []string{udnIPv4, udnIPv6} {
+							if destIP == "" {
+								continue
 							}
-							// negative check for UDN pod
-							for _, destIP := range []string{udnIPv4, udnIPv6} {
-								if destIP == "" {
-									continue
-								}
 
-								By("checking the default network hostNetwork pod can't reach UDN pod on IP " + destIP)
-								Consistently(func() bool {
-									return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetPort) != nil
-								}, 5*time.Second).Should(BeTrue())
+							By("checking the default network hostNetwork pod can't reach UDN pod on IP " + destIP)
+							Consistently(func() bool {
+								return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetPort) != nil
+							}, 5*time.Second).Should(BeTrue())
 
-								By("checking the non-kubelet host process can't reach UDN pod on IP " + destIP)
-								Consistently(func() bool {
-									_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{
-										"curl", "--connect-timeout", "2",
-										net.JoinHostPort(destIP, fmt.Sprintf("%d", podClusterNetPort)),
-									})
-									return err != nil
-								}, 5*time.Second).Should(BeTrue())
-							}
+							By("checking the non-kubelet host process can't reach UDN pod on IP " + destIP)
+							Consistently(func() bool {
+								_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{
+									"curl", "--connect-timeout", "2",
+									net.JoinHostPort(destIP, fmt.Sprintf("%d", podClusterNetPort)),
+								})
+								return err != nil
+							}, 5*time.Second).Should(BeTrue())
 						}
 
 						By("asserting UDN pod can reach the kapi service in the default network")
@@ -495,8 +534,26 @@ var _ = Describe("Network Segmentation", func() {
 						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer2",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
+						},
+						*podConfig(
+							"udn-pod",
+							withCommand(func() []string {
+								return httpServerContainerCmd(podClusterNetPort)
+							}),
+						),
+					),
+					Entry(
+						"with L2 primary UDN with custom network",
+						&networkAttachmentConfigParams{
+							name:                nadName,
+							topology:            "layer2",
+							cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:                "primary",
+							defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+							reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+							infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
 						},
 						*podConfig(
 							"udn-pod",
@@ -510,7 +567,7 @@ var _ = Describe("Network Segmentation", func() {
 						&networkAttachmentConfigParams{
 							name:     nadName,
 							topology: "layer3",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						*podConfig(
@@ -564,7 +621,7 @@ var _ = Describe("Network Segmentation", func() {
 
 							netConfig := &networkAttachmentConfigParams{
 								topology:  topology,
-								cidr:      correctCIDRFamily(userDefinedv4Subnet, userDefinedv6Subnet),
+								cidr:      joinStrings(userDefinedv4Subnet, userDefinedv6Subnet),
 								role:      "primary",
 								namespace: namespace,
 								name:      network,
@@ -606,7 +663,7 @@ var _ = Describe("Network Segmentation", func() {
 								By("creating pod " + podConfig.name + " in " + podConfig.namespace)
 								pod := runUDNPod(cs, podConfig.namespace, podConfig, nil)
 								pods = append(pods, pod)
-								podIP, err := podIPsForUserDefinedPrimaryNetwork(
+								podIP, err := getPodAnnotationIPsForAttachmentByIndex(
 									cs,
 									pod.Namespace,
 									pod.Name,
@@ -677,12 +734,12 @@ var _ = Describe("Network Segmentation", func() {
 			},
 			Entry("NetworkAttachmentDefinitions", func(c *networkAttachmentConfigParams) error {
 				netConfig := newNetworkAttachmentConfig(*c)
-				nad := generateNAD(netConfig)
+				nad := generateNAD(netConfig, f.ClientSet)
 				_, err := nadClient.NetworkAttachmentDefinitions(c.namespace).Create(context.Background(), nad, metav1.CreateOptions{})
 				return err
 			}),
 			Entry("UserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
-				udnManifest := generateUserDefinedNetworkManifest(c)
+				udnManifest := generateUserDefinedNetworkManifest(c, f.ClientSet)
 				cleanup, err := createManifest(c.namespace, udnManifest)
 				DeferCleanup(cleanup)
 				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, c.namespace, c.name), 5*time.Second, time.Second).Should(Succeed())
@@ -691,7 +748,7 @@ var _ = Describe("Network Segmentation", func() {
 			Entry("ClusterUserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
 				cudnName := randomNetworkMetaName()
 				c.name = cudnName
-				cudnManifest := generateClusterUserDefinedNetworkManifest(c)
+				cudnManifest := generateClusterUserDefinedNetworkManifest(c, f.ClientSet)
 				cleanup, err := createManifest("", cudnManifest)
 				DeferCleanup(func() {
 					cleanup()
@@ -713,14 +770,14 @@ var _ = Describe("Network Segmentation", func() {
 				name:      "tenant-blue",
 				namespace: f.Namespace.Name,
 				topology:  "layer2",
-				cidr:      correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+				cidr:      joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 				role:      "primary",
 			}
 			netConfig2 := networkAttachmentConfigParams{
 				name:      "blue",
 				namespace: f.Namespace.Name + "-tenant",
 				topology:  "layer2",
-				cidr:      correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+				cidr:      joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 				role:      "primary",
 			}
 			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
@@ -752,7 +809,7 @@ var _ = Describe("Network Segmentation", func() {
 			}()
 
 			By(fmt.Sprintf("creating the network in namespace %s", netConfig1.namespace))
-			udnManifest := generateUserDefinedNetworkManifest(&netConfig1)
+			udnManifest := generateUserDefinedNetworkManifest(&netConfig1, f.ClientSet)
 			cleanup, err := createManifest(netConfig1.namespace, udnManifest)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(cleanup)
@@ -765,7 +822,7 @@ var _ = Describe("Network Segmentation", func() {
 			runUDNPod(cs, netConfig1.namespace, clientPodConfig, nil)
 
 			By(fmt.Sprintf("creating the network in namespace %s", netConfig2.namespace))
-			udnManifest = generateUserDefinedNetworkManifest(&netConfig2)
+			udnManifest = generateUserDefinedNetworkManifest(&netConfig2, f.ClientSet)
 			cleanup2, err := createManifest(netConfig2.namespace, udnManifest)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(cleanup2)
@@ -786,7 +843,7 @@ var _ = Describe("Network Segmentation", func() {
 				By(fmt.Sprintf("asserting network works in namespace %s", config.namespace))
 				for i, cidr := range strings.Split(config.cidr, ",") {
 					if cidr != "" {
-						serverIP, err = podIPsForUserDefinedPrimaryNetwork(
+						serverIP, err = getPodAnnotationIPsForAttachmentByIndex(
 							cs,
 							config.namespace,
 							serverPodConfig.name,
@@ -835,10 +892,11 @@ var _ = Describe("Network Segmentation", func() {
 			DescribeTable("should be able to send multicast UDP traffic between nodes", func(netConfigParams networkAttachmentConfigParams) {
 				ginkgo.By("creating the attachment configuration")
 				netConfigParams.namespace = f.Namespace.Name
+				filterSupportedNetworkConfig(f.ClientSet, &netConfigParams)
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
-					generateNAD(netConfig),
+					generateNAD(netConfig, f.ClientSet),
 					metav1.CreateOptions{},
 				)
 				framework.ExpectNoError(err)
@@ -847,23 +905,33 @@ var _ = Describe("Network Segmentation", func() {
 				ginkgo.Entry("with primary layer3 UDN", networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				}),
 				ginkgo.Entry("with primary layer2 UDN", networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer2",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
+				}),
+				ginkgo.Entry("with primary layer2 UDN with custom network", networkAttachmentConfigParams{
+					name:                nadName,
+					topology:            "layer2",
+					cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:                "primary",
+					defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+					reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+					infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
 				}),
 			)
 			DescribeTable("should be able to receive multicast IGMP query", func(netConfigParams networkAttachmentConfigParams) {
 				ginkgo.By("creating the attachment configuration")
 				netConfigParams.namespace = f.Namespace.Name
+				filterSupportedNetworkConfig(f.ClientSet, &netConfigParams)
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
-					generateNAD(netConfig),
+					generateNAD(netConfig, f.ClientSet),
 					metav1.CreateOptions{},
 				)
 				framework.ExpectNoError(err)
@@ -872,15 +940,25 @@ var _ = Describe("Network Segmentation", func() {
 				ginkgo.Entry("with primary layer3 UDN", networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				}),
-				ginkgo.Entry("with primary layer2 UDN", networkAttachmentConfigParams{
-					name:     nadName,
-					topology: "layer2",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					role:     "primary",
-				}),
+				// TODO: this test is broken, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5309
+				//ginkgo.Entry("with primary layer2 UDN", networkAttachmentConfigParams{
+				//	name:     nadName,
+				//	topology: "layer2",
+				//	cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+				//	role:     "primary",
+				//}),
+				//ginkgo.Entry("with primary layer2 UDN with custom network", networkAttachmentConfigParams{
+				//	name:              nadName,
+				//	topology:          "layer2",
+				//	cidr:              joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+				//	role:              "primary",
+				//	defaultGatewayIPs: joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+				//	reservedCIDRs:     joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+				//	infraCIDRs:        joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
+				//}),
 			)
 		})
 	})
@@ -908,7 +986,7 @@ var _ = Describe("Network Segmentation", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				By("create tests UserDefinedNetwork")
-				cleanup, err := createManifest(defaultNetNamespace.Name, newPrimaryUserDefinedNetworkManifest(testUdnName))
+				cleanup, err := createManifest(defaultNetNamespace.Name, newPrimaryUserDefinedNetworkManifest(cs, testUdnName))
 				DeferCleanup(cleanup)
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, defaultNetNamespace.Name, testUdnName), 5*time.Second).Should(Not(Succeed()))
@@ -1125,13 +1203,13 @@ spec:
 			topology:    "layer3",
 			name:        primaryNadName,
 			networkName: primaryNadName,
-			cidr:        correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-		}))
+			cidr:        joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+		}), f.ClientSet)
 		_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(context.Background(), primaryNetNad, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		By("create primary network UserDefinedNetwork")
-		cleanup, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(primaryUdnName))
+		cleanup, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(cs, primaryUdnName))
 		DeferCleanup(cleanup)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -1423,14 +1501,14 @@ spec:
 			topology:    "layer3",
 			name:        primaryNadName,
 			networkName: primaryNadName,
-			cidr:        correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-		}))
+			cidr:        joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+		}), f.ClientSet)
 		_, err := nadClient.NetworkAttachmentDefinitions(primaryNetTenantNs).Create(context.Background(), primaryNetNad, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		By("create primary Cluster UDN CR")
 		cudnName := randomNetworkMetaName()
-		cleanup, err := createManifest(f.Namespace.Name, newPrimaryClusterUDNManifest(cudnName, testTenantNamespaces...))
+		cleanup, err := createManifest(f.Namespace.Name, newPrimaryClusterUDNManifest(cs, cudnName, testTenantNamespaces...))
 		DeferCleanup(func() {
 			cleanup()
 			_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", cudnName, "--wait", fmt.Sprintf("--timeout=%ds", 60))
@@ -1469,7 +1547,7 @@ spec:
 				Name:    externalContainerName,
 				Image:   images.AgnHost(),
 				Network: providerPrimaryNetwork,
-				Args:    httpServerContainerCmd(uint16(externalContainerPort)),
+				CmdArgs: httpServerContainerCmd(uint16(externalContainerPort)),
 				ExtPort: externalContainerPort,
 			}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainerSpec)
@@ -1519,16 +1597,28 @@ spec:
 						Expect(err).NotTo(HaveOccurred())
 						framework.Logf("Client pod's annotation for network %s is %v", netConfigParams.name, podAnno)
 
-						Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(*netConfigParams)))
+						Expect(podAnno.Routes).To(HaveLen(expectedNumberOfRoutes(cs, *netConfigParams)))
 
-						assertClientExternalConnectivity(clientPodConfig, externalContainer.GetIPv4(), externalContainer.GetIPv6(), externalContainer.GetPort())
+						assertClientExternalConnectivity(cs, clientPodConfig, externalContainer.GetIPv4(), externalContainer.GetIPv6(), externalContainer.GetPort())
 					},
 					Entry("by one pod over a layer2 network",
 						&networkAttachmentConfigParams{
 							name:     userDefinedNetworkName,
 							topology: "layer2",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
+						},
+						*podConfig("client-pod"),
+					),
+					Entry("by one pod over a layer2 network with custom network",
+						&networkAttachmentConfigParams{
+							name:                userDefinedNetworkName,
+							topology:            "layer2",
+							cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							role:                "primary",
+							defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+							reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+							infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
 						},
 						*podConfig("client-pod"),
 					),
@@ -1536,7 +1626,7 @@ spec:
 						&networkAttachmentConfigParams{
 							name:     userDefinedNetworkName,
 							topology: "layer3",
-							cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+							cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 							role:     "primary",
 						},
 						*podConfig("client-pod"),
@@ -1545,12 +1635,12 @@ spec:
 			},
 			Entry("NetworkAttachmentDefinitions", func(c *networkAttachmentConfigParams) error {
 				netConfig := newNetworkAttachmentConfig(*c)
-				nad := generateNAD(netConfig)
+				nad := generateNAD(netConfig, f.ClientSet)
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(context.Background(), nad, metav1.CreateOptions{})
 				return err
 			}),
 			Entry("UserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
-				udnManifest := generateUserDefinedNetworkManifest(c)
+				udnManifest := generateUserDefinedNetworkManifest(c, f.ClientSet)
 				cleanup, err := createManifest(f.Namespace.Name, udnManifest)
 				DeferCleanup(cleanup)
 				Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, c.name), 5*time.Second, time.Second).Should(Succeed())
@@ -1558,7 +1648,7 @@ spec:
 			}),
 			Entry("ClusterUserDefinedNetwork", func(c *networkAttachmentConfigParams) error {
 				c.name = randomNetworkMetaName()
-				cudnManifest := generateClusterUserDefinedNetworkManifest(c)
+				cudnManifest := generateClusterUserDefinedNetworkManifest(c, f.ClientSet)
 				cleanup, err := createManifest("", cudnManifest)
 				DeferCleanup(func() {
 					cleanup()
@@ -1583,7 +1673,7 @@ spec:
 
 		BeforeEach(func() {
 			By("create tests UserDefinedNetwork")
-			cleanup, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(testUdnName))
+			cleanup, err := createManifest(f.Namespace.Name, newPrimaryUserDefinedNetworkManifest(cs, testUdnName))
 			DeferCleanup(cleanup)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, testUdnName), 5*time.Second, time.Second).Should(Succeed())
@@ -1644,12 +1734,10 @@ spec:
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, podClusterNetPort) != nil
 				}, 5*time.Second).Should(BeTrue())
 
-				if !isUDNHostIsolationDisabled() {
-					By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
-					Consistently(func() bool {
-						return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetPort) != nil
-					}, 5*time.Second).Should(BeTrue())
-				}
+				By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
+				Consistently(func() bool {
+					return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetPort) != nil
+				}, 5*time.Second).Should(BeTrue())
 			}
 
 			By("Open UDN pod port")
@@ -1694,12 +1782,10 @@ spec:
 					return connectToServer(podConfiguration{namespace: defaultClientPod.Namespace, name: defaultClientPod.Name}, destIP, podClusterNetPort) != nil
 				}, 5*time.Second).Should(BeTrue())
 
-				if !isUDNHostIsolationDisabled() {
-					By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
-					Eventually(func() bool {
-						return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetPort) != nil
-					}, 5*time.Second).Should(BeTrue())
-				}
+				By("checking the default hostNetwork pod can't reach UDN pod on IP " + destIP)
+				Eventually(func() bool {
+					return connectToServer(podConfiguration{namespace: hostNetPod.Namespace, name: hostNetPod.Name}, destIP, podClusterNetPort) != nil
+				}, 5*time.Second).Should(BeTrue())
 			}
 			By("Verify syntax error is reported via event")
 			events, err := cs.CoreV1().Events(udnPod.Namespace).List(context.Background(), metav1.ListOptions{})
@@ -1730,7 +1816,7 @@ spec:
 				}
 				By("creating the network")
 				netConfig.namespace = f.Namespace.Name
-				udnManifest := generateUserDefinedNetworkManifest(&netConfig)
+				udnManifest := generateUserDefinedNetworkManifest(&netConfig, f.ClientSet)
 				cleanup, err := createManifest(netConfig.namespace, udnManifest)
 				Expect(err).ShouldNot(HaveOccurred(), "creating manifest must succeed")
 				DeferCleanup(cleanup)
@@ -1749,7 +1835,7 @@ spec:
 				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: node2Name}
 				runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
 				runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
-				serverIP, err := podIPsForUserDefinedPrimaryNetwork(cs, f.Namespace.Name, serverPodConfig.name, namespacedName(f.Namespace.Name, netConfig.name), 0)
+				serverIP, err := getPodAnnotationIPsForAttachmentByIndex(cs, f.Namespace.Name, serverPodConfig.name, namespacedName(f.Namespace.Name, netConfig.name), 0)
 				Expect(err).ShouldNot(HaveOccurred(), "UDN pod IP must be retrieved")
 				By("restart OVNKube node pods on client and server Nodes and ensure connectivity")
 				serverPod := getPod(f, serverPodConfig.name)
@@ -1768,7 +1854,7 @@ spec:
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig(
@@ -1786,8 +1872,29 @@ spec:
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer2",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
+				},
+				*podConfig(
+					"client-pod",
+				),
+				*podConfig(
+					"server-pod",
+					withCommand(func() []string {
+						return httpServerContainerCmd(podClusterNetPort)
+					}),
+				),
+			),
+			Entry(
+				"L2 with custom network",
+				networkAttachmentConfigParams{
+					name:                nadName,
+					topology:            "layer2",
+					cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:                "primary",
+					defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+					reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+					infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
 				},
 				*podConfig(
 					"client-pod",
@@ -1817,9 +1924,11 @@ var nadToUdnParams = map[string]string{
 	"layer3":    "Layer3",
 }
 
-func generateUserDefinedNetworkManifest(params *networkAttachmentConfigParams) string {
+func generateUserDefinedNetworkManifest(params *networkAttachmentConfigParams, client clientset.Interface) string {
+	filterSupportedNetworkConfig(client, params)
+
 	subnets := generateSubnetsYaml(params)
-	return `
+	manifest := `
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
 metadata:
@@ -1828,13 +1937,29 @@ spec:
   topology: ` + nadToUdnParams[params.topology] + `
   ` + params.topology + `: 
     role: ` + nadToUdnParams[params.role] + `
-    subnets: ` + subnets + `
-`
+    subnets: ` + subnets + ``
+	if params.topology == "layer2" && params.role == "primary" {
+		if len(params.reservedCIDRs) > 0 {
+			manifest += `
+    reservedSubnets: [` + params.reservedCIDRs + `]`
+		}
+		if len(params.infrastructureCIDRs) > 0 {
+			manifest += `
+    infrastructureSubnets: [` + params.infrastructureCIDRs + `]`
+		}
+		if len(params.defaultGatewayIPs) > 0 {
+			manifest += `
+    defaultGatewayIPs: [` + params.defaultGatewayIPs + `]`
+		}
+	}
+	return manifest
 }
 
-func generateClusterUserDefinedNetworkManifest(params *networkAttachmentConfigParams) string {
+func generateClusterUserDefinedNetworkManifest(params *networkAttachmentConfigParams, client clientset.Interface) string {
+	filterSupportedNetworkConfig(client, params)
+
 	subnets := generateSubnetsYaml(params)
-	return `
+	manifest := `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
 metadata:
@@ -1849,8 +1974,24 @@ spec:
     topology: ` + nadToUdnParams[params.topology] + `
     ` + params.topology + `: 
       role: ` + nadToUdnParams[params.role] + `
-      subnets: ` + subnets + `
-`
+      subnets: ` + subnets + ``
+
+	if params.topology == "layer2" && params.role == "primary" {
+		if len(params.reservedCIDRs) > 0 {
+			manifest += `
+      reservedSubnets: [` + params.reservedCIDRs + `]`
+		}
+		if len(params.infrastructureCIDRs) > 0 {
+			manifest += `
+      infrastructureSubnets: [` + params.infrastructureCIDRs + `]`
+		}
+		if len(params.defaultGatewayIPs) > 0 {
+			manifest += `
+      defaultGatewayIPs: [` + params.defaultGatewayIPs + `]`
+		}
+	}
+
+	return manifest
 }
 
 func generateSubnetsYaml(params *networkAttachmentConfigParams) string {
@@ -1880,31 +2021,17 @@ func generateLayer3Subnets(cidrs string) []string {
 
 // userDefinedNetworkReadyFunc returns a function that checks for the NetworkCreated condition in the provided udn
 func userDefinedNetworkReadyFunc(client dynamic.Interface, namespace, name string) func() error {
-	return func() error {
-		udn, err := client.Resource(udnGVR).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{}, "status")
-		if err != nil {
-			return err
-		}
-		conditions, err := getConditions(udn)
-		if err != nil {
-			return err
-		}
-		if len(conditions) == 0 {
-			return fmt.Errorf("no conditions found in: %v", udn)
-		}
-		for _, condition := range conditions {
-			if condition.Type == "NetworkCreated" && condition.Status == metav1.ConditionTrue {
-				return nil
-			}
-		}
-		return fmt.Errorf("no NetworkCreated condition found in: %v", udn)
-	}
+	return networkReadyFunc(client.Resource(udnGVR).Namespace(namespace), name)
 }
 
 // userDefinedNetworkReadyFunc returns a function that checks for the NetworkCreated condition in the provided cluster udn
 func clusterUserDefinedNetworkReadyFunc(client dynamic.Interface, name string) func() error {
+	return networkReadyFunc(client.Resource(clusterUDNGVR), name)
+}
+
+func networkReadyFunc(client dynamic.ResourceInterface, name string) func() error {
 	return func() error {
-		cUDN, err := client.Resource(clusterUDNGVR).Get(context.Background(), name, metav1.GetOptions{}, "status")
+		cUDN, err := client.Get(context.Background(), name, metav1.GetOptions{}, "status")
 		if err != nil {
 			return err
 		}
@@ -2150,7 +2277,7 @@ spec:
 `
 }
 
-func newPrimaryClusterUDNManifest(name string, targetNamespaces ...string) string {
+func newPrimaryClusterUDNManifest(cs clientset.Interface, name string, targetNamespaces ...string) string {
 	targetNs := strings.Join(targetNamespaces, ",")
 	return `
 apiVersion: k8s.ovn.org/v1
@@ -2167,7 +2294,7 @@ spec:
     topology: Layer3
     layer3:
       role: Primary
-      subnets: ` + generateCIDRforClusterUDN("10.20.100.0/16", "2014:100:200::0/60")
+      subnets: ` + generateCIDRforClusterUDN(cs, "10.20.100.0/16", "2014:100:200::0/60")
 }
 
 func newL2SecondaryUDNManifest(name string) string {
@@ -2184,7 +2311,7 @@ spec:
 `
 }
 
-func newPrimaryUserDefinedNetworkManifest(name string) string {
+func newPrimaryUserDefinedNetworkManifest(cs clientset.Interface, name string) string {
 	return `
 apiVersion: k8s.ovn.org/v1
 kind: UserDefinedNetwork
@@ -2194,19 +2321,19 @@ spec:
   topology: Layer3
   layer3:
     role: Primary
-    subnets: ` + generateCIDRforUDN("10.20.100.0/16", "2014:100:200::0/60")
+    subnets: ` + generateCIDRforUDN(cs, "10.20.100.0/16", "2014:100:200::0/60")
 }
 
-func generateCIDRforUDN(v4, v6 string) string {
+func generateCIDRforUDN(cs clientset.Interface, v4, v6 string) string {
 	cidr := `
     - cidr: ` + v4 + `
 `
-	if isIPv6Supported() && isIPv4Supported() {
+	if isIPv6Supported(cs) && isIPv4Supported(cs) {
 		cidr = `
     - cidr: ` + v4 + `
     - cidr: ` + v6 + `
 `
-	} else if isIPv6Supported() {
+	} else if isIPv6Supported(cs) {
 		cidr = `
     - cidr: ` + v6 + `
 `
@@ -2214,11 +2341,33 @@ func generateCIDRforUDN(v4, v6 string) string {
 	return cidr
 }
 
-func generateCIDRforClusterUDN(v4, v6 string) string {
+func filterDualStackCIDRs(cs clientset.Interface, cidrs udnv1.DualStackCIDRs) udnv1.DualStackCIDRs {
+	filteredCIDRs := make(udnv1.DualStackCIDRs, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		if !isCIDRIPFamilySupported(cs, string(cidr)) {
+			continue
+		}
+		filteredCIDRs = append(filteredCIDRs, cidr)
+	}
+	return filteredCIDRs
+}
+
+func filterL3Subnets(cs clientset.Interface, l3Subnets []udnv1.Layer3Subnet) []udnv1.Layer3Subnet {
+	filteredL3Subnets := make([]udnv1.Layer3Subnet, 0, len(l3Subnets))
+	for _, l3Subnet := range l3Subnets {
+		if !isCIDRIPFamilySupported(cs, string(l3Subnet.CIDR)) {
+			continue
+		}
+		filteredL3Subnets = append(filteredL3Subnets, l3Subnet)
+	}
+	return filteredL3Subnets
+}
+
+func generateCIDRforClusterUDN(cs clientset.Interface, v4, v6 string) string {
 	cidr := `[{cidr: ` + v4 + `}]`
-	if isIPv6Supported() && isIPv4Supported() {
+	if isIPv6Supported(cs) && isIPv4Supported(cs) {
 		cidr = `[{cidr: ` + v4 + `},{cidr: ` + v6 + `}]`
-	} else if isIPv6Supported() {
+	} else if isIPv6Supported(cs) {
 		cidr = `[{cidr: ` + v6 + `}]`
 	}
 	return cidr
@@ -2260,26 +2409,6 @@ func withNetworkAttachment(networks []nadapi.NetworkSelectionElement) podOption 
 	}
 }
 
-// podIPsForUserDefinedPrimaryNetwork returns the v4 or v6 IPs for a pod on the UDN
-func podIPsForUserDefinedPrimaryNetwork(k8sClient clientset.Interface, podNamespace string, podName string, attachmentName string, index int) (string, error) {
-	pod, err := k8sClient.CoreV1().Pods(podNamespace).Get(context.Background(), podName, metav1.GetOptions{})
-	if err != nil {
-		return "", err
-	}
-	netStatus, err := userDefinedNetworkStatus(pod, attachmentName)
-	if err != nil {
-		return "", err
-	}
-
-	if len(netStatus.IPs) == 0 {
-		return "", fmt.Errorf("attachment for network %q without IPs", attachmentName)
-	}
-	if len(netStatus.IPs) > 2 {
-		return "", fmt.Errorf("attachment for network %q with more than two IPs", attachmentName)
-	}
-	return netStatus.IPs[index].IP.String(), nil
-}
-
 func podIPsForDefaultNetwork(k8sClient clientset.Interface, podNamespace string, podName string) (string, string, error) {
 	pod, err := k8sClient.CoreV1().Pods(podNamespace).Get(context.Background(), podName, metav1.GetOptions{})
 	if err != nil {
@@ -2287,15 +2416,6 @@ func podIPsForDefaultNetwork(k8sClient clientset.Interface, podNamespace string,
 	}
 	ipv4, ipv6 := getPodAddresses(pod)
 	return ipv4, ipv6, nil
-}
-
-func userDefinedNetworkStatus(pod *v1.Pod, networkName string) (PodAnnotation, error) {
-	netStatus, err := unmarshalPodAnnotation(pod.Annotations, networkName)
-	if err != nil {
-		return PodAnnotation{}, fmt.Errorf("failed to unmarshall annotations for pod %q: %v", pod.Name, err)
-	}
-
-	return *netStatus, nil
 }
 
 func runUDNPod(cs clientset.Interface, namespace string, serverPodConfig podConfiguration, podSpecTweak func(*v1.Pod)) *v1.Pod {
@@ -2342,15 +2462,15 @@ func connectToServerViaDefaultNetwork(clientPodConfig podConfiguration, serverIP
 }
 
 // assertClientExternalConnectivity checks if the client can connect to an externally created IP outside the cluster
-func assertClientExternalConnectivity(clientPodConfig podConfiguration, externalIpv4 string, externalIpv6 string, port uint16) {
-	if isIPv4Supported() {
+func assertClientExternalConnectivity(cs clientset.Interface, clientPodConfig podConfiguration, externalIpv4 string, externalIpv6 string, port uint16) {
+	if isIPv4Supported(cs) {
 		By("asserting the *client* pod can contact the server's v4 IP located outside the cluster")
 		Eventually(func() error {
 			return connectToServer(clientPodConfig, externalIpv4, port)
 		}, 2*time.Minute, 6*time.Second).Should(Succeed())
 	}
 
-	if isIPv6Supported() {
+	if isIPv6Supported(cs) {
 		By("asserting the *client* pod can contact the server's v6 IP located outside the cluster")
 		Eventually(func() error {
 			return connectToServer(clientPodConfig, externalIpv6, port)
@@ -2358,15 +2478,15 @@ func assertClientExternalConnectivity(clientPodConfig podConfiguration, external
 	}
 }
 
-func expectedNumberOfRoutes(netConfig networkAttachmentConfigParams) int {
+func expectedNumberOfRoutes(cs clientset.Interface, netConfig networkAttachmentConfigParams) int {
 	if netConfig.topology == "layer2" {
-		if isIPv6Supported() && isIPv4Supported() {
+		if isIPv6Supported(cs) && isIPv4Supported(cs) {
 			return 4 // 2 routes per family
 		} else {
 			return 2 //one family supported
 		}
 	}
-	if isIPv6Supported() && isIPv4Supported() {
+	if isIPv6Supported(cs) && isIPv4Supported(cs) {
 		return 6 // 3 v4 routes + 3 v6 routes for UDN
 	}
 	return 3 //only one family, each has 3 routes

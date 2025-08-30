@@ -21,14 +21,14 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/database"
-	"github.com/ovn-org/libovsdb/database/inmemory"
-	"github.com/ovn-org/libovsdb/mapper"
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
-	"github.com/ovn-org/libovsdb/server"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/database"
+	"github.com/ovn-kubernetes/libovsdb/database/inmemory"
+	"github.com/ovn-kubernetes/libovsdb/mapper"
+	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb/serverdb"
+	"github.com/ovn-kubernetes/libovsdb/server"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
@@ -368,7 +368,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 	db := inmemory.NewDatabase(map[string]model.ClientDBModel{
 		schema.Name:       dbModel,
 		serverSchema.Name: serverDBModel,
-	})
+	}, nil)
 
 	dbMod, errs := model.NewDatabaseModel(schema, dbModel)
 	if len(errs) > 0 {
@@ -380,7 +380,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 		log.Fatal(errs)
 	}
 
-	s, err := server.NewOvsdbServer(db, dbMod, servMod)
+	s, err := server.NewOvsdbServer(db, nil, dbMod, servMod)
 	if err != nil {
 		return nil, err
 	}
