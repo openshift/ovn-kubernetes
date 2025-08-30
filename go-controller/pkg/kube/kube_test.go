@@ -96,7 +96,7 @@ var _ = Describe("Kube", func() {
 					err := kube.SetTaintOnNode(node.Name, &taint)
 					Expect(err).ToNot(HaveOccurred())
 
-					updatedNode, err := kube.GetNode(node.Name)
+					updatedNode, err := kube.GetNodeForWindows(node.Name)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(updatedNode.Spec.Taints).To(Equal([]corev1.Taint{taint}))
 				})

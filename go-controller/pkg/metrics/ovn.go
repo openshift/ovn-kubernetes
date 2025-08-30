@@ -9,32 +9,33 @@ import (
 
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 // ovnController Configuration metrics
 var metricRemoteProbeInterval = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "remote_probe_interval_seconds",
 	Help:      "The inactivity probe interval of the connection to the OVN SB DB.",
 })
 
 var metricOpenFlowProbeInterval = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "openflow_probe_interval_seconds",
 	Help: "The inactivity probe interval of the OpenFlow connection to the " +
 		"OpenvSwitch integration bridge.",
 })
 
 var metricMonitorAll = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "monitor_all",
 	Help: "Specifies if ovn-controller should monitor all records of tables in OVN SB DB. " +
 		"If set to false, it will conditionally monitor the records that " +
@@ -42,8 +43,8 @@ var metricMonitorAll = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 var metricEncapIP = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "encap_ip",
 	Help: "A metric with a constant '1' value labeled by ipadress that " +
 		"specifies the encapsulation ip address configured on that node.",
@@ -54,8 +55,8 @@ var metricEncapIP = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricSbConnectionMethod = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "sb_connection_method",
 	Help: "A metric with a constant '1' value labeled by connection_method that " +
 		"specifies the ovn-remote value configured on that node.",
@@ -66,8 +67,8 @@ var metricSbConnectionMethod = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricEncapType = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "encap_type",
 	Help: "A metric with a constant '1' value labeled by type that " +
 		"specifies the encapsulation type a chassis should use to " +
@@ -79,8 +80,8 @@ var metricEncapType = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricBridgeMappings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "bridge_mappings",
 	Help: "A metric with a constant '1' value labeled by mapping that " +
 		"specifies list of key-value pairs that map a physical network name " +
@@ -92,8 +93,8 @@ var metricBridgeMappings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOVNControllerSBDBConnection = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemController,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
 	Name:      "southbound_database_connected",
 	Help:      "Specifies if OVN controller is connected to OVN southbound database (1) or not (0)",
 })
@@ -261,11 +262,11 @@ func setOvnControllerConfigurationMetrics(ovsDBClient libovsdbclient.Client) (er
 	}
 
 	openflowProbeField := openvSwitch.ExternalIDs["ovn-bridge-remote-probe-interval"]
-	openflowProbeVal := parseMetricToFloat(MetricOvnSubsystemController, "ovn-bridge-remote-probe-interval", openflowProbeField)
+	openflowProbeVal := parseMetricToFloat(types.MetricOvnSubsystemController, "ovn-bridge-remote-probe-interval", openflowProbeField)
 	metricOpenFlowProbeInterval.Set(openflowProbeVal)
 
 	remoteProbeField := openvSwitch.ExternalIDs["ovn-remote-probe-interval"]
-	remoteProbeValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-remote-probe-interval", remoteProbeField)
+	remoteProbeValue := parseMetricToFloat(types.MetricOvnSubsystemController, "ovn-remote-probe-interval", remoteProbeField)
 	metricRemoteProbeInterval.Set(remoteProbeValue / 1000)
 
 	var ovnMonitorValue float64
@@ -406,8 +407,8 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 	getOvnControllerVersionInfo()
 	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
-			Namespace: MetricOvnNamespace,
-			Subsystem: MetricOvnSubsystemController,
+			Namespace: types.MetricOvnNamespace,
+			Subsystem: types.MetricOvnSubsystemController,
 			Name:      "build_info",
 			Help: "A metric with a constant '1' value labeled by version and library " +
 				"from which ovn binaries were built",
@@ -423,8 +424,8 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 	ovnRegistry.MustRegister(metricOVNControllerSBDBConnection)
 	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{
-			Namespace: MetricOvnNamespace,
-			Subsystem: MetricOvnSubsystemController,
+			Namespace: types.MetricOvnNamespace,
+			Subsystem: types.MetricOvnSubsystemController,
 			Name:      "integration_bridge_openflow_total",
 			Help:      "The total number of OpenFlow flows in the integration bridge.",
 		}, func() float64 {
@@ -437,7 +438,7 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 			for _, kvPair := range strings.Fields(stdout) {
 				if strings.HasPrefix(kvPair, "flow_count=") {
 					value := strings.Split(kvPair, "=")[1]
-					return parseMetricToFloat(MetricOvnSubsystemController, "integration_bridge_openflow_total",
+					return parseMetricToFloat(types.MetricOvnSubsystemController, "integration_bridge_openflow_total",
 						value)
 				}
 			}
@@ -445,8 +446,8 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 		}))
 	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
-			Namespace: MetricOvnNamespace,
-			Subsystem: MetricOvnSubsystemController,
+			Namespace: types.MetricOvnNamespace,
+			Subsystem: types.MetricOvnSubsystemController,
 			Name:      "integration_bridge_patch_ports",
 			Help: "Captures the number of patch ports that connect br-int OVS " +
 				"bridge to physical OVS bridge and br-local OVS bridge.",
@@ -456,8 +457,8 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 		}))
 	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
-			Namespace: MetricOvnNamespace,
-			Subsystem: MetricOvnSubsystemController,
+			Namespace: types.MetricOvnNamespace,
+			Subsystem: types.MetricOvnSubsystemController,
 			Name:      "integration_bridge_geneve_ports",
 			Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
 		},
@@ -475,11 +476,11 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 	ovnRegistry.MustRegister(metricBridgeMappings)
 	// Register the ovn-controller coverage/show metrics
 	componentCoverageShowMetricsMap[ovnController] = ovnControllerCoverageShowMetricsMap
-	registerCoverageShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
+	registerCoverageShowMetrics(ovnController, types.MetricOvnNamespace, types.MetricOvnSubsystemController)
 
 	// Register the ovn-controller coverage/show metrics
 	componentStopwatchShowMetricsMap[ovnController] = ovnControllerStopwatchShowMetricsMap
-	registerStopwatchShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
+	registerStopwatchShowMetrics(ovnController, types.MetricOvnNamespace, types.MetricOvnSubsystemController)
 
 	// ovn-controller configuration metrics updater
 	go ovnControllerConfigurationMetricsUpdater(ovsDBClient,

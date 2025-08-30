@@ -20,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -37,21 +38,21 @@ type addressManager struct {
 	syncPeriod time.Duration
 	// compare node primary IP change
 	nodePrimaryAddr net.IP
-	gatewayBridge   *bridgeConfiguration
+	gatewayBridge   *bridgeconfig.BridgeConfiguration
 
 	OnChanged func()
 	sync.Mutex
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration) *addressManager {
+func newAddressManager(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeconfig.BridgeConfiguration) *addressManager {
 	return newAddressManagerInternal(nodeName, k, mgmtPort, watchFactory, gwBridge, true)
 }
 
 // newAddressManagerInternal creates a new address manager; this function is
 // only expose for testcases to disable netlink subscription to ensure
 // reproducibility of unit tests.
-func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
+func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeconfig.BridgeConfiguration, useNetlink bool) *addressManager {
 	mgr := &addressManager{
 		nodeName:      nodeName,
 		watchFactory:  watchFactory,
@@ -64,27 +65,11 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort manag
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		var ifAddrs []*net.IPNet
-
-		// update k8s.ovn.org/host-cidrs
-		node, err := watchFactory.GetNode(nodeName)
-		if err != nil {
-			klog.Errorf("Failed to get node %s: %v", nodeName, err)
-			return nil
-		}
-		if useNetlink {
-			// get updated interface IP addresses for the gateway bridge
-			ifAddrs, err = gwBridge.updateInterfaceIPAddresses(node)
-			if err != nil {
-				klog.Errorf("Failed to obtain interface IP addresses for node %s: %v", nodeName, err)
-				return nil
-			}
-		}
-		if err = mgr.updateHostCIDRs(ifAddrs); err != nil {
+		if err := mgr.updateHostCIDRs(); err != nil {
 			klog.Errorf("Failed to update host-cidrs annotations on node %s: %v", nodeName, err)
 			return nil
 		}
-		if err = mgr.nodeAnnotator.Run(); err != nil {
+		if err := mgr.nodeAnnotator.Run(); err != nil {
 			klog.Errorf("Failed to set host-cidrs annotations on node %s: %v", nodeName, err)
 			return nil
 		}
@@ -278,14 +263,14 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 
 	if c.useNetlink {
 		// get updated interface IP addresses for the gateway bridge
-		ifAddrs, err = c.gatewayBridge.updateInterfaceIPAddresses(node)
+		ifAddrs, err = c.gatewayBridge.UpdateInterfaceIPAddresses(node)
 		if err != nil {
 			return err
 		}
 	}
 
 	// update k8s.ovn.org/host-cidrs
-	if err = c.updateHostCIDRs(ifAddrs); err != nil {
+	if err = c.updateHostCIDRs(); err != nil {
 		return err
 	}
 
@@ -315,14 +300,10 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	return nil
 }
 
-func (c *addressManager) updateHostCIDRs(ifAddrs []*net.IPNet) error {
+func (c *addressManager) updateHostCIDRs() error {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
-		// host internal IP address instead.
-		// Currently we are only intentionally supporting IPv4 for DPU here.
-		nodeIPNetv4, _ := util.MatchFirstIPNetFamily(false, ifAddrs)
-		nodeAddrSet := sets.New[string](nodeIPNetv4.String())
-		return util.SetNodeHostCIDRs(c.nodeAnnotator, nodeAddrSet)
+		// For DPU mode, we don't need to update the host-cidrs annotation.
+		return nil
 	}
 
 	return util.SetNodeHostCIDRs(c.nodeAnnotator, c.cidrs)
@@ -437,7 +418,8 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
 			// Two methods to lookup EIPs assigned to the gateway bridge. Fast path from a shared cache or slow path from node annotations.
 			// At startup, gateway bridge cache gets sync
-			if c.gatewayBridge.eipMarkIPs != nil && c.gatewayBridge.eipMarkIPs.HasSyncdOnce() && c.gatewayBridge.eipMarkIPs.IsIPPresent(addr) {
+			eipMarkIPs := c.gatewayBridge.GetEIPMarkIPs()
+			if eipMarkIPs != nil && eipMarkIPs.HasSyncdOnce() && eipMarkIPs.IsIPPresent(addr) {
 				return false
 			} else {
 				if eipAddresses, err := c.getPrimaryHostEgressIPs(); err != nil {

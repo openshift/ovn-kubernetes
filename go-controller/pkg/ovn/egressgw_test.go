@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
@@ -19,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -133,8 +135,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -169,8 +171,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -273,8 +275,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -309,8 +311,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -417,8 +419,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -463,8 +465,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -895,8 +897,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -966,8 +968,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -1045,7 +1047,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
@@ -1076,8 +1078,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -1116,8 +1118,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -1208,7 +1210,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
@@ -1237,8 +1239,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -1277,8 +1279,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -1377,7 +1379,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				err = fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				err = fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
@@ -1408,8 +1410,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
-					"iface-id-ver":      "myPod",
-					"requested-chassis": "node1",
+					"iface-id-ver":               "myPod",
+					libovsdbops.RequestedChassis: "node1",
 				},
 				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
@@ -1448,8 +1450,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
-						"iface-id-ver":      "myPod",
-						"requested-chassis": "node1",
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
 					},
 					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
@@ -1547,7 +1549,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						apbExternalRouteCRList,
 					)
 					t.populateLogicalSwitchCache(fakeOvn)
-					err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+					err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")}, nil)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					injectNode(fakeOvn)
 					err = fakeOvn.controller.WatchNamespaces()
@@ -1579,6 +1581,353 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgo.Entry("No BFD", false,
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{"static-route-1-UUID"},
+					},
+				},
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{},
+					},
+				},
+				"",
+				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
+			),
+			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+				&nbdb.LogicalSwitchPort{
+					UUID:      "lsp1",
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					ExternalIDs: map[string]string{
+						"pod":       "true",
+						"namespace": namespaceName,
+					},
+					Name: "namespace1_myPod",
+					Options: map[string]string{
+						"iface-id-ver":               "myPod",
+						libovsdbops.RequestedChassis: "node1",
+					},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID:  "node1",
+					Name:  "node1",
+					Ports: []string{"lsp1"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: "node2",
+					Name: "node2",
+				},
+				&nbdb.BFD{
+					UUID:        bfd1NamedUUID,
+					DstIP:       "9.0.0.1",
+					LogicalPort: "rtoe-GR_node1",
+				},
+				&nbdb.LogicalRouterStaticRoute{
+					UUID:       "static-route-1-UUID",
+					IPPrefix:   "10.128.1.3/32",
+					Nexthop:    "9.0.0.1",
+					BFD:        &bfd1NamedUUID,
+					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+					OutputPort: &logicalRouterPort,
+					Options: map[string]string{
+						"ecmp_symmetric_reply": "true",
+					},
+				},
+				&nbdb.LogicalRouter{
+					UUID:         "GR_node1-UUID",
+					Name:         "GR_node1",
+					StaticRoutes: []string{"static-route-1-UUID"},
+				},
+			},
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{},
+					},
+				},
+				"",
+				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
+			),
+			ginkgo.Entry("No BFD and with overlapping APB External Route CR and annotation", false,
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{"static-route-1-UUID"},
+					},
+				},
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{},
+					},
+				},
+				"",
+				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
+					Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
+						newPolicy("policy",
+							&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
+							nil,
+							false,
+							&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespace2Name}},
+							&metav1.LabelSelector{MatchLabels: map[string]string{"name": gwPodName}},
+							false,
+							""),
+					},
+				},
+			),
+		)
+		ginkgo.DescribeTable("reconciles a host networked pod in terminating or not ready state acting as a exgw for another namespace for existing pod",
+			func(bfd bool,
+				terminating bool,
+				beforeUpdateNB []libovsdbtest.TestData,
+				afterUpdateNB []libovsdbtest.TestData,
+				expectedNamespaceAnnotation string,
+				apbExternalRouteCRList *adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList) {
+				app.Action = func(*cli.Context) error {
+
+					namespaceT := *newNamespace(namespaceName)
+					namespaceX := *newNamespace(namespace2Name)
+					t := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
+					gwPod := *newPod(namespaceX.Name, gwPodName, "node2", "9.0.0.1")
+					gwPod.Annotations = map[string]string{"k8s.ovn.org/routing-namespaces": namespaceT.Name}
+					if bfd {
+						gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					gwPod.Spec.HostNetwork = true
+					fakeOvn.startWithDBSetup(
+						libovsdbtest.TestSetup{
+							NBData: []libovsdbtest.TestData{
+								&nbdb.LogicalSwitch{
+									UUID: "node1",
+									Name: "node1",
+								},
+								&nbdb.LogicalSwitch{
+									UUID: "node2",
+									Name: "node2",
+								},
+								&nbdb.LogicalRouter{
+									UUID: "GR_node1-UUID",
+									Name: "GR_node1",
+								},
+							},
+						},
+						&corev1.NamespaceList{
+							Items: []corev1.Namespace{
+								namespaceT, namespaceX,
+							},
+						},
+						&corev1.NodeList{
+							Items: []corev1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+								*newNode("node2", "192.168.126.50/24"),
+							},
+						},
+						&corev1.PodList{
+							Items: []corev1.Pod{
+								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							},
+						},
+						apbExternalRouteCRList,
+					)
+					t.populateLogicalSwitchCache(fakeOvn)
+					err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")}, nil)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					injectNode(fakeOvn)
+					err = fakeOvn.controller.WatchNamespaces()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = fakeOvn.controller.WatchPods()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					fakeOvn.RunAPBExternalPolicyController()
+
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(beforeUpdateNB))
+					gomega.Eventually(func() string {
+						return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
+					}).Should(gomega.Equal("9.0.0.1"))
+
+					if terminating {
+						ginkgo.By("Setting deletion timestamp for the ex gw pod")
+						gwPod.DeletionTimestamp = &metav1.Time{Time: time.Now().Add(1000 * time.Second)}
+						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Update(context.TODO(), &gwPod, metav1.UpdateOptions{})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					} else {
+						ginkgo.By("Updating the ex gw pod status to mark it as not ready")
+						notReadyCondition := corev1.PodCondition{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionFalse,
+						}
+						gwPod.Status.Conditions = []corev1.PodCondition{notReadyCondition}
+						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).UpdateStatus(context.TODO(), &gwPod, metav1.UpdateOptions{})
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					}
+
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(afterUpdateNB))
+					gomega.Eventually(func() string {
+						return getNamespaceAnnotations(fakeOvn.fakeClient.KubeClient, namespaceT.Name)[util.ExternalGatewayPodIPsAnnotation]
+					}).Should(gomega.Equal(expectedNamespaceAnnotation))
+					for _, apbRoutePolicy := range apbExternalRouteCRList.Items {
+						checkAPBRouteStatus(fakeOvn, apbRoutePolicy.Name, false)
+					}
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			},
+			ginkgo.Entry("No BFD with ex gw pod in terminating state", false, true,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
@@ -1652,7 +2001,81 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				"",
 				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
 			),
-			ginkgo.Entry("BFD Enabled", true, []libovsdbtest.TestData{
+			ginkgo.Entry("No BFD with ex gw pod in not ready state", false, false,
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":      "myPod",
+							"requested-chassis": "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{"static-route-1-UUID"},
+					},
+				},
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":      "myPod",
+							"requested-chassis": "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{},
+					},
+				},
+				"",
+				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
+			),
+			ginkgo.Entry("BFD Enabled with ex gw pod in terminating state", true, true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
@@ -1731,7 +2154,171 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				"",
 				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
 			),
-			ginkgo.Entry("No BFD and with overlapping APB External Route CR and annotation", false,
+			ginkgo.Entry("BFD Enabled with ex gw pod in not ready state", true, false, []libovsdbtest.TestData{
+				&nbdb.LogicalSwitchPort{
+					UUID:      "lsp1",
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					ExternalIDs: map[string]string{
+						"pod":       "true",
+						"namespace": namespaceName,
+					},
+					Name: "namespace1_myPod",
+					Options: map[string]string{
+						"iface-id-ver":      "myPod",
+						"requested-chassis": "node1",
+					},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID:  "node1",
+					Name:  "node1",
+					Ports: []string{"lsp1"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: "node2",
+					Name: "node2",
+				},
+				&nbdb.BFD{
+					UUID:        bfd1NamedUUID,
+					DstIP:       "9.0.0.1",
+					LogicalPort: "rtoe-GR_node1",
+				},
+				&nbdb.LogicalRouterStaticRoute{
+					UUID:       "static-route-1-UUID",
+					IPPrefix:   "10.128.1.3/32",
+					Nexthop:    "9.0.0.1",
+					BFD:        &bfd1NamedUUID,
+					Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+					OutputPort: &logicalRouterPort,
+					Options: map[string]string{
+						"ecmp_symmetric_reply": "true",
+					},
+				},
+				&nbdb.LogicalRouter{
+					UUID:         "GR_node1-UUID",
+					Name:         "GR_node1",
+					StaticRoutes: []string{"static-route-1-UUID"},
+				},
+			},
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":      "myPod",
+							"requested-chassis": "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{},
+					},
+				},
+				"",
+				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{},
+			),
+			ginkgo.Entry("No BFD with ex gw pod in terminating state and with overlapping APB External Route CR and annotation", false, true,
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":      "myPod",
+							"requested-chassis": "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-1-UUID",
+						IPPrefix:   "10.128.1.3/32",
+						Nexthop:    "9.0.0.1",
+						Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						OutputPort: &logicalRouterPort,
+						Options: map[string]string{
+							"ecmp_symmetric_reply": "true",
+						},
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{"static-route-1-UUID"},
+					},
+				},
+				[]libovsdbtest.TestData{
+					&nbdb.LogicalSwitchPort{
+						UUID:      "lsp1",
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+						ExternalIDs: map[string]string{
+							"pod":       "true",
+							"namespace": namespaceName,
+						},
+						Name: "namespace1_myPod",
+						Options: map[string]string{
+							"iface-id-ver":      "myPod",
+							"requested-chassis": "node1",
+						},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  "node1",
+						Name:  "node1",
+						Ports: []string{"lsp1"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node2",
+						Name: "node2",
+					},
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{},
+					},
+				},
+				"",
+				&adminpolicybasedrouteapi.AdminPolicyBasedExternalRouteList{
+					Items: []adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute{
+						newPolicy("policy",
+							&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespaceName}},
+							nil,
+							false,
+							&metav1.LabelSelector{MatchLabels: map[string]string{"name": namespace2Name}},
+							&metav1.LabelSelector{MatchLabels: map[string]string{"name": gwPodName}},
+							false,
+							""),
+					},
+				},
+			),
+			ginkgo.Entry("No BFD with ex gw pod in not ready state and with overlapping APB External Route CR and annotation", false, false,
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
@@ -1875,7 +2462,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
@@ -1896,8 +2483,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2009,7 +2596,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch("node2", []*net.IPNet{ovntest.MustParseIPNet("10.128.2.0/24")}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
@@ -2030,8 +2617,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2171,8 +2758,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"iface-id-ver":      "myPod",
-							"requested-chassis": "node1",
+							"iface-id-ver":               "myPod",
+							libovsdbops.RequestedChassis: "node1",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2364,8 +2951,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"requested-chassis": "node1",
-							"iface-id-ver":      "myPod",
+							libovsdbops.RequestedChassis: "node1",
+							"iface-id-ver":               "myPod",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
@@ -2546,8 +3133,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
-							"requested-chassis": "node1",
-							"iface-id-ver":      "myPod",
+							libovsdbops.RequestedChassis: "node1",
+							"iface-id-ver":               "myPod",
 						},
 						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},

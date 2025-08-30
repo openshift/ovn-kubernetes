@@ -6,13 +6,13 @@ import (
 
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/testdata"
-	testdatacudn "github.com/ovn-org/ovn-kubernetes/test/e2e/testdata/cudn"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/testscenario"
+	testscenariocudn "github.com/ovn-org/ovn-kubernetes/test/e2e/testscenario/cudn"
 )
 
 var _ = Describe("Network Segmentation: API validations", func() {
 	DescribeTable("api-server should reject invalid CRs",
-		func(scenarios []testdata.ValidateCRScenario) {
+		func(scenarios []testscenario.ValidateCRScenario) {
 			DeferCleanup(func() {
 				cleanupValidateCRsTest(scenarios)
 			})
@@ -23,16 +23,18 @@ var _ = Describe("Network Segmentation: API validations", func() {
 				Expect(stderr).To(ContainSubstring(s.ExpectedErr))
 			}
 		},
-		Entry("ClusterUserDefinedNetwork, mismatch topology and config", testdatacudn.MismatchTopologyConfig),
-		Entry("ClusterUserDefinedNetwork, localnet, invalid role", testdatacudn.LocalnetInvalidRole),
-		Entry("ClusterUserDefinedNetwork, localnet, invalid physicalNetworkName", testdatacudn.LocalnetInvalidPhyNetName),
-		Entry("ClusterUserDefinedNetwork, localnet, invalid subnets", testdatacudn.LocalnetInvalidSubnets),
-		Entry("ClusterUserDefinedNetwork, localnet, invalid mtu", testdatacudn.LocalnetInvalidMTU),
-		Entry("ClusterUserDefinedNetwork, localnet, invalid vlan", testdatacudn.LocalnetInvalidVLAN),
+		Entry("ClusterUserDefinedNetwork, mismatch topology and config", testscenariocudn.MismatchTopologyConfig),
+		Entry("ClusterUserDefinedNetwork, localnet, invalid role", testscenariocudn.LocalnetInvalidRole),
+		Entry("ClusterUserDefinedNetwork, localnet, invalid physicalNetworkName", testscenariocudn.LocalnetInvalidPhyNetName),
+		Entry("ClusterUserDefinedNetwork, localnet, invalid subnets", testscenariocudn.LocalnetInvalidSubnets),
+		Entry("ClusterUserDefinedNetwork, localnet, invalid mtu", testscenariocudn.LocalnetInvalidMTU),
+		Entry("ClusterUserDefinedNetwork, localnet, invalid vlan", testscenariocudn.LocalnetInvalidVLAN),
+		Entry("ClusterUserDefinedNetwork, layer2", testscenariocudn.Layer2CUDNInvalid),
+		Entry("UserDefinedNetwork, layer2", testscenariocudn.Layer2UDNInvalid),
 	)
 
 	DescribeTable("api-server should accept valid CRs",
-		func(scenarios []testdata.ValidateCRScenario) {
+		func(scenarios []testscenario.ValidateCRScenario) {
 			DeferCleanup(func() {
 				cleanupValidateCRsTest(scenarios)
 			})
@@ -42,7 +44,9 @@ var _ = Describe("Network Segmentation: API validations", func() {
 				Expect(err).NotTo(HaveOccurred(), "should create valid CR successfully")
 			}
 		},
-		Entry("ClusterUserDefinedNetwork, localnet", testdatacudn.LocalnetValid),
+		Entry("ClusterUserDefinedNetwork, localnet", testscenariocudn.LocalnetValid),
+		Entry("ClusterUserDefinedNetwork, layer2", testscenariocudn.Layer2CUDNValid),
+		Entry("UserDefinedNetwork, layer2", testscenariocudn.Layer2UDNValid),
 	)
 })
 
@@ -52,7 +56,7 @@ func runKubectlInputWithFullOutput(namespace string, data string, args ...string
 	return e2ekubectl.NewKubectlCommand(namespace, args...).WithStdinData(data).ExecWithFullOutput()
 }
 
-func cleanupValidateCRsTest(scenarios []testdata.ValidateCRScenario) {
+func cleanupValidateCRsTest(scenarios []testscenario.ValidateCRScenario) {
 	for _, s := range scenarios {
 		e2ekubectl.RunKubectlInput("", s.Manifest, "delete", "-f", "-")
 	}

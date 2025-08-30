@@ -7,13 +7,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // MetricCNIRequestDuration is a prometheus metric that tracks the duration
 // of CNI requests
 var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "cni_request_duration_seconds",
 	Help:      "The duration of CNI server requests.",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
@@ -22,23 +23,23 @@ var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOp
 )
 
 var MetricNodeReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "ready_duration_seconds",
 	Help:      "The duration for the node to get to ready state.",
 })
 
 var metricOvnNodePortEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "nodeport_enabled",
 	Help:      "Specifies if the node port is enabled on this node(1) or not(0).",
 })
 
 // metric to get the size of ovnkube.log file
 var metricOvnKubeNodeLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "logfile_size_bytes",
 	Help:      "The size of ovnkube logfile on the node."},
 	[]string{
@@ -56,8 +57,8 @@ func RegisterNodeMetrics(stopChan <-chan struct{}) {
 		prometheus.MustRegister(metricOvnNodePortEnabled)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
-				Namespace: MetricOvnkubeNamespace,
-				Subsystem: MetricOvnkubeSubsystemNode,
+				Namespace: types.MetricOvnkubeNamespace,
+				Subsystem: types.MetricOvnkubeSubsystemNode,
 				Name:      "build_info",
 				Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
 					"and go version from which ovnkube was built and when and who built it.",
@@ -72,7 +73,7 @@ func RegisterNodeMetrics(stopChan <-chan struct{}) {
 			},
 			func() float64 { return 1 },
 		))
-		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemNode)
+		registerWorkqueueMetrics(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemNode)
 		if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 				panic(err)

@@ -91,36 +91,6 @@ func (_m *InterfaceOVN) Events() corev1.EventInterface {
 	return r0
 }
 
-// GetAnnotationsOnPod provides a mock function with given fields: namespace, name
-func (_m *InterfaceOVN) GetAnnotationsOnPod(namespace string, name string) (map[string]string, error) {
-	ret := _m.Called(namespace, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetAnnotationsOnPod")
-	}
-
-	var r0 map[string]string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (map[string]string, error)); ok {
-		return rf(namespace, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) map[string]string); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]string)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetEgressFirewalls provides a mock function with given fields:
 func (_m *InterfaceOVN) GetEgressFirewalls() ([]*egressfirewallv1.EgressFirewall, error) {
 	ret := _m.Called()
@@ -211,42 +181,12 @@ func (_m *InterfaceOVN) GetEgressIPs() ([]*egressipv1.EgressIP, error) {
 	return r0, r1
 }
 
-// GetNamespaces provides a mock function with given fields: labelSelector
-func (_m *InterfaceOVN) GetNamespaces(labelSelector metav1.LabelSelector) ([]*apicorev1.Namespace, error) {
-	ret := _m.Called(labelSelector)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetNamespaces")
-	}
-
-	var r0 []*apicorev1.Namespace
-	var r1 error
-	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) ([]*apicorev1.Namespace, error)); ok {
-		return rf(labelSelector)
-	}
-	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) []*apicorev1.Namespace); ok {
-		r0 = rf(labelSelector)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*apicorev1.Namespace)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(metav1.LabelSelector) error); ok {
-		r1 = rf(labelSelector)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetNode provides a mock function with given fields: name
-func (_m *InterfaceOVN) GetNode(name string) (*apicorev1.Node, error) {
+func (_m *InterfaceOVN) GetNodeForWindows(name string) (*apicorev1.Node, error) {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetNode")
+		panic("no return value specified for GetNodeForWindows")
 	}
 
 	var r0 *apicorev1.Node
@@ -271,8 +211,8 @@ func (_m *InterfaceOVN) GetNode(name string) (*apicorev1.Node, error) {
 	return r0, r1
 }
 
-// GetNodes provides a mock function with given fields:
-func (_m *InterfaceOVN) GetNodes() ([]*apicorev1.Node, error) {
+// GetNodesForWindows provides a mock function with given fields:
+func (_m *InterfaceOVN) GetNodesForWindows() ([]*apicorev1.Node, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
@@ -301,42 +241,12 @@ func (_m *InterfaceOVN) GetNodes() ([]*apicorev1.Node, error) {
 	return r0, r1
 }
 
-// GetPod provides a mock function with given fields: namespace, name
-func (_m *InterfaceOVN) GetPod(namespace string, name string) (*apicorev1.Pod, error) {
-	ret := _m.Called(namespace, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPod")
-	}
-
-	var r0 *apicorev1.Pod
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*apicorev1.Pod, error)); ok {
-		return rf(namespace, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) *apicorev1.Pod); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.Pod)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetPods provides a mock function with given fields: namespace, opts
-func (_m *InterfaceOVN) GetPods(namespace string, opts metav1.ListOptions) ([]*apicorev1.Pod, error) {
+func (_m *InterfaceOVN) GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*apicorev1.Pod, error) {
 	ret := _m.Called(namespace, opts)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetPods")
+		panic("no return value specified for GetPodsForDBChecker")
 	}
 
 	var r0 []*apicorev1.Pod

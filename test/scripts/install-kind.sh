@@ -45,7 +45,7 @@ install_kind() {
 }
 
 pushd $TMP_DIR
-K8S_VERSION="v1.32.3"
+K8S_VERSION="v1.33.1"
 
 # Install kubectl for K8S_VERSION in use
 curl -sL https://dl.k8s.io/${K8S_VERSION}/kubernetes-client-linux-${ARCH}.tar.gz | sudo tar xvz -C /usr/local/bin kubernetes/client/bin/kubectl --strip-components 3
@@ -78,8 +78,5 @@ else
     ./kind.sh
 fi
 
-if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
-    sudo mv ./bin/virtctl /usr/local/bin/virtctl
-fi
 popd # go our of $SCRIPT_DIR/../../contrib
 

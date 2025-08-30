@@ -27,6 +27,7 @@ set_default_params() {
   export KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
   export ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   export ENABLE_NETWORK_SEGMENTATION=${ENABLE_NETWORK_SEGMENTATION:-false}
+  export ENABLE_PRE_CONF_UDN_ADDR=${ENABLE_PRE_CONF_UDN_ADDR:-false}
   export OVN_NETWORK_QOS_ENABLE=${OVN_NETWORK_QOS_ENABLE:-false}
   export KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   export KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
@@ -61,7 +62,7 @@ set_default_params() {
     KIND_NUM_MASTER=3
   fi
 
-  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
+  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-true}
   if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
      echo "Compact mode cannot be used together with Interconnect"
      exit 1
@@ -99,6 +100,7 @@ usage() {
     echo "       [ -ikv | --install-kubevirt ]"
     echo "       [ -mne | --multi-network-enable ]"
     echo "       [ -nse | --network-segmentation-enable ]"
+    echo "       [ -uae | --preconfigured-udn-addresses-enable ]"
     echo "       [ -nqe | --network-qos-enable ]"
     echo "       [ -wk  | --num-workers <num> ]"
     echo "       [ -ic  | --enable-interconnect]"
@@ -106,28 +108,29 @@ usage() {
     echo "       [ -cn  | --cluster-name ]"
     echo "       [ -h ]"
     echo ""
-    echo "--delete                             Delete current cluster"
-    echo "-cf  | --config-file                 Name of the KIND configuration file"
-    echo "-kt  | --keep-taint                  Do not remove taint components"
-    echo "                                     DEFAULT: Remove taint components"
-    echo "-me  | --multicast-enabled           Enable multicast. DEFAULT: Disabled"
-    echo "-ho  | --hybrid-enabled              Enable hybrid overlay. DEFAULT: Disabled"
-    echo "-obs | --observability               Enable observability. DEFAULT: Disabled"
-    echo "-el  | --ovn-empty-lb-events         Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
-    echo "-ii  | --install-ingress             Flag to install Ingress Components."
-    echo "                                     DEFAULT: Don't install ingress components."
-    echo "-mlb | --install-metallb             Install metallb to test service type LoadBalancer deployments"
-    echo "-pl  | --install-cni-plugins         Install CNI plugins"
-    echo "-ikv | --install-kubevirt            Install kubevirt"
-    echo "-mne | --multi-network-enable        Enable multi networks. DEFAULT: Disabled"
-    echo "-nse | --network-segmentation-enable Enable network segmentation. DEFAULT: Disabled"
-    echo "-nqe | --network-qos-enable          Enable network QoS. DEFAULT: Disabled"
-    echo "-ha  | --ha-enabled                  Enable high availability. DEFAULT: HA Disabled"
-    echo "-wk  | --num-workers                 Number of worker nodes. DEFAULT: 2 workers"
-    echo "-cn  | --cluster-name                Configure the kind cluster's name"
-    echo "-dns | --enable-dnsnameresolver      Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
-    echo "-ic  | --enable-interconnect         Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
-    echo "-npz | --nodes-per-zone              Specify number of nodes per zone (Default 0, which means global zone; >0 means interconnect zone, where 1 for single-node zone, >1 for multi-node zone). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
+    echo "--delete                                      Delete current cluster"
+    echo "-cf  | --config-file                          Name of the KIND configuration file"
+    echo "-kt  | --keep-taint                           Do not remove taint components"
+    echo "                                              DEFAULT: Remove taint components"
+    echo "-me  | --multicast-enabled                    Enable multicast. DEFAULT: Disabled"
+    echo "-ho  | --hybrid-enabled                       Enable hybrid overlay. DEFAULT: Disabled"
+    echo "-obs | --observability                        Enable observability. DEFAULT: Disabled"
+    echo "-el  | --ovn-empty-lb-events                  Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
+    echo "-ii  | --install-ingress                      Flag to install Ingress Components."
+    echo "                                              DEFAULT: Don't install ingress components."
+    echo "-mlb | --install-metallb                      Install metallb to test service type LoadBalancer deployments"
+    echo "-pl  | --install-cni-plugins                  Install CNI plugins"
+    echo "-ikv | --install-kubevirt                     Install kubevirt"
+    echo "-mne | --multi-network-enable                 Enable multi networks. DEFAULT: Disabled"
+    echo "-nse | --network-segmentation-enable          Enable network segmentation. DEFAULT: Disabled"
+    echo "-uae | --preconfigured-udn-addresses-enable   Enable connecting workloads with preconfigured network to user-defined networks. DEFAULT: Disabled"
+    echo "-nqe | --network-qos-enable                   Enable network QoS. DEFAULT: Disabled"
+    echo "-ha  | --ha-enabled                           Enable high availability. DEFAULT: HA Disabled"
+    echo "-wk  | --num-workers                          Number of worker nodes. DEFAULT: 2 workers"
+    echo "-cn  | --cluster-name                         Configure the kind cluster's name"
+    echo "-dns | --enable-dnsnameresolver               Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
+    echo "-ce  | --enable-central                       Deploy with OVN Central (Legacy Architecture)"
+    echo "-npz | --nodes-per-zone                       Specify number of nodes per zone (Default 0, which means global zone; >0 means interconnect zone, where 1 for single-node zone, >1 for multi-node zone). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
     echo ""
 
 }
@@ -168,6 +171,8 @@ parse_args() {
                                                   ;;
             -nse | --network-segmentation-enable) ENABLE_NETWORK_SEGMENTATION=true
                                                   ;;
+            -uae | --preconfigured-udn-addresses-enable)    ENABLE_PRE_CONF_UDN_ADDR=true
+                                                  ;;
             -nqe | --network-qos-enable )         OVN_NETWORK_QOS_ENABLE=true
                                                   ;;
             -ha | --ha-enabled )                  OVN_HA=true
@@ -188,7 +193,11 @@ parse_args() {
                                                   ;;
             -dns | --enable-dnsnameresolver )     OVN_ENABLE_DNSNAMERESOLVER=true
                                                   ;;
+            -ce | --enable-central )              OVN_ENABLE_INTERCONNECT=false
+                                                  CENTRAL_ARG_PROVIDED=true
+                                                  ;;
             -ic | --enable-interconnect )         OVN_ENABLE_INTERCONNECT=true
+                                                  IC_ARG_PROVIDED=true
                                                   ;;
             -npz | --nodes-per-zone )             shift
                                                   if ! [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -203,6 +212,11 @@ parse_args() {
         esac
         shift
     done
+
+    if [[ -n "${CENTRAL_ARG_PROVIDED:-}" && -n "${IC_ARG_PROVIDED:-}" ]]; then
+      echo "Cannot specify both --enable-central and --enable-interconnect" >&2
+      exit 1
+    fi
 }
 
 print_params() {
@@ -223,6 +237,7 @@ print_params() {
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "ENABLE_NETWORK_SEGMENTATION = $ENABLE_NETWORK_SEGMENTATION"
+     echo "ENABLE_PRE_CONF_UDN_ADDR = $ENABLE_PRE_CONF_UDN_ADDR"
      echo "OVN_NETWORK_QOS_ENABLE = $OVN_NETWORK_QOS_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
      echo "KIND_NUM_MASTER = $KIND_NUM_MASTER"
@@ -240,15 +255,23 @@ print_params() {
 }
 
 check_dependencies() {
-    for cmd in $OCI_BIN kubectl kind helm go ; do \
-         if ! command_exists $cmd ; then
-           2&>1 echo "Dependency not met: $cmd"
+    if ! command_exists kubectl ; then
+      echo "'kubectl' not found, installing"
+      setup_kubectl_bin
+    fi
+
+    for cmd in "$OCI_BIN" kind helm go ; do \
+         if ! command_exists "$cmd" ; then
+           echo "Dependency not met: $cmd"
            exit 1
         fi
     done
 
     # check for currently unsupported features
-    [ "${PLATFORM_IPV6_SUPPORT}" == "true" ] && { &>1 echo "Fatal: PLATFORM_IPV6_SUPPORT support not implemented yet"; exit 1; } ||:
+    if [ "${PLATFORM_IPV6_SUPPORT:-}" = "true" ]; then
+        echo "Fatal: PLATFORM_IPV6_SUPPORT support not implemented yet"
+        exit 1
+    fi
 }
 
 helm_prereqs() {
@@ -274,7 +297,12 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
+    $OCI_BIN build \
+      --build-arg http_proxy="$http_proxy" \
+      --build-arg https_proxy="$https_proxy" \
+      --network=host \
+      -t "${OVN_IMAGE}" \
+      -f Dockerfile.fedora .
     popd
 }
 
@@ -394,7 +422,7 @@ create_ovn_kubernetes() {
       label_ovn_single_node_zones
       value_file="values-single-node-zone.yaml"
       ovnkube_db_options=""
-    elif [[ $KIND_NUM_NODES_PER_ZONE > 1 ]]; then
+    elif [[ $KIND_NUM_NODES_PER_ZONE -gt 1 ]]; then
       label_ovn_multiple_nodes_zones
       value_file="values-multi-node-zone.yaml"
       ovnkube_db_options=""
@@ -416,6 +444,7 @@ helm install ovn-kubernetes . -f "${value_file}" \
           --set global.enableMulticast=$(if [ "${OVN_MULTICAST_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableMultiNetwork=$(if [ "${ENABLE_MULTI_NET}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNetworkSegmentation=$(if [ "${ENABLE_NETWORK_SEGMENTATION}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.enablePreconfiguredUDNAddresses=$(if [ "${ENABLE_PRE_CONF_UDN_ADDR}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableHybridOverlay=$(if [ "${OVN_HYBRID_OVERLAY_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableObservability=$(if [ "${OVN_OBSERV_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.emptyLbEvents=$(if [ "${OVN_EMPTY_LB_EVENTS}" == "true" ]; then echo "true"; else echo "false"; fi) \
@@ -494,3 +523,5 @@ fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
 fi
+
+interconnect_arg_check

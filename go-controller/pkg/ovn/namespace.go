@@ -8,10 +8,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -234,9 +237,41 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *corev1.Namespace
 				if err != nil {
 					errors = append(errors, err)
 				} else {
-					if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
-						errors = append(errors, err)
-					} else if err = addOrUpdatePodSNAT(oc.nbClient, oc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podAnnotation.IPs); err != nil {
+					// Helper function to handle the complex SNAT operations
+					handleSNATOps := func() error {
+						extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName)
+						if err != nil {
+							return err
+						}
+
+						var ops []ovsdb.Operation
+						// Handle each pod IP individually since each IP family needs its own SNAT match
+						for _, podIP := range podAnnotation.IPs {
+							ipFamily := utilnet.IPv4
+							if utilnet.IsIPv6CIDR(podIP) {
+								ipFamily = utilnet.IPv6
+							}
+							snatMatch, err := GetNetworkScopedClusterSubnetSNATMatch(oc.nbClient, oc.GetNetInfo(), pod.Spec.NodeName, oc.isPodNetworkAdvertisedAtNode(pod.Spec.NodeName), ipFamily)
+							if err != nil {
+								return fmt.Errorf("failed to get SNAT match for node %s for network %s: %v", pod.Spec.NodeName, oc.GetNetworkName(), err)
+							}
+							ops, err = addOrUpdatePodSNATOps(oc.nbClient, oc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, []*net.IPNet{podIP}, snatMatch, ops)
+							if err != nil {
+								return err
+							}
+						}
+
+						// Execute all operations in a single transaction
+						if len(ops) > 0 {
+							_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+							if err != nil {
+								return fmt.Errorf("failed to update SNAT for pod %s on router %s: %v", pod.Name, oc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), err)
+							}
+						}
+						return nil
+					}
+
+					if err := handleSNATOps(); err != nil {
 						errors = append(errors, err)
 					}
 				}
@@ -336,21 +371,22 @@ func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *corev
 		return nil, err
 	}
 	for _, hostSubnet := range hostSubnets {
-		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		mgmtIfAddr := oc.GetNodeManagementIP(hostSubnet)
 		ips = append(ips, mgmtIfAddr.IP)
 	}
 	// for shared gateway mode we will use LRP IPs to SNAT host network traffic
 	// so add these to the address set.
-	lrpIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
-	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// FIXME(tssurya): This is present for backwards compatibility
-			// Remove me a few months from now
-			var err1 error
-			lrpIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err1 != nil {
-				return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
-			}
+	lrpIPs, gwIPsErr := udn.GetGWRouterIPs(node, oc.GetNetInfo())
+	if gwIPsErr != nil {
+		if !util.IsAnnotationNotSetError(gwIPsErr) {
+			return nil, gwIPsErr
+		}
+		// FIXME(tssurya): This is present for backwards compatibility
+		// Remove me a few months from now
+		var lrpAddrsErr error
+		lrpIPs, lrpAddrsErr = util.ParseNodeGatewayRouterLRPAddrs(node)
+		if lrpAddrsErr != nil {
+			return nil, fmt.Errorf("failed to fallback to annotations after error %q: %w", gwIPsErr, lrpAddrsErr)
 		}
 	}
 

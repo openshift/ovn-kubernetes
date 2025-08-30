@@ -26,6 +26,8 @@ import (
 	udnclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
+	nmtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -59,9 +61,11 @@ var _ = Describe("User Defined Network Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.Start()).To(Succeed())
 
+		networkManager, err := networkmanager.NewForCluster(&nmtest.FakeControllerManager{}, f, cs, nil)
+		Expect(err).NotTo(HaveOccurred())
 		return New(cs.NetworkAttchDefClient, f.NADInformer(),
 			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
-			renderNADStub, f.PodCoreInformer(), f.NamespaceInformer(), nil,
+			renderNADStub, networkManager.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), nil,
 		)
 	}
 
@@ -438,6 +442,63 @@ var _ = Describe("User Defined Network Controller", func() {
 					actualNAD, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(testNamespace).Get(context.Background(), cudn.Name, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred())
 					Expect(actualNAD).To(Equal(expectedNAD), "NAD should exist in test namespaces")
+				}
+			})
+
+			It("should update NAD annotations and preserve internal OVNK annotations on UDN update", func() {
+				testNamespaces := []string{"red", "blue"}
+				var objs []runtime.Object
+				for _, nsName := range testNamespaces {
+					objs = append(objs, testNamespace(nsName))
+				}
+				cudn := testClusterUDN("test", testNamespaces...)
+				cudn.Spec.Network = udnv1.NetworkSpec{Topology: udnv1.NetworkTopologyLayer2, Layer2: &udnv1.Layer2Config{
+					Subnets: udnv1.DualStackCIDRs{"10.10.10.0/24"},
+				}}
+				cudn.Annotations = map[string]string{"foo": "bar"}
+
+				objs = append(objs, cudn)
+				networkName := ovntypes.CUDNPrefix + cudn.Name
+				expectedNsNADs := map[string]*netv1.NetworkAttachmentDefinition{}
+				for _, nsName := range testNamespaces {
+					nad := testClusterUdnNAD(cudn.Name, nsName)
+					nadName := nsName + "/" + cudn.Name
+					nad.Spec.Config = `{"cniVersion":"1.0.0","name":"` + networkName + `","netAttachDefName":"` + nadName + `","role":"","subnets":"10.10.10.0/24","topology":"layer2","type":"ovn-k8s-cni-overlay"}`
+					nad.Annotations = map[string]string{
+						"foo":                             "bar",
+						ovntypes.OvnNetworkNameAnnotation: networkName,
+						ovntypes.OvnNetworkIDAnnotation:   "6",
+					}
+					expectedNsNADs[nsName] = nad.DeepCopy()
+					objs = append(objs, nad)
+				}
+
+				c = newTestController(template.RenderNetAttachDefManifest, objs...)
+				Expect(c.Run()).To(Succeed())
+
+				By("updating CUDN with a new annotation")
+				cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				updatedCUDN := cudn.DeepCopy()
+				updatedCUDN.Annotations = map[string]string{"foo2": "bar2"}
+				_, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), updatedCUDN, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				for testNamespace, expectedNAD := range expectedNsNADs {
+					expectedNAD.Annotations = map[string]string{
+						"foo2":                            "bar2",
+						ovntypes.OvnNetworkNameAnnotation: networkName,
+						ovntypes.OvnNetworkIDAnnotation:   "6",
+					}
+
+					Eventually(func(g Gomega) {
+						actualNAD, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().
+							NetworkAttachmentDefinitions(testNamespace).
+							Get(context.Background(), cudn.Name, metav1.GetOptions{})
+						g.Expect(err).NotTo(HaveOccurred())
+						g.Expect(actualNAD).To(Equal(expectedNAD), "NAD should exist, have updated "+
+							"annotations, and preserve internal annotations")
+					}).Should(Succeed())
 				}
 			})
 
