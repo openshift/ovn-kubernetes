@@ -21,8 +21,6 @@ import (
 
 	"github.com/openshift-kni/k8sreporter"
 	"github.com/pkg/errors"
-	metallbv1beta1 "go.universe.tf/metallb/api/v1beta1"
-	metallbv1beta2 "go.universe.tf/metallb/api/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -57,14 +55,14 @@ func InitReporter(kubeconfig, path string, namespaces []string) *k8sreporter.Kub
 		if err != nil {
 			return err
 		}
-		err = metallbv1beta1.AddToScheme(s)
-		if err != nil {
-			return err
-		}
-		err = metallbv1beta2.AddToScheme(s)
-		if err != nil {
-			return err
-		}
+		//err = metallbv1beta1.AddToScheme(s)
+		//if err != nil {
+		//	return err
+		//}
+		//err = metallbv1beta2.AddToScheme(s)
+		//if err != nil {
+		//	return err
+		//}
 		return nil
 	}
 
@@ -80,12 +78,12 @@ func InitReporter(kubeconfig, path string, namespaces []string) *k8sreporter.Kub
 		{Cr: &egressfwv1.EgressFirewallList{}},
 		{Cr: &egressqosv1.EgressQoSList{}},
 		{Cr: &egressservicev1.EgressServiceList{}},
-		{Cr: &metallbv1beta1.IPAddressPoolList{}},
-		{Cr: &metallbv1beta2.BGPPeerList{}},
-		{Cr: &metallbv1beta1.L2AdvertisementList{}},
-		{Cr: &metallbv1beta1.BGPAdvertisementList{}},
-		{Cr: &metallbv1beta1.BFDProfileList{}},
-		{Cr: &metallbv1beta1.CommunityList{}},
+		//{Cr: &metallbv1beta1.IPAddressPoolList{}},
+		//{Cr: &metallbv1beta2.BGPPeerList{}},
+		//{Cr: &metallbv1beta1.L2AdvertisementList{}},
+		//{Cr: &metallbv1beta1.BGPAdvertisementList{}},
+		//{Cr: &metallbv1beta1.BFDProfileList{}},
+		//{Cr: &metallbv1beta1.CommunityList{}},
 		{Cr: &corev1.ServiceList{}},
 	}
 
