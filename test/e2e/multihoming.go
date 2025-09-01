@@ -388,7 +388,6 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 					needsIPRequestFromHostSubnet: true, // will override attachments above with an IPRequest
 				},
 				false, // scheduled on distinct Nodes
-				Label("BUG", "OCPBUGS-43004"),
 			),
 			Entry(
 				"can be reached by a client pod in the default network on the same node",
@@ -409,7 +408,6 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 					needsIPRequestFromHostSubnet: true,
 				},
 				true, // collocated on same Node
-				Label("BUG", "OCPBUGS-43004"),
 			),
 			Entry(
 				"can reach a host-networked pod on a different node",
@@ -1268,7 +1266,6 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 								nil,
 								nil,
 							),
-							Label("BUG", "OCPBUGS-25928"),
 						),
 						Entry(
 							"ingress denyall, egress allow all, ingress policy should have no impact on egress",
@@ -1947,7 +1944,6 @@ ip a add %[4]s/24 dev %[2]s
 						nil,
 						nil,
 					),
-					Label("BUG", "OCPBUGS-25928"),
 				),
 				Entry(
 					"using egress deny-all, ingress allow-all for a localnet topology",
