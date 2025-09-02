@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -867,7 +868,11 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 	}
 	for _, status := range remainingAssignments {
 		klog.V(2).Infof("Adding pod egress IP status: %v for EgressIP: %s and pod: %s/%s/%v", status, name, pod.Namespace, pod.Name, podIPNets)
-		err = e.nodeZoneState.DoWithLock(status.Node, func(_ string) error {
+		nodesToLock := []string{status.Node, pod.Spec.NodeName}
+		// Sort nodes lexicographically to ensure node locks are acquired in
+		// same order, preventing deadlock situations.
+		sort.Strings(nodesToLock)
+		err = e.nodeZoneState.DoWithLock(nodesToLock[0], func(_ string) error {
 			if status.Node == pod.Spec.NodeName {
 				// we are safe, no need to grab lock again
 				if err := e.addPodEgressIPAssignment(ni, name, status, mark, pod, podIPNets); err != nil {
@@ -876,7 +881,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 				podState.egressStatuses.statusMap[status] = ""
 				return nil
 			}
-			return e.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(_ string) error {
+			return e.nodeZoneState.DoWithLock(nodesToLock[1], func(_ string) error {
 				// we need to grab lock again for pod's node
 				if err := e.addPodEgressIPAssignment(ni, name, status, mark, pod, podIPNets); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPNets, err)
@@ -1040,7 +1045,11 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 			continue
 		}
 		klog.V(2).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", statusToRemove, name, pod.Name, pod.Namespace)
-		err := e.nodeZoneState.DoWithLock(statusToRemove.Node, func(_ string) error {
+		nodesToLock := []string{statusToRemove.Node, pod.Spec.NodeName}
+		// Sort nodes lexicographically to ensure node locks are acquired in
+		// same order, preventing deadlock situations.
+		sort.Strings(nodesToLock)
+		err := e.nodeZoneState.DoWithLock(nodesToLock[0], func(_ string) error {
 			if statusToRemove.Node == pod.Spec.NodeName {
 				// we are safe, no need to grab lock again
 				if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod); err != nil {
@@ -1049,7 +1058,7 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 				podStatus.egressStatuses.delete(statusToRemove)
 				return nil
 			}
-			return e.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(_ string) error {
+			return e.nodeZoneState.DoWithLock(nodesToLock[1], func(_ string) error {
 				if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod); err != nil {
 					return err
 				}
