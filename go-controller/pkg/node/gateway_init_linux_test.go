@@ -109,12 +109,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
-		if config.IPv6Mode {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding=1",
-				Output: "net.ipv6.conf.breth0.forwarding = 1",
-			})
-		}
+
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -386,7 +381,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
 		// END OCP HACK
 		f4 := iptV4.(*util.FakeIPTables)
-		err = f4.MatchState(expectedTables)
+		err = f4.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		expectedTables = map[string]util.FakeTable{
@@ -395,7 +390,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"mangle": {},
 		}
 		f6 := iptV6.(*util.FakeIPTables)
-		err = f6.MatchState(expectedTables)
+		err = f6.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 		return nil
 	}
@@ -917,12 +912,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
-		if config.IPv6Mode {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding=1",
-				Output: "net.ipv6.conf.breth0.forwarding = 1",
-			})
-		}
+
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -1092,6 +1082,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		})
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
+
+			Expect(configureGlobalForwarding()).To(Succeed())
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
@@ -1191,8 +1183,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 					"-s 10.1.0.0/16 -j ACCEPT",
 					"-i ovn-k8s-mp0 -j ACCEPT",
 					"-o ovn-k8s-mp0 -j ACCEPT",
-					"-i breth0 -j DROP",
-					"-o breth0 -j DROP",
 				},
 				"INPUT": []string{
 					"-i ovn-k8s-mp0 -m comment --comment from OVN to localhost -j ACCEPT",
@@ -1214,7 +1204,10 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
 		// END OCP HACK
 		f4 := iptV4.(*util.FakeIPTables)
-		err = f4.MatchState(expectedTables)
+		err = f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
+			Table: "filter",
+			Chain: "FORWARD",
+		}: "DROP"})
 		Expect(err).NotTo(HaveOccurred())
 
 		expectedTables = map[string]util.FakeTable{
@@ -1223,7 +1216,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			"mangle": {},
 		}
 		f6 := iptV6.(*util.FakeIPTables)
-		err = f6.MatchState(expectedTables)
+		err = f6.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 		return nil
 	}

@@ -291,7 +291,7 @@ var _ = Describe("Egress Service Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -400,7 +400,7 @@ var _ = Describe("Egress Service Operations", func() {
 
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
@@ -415,7 +415,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -629,11 +629,11 @@ var _ = Describe("Egress Service Operations", func() {
 				}
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					err := f4.MatchState(expectedTables)
+					err := f4.MatchState(expectedTables, nil)
 					if err == nil {
 						return nil
 					}
-					return f4.MatchState(expectedTables2)
+					return f4.MatchState(expectedTables2, nil)
 				}).ShouldNot(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
@@ -651,7 +651,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fakeOvnNode.fakeExec.ErrorDesc)
@@ -836,7 +836,7 @@ var _ = Describe("Egress Service Operations", func() {
 				}
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -871,7 +871,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -999,7 +999,7 @@ var _ = Describe("Egress Service Operations", func() {
 				}
 				f4 := iptV4.(*util.FakeIPTables)
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1017,7 +1017,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1035,7 +1035,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
@@ -1056,7 +1056,7 @@ var _ = Describe("Egress Service Operations", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() error {
-					return f4.MatchState(expectedTables)
+					return f4.MatchState(expectedTables, nil)
 				}).ShouldNot(HaveOccurred())
 
 				Eventually(func() bool {
