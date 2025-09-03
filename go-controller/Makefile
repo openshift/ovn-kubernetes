@@ -22,8 +22,7 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-# FIXME(tssurya): In one week when OVN 24.09 is released change the schema version
-OVN_SCHEMA_VERSION ?= 8efac26f6637fc
+OVN_SCHEMA_VERSION ?= v25.03.1
 OVS_VERSION ?= v2.17.0
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
@@ -93,9 +92,17 @@ clean:
 
 lint:
 ifeq ($(CONTAINER_RUNNABLE), 0)
-	@GOPATH=${GOPATH} ./hack/lint.sh $(CONTAINER_RUNTIME)
+	@GOPATH=${GOPATH} ./hack/lint.sh $(CONTAINER_RUNTIME) || { echo "lint failed! Try running 'make lint-fix'"; exit 1; }
 else
-	echo "linter can only be run within a container since it needs a specific golangci-lint version"
+	echo "linter can only be run within a container since it needs a specific golangci-lint version"; exit 1
+endif
+
+lint-fix:
+ifeq ($(CONTAINER_RUNNABLE), 0)
+	@GOPATH=${GOPATH} ./hack/lint.sh $(CONTAINER_RUNTIME) fix || { echo "ERROR: lint fix failed! There is a bug that changes file ownership to root \
+	when this happens. To fix it, simply run 'chown -R <user>:<group> *' from the repo root."; exit 1; }
+else
+	echo "linter can only be run within a container since it needs a specific golangci-lint version"; exit 1
 endif
 
 gofmt:

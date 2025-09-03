@@ -762,7 +762,7 @@ func expectedGatewayChassis(nodeName string, netInfo util.NetInfo, gwConfig util
 
 func expectedGRToJoinSwitchLRP(gatewayRouterName string, gwRouterLRPIP *net.IPNet, netInfo util.NetInfo) *nbdb.LogicalRouterPort {
 	lrpName := fmt.Sprintf("%s%s", types.GWRouterToJoinSwitchPrefix, gatewayRouterName)
-	options := map[string]string{"gateway_mtu": fmt.Sprintf("%d", 1400)}
+	options := map[string]string{libovsdbops.GatewayMTU: fmt.Sprintf("%d", 1400)}
 	return expectedLogicalRouterPort(lrpName, netInfo, options, gwRouterLRPIP)
 }
 
@@ -836,7 +836,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			Networks:       []string{"192.168.1.1/24"},
 			MAC:            "0a:58:c0:a8:01:01",
 			GatewayChassis: []string{gatewayChassisUUID},
-			Options:        map[string]string{"gateway_mtu": "1400"},
+			Options:        map[string]string{libovsdbops.GatewayMTU: "1400"},
 		},
 		expectedGRStaticRoute(staticRouteUUID1, nodeSubnet.String(), lrsrNextHop, &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
 		expectedGRStaticRoute(staticRouteUUID2, gwRouterJoinIPAddress().IP.String(), gwRouterJoinIPAddress().IP.String(), nil, nil, netInfo),
@@ -973,7 +973,7 @@ func externalSwitchRouterPortOptions(gatewayRouterName string) map[string]string
 	return map[string]string{
 		"nat-addresses":             "router",
 		"exclude-lb-vips-from-garp": "true",
-		"router-port":               types.GWRouterToExtSwitchPrefix + gatewayRouterName,
+		libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + gatewayRouterName,
 	}
 }
 
@@ -992,7 +992,7 @@ func expectedJoinSwitchAndLSPs(netInfo util.NetInfo, nodeName string) []libovsdb
 			Name:        types.JoinSwitchToGWRouterPrefix + gwRouterName,
 			Addresses:   []string{"router"},
 			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
-			Options:     map[string]string{"router-port": types.GWRouterToJoinSwitchPrefix + gwRouterName},
+			Options:     map[string]string{libovsdbops.RouterPort: types.GWRouterToJoinSwitchPrefix + gwRouterName},
 			Type:        "router",
 		},
 	}
