@@ -598,6 +598,8 @@ github.com/openshift-kni/k8sreporter
 ## explicit; go 1.20
 github.com/openshift/api/cloudnetwork/v1
 github.com/openshift/api/config/v1
+github.com/openshift/api/machine/v1
+github.com/openshift/api/machine/v1beta1
 github.com/openshift/api/network/v1
 github.com/openshift/api/network/v1alpha1
 github.com/openshift/api/project/v1
@@ -610,6 +612,13 @@ github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake
 github.com/openshift/client-go/cloudnetwork/clientset/versioned/scheme
 github.com/openshift/client-go/cloudnetwork/clientset/versioned/typed/cloudnetwork/v1
 github.com/openshift/client-go/cloudnetwork/clientset/versioned/typed/cloudnetwork/v1/fake
+github.com/openshift/client-go/machine/applyconfigurations/internal
+github.com/openshift/client-go/machine/applyconfigurations/machine/v1
+github.com/openshift/client-go/machine/applyconfigurations/machine/v1beta1
+github.com/openshift/client-go/machine/clientset/versioned
+github.com/openshift/client-go/machine/clientset/versioned/scheme
+github.com/openshift/client-go/machine/clientset/versioned/typed/machine/v1
+github.com/openshift/client-go/machine/clientset/versioned/typed/machine/v1beta1
 github.com/openshift/client-go/network/applyconfigurations/internal
 github.com/openshift/client-go/network/applyconfigurations/network/v1
 github.com/openshift/client-go/network/applyconfigurations/network/v1alpha1
@@ -712,6 +721,7 @@ github.com/ovn-org/ovn-kubernetes/test/e2e/containerengine
 github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig
 github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig/api
 github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind
+github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig/configs/openshift
 github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics
 github.com/ovn-org/ovn-kubernetes/test/e2e/feature
 github.com/ovn-org/ovn-kubernetes/test/e2e/images
@@ -719,6 +729,7 @@ github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider
 github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api
 github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/portalloc
 github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/providers/kind
+github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/providers/openshift
 github.com/ovn-org/ovn-kubernetes/test/e2e/ipalloc
 github.com/ovn-org/ovn-kubernetes/test/e2e/kubevirt
 github.com/ovn-org/ovn-kubernetes/test/e2e/label
