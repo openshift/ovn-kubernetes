@@ -97,6 +97,9 @@ const (
 	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
 
+	// OVNNodePrimaryDPUHostAddr is used to track the primary DPU host address on the node
+	OVNNodePrimaryDPUHostAddr = "k8s.ovn.org/primary-dpu-host-addr"
+
 	// OVNNodeSecondaryHostEgressIPs contains EgressIP addresses that aren't managed by OVN. The EIP addresses are assigned to
 	// standard linux interfaces and not interfaces of type OVS.
 	OVNNodeSecondaryHostEgressIPs = "k8s.ovn.org/secondary-host-egress-ips"
@@ -154,6 +157,9 @@ const (
 
 	// ovnNodeEncapIPs is used to indicate encap IPs set on the node
 	OVNNodeEncapIPs = "k8s.ovn.org/node-encap-ips"
+
+	// OvnNodeDontSNATSubnets is a user assigned source subnets that should avoid SNAT at ovn-k8s-mp0 interface
+	OvnNodeDontSNATSubnets = "k8s.ovn.org/node-ingress-snat-exclude-subnets"
 )
 
 type L3GatewayConfig struct {
@@ -1115,15 +1121,45 @@ func ParseNodeHostCIDRsExcludeOVNNetworks(node *corev1.Node) ([]string, error) {
 }
 
 func ParseNodeHostCIDRsList(node *corev1.Node) ([]string, error) {
-	addrAnnotation, ok := node.Annotations[OVNNodeHostCIDRs]
+	return parseNodeAnnotationList(node, OVNNodeHostCIDRs)
+}
+
+func ParseNodeDontSNATSubnetsList(node *corev1.Node) ([]string, error) {
+	return parseNodeAnnotationList(node, OvnNodeDontSNATSubnets)
+}
+
+// NodeDontSNATSubnetAnnotationChanged returns true if the OvnNodeDontSNATSubnets in the corev1.Nodes doesn't match
+func NodeDontSNATSubnetAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	oldVal, oldOk := oldNode.Annotations[OvnNodeDontSNATSubnets]
+	newVal, newOk := newNode.Annotations[OvnNodeDontSNATSubnets]
+
+	if oldOk != newOk {
+		return true
+	}
+
+	if oldOk && newOk && oldVal != newVal {
+		return true
+	}
+
+	return false
+}
+
+// NodeDontSNATSubnetAnnotationExist returns true OvnNodeDontSNATSubnets annotation key exists in node annotation
+func NodeDontSNATSubnetAnnotationExist(node *corev1.Node) bool {
+	_, ok := node.Annotations[OvnNodeDontSNATSubnets]
+	return ok
+}
+
+func parseNodeAnnotationList(node *corev1.Node, annotationKey string) ([]string, error) {
+	annotationValue, ok := node.Annotations[annotationKey]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeHostCIDRs, node.Name)
+		return []string{}, nil
 	}
 
 	var cfg []string
-	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal host cidrs annotation %s for node %q: %v",
-			addrAnnotation, node.Name, err)
+	if err := json.Unmarshal([]byte(annotationValue), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v",
+			annotationKey, annotationValue, node.Name, err)
 	}
 	return cfg, nil
 }
@@ -1500,4 +1536,40 @@ func ParseNodeEncapIPsAnnotation(node *corev1.Node) ([]string, error) {
 
 func NodeEncapIPsChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OVNNodeEncapIPs] != newNode.Annotations[OVNNodeEncapIPs]
+}
+
+// SetNodePrimaryDPUHostAddr sets the primary DPU host address annotation on a node
+func SetNodePrimaryDPUHostAddr(nodeAnnotator kube.Annotator, ifAddrs []*net.IPNet) error {
+	nodeIPNetv4, _ := MatchFirstIPNetFamily(false, ifAddrs)
+	nodeIPNetv6, _ := MatchFirstIPNetFamily(true, ifAddrs)
+
+	ifAddrAnnotation := ifAddr{}
+	if nodeIPNetv4 != nil {
+		ifAddrAnnotation.IPv4 = nodeIPNetv4.String()
+	}
+	if nodeIPNetv6 != nil {
+		ifAddrAnnotation.IPv6 = nodeIPNetv6.String()
+	}
+	return nodeAnnotator.Set(OVNNodePrimaryDPUHostAddr, ifAddrAnnotation)
+}
+
+// NodePrimaryDPUHostAddrAnnotationChanged returns true if the primary DPU host address annotation changed
+func NodePrimaryDPUHostAddrAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[OVNNodePrimaryDPUHostAddr] != newNode.Annotations[OVNNodePrimaryDPUHostAddr]
+}
+
+// GetNodePrimaryDPUHostAddrAnnotation returns the raw primary DPU host address annotation from a node
+func GetNodePrimaryDPUHostAddrAnnotation(node *corev1.Node) (*ifAddr, error) {
+	addrAnnotation, ok := node.Annotations[OVNNodePrimaryDPUHostAddr]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodePrimaryDPUHostAddr, node.Name)
+	}
+	nodeIfAddr := &ifAddr{}
+	if err := json.Unmarshal([]byte(addrAnnotation), nodeIfAddr); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", OVNNodePrimaryDPUHostAddr, node.Name, err)
+	}
+	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
+		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
+	}
+	return nodeIfAddr, nil
 }

@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
@@ -32,6 +32,16 @@ const (
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
+
+type GatewayConfig struct {
+	annoConfig                 *util.L3GatewayConfig
+	hostSubnets                []*net.IPNet
+	clusterSubnets             []*net.IPNet
+	gwLRPJoinIPs               []*net.IPNet
+	hostAddrs                  []string
+	externalIPs                []net.IP
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
+}
 
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *DefaultNetworkController) SetupMaster() error {
@@ -82,15 +92,33 @@ func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *corev1.N
 	return err
 }
 
-func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
-	node *corev1.Node,
-	l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet,
-	hostAddrs []string,
-) error {
+func (oc *DefaultNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return nil, err
+	}
+
+	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
+	for i, ip := range l3GatewayConfig.IPAddresses {
+		externalIPs[i] = ip.IP
+	}
+
+	var hostAddrs []string
+	if config.Gateway.Mode == config.GatewayModeShared {
+		hostAddrs, err = util.GetNodeHostAddrs(node)
+		if err != nil && !util.IsAnnotationNotSetError(err) {
+			return nil, fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
+		}
+	}
+
 	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
+	}
+
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
+	if err != nil {
+		return nil, err
 	}
 
 	gwLRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
@@ -101,26 +129,20 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
 			var err1 error
 			gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
 			if err1 != nil {
-				return fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
+				return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
 			}
 		}
 	}
 
-	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
-	for i, ip := range l3GatewayConfig.IPAddresses {
-		externalIPs[i] = ip.IP
-	}
-
-	return oc.newGatewayManager(node.Name).syncGatewayLogicalNetwork(
-		node,
-		l3GatewayConfig,
-		hostSubnets,
-		hostAddrs,
-		clusterSubnets,
-		gwLRPIPs,
-		oc.ovnClusterLRPToJoinIfAddrs,
-		externalIPs,
-	)
+	return &GatewayConfig{
+		annoConfig:                 l3GatewayConfig,
+		hostSubnets:                hostSubnets,
+		clusterSubnets:             clusterSubnets,
+		gwLRPJoinIPs:               gwLRPIPs,
+		hostAddrs:                  hostAddrs,
+		externalIPs:                externalIPs,
+		ovnClusterLRPToJoinIfAddrs: oc.ovnClusterLRPToJoinIfAddrs,
+	}, nil
 }
 
 func (oc *DefaultNetworkController) addNode(node *corev1.Node) ([]*net.IPNet, error) {
@@ -470,6 +492,16 @@ type nodeSyncs struct {
 	syncReroute           bool
 }
 
+func nodeNeedsSync(syncs *nodeSyncs) bool {
+	return syncs.syncNode ||
+		syncs.syncClusterRouterPort ||
+		syncs.syncMgmtPort ||
+		syncs.syncGw ||
+		syncs.syncHo ||
+		syncs.syncZoneIC ||
+		syncs.syncReroute
+}
+
 func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
@@ -492,7 +524,11 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 		return nil
 	}
 
-	klog.Infof("Adding or Updating Node %q", node.Name)
+	if !nodeNeedsSync(nSyncs) {
+		return nil
+	}
+
+	klog.Infof("Adding or Updating local node %q for network %q", node.Name, oc.GetNetworkName())
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
@@ -509,12 +545,10 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 	}
 
 	// since the nodeSync objects are created knowing if hybridOverlay is enabled this should work
-	if nSyncs.syncHo {
+	if nSyncs.syncHo && config.HybridOverlay.Enabled {
 		if err = oc.allocateHybridOverlayDRIP(node); err != nil {
 			errs = append(errs, err)
 			oc.hybridOverlayFailed.Store(node.Name, true)
-		} else {
-			oc.hybridOverlayFailed.Delete(node.Name)
 		}
 	}
 
@@ -551,30 +585,40 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 		}
 	}
 
-	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
-	if config.HybridOverlay.Enabled {
-		if err := oc.handleHybridOverlayPort(node, annotator); err != nil {
-			errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
+	if nSyncs.syncHo {
+		annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
+		if config.HybridOverlay.Enabled {
+			if err := oc.handleHybridOverlayPort(node, annotator); err != nil {
+				errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
+				oc.hybridOverlayFailed.Store(node.Name, true)
+			} else {
+				oc.hybridOverlayFailed.Delete(node.Name)
+			}
+		} else {
+			// pedantic - node should never be stored in hybridOverlayFailed if HO is not enabled
+			oc.hybridOverlayFailed.Delete(node.Name)
+
+			// the node needs to cleanup Hybrid overlay annotations LogicalRouterPolicies and Hybrid overlay port
+			// if it has them and hybrid overlay is not enabled
+			if err := oc.deleteHybridOverlayPort(node); err != nil {
+				errs = append(errs, err)
+			} else {
+				// only clear annotations if tear down was successful
+				if _, exist := node.Annotations[hotypes.HybridOverlayDRMAC]; exist {
+					annotator.Delete(hotypes.HybridOverlayDRMAC)
+				}
+				if _, exist := node.Annotations[hotypes.HybridOverlayDRIP]; exist {
+					annotator.Delete(hotypes.HybridOverlayDRIP)
+				}
+			}
 		}
-	} else {
-		// the node needs to cleanup Hybrid overlay annotations LogicalRouterPolicies and Hybrid overlay port
-		// if it has them and hybrid overlay is not enabled
-		if err := oc.deleteHybridOverlayPort(node); err != nil {
-			errs = append(errs, err)
+		if err := annotator.Run(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
 		}
-		if _, exist := node.Annotations[hotypes.HybridOverlayDRMAC]; exist {
-			annotator.Delete(hotypes.HybridOverlayDRMAC)
-		}
-		if _, exist := node.Annotations[hotypes.HybridOverlayDRIP]; exist {
-			annotator.Delete(hotypes.HybridOverlayDRIP)
-		}
-	}
-	if err := annotator.Run(); err != nil {
-		errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
 	}
 
 	if nSyncs.syncGw {
-		err := oc.syncNodeGateway(node, nil)
+		err := oc.syncNodeGateway(node)
 		if err != nil {
 			errs = append(errs, err)
 			oc.gatewaysFailed.Store(node.Name, true)
@@ -653,8 +697,8 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, 
 		} else {
 			oc.syncZoneICFailed.Delete(node.Name)
 		}
+		klog.V(5).Infof("Creating Interconnect resources for remote node %q on network %q took: %s", node.Name, oc.GetNetworkName(), time.Since(start))
 	}
-	klog.V(5).Infof("Creating Interconnect resources for node %v took: %s", node.Name, time.Since(start))
 	return err
 }
 
@@ -730,7 +774,7 @@ func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *corev1.Node) erro
 		return err
 	}
 
-	nodes, err := oc.kube.GetNodes()
+	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		return err
 	}

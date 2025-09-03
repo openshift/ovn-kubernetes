@@ -17,6 +17,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -52,7 +53,7 @@ var (
 	reportPath string
 )
 
-var _ = ginkgo.Describe("Services", func() {
+var _ = ginkgo.Describe("Services", feature.Service, func() {
 	const (
 		serviceName               = "testservice"
 		echoServerPodNameTemplate = "echo-server-pod-%d"
@@ -811,7 +812,7 @@ var _ = ginkgo.Describe("Services", func() {
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "external container %s must be created", externalContainer.Name)
 
@@ -1010,7 +1011,7 @@ var _ = ginkgo.Describe("Services", func() {
 				Name:    targetSecondaryContainerName,
 				Image:   images.AgnHost(),
 				Network: secondaryProviderNetwork,
-				Args:    getAgnHostHTTPPortBindCMDArgs(serverExternalContainerPort),
+				CmdArgs: getAgnHostHTTPPortBindCMDArgs(serverExternalContainerPort),
 				ExtPort: serverExternalContainerPort,
 			}
 			serverExternalContainer, err := providerCtx.CreateExternalContainer(serverExternalContainerSpec)
@@ -1314,7 +1315,7 @@ spec:
 
 			ginkgo.By("Creating an external client")
 			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-				Args: []string{"pause"}, ExtPort: infraprovider.Get().GetExternalContainerPort()}
+				CmdArgs: []string{"pause"}, ExtPort: infraprovider.Get().GetExternalContainerPort()}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "failed to create external container", externalContainer)
 
@@ -1424,7 +1425,7 @@ func getServiceBackendsFromPod(execPod *v1.Pod, serviceIP string, servicePort in
 // service ip; if the traffic was DNAT-ed to the same src pod (hairpin/loopback case) -
 // the srcIP of reply traffic is SNATed to the special masqurade IP 169.254.0.5
 // or "fd69::5"
-var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
+var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 	const (
 		svcName                        = "service-hairpin-test"
 		backendName                    = "hairpin-backend-pod"
@@ -1522,7 +1523,7 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
 
 })
 
-var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", func() {
+var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Service, func() {
 
 	const (
 		svcName                     = "lbservice-test"

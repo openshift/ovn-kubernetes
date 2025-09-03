@@ -11,6 +11,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -121,7 +122,7 @@ func (h *nodeEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, erro
 		if !ok {
 			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Node", obj2)
 		}
-		return reflect.DeepEqual(node1.Status.Addresses, node2.Status.Addresses), nil
+		return reflect.DeepEqual(node1.Status.Addresses, node2.Status.Addresses) && reflect.DeepEqual(node1.Annotations, node2.Annotations), nil
 
 	default:
 		return false, fmt.Errorf("no object comparison for type %s", h.objType)
@@ -175,6 +176,13 @@ func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
 		node := obj.(*corev1.Node)
 		// if it's our node that is changing, then nothing to do as we dont add our own IP to the nftables rules
 		if node.Name == h.nc.name {
+			if util.NodeDontSNATSubnetAnnotationExist(node) {
+				err := managementport.UpdateNoSNATSubnetsSets(node, util.ParseNodeDontSNATSubnetsList)
+				if err != nil {
+					return fmt.Errorf("error updating no snat subnets sets: %w", err)
+				}
+			}
+
 			return nil
 		}
 		return h.nc.addOrUpdateNode(node)
@@ -218,37 +226,55 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 
 		// if it's our node that is changing, then nothing to do as we dont add our own IP to the nftables rules
 		if newNode.Name == h.nc.name {
+
+			// if node's dont SNAT subnet annotation changed sync nftables
+			if !reflect.DeepEqual(oldNode.Annotations, newNode.Annotations) &&
+				util.NodeDontSNATSubnetAnnotationChanged(oldNode, newNode) {
+				err := managementport.UpdateNoSNATSubnetsSets(newNode, util.ParseNodeDontSNATSubnetsList)
+				if err != nil {
+					return fmt.Errorf("error updating no snat subnets sets: %w", err)
+				}
+			}
 			return nil
 		}
 
-		// remote node that is changing
-		ipsToKeep := map[string]bool{}
-		for _, address := range newNode.Status.Addresses {
-			if address.Type != corev1.NodeInternalIP {
-				continue
+		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+			// remote node that is changing
+			// Use GetNodeAddresses to get new node IPs
+			newIPsv4, newIPsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, newNode)
+			if err != nil {
+				return fmt.Errorf("failed to get addresses for new node %q: %w", newNode.Name, err)
 			}
-			nodeIP := net.ParseIP(address.Address)
-			if nodeIP == nil {
-				continue
-			}
-			ipsToKeep[nodeIP.String()] = true
-		}
-		ipsToRemove := make([]net.IP, 0)
-		for _, address := range oldNode.Status.Addresses {
-			if address.Type != corev1.NodeInternalIP {
-				continue
-			}
-			nodeIP := net.ParseIP(address.Address)
-			if nodeIP == nil {
-				continue
-			}
-			if _, exists := ipsToKeep[nodeIP.String()]; !exists {
-				ipsToRemove = append(ipsToRemove, nodeIP)
-			}
-		}
 
-		if err := removePMTUDNodeNFTRules(ipsToRemove); err != nil {
-			return fmt.Errorf("error removing node %q stale NFT rules during update: %w", oldNode.Name, err)
+			ipsToKeep := map[string]bool{}
+			for _, nodeIP := range newIPsv4 {
+				ipsToKeep[nodeIP.String()] = true
+			}
+			for _, nodeIP := range newIPsv6 {
+				ipsToKeep[nodeIP.String()] = true
+			}
+
+			// Use GetNodeAddresses to get old node IPs
+			oldIPsv4, oldIPsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, oldNode)
+			if err != nil {
+				return fmt.Errorf("failed to get addresses for old node %q: %w", oldNode.Name, err)
+			}
+
+			ipsToRemove := make([]net.IP, 0)
+			for _, nodeIP := range oldIPsv4 {
+				if _, exists := ipsToKeep[nodeIP.String()]; !exists {
+					ipsToRemove = append(ipsToRemove, nodeIP)
+				}
+			}
+			for _, nodeIP := range oldIPsv6 {
+				if _, exists := ipsToKeep[nodeIP.String()]; !exists {
+					ipsToRemove = append(ipsToRemove, nodeIP)
+				}
+			}
+
+			if err := removePMTUDNodeNFTRules(ipsToRemove); err != nil {
+				return fmt.Errorf("error removing node %q stale NFT rules during update: %w", oldNode.Name, err)
+			}
 		}
 		return h.nc.addOrUpdateNode(newNode)
 
@@ -273,6 +299,10 @@ func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 
 	case factory.NodeType:
 		h.nc.deleteNode(obj.(*corev1.Node))
+		_ = managementport.UpdateNoSNATSubnetsSets(obj.(*corev1.Node), func(_ *corev1.Node) ([]string, error) {
+			return []string{}, nil
+		})
+
 		return nil
 
 	default:

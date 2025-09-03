@@ -9,6 +9,7 @@ import (
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -18,7 +19,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
-var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
+var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.NetworkSegmentation, func() {
 	f := wrappedTestFramework("network-segmentation")
 	f.SkipNamespaceCreation = true
 
@@ -34,6 +35,8 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 			randomStringLength           = 5
 			nameSpaceYellowSuffix        = "yellow"
 			namespaceBlueSuffix          = "blue"
+			namespaceRedSuffix           = "red"
+			namespaceOrangeSuffix        = "orange"
 		)
 
 		var (
@@ -56,7 +59,10 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 
 			namespaceYellow := getNamespaceName(f, nameSpaceYellowSuffix)
 			namespaceBlue := getNamespaceName(f, namespaceBlueSuffix)
-			for _, namespace := range []string{namespaceYellow, namespaceBlue} {
+			namespaceRed := getNamespaceName(f, namespaceRedSuffix)
+			namespaceOrange := getNamespaceName(f, namespaceOrangeSuffix)
+			for _, namespace := range []string{namespaceYellow, namespaceBlue,
+				namespaceRed, namespaceOrange} {
 				ginkgo.By("Creating namespace " + namespace)
 				ns, err := cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
@@ -79,6 +85,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 				ginkgo.By("Creating the attachment configuration")
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 				netConfig.namespace = f.Namespace.Name
+				netConfig.cidr = filterCIDRsAndJoin(cs, netConfig.cidr)
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
 					generateNAD(netConfig),
@@ -96,7 +103,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 				for i, cidr := range strings.Split(netConfig.cidr, ",") {
 					if cidr != "" {
 						ginkgo.By("asserting the server pod has an IP from the configured range")
-						serverIP, err = podIPsForUserDefinedPrimaryNetwork(
+						serverIP, err = getPodAnnotationIPsForAttachmentByIndex(
 							cs,
 							f.Namespace.Name,
 							serverPodConfig.name,
@@ -131,7 +138,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer2",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig(
@@ -151,7 +158,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig(
@@ -179,11 +186,13 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 
 				namespaceYellow := getNamespaceName(f, nameSpaceYellowSuffix)
 				namespaceBlue := getNamespaceName(f, namespaceBlueSuffix)
+				namespaceRed := getNamespaceName(f, namespaceRedSuffix)
+				namespaceOrange := getNamespaceName(f, namespaceOrangeSuffix)
 
 				nad := networkAttachmentConfigParams{
 					topology: topology,
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
-					// Both yellow and blue namespaces are going to served by green network.
+					cidr:     filterCIDRsAndJoin(cs, joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet)),
+					// The yellow, blue and red namespaces are going to served by green network.
 					// Use random suffix for the network name to avoid race between tests.
 					networkName: fmt.Sprintf("%s-%s", "green", rand.String(randomStringLength)),
 					role:        "primary",
@@ -194,6 +203,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 				for _, namespace := range []string{namespaceYellow, namespaceBlue} {
 					ginkgo.By("creating the attachment configuration for " + netConfName + " in namespace " + namespace)
 					netConfig := newNetworkAttachmentConfig(nad)
+					netConfig.cidr = filterCIDRsAndJoin(cs, netConfig.cidr)
 					netConfig.namespace = namespace
 					netConfig.name = netConfName
 
@@ -221,12 +231,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 					}
 					subnet, err := getNetCIDRSubnet(cidr)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					allowServerPodIP, err = podIPsForUserDefinedPrimaryNetwork(cs, namespaceYellow, allowServerPodConfig.name,
+					allowServerPodIP, err = getPodAnnotationIPsForAttachmentByIndex(cs, namespaceYellow, allowServerPodConfig.name,
 						namespacedName(namespaceYellow, netConfName), i)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					ginkgo.By(fmt.Sprintf("asserting the allow server pod IP %v is from the configured range %v", allowServerPodIP, cidr))
 					gomega.Expect(inRange(subnet, allowServerPodIP)).To(gomega.Succeed())
-					denyServerPodIP, err = podIPsForUserDefinedPrimaryNetwork(cs, namespaceYellow, denyServerPodConfig.name,
+					denyServerPodIP, err = getPodAnnotationIPsForAttachmentByIndex(cs, namespaceYellow, denyServerPodConfig.name,
 						namespacedName(namespaceYellow, netConfName), i)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					ginkgo.By(fmt.Sprintf("asserting the deny server pod IP %v is from the configured range %v", denyServerPodIP, cidr))
@@ -257,8 +267,8 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 					return reachServerPodFromClient(cs, denyServerPodConfig, clientPodConfig, denyServerPodIP, port)
 				}, 1*time.Minute, 6*time.Second).ShouldNot(gomega.Succeed())
 
-				ginkgo.By("creating a \"allow-traffic-to-pod\" network policy")
-				_, err = allowTrafficToPodFromNamespacePolicy(f, namespaceYellow, namespaceBlue, "allow-traffic-to-pod", allowServerPodLabel)
+				ginkgo.By("creating a \"allow-traffic-to-pod\" network policy for blue and red namespace")
+				_, err = allowTrafficToPodFromNamespacePolicy(f, namespaceYellow, namespaceBlue, namespaceRed, "allow-traffic-to-pod", allowServerPodLabel)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ginkgo.By("asserting the *client* pod can contact the allow server pod exposed endpoint")
@@ -271,6 +281,74 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", func() {
 					return reachServerPodFromClient(cs, denyServerPodConfig, clientPodConfig, denyServerPodIP, port)
 				}, 1*time.Minute, 6*time.Second).ShouldNot(gomega.Succeed())
 
+				// Create client pod in red namespace and check network policy is working.
+				ginkgo.By("creating client pod in red namespace and check if it is in pending state until NAD is created")
+				clientPodConfig.namespace = namespaceRed
+				podSpec := generatePodSpec(clientPodConfig)
+				_, err = cs.CoreV1().Pods(clientPodConfig.namespace).Create(
+					context.Background(),
+					podSpec,
+					metav1.CreateOptions{},
+				)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Consistently(func() v1.PodPhase {
+					updatedPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Get(context.Background(),
+						clientPodConfig.name, metav1.GetOptions{})
+					if err != nil {
+						return v1.PodFailed
+					}
+					return updatedPod.Status.Phase
+				}, 1*time.Minute, 6*time.Second).Should(gomega.Equal(v1.PodPending))
+
+				// The pod won't run and the namespace address set won't be created until the NAD for the network is added
+				// to the namespace and we test here that once that happens the policy is reconciled to account for it.
+				ginkgo.By("creating NAD for red and orange namespaces and check pod moves into running state")
+				for _, namespace := range []string{namespaceRed, namespaceOrange} {
+					ginkgo.By("creating the attachment configuration for " + netConfName + " in namespace " + namespace)
+					netConfig := newNetworkAttachmentConfig(nad)
+					netConfig.namespace = namespace
+					netConfig.name = netConfName
+
+					_, err := nadClient.NetworkAttachmentDefinitions(namespace).Create(
+						context.Background(),
+						generateNAD(netConfig),
+						metav1.CreateOptions{},
+					)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+				gomega.Eventually(func() v1.PodPhase {
+					updatedPod, err := cs.CoreV1().Pods(clientPodConfig.namespace).Get(context.Background(),
+						clientPodConfig.name, metav1.GetOptions{})
+					if err != nil {
+						return v1.PodFailed
+					}
+					return updatedPod.Status.Phase
+				}, 1*time.Minute, 6*time.Second).Should(gomega.Equal(v1.PodRunning))
+
+				ginkgo.By("asserting the *red client* pod can contact the allow server pod exposed endpoint")
+				gomega.Eventually(func() error {
+					return reachServerPodFromClient(cs, allowServerPodConfig, clientPodConfig, allowServerPodIP, port)
+				}, 1*time.Minute, 6*time.Second).Should(gomega.Succeed())
+
+				ginkgo.By("asserting the *red client* pod can not contact deny server pod exposed endpoint")
+				gomega.Eventually(func() error {
+					return reachServerPodFromClient(cs, denyServerPodConfig, clientPodConfig, denyServerPodIP, port)
+				}, 1*time.Minute, 6*time.Second).ShouldNot(gomega.Succeed())
+
+				// Create client pod in orange namespace now and check network policy is working.
+				ginkgo.By("creating client pod in orange namespace")
+				clientPodConfig.namespace = namespaceOrange
+				runUDNPod(cs, namespaceOrange, clientPodConfig, nil)
+
+				ginkgo.By("asserting the *orange client* pod can not contact the allow server pod exposed endpoint")
+				gomega.Eventually(func() error {
+					return reachServerPodFromClient(cs, allowServerPodConfig, clientPodConfig, allowServerPodIP, port)
+				}, 1*time.Minute, 6*time.Second).ShouldNot(gomega.Succeed())
+
+				ginkgo.By("asserting the *orange client* pod can not contact deny server pod exposed endpoint")
+				gomega.Eventually(func() error {
+					return reachServerPodFromClient(cs, denyServerPodConfig, clientPodConfig, denyServerPodIP, port)
+				}, 1*time.Minute, 6*time.Second).ShouldNot(gomega.Succeed())
 			},
 			ginkgo.Entry(
 				"in L2 primary UDN",
@@ -327,7 +405,7 @@ func getNamespaceName(f *framework.Framework, nsSuffix string) string {
 	return fmt.Sprintf("%s-%s", f.Namespace.Name, nsSuffix)
 }
 
-func allowTrafficToPodFromNamespacePolicy(f *framework.Framework, namespace, fromNamespace, policyName string, podLabel map[string]string) (*knet.NetworkPolicy, error) {
+func allowTrafficToPodFromNamespacePolicy(f *framework.Framework, namespace, fromNamespace1, fromNamespace2, policyName string, podLabel map[string]string) (*knet.NetworkPolicy, error) {
 	policy := &knet.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: policyName,
@@ -336,7 +414,8 @@ func allowTrafficToPodFromNamespacePolicy(f *framework.Framework, namespace, fro
 			PodSelector: metav1.LabelSelector{MatchLabels: podLabel},
 			PolicyTypes: []knet.PolicyType{knet.PolicyTypeIngress},
 			Ingress: []knet.NetworkPolicyIngressRule{{From: []knet.NetworkPolicyPeer{
-				{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": fromNamespace}}}}}},
+				{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": fromNamespace1}}},
+				{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": fromNamespace2}}}}}},
 		},
 	}
 	return f.ClientSet.NetworkingV1().NetworkPolicies(namespace).Create(context.TODO(), policy, metav1.CreateOptions{})

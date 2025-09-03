@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -107,7 +107,6 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -187,7 +186,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, failed = h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
-				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
+					joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName())
 				nodeSyncsParam = &nodeSyncs{
 					syncNode:              nodeSync,
 					syncClusterRouterPort: clusterRtrSync,
@@ -684,7 +684,7 @@ func (oc *SecondaryLayer3NetworkController) init() error {
 		}
 	}
 
-	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
+	// FIXME: When https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed,
 	// use IsTableSupported(nbdb.LoadBalancerGroup).
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
@@ -704,7 +704,6 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
-
 	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
@@ -715,7 +714,11 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 		return nil
 	}
 
-	klog.Infof("Adding or Updating Node %q for network %s", node.Name, oc.GetNetworkName())
+	if !nodeNeedsSync(nSyncs) {
+		return nil
+	}
+
+	klog.Infof("Adding or Updating local node %q for network %q", node.Name, oc.GetNetworkName())
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
@@ -774,15 +777,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				if err := gwManager.syncNodeGateway(
+				if err := gwManager.SyncGateway(
 					node,
-					gwConfig.config,
-					gwConfig.hostSubnets,
-					gwConfig.hostAddrs,
-					gwConfig.clusterSubnets,
-					gwConfig.gwLRPJoinIPs,         // the joinIP allocated to this node for this controller's network
-					oc.ovnClusterLRPToJoinIfAddrs, // the .1 of this controller's global joinSubnet
-					gwConfig.externalIPs,
+					gwConfig,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
 						"failed to sync node GW for network %q: %v",
@@ -817,7 +814,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 
 	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() && nSyncs.syncReroute {
 		rerouteFailed := false
-		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo(), node); err != nil {
 			errs = append(errs, fmt.Errorf("failed to ensure EgressIP router polices for network %s: %v", oc.GetNetworkName(), err))
 			rerouteFailed = true
 		}
@@ -860,7 +857,8 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *corev
 	return err
 }
 
-// addNodeSubnetEgressSNAT adds the SNAT on each node's ovn-cluster-router in L3 networks
+// addOrUpdateUDNNodeSubnetEgressSNAT adds or updates the SNAT on each node's ovn-cluster-router in L3 networks for each UDN
+// Based on the isUDNAdvertised flag, the SNAT matches are slightly different
 // snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 10.128.0.0/24
 // snat eth.dst == d6:cf:fd:2c:a6:44 169.254.0.12 2010:100:200::/64
 // these SNATs are required for pod2Egress traffic in LGW mode and pod2SameNode traffic in SGW mode to function properly on UDNs
@@ -870,9 +868,12 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *corev
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L3 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node) error {
+// If isUDNAdvertised is true, then we want to SNAT all packets that are coming from pods on this network
+// leaving towards nodeIPs on the cluster to masqueradeIP. If network is advertise then the SNAT looks like this:
+// "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/24"
+func (oc *SecondaryLayer3NetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node, isUDNAdvertised bool) error {
 	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, isUDNAdvertised)
 	if err != nil {
 		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
 			oc.GetNetworkName(), node.Name, err)
@@ -885,28 +886,6 @@ func (oc *SecondaryLayer3NetworkController) addUDNNodeSubnetEgressSNAT(localPodS
 	}
 	if err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, router, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for node subnet on router: %q for network %q, error: %w",
-			oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkName(), err)
-	}
-	return nil
-}
-
-// deleteUDNNodeSubnetEgressSNAT deletes SNAT rule from network specific
-// ovn_cluster_router depending on whether the network is advertised or not
-func (oc *SecondaryLayer3NetworkController) deleteUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node) error {
-	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort)
-	if err != nil {
-		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
-			oc.GetNetworkName(), node.Name, err)
-	}
-	if len(nats) == 0 {
-		return nil // nothing to do
-	}
-	router := &nbdb.LogicalRouter{
-		Name: oc.GetNetworkScopedClusterRouterName(),
-	}
-	if err := libovsdbops.DeleteNATs(oc.nbClient, router, nats...); err != nil {
-		return fmt.Errorf("failed to delete SNAT for node subnet on router: %q for network %q, error: %w",
 			oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkName(), err)
 	}
 	return nil
@@ -926,19 +905,17 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 		return nil, err
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		if !util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
-			if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
-				return nil, err
-			}
+		isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
+		if err := oc.addOrUpdateUDNNodeSubnetEgressSNAT(hostSubnets, node, isUDNAdvertised); err != nil {
+			return nil, err
+		}
+		if !isUDNAdvertised {
 			if util.IsRouteAdvertisementsEnabled() {
 				if err := oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
 					return nil, err
 				}
 			}
 		} else {
-			if err := oc.deleteUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
-				return nil, err
-			}
 			if err := oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
 				return nil, err
 			}
@@ -1042,16 +1019,7 @@ func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
 	return nil
 }
 
-type SecondaryL3GatewayConfig struct {
-	config         *util.L3GatewayConfig
-	hostSubnets    []*net.IPNet
-	clusterSubnets []*net.IPNet
-	gwLRPJoinIPs   []*net.IPNet
-	hostAddrs      []string
-	externalIPs    []net.IP
-}
-
-func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL3GatewayConfig, error) {
+func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
@@ -1101,13 +1069,14 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node)
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 
-	return &SecondaryL3GatewayConfig{
-		config:         l3GatewayConfig,
-		hostSubnets:    hostSubnets,
-		clusterSubnets: clusterSubnets,
-		gwLRPJoinIPs:   gwLRPJoinIPs,
-		hostAddrs:      hostAddrs,
-		externalIPs:    externalIPs,
+	return &GatewayConfig{
+		annoConfig:                 l3GatewayConfig,
+		hostSubnets:                hostSubnets,
+		clusterSubnets:             clusterSubnets,
+		gwLRPJoinIPs:               gwLRPJoinIPs,
+		hostAddrs:                  hostAddrs,
+		externalIPs:                externalIPs,
+		ovnClusterLRPToJoinIfAddrs: oc.ovnClusterLRPToJoinIfAddrs,
 	}, nil
 }
 

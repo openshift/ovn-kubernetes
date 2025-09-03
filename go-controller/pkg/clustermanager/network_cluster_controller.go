@@ -16,6 +16,7 @@ import (
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
+	k8snodeutil "k8s.io/component-helpers/node/util"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -475,7 +476,7 @@ func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
 		klog.Errorf("Failed to reconcile network %s: %v", ncc.GetNetworkName(), err)
 	}
 	if reconcilePendingPods && ncc.retryPods != nil {
-		if err := objretry.RequeuePendingPods(ncc.kube, ncc.GetNetInfo(), ncc.retryPods); err != nil {
+		if err := objretry.RequeuePendingPods(ncc.watchFactory, ncc.GetNetInfo(), ncc.retryPods); err != nil {
 			klog.Errorf("Failed to requeue pending pods for network %s: %v", ncc.GetNetworkName(), err)
 		}
 	}
@@ -576,7 +577,10 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		// 1. we missed an add event (bug in kapi informer code)
 		// 2. a user removed the annotation on the node
 		// Either way to play it safe for now do a partial json unmarshal check
-		if !nodeFailed && util.NoHostSubnet(oldNode) != util.NoHostSubnet(newNode) && !h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) {
+		_, nodeCondition := k8snodeutil.GetNodeCondition(&newNode.Status, corev1.NodeNetworkUnavailable)
+		nodeNetworkUnavailable := nodeCondition != nil && nodeCondition.Status == corev1.ConditionTrue
+		if !nodeFailed && util.NoHostSubnet(oldNode) == util.NoHostSubnet(newNode) &&
+			!h.ncc.nodeAllocator.NeedsNodeAllocation(newNode) && !nodeNetworkUnavailable {
 			// no other node updates would require us to reconcile again
 			return nil
 		}

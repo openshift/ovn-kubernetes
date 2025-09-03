@@ -17,6 +17,8 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/containerengine"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
@@ -558,16 +560,13 @@ func getApiAddress() string {
 }
 
 // IsGatewayModeLocal returns true if the gateway mode is local
-func IsGatewayModeLocal() bool {
-	anno, err := e2ekubectl.RunKubectl("default", "get", "node", "ovn-control-plane", "-o", "template", "--template={{.metadata.annotations}}")
-	if err != nil {
-		framework.Logf("Error getting annotations: %v", err)
-		return false
-	}
-	framework.Logf("Annotations received: %s", anno)
-	isLocal := strings.Contains(anno, "local")
-	framework.Logf("IsGatewayModeLocal returning: %v", isLocal)
-	return isLocal
+func IsGatewayModeLocal(cs kubernetes.Interface) bool {
+	ginkgo.GinkgoHelper()
+	node, err := e2enode.GetRandomReadySchedulableNode(context.TODO(), cs)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	l3Config, err := util.ParseNodeL3GatewayAnnotation(node)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "must get node l3 gateway annotation")
+	return l3Config.Mode == config.GatewayModeLocal
 }
 
 // restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
@@ -713,7 +712,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 		secondaryExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
 		secondaryExternalContainerSpec := infraapi.ExternalContainer{Name: "e2e-ovn-k", Image: images.AgnHost(),
-			Network: secondaryProviderNetwork, Args: getAgnHostHTTPPortBindCMDArgs(secondaryExternalContainerPort), ExtPort: secondaryExternalContainerPort}
+			Network: secondaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(secondaryExternalContainerPort), ExtPort: secondaryExternalContainerPort}
 		ginkgo.By("creating container on secondary provider network")
 		secondaryExternalContainer, err = providerCtx.CreateExternalContainer(secondaryExternalContainerSpec)
 		framework.ExpectNoError(err, "failed to create external container")
@@ -1276,7 +1275,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer = infraapi.ExternalContainer{Name: "e2e-ingress", Image: images.AgnHost(), Network: primaryProviderNetwork,
-				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "failed to create external service", externalContainer.String())
 		})
@@ -1673,7 +1672,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer = infraapi.ExternalContainer{Name: "e2e-ingress-add-more", Image: images.AgnHost(), Network: primaryProviderNetwork,
-				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "external container %s must be created successfully", externalContainer.Name)
 
@@ -1835,7 +1834,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			externalContainer = infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-				Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "external container %s must be created successfully", externalContainer.Name)
 		})
@@ -1944,7 +1943,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
 			collectorExternalContainer := infraapi.ExternalContainer{Name: getContainerName(collectorPort), Image: "cloudflare/goflow",
-				Network: primaryProviderNetwork, Args: []string{"-kafka=false"}, ExtPort: collectorPort}
+				Network: primaryProviderNetwork, CmdArgs: []string{"-kafka=false"}, ExtPort: collectorPort}
 			collectorExternalContainer, err = providerCtx.CreateExternalContainer(collectorExternalContainer)
 			if err != nil {
 				framework.Failf("failed to start flow collector container %s: %v", getContainerName(collectorPort), err)

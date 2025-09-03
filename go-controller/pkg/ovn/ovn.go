@@ -16,8 +16,9 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
+	v1pod "k8s.io/kubernetes/pkg/api/v1/pod"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -117,6 +118,10 @@ func networkStatusAnnotationsChanged(oldPod, newPod *corev1.Pod) bool {
 	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
 
+func podBecameReady(oldPod, newPod *corev1.Pod) bool {
+	return !v1pod.IsPodReadyConditionTrue(oldPod.Status) && v1pod.IsPodReadyConditionTrue(newPod.Status)
+}
+
 // ensurePod tries to set up a pod. It returns nil on success and error on failure; failure
 // indicates the pod set up should be retried later.
 func (oc *DefaultNetworkController) ensurePod(oldPod, pod *corev1.Pod, addPort bool) error {
@@ -129,6 +134,14 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *corev1.Pod, addPort b
 	switchName := pod.Spec.NodeName
 	if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
 		return oc.ensureRemotePodIP(oldPod, pod, addPort)
+	}
+
+	// If an external gateway pod is in terminating or not ready state then remove the
+	// routes for the external gateway pod
+	if util.PodTerminating(pod) || !v1pod.IsPodReadyConditionTrue(pod.Status) {
+		if err := oc.deletePodExternalGW(pod); err != nil {
+			return fmt.Errorf("ensurePod failed %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
 	}
 
 	if oc.isPodScheduledinLocalZone(pod) {
@@ -170,7 +183,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 		}
 	} else {
 		// either pod is host-networked or its an update for a normal pod (addPort=false case)
-		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) || podBecameReady(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {
 				return fmt.Errorf("addPodExternalGW failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
@@ -237,7 +250,7 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *corev1.Pod,
 	}
 
 	// either pod is host-networked or its an update for a normal pod (addPort=false case)
-	if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+	if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) || podBecameReady(oldPod, pod) {
 		// check if this remote pod is serving as an external GW. If so add the routes in the namespace
 		// associated with this remote pod
 		if err := oc.addPodExternalGW(pod); err != nil {
@@ -373,34 +386,17 @@ func (oc *DefaultNetworkController) WatchEgressIPPods() error {
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
-func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node, hostSubnets []*net.IPNet) error {
-	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
+	gwConfig, err := oc.nodeGatewayConfig(node)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting gateway config for node %s: %v", node.Name, err)
 	}
 
-	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
-		if err != nil {
-			return err
-		}
-	}
-
-	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := oc.newGatewayManager(node.Name).Cleanup(); err != nil {
-			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
-		}
-	} else if hostSubnets != nil {
-		var hostAddrs []string
-		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.GetNodeHostAddrs(node)
-			if err != nil && !util.IsAnnotationNotSetError(err) {
-				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
-			}
-		}
-		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
-			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
-		}
+	if err := oc.newGatewayManager(node.Name).SyncGateway(
+		node,
+		gwConfig,
+	); err != nil {
+		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 	}
 
 	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
@@ -497,7 +493,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		return nil
 	}
 	// used only when IC=true
-	createDefaultNodeRouteToExternal := func(_ libovsdbclient.Client, _, _ string, _ []config.CIDRNetworkEntry) error {
+	createDefaultNodeRouteToExternal := func(_ libovsdbclient.Client, _, _ string, _ []config.CIDRNetworkEntry, _ []*net.IPNet) error {
 		return nil
 	}
 

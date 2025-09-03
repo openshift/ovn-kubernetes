@@ -20,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -218,7 +219,7 @@ func isSupportedAgnhostForEIP(externalContainer infraapi.ExternalContainer) bool
 	if externalContainer.Image != images.AgnHost() {
 		return false
 	}
-	if !util.SliceHasStringItem(externalContainer.Args, "netexec") {
+	if !util.SliceHasStringItem(externalContainer.CmdArgs, "netexec") {
 		return false
 	}
 	return true
@@ -377,7 +378,7 @@ type egressIPs struct {
 	Items []egressIP `json:"items"`
 }
 
-var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigParams networkAttachmentConfigParams) {
+var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP, func(netConfigParams networkAttachmentConfigParams) {
 	//FIXME: tests for CDN are designed for single stack clusters (IPv4 or IPv6) and must choose a single IP family for dual stack clusters.
 	// Remove this restriction and allow the tests to detect if an IP family support is available.
 	const (
@@ -701,6 +702,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		if len(nodes.Items) < 3 {
 			framework.Failf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
+		netConfigParams.cidr = filterCIDRsAndJoin(f.ClientSet, netConfigParams.cidr)
 		if isSupported, reason := isNetworkSupported(nodes, netConfigParams); !isSupported {
 			ginkgo.Skip(reason)
 		}
@@ -752,13 +754,13 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 		// attach containers to the primary network
 		primaryTargetExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
 		primaryTargetExternalContainerSpec := infraapi.ExternalContainer{Name: targetNodeName, Image: images.AgnHost(),
-			Network: primaryProviderNetwork, Args: getAgnHostHTTPPortBindCMDArgs(primaryTargetExternalContainerPort), ExtPort: primaryTargetExternalContainerPort}
+			Network: primaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(primaryTargetExternalContainerPort), ExtPort: primaryTargetExternalContainerPort}
 		primaryTargetExternalContainer, err = providerCtx.CreateExternalContainer(primaryTargetExternalContainerSpec)
 		framework.ExpectNoError(err, "failed to create external target container on primary network", primaryTargetExternalContainerSpec.String())
 
 		primaryDeniedExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
 		primaryDeniedExternalContainerSpec := infraapi.ExternalContainer{Name: deniedTargetNodeName, Image: images.AgnHost(),
-			Network: primaryProviderNetwork, Args: getAgnHostHTTPPortBindCMDArgs(primaryDeniedExternalContainerPort), ExtPort: primaryDeniedExternalContainerPort}
+			Network: primaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(primaryDeniedExternalContainerPort), ExtPort: primaryDeniedExternalContainerPort}
 		primaryDeniedExternalContainer, err = providerCtx.CreateExternalContainer(primaryDeniedExternalContainerSpec)
 		framework.ExpectNoError(err, "failed to create external denied container on primary network", primaryDeniedExternalContainer.String())
 
@@ -789,7 +791,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", func(netConfigPa
 			Name:    targetSecondaryNodeName,
 			Image:   images.AgnHost(),
 			Network: secondaryProviderNetwork,
-			Args:    getAgnHostHTTPPortBindCMDArgs(secondaryTargetExternalContainerPort),
+			CmdArgs: getAgnHostHTTPPortBindCMDArgs(secondaryTargetExternalContainerPort),
 			ExtPort: secondaryTargetExternalContainerPort,
 		}
 		secondaryTargetExternalContainer, err = providerCtx.CreateExternalContainer(secondaryTargetExternalContainerSpec)
@@ -970,7 +972,7 @@ spec:
 				if isClusterDefaultNetwork(netConfigParams) {
 					pod2IP = getPodAddress(pod2Name, f.Namespace.Name)
 				} else {
-					pod2IP, err = podIPsForUserDefinedPrimaryNetwork(
+					pod2IP, err = getPodAnnotationIPsForAttachmentByIndex(
 						f.ClientSet,
 						f.Namespace.Name,
 						pod2Name,
@@ -2123,7 +2125,7 @@ spec:
 		providerPrimaryNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "failed to get providers primary network")
 		externalContainerPrimary := infraapi.ExternalContainer{Name: "external-container-for-egressip-mtu-test", Image: images.AgnHost(),
-			Network: providerPrimaryNetwork, Args: []string{"pause"}, ExtPort: externalContainerPrimaryPort}
+			Network: providerPrimaryNetwork, CmdArgs: []string{"pause"}, ExtPort: externalContainerPrimaryPort}
 		externalContainerPrimary, err = providerCtx.CreateExternalContainer(externalContainerPrimary)
 		framework.ExpectNoError(err, "failed to create external container: %s", externalContainerPrimary.String())
 
@@ -3192,13 +3194,13 @@ spec:
 		ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
 			name:     "l3primary",
 			topology: types.Layer3Topology,
-			cidr:     correctCIDRFamily("30.10.0.0/16", "2014:100:200::0/60"),
+			cidr:     joinCIDRs("30.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
 		ginkgo.Entry("L2 Primary UDN", networkAttachmentConfigParams{
 			name:     "l2primary",
 			topology: types.Layer2Topology,
-			cidr:     correctCIDRFamily("10.10.0.0/16", "2014:100:200::0/60"),
+			cidr:     joinCIDRs("10.10.0.0/16", "2014:100:200::0/60"),
 			role:     "primary",
 		}),
 	)

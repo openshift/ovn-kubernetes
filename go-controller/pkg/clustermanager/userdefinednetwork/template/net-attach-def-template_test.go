@@ -301,6 +301,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			// must be defined so the primary user defined network can match the ip families of the underlying cluster
 			config.IPv4Mode = true
 			config.IPv6Mode = true
+			config.OVNKubernetesFeature.EnablePersistentIPs = true
 			nad, err := RenderNetAttachDefManifest(testUdn, testNs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))
@@ -326,7 +327,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				"netAttachDefName": "mynamespace/test-net",
 				"role": "primary",
 				"topology": "layer3",
-				"joinSubnets": "100.65.0.0/16,fd99::/64",
+				"joinSubnet": "100.65.0.0/16,fd99::/64",
 				"subnets": "192.168.100.0/16,2001:dbb::/60",
 				"mtu": 1500
 			}`,
@@ -350,7 +351,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.65.0.0/16,fd99::/64",
+			  "joinSubnet": "100.65.0.0/16,fd99::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
@@ -376,7 +377,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.62.0.0/24,fd92::/64",
+			  "joinSubnet": "100.62.0.0/24,fd92::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
@@ -436,6 +437,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			// must be defined so the primary user defined network can match the ip families of the underlying cluster
 			config.IPv4Mode = true
 			config.IPv6Mode = true
+			config.OVNKubernetesFeature.EnablePersistentIPs = true
 			nad, err := RenderNetAttachDefManifest(cudn, testNs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nad.TypeMeta).To(Equal(expectedNAD.TypeMeta))
@@ -461,7 +463,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				"netAttachDefName": "mynamespace/test-net",
 				"role": "primary",
 				"topology": "layer3",
-				"joinSubnets": "100.65.0.0/16,fd99::/64",
+				"joinSubnet": "100.65.0.0/16,fd99::/64",
 				"subnets": "192.168.100.0/16,2001:dbb::/60",
 				"mtu": 1500
 			}`,
@@ -485,7 +487,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.65.0.0/16,fd99::/64",
+			  "joinSubnet": "100.65.0.0/16,fd99::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
@@ -511,7 +513,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.62.0.0/24,fd92::/64",
+			  "joinSubnet": "100.62.0.0/24,fd92::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
