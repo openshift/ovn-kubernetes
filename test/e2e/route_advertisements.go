@@ -125,17 +125,19 @@ var _ = ginkgo.Describe("BGP: Pod to external server when default podNetwork is 
 			framework.ExpectNoError(err, "must get bgpnet subnets")
 			framework.Logf("the network cidrs to be imported are v4=%s and v6=%s", externalServerV4CIDR, externalServerV6CIDR)
 			for _, node := range nodes.Items {
-				ipVer := ""
-				bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV4CIDR), " ")
-				framework.Logf("Checking for server's route in node %s", node.Name)
-				gomega.Eventually(func() bool {
-					routes, err := infraprovider.Get().ExecK8NodeCommand(node.GetName(), bgpRouteCommand)
-					framework.ExpectNoError(err, "failed to get BGP routes from node")
-					framework.Logf("Routes in node %s", routes)
-					return strings.Contains(routes, frrContainerIPv4)
-				}, 30*time.Second).Should(gomega.BeTrue())
-				if isDualStackCluster(nodes) {
-					ipVer = " -6"
+				if isIPv4Supported(f.ClientSet) {
+					ipVer := ""
+					bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV4CIDR), " ")
+					framework.Logf("Checking for server's route in node %s", node.Name)
+					gomega.Eventually(func() bool {
+						routes, err := infraprovider.Get().ExecK8NodeCommand(node.GetName(), bgpRouteCommand)
+						framework.ExpectNoError(err, "failed to get BGP routes from node")
+						framework.Logf("Routes in node %s", routes)
+						return strings.Contains(routes, frrContainerIPv4)
+					}, 30*time.Second).Should(gomega.BeTrue())
+				}
+				if isIPv6Supported(f.ClientSet) {
+					ipVer := " -6"
 					nodeIPv6LLA, err := GetNodeIPv6LinkLocalAddressForEth0(routerContainerName)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV6CIDR), " ")
@@ -352,17 +354,19 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 			for _, node := range nodes.Items {
-				ipVer := ""
-				bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV4CIDR), " ")
-				framework.Logf("Checking for server's route in node %s", node.Name)
-				gomega.Eventually(func() bool {
-					routes, err := infraprovider.Get().ExecK8NodeCommand(node.GetName(), bgpRouteCommand)
-					framework.ExpectNoError(err, "failed to get BGP routes from node")
-					framework.Logf("Routes in node %s", routes)
-					return strings.Contains(routes, frrContainerIPv4)
-				}, 30*time.Second).Should(gomega.BeTrue())
-				if isDualStackCluster(nodes) {
-					ipVer = " -6"
+				if isIPv4Supported(f.ClientSet) {
+					ipVer := ""
+					bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV4CIDR), " ")
+					framework.Logf("Checking for server's route in node %s", node.Name)
+					gomega.Eventually(func() bool {
+						routes, err := infraprovider.Get().ExecK8NodeCommand(node.GetName(), bgpRouteCommand)
+						framework.ExpectNoError(err, "failed to get BGP routes from node")
+						framework.Logf("Routes in node %s", routes)
+						return strings.Contains(routes, frrContainerIPv4)
+					}, 30*time.Second).Should(gomega.BeTrue())
+				}
+				if isIPv6Supported(f.ClientSet) {
+					ipVer := " -6"
 					bgpRouteCommand := strings.Split(fmt.Sprintf("ip%s route show %s", ipVer, externalServerV6CIDR), " ")
 					framework.Logf("Checking for server's route in node %s", node.Name)
 					gomega.Eventually(func() bool {
@@ -395,7 +399,14 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 					60*time.Second)
 				framework.ExpectNoError(err, fmt.Sprintf("Testing pod to external traffic failed: %v", err))
 				if isIPv6Supported(f.ClientSet) && utilnet.IsIPv6String(serverContainerIP) {
-					podIP, err = getPodAnnotationIPsForAttachmentByIndex(f.ClientSet, f.Namespace.Name, clientPod.Name, namespacedName(f.Namespace.Name, cUDN.Name), 1)
+					if isIPv4Supported(f.ClientSet) && isIPv6Supported(f.ClientSet) {
+						// for dualstack we need to fetch the IP at index1
+						// if singlestack IPV6 the original podIP at index0 is the correct one
+						// FIXME: This util call assumes the first index will always be the IPv4 address
+						// and second index will always be the IPv6 address
+						// which is not always the case.
+						podIP, err = getPodAnnotationIPsForAttachmentByIndex(f.ClientSet, f.Namespace.Name, clientPod.Name, namespacedName(f.Namespace.Name, cUDN.Name), 1)
+					}
 					// For IPv6 addresses, need to handle the brackets in the output
 					outputIP := strings.TrimPrefix(strings.Split(stdout, "]:")[0], "[")
 					gomega.Expect(outputIP).To(gomega.Equal(podIP),
@@ -497,9 +508,9 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks", feature.RouteAdvertisements,
 	func(cudnATemplate, cudnBTemplate *udnv1.ClusterUserDefinedNetwork) {
 		const curlConnectionTimeoutCode = "28"
-		const (
-			ipFamilyV4 = iota
-			ipFamilyV6
+		var (
+			ipFamilyV4 = 0
+			ipFamilyV6 = 1
 		)
 
 		f := wrappedTestFramework("bgp-network-isolation")
@@ -516,6 +527,10 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 		var ra *rav1.RouteAdvertisements
 		var hostNetworkPort int
 		ginkgo.BeforeEach(func() {
+			// Adjust IP family constants based on cluster support
+			if !isIPv4Supported(f.ClientSet) && isIPv6Supported(f.ClientSet) {
+				ipFamilyV6 = ipFamilyV4
+			}
 			ginkgo.By("Configuring primary UDN namespaces")
 			var err error
 			udnNamespaceA, err = f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
@@ -783,8 +798,13 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 					framework.Logf("Connectivity check successful:'%s' -> %s", client, targetAddress)
 					return out, nil
 				}
-				clientName, clientNamespace, dst, expectedOutput, expectErr := connInfo(ipFamilyV4)
-
+				var clientName, clientNamespace, dst, expectedOutput string
+				var expectErr bool
+				if isIPv4Supported(f.ClientSet) {
+					clientName, clientNamespace, dst, expectedOutput, expectErr = connInfo(ipFamilyV4)
+				} else if isIPv6Supported(f.ClientSet) {
+					clientName, clientNamespace, dst, expectedOutput, expectErr = connInfo(ipFamilyV6)
+				}
 				asyncAssertion := gomega.Eventually
 				timeout := time.Second * 30
 				if expectErr {
