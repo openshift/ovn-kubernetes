@@ -635,14 +635,14 @@ func newNodeWithSecondaryNets(nodeName string, nodeIPv4CIDR string, netInfos ...
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr":                           fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
-				"k8s.ovn.org/node-subnets":                                  parsedNodeSubnets,
-				util.OVNNodeHostCIDRs:                                       fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
-				"k8s.ovn.org/zone-name":                                     "global",
-				"k8s.ovn.org/l3-gateway-config":                             fmt.Sprintf("{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":%q,\"ip-addresses\":[%[2]q],\"ip-address\":%[2]q,\"next-hops\":[%[3]q],\"next-hop\":%[3]q,\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}", util.IPAddrToHWAddr(nodeIP), nodeCIDR, nextHopIP),
-				util.OvnNodeChassisID:                                       "abdcef",
-				"k8s.ovn.org/network-ids":                                   fmt.Sprintf("{\"default\":\"0\",\"isolatednet\":\"%s\"}", secondaryNetworkID),
-				util.OVNNodeGRLRPAddrs:                                      fmt.Sprintf("{\"default\":{\"ipv4\":\"100.64.0.2/16\"},\"isolatednet\":{\"ipv4\":%q}}", gwRouterJoinIPAddress()),
+				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
+				"k8s.ovn.org/node-subnets":        parsedNodeSubnets,
+				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
+				"k8s.ovn.org/zone-name":           "global",
+				"k8s.ovn.org/l3-gateway-config":   fmt.Sprintf("{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":%q,\"ip-addresses\":[%[2]q],\"ip-address\":%[2]q,\"next-hops\":[%[3]q],\"next-hop\":%[3]q,\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}", util.IPAddrToHWAddr(nodeIP), nodeCIDR, nextHopIP),
+				util.OvnNodeChassisID:             "abdcef",
+				"k8s.ovn.org/network-ids":         fmt.Sprintf("{\"default\":\"0\",\"isolatednet\":\"%s\"}", secondaryNetworkID),
+				util.OvnNodeID:                    "4",
 				"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"isolatednet\":\"25\"}",
 			},
 			Labels: map[string]string{
@@ -762,7 +762,7 @@ func expectedGatewayChassis(nodeName string, netInfo util.NetInfo, gwConfig util
 
 func expectedGRToJoinSwitchLRP(gatewayRouterName string, gwRouterLRPIP *net.IPNet, netInfo util.NetInfo) *nbdb.LogicalRouterPort {
 	lrpName := fmt.Sprintf("%s%s", types.GWRouterToJoinSwitchPrefix, gatewayRouterName)
-	options := map[string]string{"gateway_mtu": fmt.Sprintf("%d", 1400)}
+	options := map[string]string{libovsdbops.GatewayMTU: fmt.Sprintf("%d", 1400)}
 	return expectedLogicalRouterPort(lrpName, netInfo, options, gwRouterLRPIP)
 }
 
@@ -836,7 +836,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			Networks:       []string{"192.168.1.1/24"},
 			MAC:            "0a:58:c0:a8:01:01",
 			GatewayChassis: []string{gatewayChassisUUID},
-			Options:        map[string]string{"gateway_mtu": "1400"},
+			Options:        map[string]string{libovsdbops.GatewayMTU: "1400"},
 		},
 		expectedGRStaticRoute(staticRouteUUID1, nodeSubnet.String(), lrsrNextHop, &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
 		expectedGRStaticRoute(staticRouteUUID2, gwRouterJoinIPAddress().IP.String(), gwRouterJoinIPAddress().IP.String(), nil, nil, netInfo),
@@ -973,7 +973,7 @@ func externalSwitchRouterPortOptions(gatewayRouterName string) map[string]string
 	return map[string]string{
 		"nat-addresses":             "router",
 		"exclude-lb-vips-from-garp": "true",
-		"router-port":               types.GWRouterToExtSwitchPrefix + gatewayRouterName,
+		libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + gatewayRouterName,
 	}
 }
 
@@ -992,7 +992,7 @@ func expectedJoinSwitchAndLSPs(netInfo util.NetInfo, nodeName string) []libovsdb
 			Name:        types.JoinSwitchToGWRouterPrefix + gwRouterName,
 			Addresses:   []string{"router"},
 			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
-			Options:     map[string]string{"router-port": types.GWRouterToJoinSwitchPrefix + gwRouterName},
+			Options:     map[string]string{libovsdbops.RouterPort: types.GWRouterToJoinSwitchPrefix + gwRouterName},
 			Type:        "router",
 		},
 	}

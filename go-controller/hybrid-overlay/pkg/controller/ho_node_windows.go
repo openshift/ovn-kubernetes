@@ -57,7 +57,7 @@ func newNodeController(kube kube.Interface,
 			"UDP port. Please make sure you install all the KB updates on your system.")
 	}
 
-	node, err := kube.GetNode(nodeName)
+	node, err := kube.GetNodeForWindows(nodeName)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func (n *NodeController) initSelf(node *corev1.Node, nodeSubnet *net.IPNet) erro
 	}
 
 	// Add existing nodes
-	nodes, err := n.kube.GetNodes()
+	nodes, err := n.kube.GetNodesForWindows()
 	if err != nil {
 		return fmt.Errorf("error in initializing/fetching nodes: %v", err)
 	}
@@ -370,7 +370,7 @@ func (n *NodeController) uninitSelf(node *corev1.Node) error {
 		networkName, n.networkID, node.Name)
 
 	// Remove existing nodes
-	nodes, err := n.kube.GetNodes()
+	nodes, err := n.kube.GetNodesForWindows()
 	if err != nil {
 		return fmt.Errorf("failed to get nodes: %v", err)
 	}

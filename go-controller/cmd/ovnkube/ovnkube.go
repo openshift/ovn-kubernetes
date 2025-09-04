@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"text/tabwriter"
 	"text/template"
@@ -22,13 +23,14 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
-	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controllermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -453,7 +455,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	wg := &sync.WaitGroup{}
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
-	var managerErr, controllerErr, nodeErr error
+	var managerErr, controllerErr, nodeErr, ovsCLIErr error
 
 	if runMode.clusterManager {
 		wg.Add(1)
@@ -485,6 +487,14 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			<-ctx.Done()
 			clusterManager.Stop()
 		}()
+	}
+	// when ovnkube is running in ovnkube-controller and ovnkube node mode in the same process, bool is used to inform ovnkube-node that ovnkube-controller
+	// has sync'd once and changes have propagated to SB DB. ovnkube-node will then remove flows for dropping GARPs.
+	// Remove when OVN supports native silencing of GARPs on startup: https://issues.redhat.com/browse/FDP-1537
+	// isOVNKubeControllerSyncd is true when ovnkube controller has sync and changes are in OVN Southbound database.
+	var isOVNKubeControllerSyncd *atomic.Bool
+	if runMode.ovnkubeController && runMode.node && config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeFull {
+		isOVNKubeControllerSyncd = &atomic.Bool{}
 	}
 
 	if runMode.ovnkubeController {
@@ -522,9 +532,19 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				controllerErr = fmt.Errorf("failed to start network controller: %w", err)
 				return
 			}
-
 			// record delay until ready
 			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
+
+			if isOVNKubeControllerSyncd != nil {
+				klog.Infof("Waiting for OVN northbound database changes to sync to OVN Southbound database")
+				if err = libovsdbutil.WaitUntilNorthdSyncOnce(ctx, libovsdbOvnNBClient, libovsdbOvnSBClient); err != nil {
+					controllerErr = fmt.Errorf("failed waiting for northd to sync OVN Northbound DB to Southbound: %v", err)
+					return
+				} else {
+					klog.Infof("OVN northbound database changes synced to OVN Southbound database")
+					isOVNKubeControllerSyncd.Store(true)
+				}
+			}
 
 			<-ctx.Done()
 			controllerManager.Stop()
@@ -569,7 +589,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				return
 			}
 
-			err = nodeControllerManager.Start(ctx)
+			err = nodeControllerManager.Start(ctx, isOVNKubeControllerSyncd)
 			if err != nil {
 				nodeErr = fmt.Errorf("failed to start node network controller: %w", err)
 				return
@@ -579,7 +599,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
 
 			<-ctx.Done()
-			nodeControllerManager.Stop()
+			nodeControllerManager.Stop(isOVNKubeControllerSyncd)
 		}()
 	}
 
@@ -587,21 +607,23 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
 		metricsScrapeInterval := 30
-		defer cancel()
 
 		if ovsClient == nil {
 			ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
 			if err != nil {
-				return fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+				ovsCLIErr = fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+				cancel()
 			}
 		}
-		if config.Metrics.ExportOVSMetrics {
-			metrics.RegisterOvsMetricsWithOvnMetrics(ovsClient, metricsScrapeInterval, ctx.Done())
+		if ovsClient != nil {
+			if config.Metrics.ExportOVSMetrics {
+				metrics.RegisterOvsMetricsWithOvnMetrics(ovsClient, metricsScrapeInterval, ctx.Done())
+			}
+			metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity,
+				ovsClient, metricsScrapeInterval, ctx.Done())
+			metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
+				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wg)
 		}
-		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, runMode.identity,
-			ovsClient, metricsScrapeInterval, ctx.Done())
-		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), wg)
 	}
 
 	// run until cancelled
@@ -612,7 +634,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	wg.Wait()
 	klog.Infof("Stopped ovnkube")
 
-	err = utilerrors.Join(managerErr, controllerErr, nodeErr)
+	err = utilerrors.Join(managerErr, controllerErr, nodeErr, ovsCLIErr)
 	if err != nil {
 		return fmt.Errorf("failed to run ovnkube: %w", err)
 	}

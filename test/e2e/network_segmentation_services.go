@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
 
@@ -30,7 +31,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-var _ = Describe("Network Segmentation: services", func() {
+var _ = Describe("Network Segmentation: services", feature.NetworkSegmentation, func() {
 
 	f := wrappedTestFramework("udn-services")
 	f.SkipNamespaceCreation = true
@@ -42,7 +43,12 @@ var _ = Describe("Network Segmentation: services", func() {
 			serviceTargetPort            = 80
 			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
-			clientContainerName          = "frr"
+			customL2IPv4Gateway          = "10.128.0.3"
+			customL2IPv6Gateway          = "2014:100:200::3"
+			customL2IPv4ReservedCIDR     = "10.128.1.0/24"
+			customL2IPv6ReservedCIDR     = "2014:100:200::100/120"
+			customL2IPv4InfraCIDR        = "10.128.0.0/30"
+			customL2IPv6InfraCIDR        = "2014:100:200::/122"
 		)
 
 		var (
@@ -114,7 +120,7 @@ var _ = Describe("Network Segmentation: services", func() {
 				netConfig.namespace = f.Namespace.Name
 				_, err = nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
-					generateNAD(netConfig),
+					generateNAD(netConfig, f.ClientSet),
 					metav1.CreateOptions{},
 				)
 				Expect(err).NotTo(HaveOccurred())
@@ -267,7 +273,7 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 			),
@@ -276,8 +282,20 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer2",
-					cidr:     correctCIDRFamily(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
+				},
+			),
+			Entry(
+				"L2 primary UDN with custom network, cluster-networked pods, NodePort service",
+				networkAttachmentConfigParams{
+					name:                nadName,
+					topology:            "layer2",
+					cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:                "primary",
+					defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+					reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+					infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
 				},
 			),
 		)

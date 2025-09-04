@@ -541,126 +541,6 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 	}
 }
 
-func TestParseNodeGatewayRouterJoinAddrs(t *testing.T) {
-	tests := []struct {
-		desc        string
-		inpNode     corev1.Node
-		netName     string
-		errExpected bool
-		expOutput   bool
-	}{
-		{
-			desc:      "Gateway router LPR IP address annotation not found for node, however, does not return error",
-			inpNode:   corev1.Node{},
-			expOutput: false,
-		},
-		{
-			desc: "success: Gateway router parse LPR IP address",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.4/16"}}`},
-				},
-			},
-			netName:   types.DefaultNetworkName,
-			expOutput: true,
-		},
-		{
-			desc: "success: Gateway router parse LPR IP address dual stack",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"}}`},
-				},
-			},
-			netName:   types.DefaultNetworkName,
-			expOutput: true,
-		},
-		{
-			desc: "success: Gateway router parse LPR IP address dual stack for the right network name",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"},"l3-network":{"ipv4":"100.65.0.5/16","ipv6":"fd:99::/64"}}`},
-				},
-			},
-			netName:   "l3-network",
-			expOutput: true,
-		},
-		{
-			desc: "error: Gateway router parse LPR IP address dual stack cannot find the requested network name",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5/16","ipv6":"fd:98::/64"},"l3-network":{"ipv4":"100.65.0.5/16","ipv6":"fd:99::/64"}}`},
-				},
-			},
-			netName:     "l2-network",
-			errExpected: true,
-		},
-		{
-			desc: "error: Gateway router parse LPR IP address error",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": `{"default":{"ipv4":"100.64.0.5"}}`},
-				},
-			},
-			netName:     types.DefaultNetworkName,
-			errExpected: true,
-		},
-	}
-	config.IPv4Mode = true
-	config.IPv6Mode = true
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			cfg, e := ParseNodeGatewayRouterJoinAddrs(&tc.inpNode, tc.netName)
-			if tc.errExpected {
-				t.Log(e)
-				require.Error(t, e)
-				assert.Nil(t, cfg)
-			}
-			if tc.expOutput {
-				assert.NotNil(t, cfg)
-			}
-		})
-	}
-}
-
-func TestCreateNodeGatewayRouterLRPAddrsAnnotation(t *testing.T) {
-	tests := []struct {
-		desc            string
-		inpDefSubnetIps []*net.IPNet
-		outExp          map[string]string
-		errExp          bool
-	}{
-		{
-			desc:            "success path, valid default subnets",
-			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24"),
-			outExp: map[string]string{
-				"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{\"default\":{\"ipv4\":\"192.168.1.12/24\"}}",
-			},
-		},
-		{
-			desc:            "success path, valid default dualstack subnets",
-			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24", "fd:98::5/64"),
-			outExp: map[string]string{
-				"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{\"default\":{\"ipv4\":\"192.168.1.12/24\",\"ipv6\":\"fd:98::5/64\"}}",
-			},
-		},
-		{
-			desc:   "success path, inpDefSubnetIps is nil",
-			outExp: map[string]string{},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := UpdateNodeGatewayRouterLRPAddrsAnnotation(nil, tc.inpDefSubnetIps, types.DefaultNetworkName)
-			t.Log(res, err)
-			if tc.errExp {
-				assert.Error(t, err)
-			} else {
-				assert.True(t, reflect.DeepEqual(res, tc.outExp))
-			}
-		})
-	}
-}
-
 func TestSetGatewayMTUSupport(t *testing.T) {
 	mockAnnotator := new(annotatorMock.Annotator)
 
@@ -826,6 +706,177 @@ func TestParseUDNLayer2NodeGRLRPTunnelIDs(t *testing.T) {
 				require.Error(t, err)
 			}
 			assert.Equal(t, tc.res, res)
+		})
+	}
+}
+
+func TestNodeDontSNATSubnetAnnotationChanged(t *testing.T) {
+	tests := []struct {
+		desc    string
+		oldNode *corev1.Node
+		newNode *corev1.Node
+		result  bool
+	}{
+		{
+			desc: "annotation added",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `["192.168.1.0/24"]`,
+					},
+				},
+			},
+			result: true,
+		},
+		{
+			desc: "annotation removed",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `["192.168.1.0/24"]`,
+					},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			result: true,
+		},
+		{
+			desc: "annotation value changed",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `["192.168.1.0/24"]`,
+					},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `["10.0.0.0/16"]`,
+					},
+				},
+			},
+			result: true,
+		},
+		{
+			desc: "false: annotation unchanged",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `["192.168.1.0/24"]`,
+					},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `["192.168.1.0/24"]`,
+					},
+				},
+			},
+			result: false,
+		},
+		{
+			desc: "annotation absent in both",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			result: false,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			result := NodeDontSNATSubnetAnnotationChanged(tc.oldNode, tc.newNode)
+			assert.Equal(t, tc.result, result)
+		})
+	}
+}
+
+func TestParseNodeDontSNATSubnetsList(t *testing.T) {
+	tests := []struct {
+		desc        string
+		node        *corev1.Node
+		expected    []string
+		expectError bool
+	}{
+		{
+			desc: "no annotation present",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "my-node",
+					Annotations: map[string]string{},
+				},
+			},
+			expected:    []string{},
+			expectError: false,
+		},
+		{
+			desc: "valid annotation list with IPv4 and IPv6 CIDRs",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node2",
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `["192.168.1.0/24", "fd00::/64", "10.0.0.0/16"]`,
+					},
+				},
+			},
+			expected:    []string{"192.168.1.0/24", "fd00::/64", "10.0.0.0/16"},
+			expectError: false,
+		},
+		{
+			desc: "invalid annotation value (not JSON)",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node3",
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `not-a-json`,
+					},
+				},
+			},
+			expected:    nil,
+			expectError: true,
+		},
+		{
+			desc: "empty JSON array annotation",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node4",
+					Annotations: map[string]string{
+						OvnNodeDontSNATSubnets: `[]`,
+					},
+				},
+			},
+			expected:    []string{},
+			expectError: false,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			result, err := ParseNodeDontSNATSubnetsList(tc.node)
+			if tc.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expected, result)
+			}
 		})
 	}
 }

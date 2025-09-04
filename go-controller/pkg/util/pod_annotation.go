@@ -16,7 +16,6 @@ import (
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/yaml"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
@@ -53,7 +52,7 @@ import (
 const (
 	// OvnPodAnnotationName is the constant string representing the POD annotation key
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
-	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
+	// DefNetworkAnnotation is the pod annotation for the cluster-wide active network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 	// OvnUDNIPAMClaimName is used for workload owners to instruct OVN-K which
 	// IPAMClaim will hold the allocation for the workload
@@ -228,7 +227,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadName string) (*Pod
 
 	tempA, ok := podNetworks[nadName]
 	if !ok {
-		return nil, fmt.Errorf("no ovn pod annotation for network %s: %q",
+		return nil, newAnnotationNotSetError("no ovn pod annotation for NAD %s: %q",
 			nadName, ovnAnnotation)
 	}
 
@@ -512,190 +511,6 @@ func UpdatePodAnnotationWithRetry(podLister listers.PodLister, kube kube.Interfa
 // pod.
 func IsValidPodAnnotation(podAnnotation *PodAnnotation) bool {
 	return podAnnotation != nil && len(podAnnotation.MAC) > 0
-}
-
-func joinSubnetToRoute(netinfo NetInfo, isIPv6 bool, gatewayIP net.IP) PodRoute {
-	joinSubnet := netinfo.JoinSubnetV4()
-	if isIPv6 {
-		joinSubnet = netinfo.JoinSubnetV6()
-	}
-	return PodRoute{
-		Dest:    joinSubnet,
-		NextHop: gatewayIP,
-	}
-}
-
-func serviceCIDRToRoute(isIPv6 bool, gatewayIP net.IP) []PodRoute {
-	var podRoutes []PodRoute
-	for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
-		if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
-			podRoutes = append(podRoutes, PodRoute{
-				Dest:    serviceSubnet,
-				NextHop: gatewayIP,
-			})
-		}
-	}
-	return podRoutes
-}
-
-func hairpinMasqueradeIPToRoute(isIPv6 bool, gatewayIP net.IP) PodRoute {
-	ip := config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP
-	if isIPv6 {
-		ip = config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP
-	}
-	return PodRoute{
-		Dest: &net.IPNet{
-			IP:   ip,
-			Mask: GetIPFullMask(ip),
-		},
-		NextHop: gatewayIP,
-	}
-}
-
-// addRoutesGatewayIP updates the provided pod annotation for the provided pod
-// with the gateways derived from the allocated IPs
-func AddRoutesGatewayIP(
-	netinfo NetInfo,
-	node *corev1.Node,
-	pod *corev1.Pod,
-	podAnnotation *PodAnnotation,
-	network *nadapi.NetworkSelectionElement) error {
-
-	// generate the nodeSubnets from the allocated IPs
-	nodeSubnets := IPsToNetworkIPs(podAnnotation.IPs...)
-
-	if netinfo.IsSecondary() {
-		// for secondary network, see if its network-attachment's annotation has default-route key.
-		// If present, then we need to add default route for it
-		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
-		topoType := netinfo.TopologyType()
-		switch topoType {
-		case types.LocalnetTopology:
-			// no route needed for directly connected subnets
-			return nil
-		case types.Layer2Topology:
-			if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
-				return nil
-			}
-			for _, podIfAddr := range podAnnotation.IPs {
-				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-				nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
-				if err != nil {
-					return err
-				}
-				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
-				// Ensure default service network traffic always goes to OVN
-				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
-				// Ensure UDN join subnet traffic always goes to UDN LSP
-				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
-				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
-					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
-				}
-			}
-			// Until https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4876 is fixed, it is limited to IC only
-			if config.OVNKubernetesFeature.EnableInterconnect {
-				if _, isIPv6Mode := netinfo.IPMode(); isIPv6Mode {
-					joinAddrs, err := ParseNodeGatewayRouterJoinAddrs(node, netinfo.GetNetworkName())
-					if err != nil {
-						if IsAnnotationNotSetError(err) {
-							return types.NewSuppressedError(err)
-						}
-						return fmt.Errorf("failed parsing node gateway router join addresses, network %q, %w", netinfo.GetNetworkName(), err)
-					}
-					podAnnotation.GatewayIPv6LLA = HWAddrToIPv6LLA(IPAddrToHWAddr(joinAddrs[0].IP))
-				}
-			}
-			return nil
-		case types.Layer3Topology:
-			for _, podIfAddr := range podAnnotation.IPs {
-				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-				nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
-				if err != nil {
-					return err
-				}
-				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
-				for _, clusterSubnet := range netinfo.Subnets() {
-					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
-							Dest:    clusterSubnet.CIDR,
-							NextHop: gatewayIPnet.IP,
-						})
-					}
-				}
-				if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
-					continue
-				}
-				// Ensure default service network traffic always goes to OVN
-				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
-				// Ensure UDN join subnet traffic always goes to UDN LSP
-				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
-				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
-					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
-				}
-			}
-			return nil
-		}
-		return fmt.Errorf("topology type %s not supported", topoType)
-	}
-
-	// if there are other network attachments for the pod, then check if those network-attachment's
-	// annotation has default-route key. If present, then we need to skip adding default route for
-	// OVN interface
-	networks, err := GetK8sPodAllNetworkSelections(pod)
-	if err != nil {
-		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
-			pod.Namespace, pod.Name, err)
-	}
-	otherDefaultRouteV4 := false
-	otherDefaultRouteV6 := false
-	for _, network := range networks {
-		for _, gatewayRequest := range network.GatewayRequest {
-			if utilnet.IsIPv6(gatewayRequest) {
-				otherDefaultRouteV6 = true
-			} else {
-				otherDefaultRouteV4 = true
-			}
-		}
-	}
-
-	for _, podIfAddr := range podAnnotation.IPs {
-		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-		nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
-		if err != nil {
-			return err
-		}
-
-		gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
-
-		// Ensure default pod network traffic always goes to OVN
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-				podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
-					Dest:    clusterSubnet.CIDR,
-					NextHop: gatewayIPnet.IP,
-				})
-			}
-		}
-
-		if podAnnotation.Role == types.NetworkRolePrimary {
-			// Ensure default service network traffic always goes to OVN
-			podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
-			// Ensure service hairpin masquerade traffic always goes to OVN
-			podAnnotation.Routes = append(podAnnotation.Routes, hairpinMasqueradeIPToRoute(isIPv6, gatewayIPnet.IP))
-			otherDefaultRoute := otherDefaultRouteV4
-			if isIPv6 {
-				otherDefaultRoute = otherDefaultRouteV6
-			}
-			if !otherDefaultRoute {
-				podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
-			}
-		}
-
-		// Ensure default join subnet traffic always goes to OVN
-		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
-	}
-
-	return nil
 }
 
 // UnmarshalUDNOpenPortsAnnotation returns the OpenPorts from the pod annotation. If annotation is not present,

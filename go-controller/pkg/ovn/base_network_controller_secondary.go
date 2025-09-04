@@ -18,8 +18,8 @@ import (
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -28,6 +28,8 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -679,7 +681,15 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	defer nsUnlock()
+	nsUnlock()
+	// Enqueue the UDN namespace into network policy controller if it needs to be
+	// processed by network policy peer namespace handlers.
+	if bsnc.IsPrimaryNetwork() {
+		err = bsnc.requeuePeerNamespace(ns)
+		if err != nil {
+			return fmt.Errorf("failed to requeue peer namespace %s: %v", ns.Name, err)
+		}
+	}
 	return nil
 }
 
@@ -804,7 +814,7 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
-func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string) ([]*nbdb.NAT, error) {
+func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string, isUDNAdvertised bool) ([]*nbdb.NAT, error) {
 	if len(localPodSubnets) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -813,17 +823,47 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 	var err error
 	networkID := bsnc.GetNetworkID()
 	// calculate MAC
-	dstMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(localPodSubnets[0]).IP)
+	dstMac := util.IPAddrToHWAddr(bsnc.GetNodeManagementIP(localPodSubnets[0]).IP)
+	dstMacMatch := getMasqueradeManagementIPSNATMatch(dstMac.String())
 
 	extIDs := map[string]string{
 		types.NetworkExternalID:  bsnc.GetNetworkName(),
 		types.TopologyExternalID: bsnc.TopologyType(),
 	}
+
+	var nodeIPsAS, svcIPsAS addressset.AddressSet
+	if isUDNAdvertised {
+		// For advertised networks, we need to SNAT any traffic leaving the
+		// pods from these networks towards the node IPs in the cluster. In
+		// order to do such a conditional SNAT, we need an address set that
+		// contains the node IPs in the cluster. Given that egressIP feature
+		// already has an address set containing these nodeIPs owned by the
+		// default network controller, let's re-use it.
+		nodeIPsASIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, DefaultNetworkControllerName)
+		nodeIPsAS, err = bsnc.addressSetFactory.GetAddressSet(nodeIPsASIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get address set with IDs %v: %w", nodeIPsASIDs, err)
+		}
+
+		// We also need to SNAT any traffic leaving the pods from these
+		// networks towards the default network service cluster IPs
+		// accessible from UDNs: we want the reply traffic to hit the
+		// masquerade IP rule rather than the UDN subnet ip rule to allow
+		// for overlaps in VRF-Lite configurations
+		svcIPsASIDs := udnenabledsvc.GetAddressSetDBIDs()
+		svcIPsAS, err = bsnc.addressSetFactory.GetAddressSet(svcIPsASIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get address set with IDs %v: %w", svcIPsASIDs, err)
+		}
+	}
+
 	for _, localPodSubnet := range localPodSubnets {
+		snatMatch := dstMacMatch
+		ipFamily := utilnet.IPv4
+		masqIP, err = udn.AllocateV4MasqueradeIPs(networkID)
 		if utilnet.IsIPv6CIDR(localPodSubnet) {
 			masqIP, err = udn.AllocateV6MasqueradeIPs(networkID)
-		} else {
-			masqIP, err = udn.AllocateV4MasqueradeIPs(networkID)
+			ipFamily = utilnet.IPv6
 		}
 		if err != nil {
 			return nil, err
@@ -831,10 +871,53 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 		if masqIP == nil {
 			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 		}
-		snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
-			extIDs, getMasqueradeManagementIPSNATMatch(dstMac.String())))
+
+		if isUDNAdvertised {
+			additionalSNATMatch := getClusterNodesDestinationBasedSNATMatch(ipFamily, nodeIPsAS, svcIPsAS)
+			if additionalSNATMatch != "" {
+				snatMatch = fmt.Sprintf("%s && %s", snatMatch, additionalSNATMatch)
+			}
+		}
+
+		snat := libovsdbops.BuildSNATWithMatch(
+			&masqIP.ManagementPort.IP,
+			localPodSubnet,
+			outputPort,
+			extIDs,
+			snatMatch,
+		)
+		snats = append(snats, snat)
 	}
+
 	return snats, nil
+}
+
+func getMasqueradeManagementIPSNATMatch(dstMac string) string {
+	return fmt.Sprintf("eth.dst == %s", dstMac)
+}
+
+// getClusterNodesDestinationBasedSNATMatch creates destination-based SNAT match
+// for the specified IP family. Returns an empty string if there is no address
+// set for the provided IP family.
+func getClusterNodesDestinationBasedSNATMatch(ipFamily utilnet.IPFamily, addressSets ...addressset.AddressSet) string {
+	asMatches := make([]string, 0, len(addressSets))
+	for _, as := range addressSets {
+		asIPv4, asIPv6 := as.GetASHashNames()
+		switch {
+		case ipFamily == utilnet.IPv4 && asIPv4 != "":
+			asMatches = append(asMatches, fmt.Sprintf("ip4.dst == $%s", asIPv4))
+		case ipFamily == utilnet.IPv6 && asIPv6 != "":
+			asMatches = append(asMatches, fmt.Sprintf("ip6.dst == $%s", asIPv6))
+		}
+	}
+	switch len(asMatches) {
+	case 0:
+		return ""
+	case 1:
+		return asMatches[0]
+	default:
+		return fmt.Sprintf("(%s)", strings.Join(asMatches, " || "))
+	}
 }
 
 func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
@@ -857,10 +940,6 @@ func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnot
 	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
 
 	return kubevirt.EnsureDHCPOptionsForLSP(bsnc.controllerName, bsnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
-}
-
-func getMasqueradeManagementIPSNATMatch(dstMac string) string {
-	return fmt.Sprintf("eth.dst == %s", dstMac)
 }
 
 func (bsnc *BaseSecondaryNetworkController) requireDHCP(pod *corev1.Pod) bool {
