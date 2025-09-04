@@ -32,8 +32,8 @@ import (
 )
 
 var (
-	nodeLogicalRouterIPv6      = []string{"fef0::56"}
-	node2LogicalRouterIPv6     = []string{"fef0::57"}
+	nodeLogicalRouterIPv6      = []string{"fd98::2"}
+	node2LogicalRouterIPv6     = []string{"fd98::3"}
 	nodeLogicalRouterIPv4      = []string{"100.64.0.2"}
 	node2LogicalRouterIPv4     = []string{"100.64.0.3"}
 	node3LogicalRouterIPv4     = []string{"100.64.0.4"}
@@ -314,7 +314,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -428,7 +428,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 						"nat-addresses":             "router",
 						"exclude-lb-vips-from-garp": "true",
 					},
@@ -524,7 +524,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -632,7 +632,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 						"nat-addresses":             "router",
 						"exclude-lb-vips-from-garp": "true",
 					},
@@ -756,7 +756,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -766,7 +766,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -919,7 +919,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -929,7 +929,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -1076,7 +1076,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -1086,7 +1086,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -1096,7 +1096,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -1302,7 +1302,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -1312,7 +1312,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -1322,7 +1322,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -1482,7 +1482,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -1492,7 +1492,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -1502,7 +1502,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -1712,7 +1712,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -1722,7 +1722,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -1732,7 +1732,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -1894,7 +1894,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -1904,7 +1904,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -2055,7 +2055,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -2065,7 +2065,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -2269,7 +2269,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -2279,7 +2279,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -2500,7 +2500,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -2510,7 +2510,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -2721,7 +2721,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -2731,7 +2731,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -2867,7 +2867,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -2877,7 +2877,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -3008,7 +3008,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -3167,7 +3167,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -3177,7 +3177,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -3332,7 +3332,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -3342,7 +3342,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -5598,6 +5598,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\"}", // used only for ic=true test
 						"k8s.ovn.org/zone-name":                       node1Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
+						util.OvnNodeID:                                "2",
 					}
 					if node1Zone != "global" {
 						annotations["k8s.ovn.org/remote-zone-migrated"] = node1Zone // used only for ic=true test
@@ -5612,6 +5613,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.3/16\"}", // used only for ic=true test
 						"k8s.ovn.org/zone-name":                       node2Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
+						util.OvnNodeID:                                "3",
 					}
 					if node2Zone != "global" {
 						annotations["k8s.ovn.org/remote-zone-migrated"] = node2Zone // used only for ic=true test
@@ -5688,7 +5690,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -5698,7 +5700,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 									Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 									Type: "router",
 									Options: map[string]string{
-										"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+										libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 										"nat-addresses":             "router",
 										"exclude-lb-vips-from-garp": "true",
 									},
@@ -5860,7 +5862,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -5870,7 +5872,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -6025,7 +6027,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -6035,7 +6037,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -6500,7 +6502,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -6510,7 +6512,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -6621,7 +6623,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -6631,7 +6633,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -6708,7 +6710,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
 							Type: "router",
 							Options: map[string]string{
-								"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+								libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
 								"nat-addresses":             "router",
 								"exclude-lb-vips-from-garp": "true",
 							},
@@ -6802,7 +6804,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -6913,7 +6915,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -6944,7 +6946,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Pod{egressPod1},
 					},
 				)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -7036,7 +7038,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -7072,8 +7074,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"namespace": egressPod1.Namespace,
 					},
 					Options: map[string]string{
-						"requested-chassis": egressPod1.Spec.NodeName,
-						"iface-id-ver":      egressPod1.Name,
+						libovsdbops.RequestedChassis: egressPod1.Spec.NodeName,
+						"iface-id-ver":               egressPod1.Name,
 					},
 					PortSecurity: []string{podAddr},
 				}
@@ -7134,7 +7136,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -7269,7 +7271,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -7300,7 +7302,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Pod{*egressPod1},
 					},
 				)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fakeOvn.controller.WatchPods()).To(gomega.Succeed())
 				gomega.Expect(fakeOvn.controller.WatchEgressIPNamespaces()).To(gomega.Succeed())
@@ -7389,7 +7391,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -7425,8 +7427,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"namespace": egressPod1.Namespace,
 					},
 					Options: map[string]string{
-						"requested-chassis": egressPod1.Spec.NodeName,
-						"iface-id-ver":      egressPod1.Name,
+						libovsdbops.RequestedChassis: egressPod1.Spec.NodeName,
+						"iface-id-ver":               egressPod1.Name,
 					},
 					PortSecurity: []string{podAddr},
 				}
@@ -7609,7 +7611,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -7619,7 +7621,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -7681,9 +7683,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					}
 					fakeOvn.controller.localZoneNodes.Store(node1.Name, isNode1Local)
 					fakeOvn.controller.localZoneNodes.Store(node2.Name, isNode2Local)
-					err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)})
+					err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.lsManager.AddOrUpdateSwitch(node2.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node2Subnet)})
+					err = fakeOvn.controller.lsManager.AddOrUpdateSwitch(node2.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node2Subnet)}, nil)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -7852,8 +7854,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							"namespace": egressPod1.Namespace,
 						},
 						Options: map[string]string{
-							"requested-chassis": egressPod1.Spec.NodeName,
-							"iface-id-ver":      egressPod1.Name,
+							libovsdbops.RequestedChassis: egressPod1.Spec.NodeName,
+							"iface-id-ver":               egressPod1.Name,
 						},
 						PortSecurity: []string{podAddr},
 					}
@@ -8231,7 +8233,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node.Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -8315,7 +8317,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node.Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8400,7 +8402,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node.Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node.Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8487,7 +8489,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -8497,7 +8499,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -8582,7 +8584,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8592,7 +8594,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8686,7 +8688,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -8696,7 +8698,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -8781,7 +8783,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8791,7 +8793,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8866,7 +8868,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8876,7 +8878,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -8996,7 +8998,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -9006,7 +9008,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -9141,7 +9143,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9151,7 +9153,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9269,7 +9271,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -9353,7 +9355,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9435,7 +9437,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 						"nat-addresses":             "router",
 						"exclude-lb-vips-from-garp": "true",
 					},
@@ -9647,7 +9649,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -9657,7 +9659,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -9741,7 +9743,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9751,7 +9753,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9825,7 +9827,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9835,7 +9837,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9919,7 +9921,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -9929,7 +9931,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -10021,7 +10023,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -10031,7 +10033,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -10116,7 +10118,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -10126,7 +10128,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -10201,7 +10203,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -10211,7 +10213,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -10312,7 +10314,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -10322,7 +10324,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -10419,7 +10421,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 						"nat-addresses":             "router",
 						"exclude-lb-vips-from-garp": "true",
 					},
@@ -10615,7 +10617,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 					Type: "router",
 					Options: map[string]string{
-						"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+						libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 						"nat-addresses":             "router",
 						"exclude-lb-vips-from-garp": "true",
 					},
@@ -10908,7 +10910,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11049,7 +11051,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						UUID:        "reroute-UUID1",
 					}
 					if isEgressIPv6 {
-						podReRoutePolicy.Nexthops = []string{"fef0::56"}
+						podReRoutePolicy.Nexthops = nodeLogicalRouterIPv6
 					}
 
 					node1GR.Nat = []string{"egressip-nat-UUID1", natToRemain.UUID}
@@ -11239,7 +11241,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -11249,7 +11251,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -11359,7 +11361,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11369,7 +11371,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11491,7 +11493,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11501,7 +11503,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11681,7 +11683,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11691,7 +11693,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11829,7 +11831,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11839,7 +11841,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11954,7 +11956,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -11964,7 +11966,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12062,7 +12064,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Options: map[string]string{
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								},
 							},
 							&nbdb.LogicalSwitch{
@@ -12193,7 +12195,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12327,7 +12329,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Options: map[string]string{
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 								},
 							},
 							&nbdb.LogicalSwitchPort{
@@ -12335,7 +12337,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -12345,7 +12347,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 								Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 								Type: "router",
 								Options: map[string]string{
-									"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+									libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 									"nat-addresses":             "router",
 									"exclude-lb-vips-from-garp": "true",
 								},
@@ -12477,7 +12479,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12487,7 +12489,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12497,7 +12499,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12659,7 +12661,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12669,7 +12671,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12679,7 +12681,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12845,7 +12847,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12855,7 +12857,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12865,7 +12867,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
 						Type: "router",
 						Options: map[string]string{
-							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
 							"nat-addresses":             "router",
 							"exclude-lb-vips-from-garp": "true",
 						},
@@ -12940,7 +12942,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				_, node1IPV6Net, _ := net.ParseCIDR(v6Node1Subnet)
 				nodeAnnotations := map[string]string{
 					"k8s.ovn.org/l3-gateway-config":               `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\",\"ipv6\":\"%s\"}}", nodeLogicalRouterIfAddrV4, nodeLogicalRouterIfAddrV6),
+					util.OvnNodeID:                                "2",
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", Node1IPv4CIDR, node1IPv6CIDR),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4Node1Subnet, v6Node1Subnet),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s\", \"ipv6\": \"%s\"}", node1TranSwitchIPv4CIDR, node1TranSwitchIPv6CIDR),
@@ -13183,7 +13185,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				_, node1IPV6Net, _ := net.ParseCIDR(v6Node1Subnet)
 				nodeAnnotations := map[string]string{
 					"k8s.ovn.org/l3-gateway-config":               `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1"}}`,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\",\"ipv6\":\"%s\"}}", nodeLogicalRouterIfAddrV4, nodeLogicalRouterIfAddrV6),
+					util.OvnNodeID:                                "2",
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", Node1IPv4CIDR, node1IPv6CIDR),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4Node1Subnet, v6Node1Subnet),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s\", \"ipv6\": \"%s\"}", node1TranSwitchIPv4CIDR, node1TranSwitchIPv6CIDR),
@@ -13203,7 +13205,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				_, node2IPV4Net, _ := net.ParseCIDR(v4Node2Subnet)
 				_, node2IPV6Net, _ := net.ParseCIDR(v6Node2Subnet)
 				nodeAnnotations = map[string]string{
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\",\"ipv6\":\"%s\"}}", node2LogicalRouterIfAddrV4, node2LogicalRouterIfAddrV6),
+					util.OvnNodeID:                                "3",
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, node2IPv6CIDR),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4Node2Subnet, v6Node2Subnet),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s\", \"ipv6\": \"%s\"}", node2TranSwitchIPv4CIDR, node2TranSwitchIPv6CIDR),

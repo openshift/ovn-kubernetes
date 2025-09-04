@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -130,7 +130,7 @@ func (gtf *GatewayTopologyFactory) NewJoinSwitch(
 		Name: drSwitchPort,
 		Type: "router",
 		Options: map[string]string{
-			"router-port": drRouterPort,
+			libovsdbops.RouterPort: drRouterPort,
 		},
 		Addresses: []string{"router"},
 	}

@@ -60,6 +60,9 @@ type nodeInfo struct {
 	// has the node migrated to remote?
 	migrated bool
 	/** HACK END **/
+
+	// The list of node's management IPs
+	mgmtIPs []net.IP
 }
 
 func (ni *nodeInfo) hostAddressesStr() []string {
@@ -119,7 +122,7 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 			// - node changes its zone
 			// - node becomes a hybrid overlay node from a ovn node or vice verse
 			// . No need to trigger update for any other field change.
-			if util.NodeSubnetAnnotationChanged(oldObj, newObj) ||
+			if util.NodeSubnetAnnotationChangedForNetwork(oldObj, newObj, nt.netInfo.GetNetworkName()) ||
 				util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
 				oldObj.Name != newObj.Name ||
 				util.NodeHostCIDRsAnnotationChanged(oldObj, newObj) ||
@@ -151,13 +154,13 @@ func (nt *nodeTracker) Start(nodeInformer coreinformers.NodeInformer) (cache.Res
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, l3gatewayAddresses,
-	hostAddresses []net.IP, podSubnets []*net.IPNet, zone string, nodePortDisabled, migrated bool) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, l3gatewayAddresses, hostAddresses []net.IP, podSubnets []*net.IPNet, mgmtIPs []net.IP, zone string, nodePortDisabled, migrated bool) {
 	ni := nodeInfo{
 		name:               nodeName,
 		l3gatewayAddresses: l3gatewayAddresses,
 		hostAddresses:      hostAddresses,
 		podSubnets:         make([]net.IPNet, 0, len(podSubnets)),
+		mgmtIPs:            mgmtIPs,
 		gatewayRouterName:  routerName,
 		switchName:         switchName,
 		chassisID:          chassisID,
@@ -169,7 +172,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
 	}
 
-	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
+	klog.Infof("Node %s switch + router changed, syncing services in network %q", nodeName, nt.netInfo.GetNetworkName())
 
 	nt.Lock()
 	defer nt.Unlock()
@@ -208,7 +211,7 @@ func (nt *nodeTracker) removeNode(nodeName string) {
 // The switch exists when the HostSubnet annotation is set.
 // The gateway router will exist sometime after the L3Gateway annotation is set.
 func (nt *nodeTracker) updateNode(node *corev1.Node) {
-	klog.V(2).Infof("Processing possible switch / router updates for node %s", node.Name)
+	klog.V(2).Infof("Processing possible switch / router updates for node %s in network %q", node.Name, nt.netInfo.GetNetworkName())
 	var hsn []*net.IPNet
 	var err error
 	if nt.netInfo.TopologyType() == types.Layer2Topology {
@@ -256,6 +259,11 @@ func (nt *nodeTracker) updateNode(node *corev1.Node) {
 		hostAddressesIPs = append(hostAddressesIPs, ip)
 	}
 
+	mgmtIPs := make([]net.IP, 0, len(hsn))
+	for _, hostSubnet := range hsn {
+		mgmtIPs = append(mgmtIPs, nt.netInfo.GetNodeManagementIP(hostSubnet).IP)
+	}
+
 	nt.updateNodeInfo(
 		node.Name,
 		switchName,
@@ -264,6 +272,7 @@ func (nt *nodeTracker) updateNode(node *corev1.Node) {
 		l3gatewayAddresses,
 		hostAddressesIPs,
 		hsn,
+		mgmtIPs,
 		util.GetNodeZone(node),
 		!nodePortEnabled,
 		util.HasNodeMigratedZone(node),

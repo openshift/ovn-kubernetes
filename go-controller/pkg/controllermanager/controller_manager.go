@@ -2,6 +2,7 @@ package controllermanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -23,6 +24,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
@@ -194,15 +196,15 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 		}
 	}
 
-	if util.IsRouteAdvertisementsEnabled() {
-		// Remove stale subnets from the advertised networks address set used for isolation
-		// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
-		// advertised.
-		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
-		advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
-		if err != nil {
-			return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
-		}
+	// Remove stale subnets from the advertised networks address set used for isolation
+	// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
+	// advertised.
+	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+	advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
+	}
+	if advertisedSubnets != nil {
 		v4AdvertisedSubnets, v6AdvertisedSubnets := advertisedSubnets.GetAddresses()
 		var invalidSubnets []string
 		for _, subnet := range append(v4AdvertisedSubnets, v6AdvertisedSubnets...) {
@@ -438,7 +440,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		// with k=10,
 		//  for a cluster with 10 nodes, measurement of 1 in every 100 requests
 		//  for a cluster with 100 nodes, measurement of 1 in every 1000 requests
-		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
+		recorders.GetConfigDurationRecorder().Run(cm.nbClient, cm.watchFactory, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
 

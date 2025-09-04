@@ -26,13 +26,14 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -249,7 +250,7 @@ func NewEIPController(
 //	  CASE 3.4: Both Namespace && Pod Selectors on Spec changed
 //	}
 //
-// NOTE: `Spec.EgressIPs“ updates for EIP object are not processed here, that is the job of cluster manager
+// NOTE: `Spec.EgressIPs" updates for EIP object are not processed here, that is the job of cluster manager
 //
 //	We only care about `Spec.NamespaceSelector`, `Spec.PodSelector` and `Status` field
 func (e *EgressIPController) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
@@ -2089,28 +2090,14 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 			// NOTE3: When the node gets deleted we do not remove this route intentionally because
 			// on IC if the node is gone, then the ovn_cluster_router is also gone along with all
 			// the routes on it.
-			processNetworkFn := func(ni util.NetInfo) error {
-				if ni.TopologyType() == types.Layer2Topology || len(ni.Subnets()) == 0 {
-					return nil
-				}
-				if err := libovsdbutil.CreateDefaultRouteToExternal(e.nbClient, ni.GetNetworkScopedClusterRouterName(),
-					ni.GetNetworkScopedGWRouterName(node.Name), ni.Subnets()); err != nil {
-					return fmt.Errorf("failed to create route to external for network %s: %v", ni.GetNetworkName(), err)
-				}
-				return nil
-			}
 			ni := e.networkManager.GetNetwork(types.DefaultNetworkName)
-			if ni == nil {
-				return fmt.Errorf("failed to get default network from NAD controller")
+			gatewayIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
+			if err != nil {
+				return fmt.Errorf("failed to get default network gateway router join IPs for node %q: %w", node.Name, err)
 			}
-			if err := processNetworkFn(ni); err != nil {
-				return fmt.Errorf("failed to process default network: %v", err)
-			}
-			if !isEgressIPForUDNSupported() {
-				return nil
-			}
-			if err := e.networkManager.DoWithLock(processNetworkFn); err != nil {
-				return fmt.Errorf("failed to process all user defined networks route to external: %v", err)
+			if err := libovsdbutil.CreateDefaultRouteToExternal(e.nbClient, ni.GetNetworkScopedClusterRouterName(),
+				ni.GetNetworkScopedGWRouterName(node.Name), ni.Subnets(), gatewayIPs); err != nil {
+				return fmt.Errorf("failed to create route to external for network %s: %v", ni.GetNetworkName(), err)
 			}
 		}
 	}
@@ -2608,9 +2595,21 @@ func (e *EgressIPController) addExternalGWPodSNATOps(ni util.NetInfo, ops []ovsd
 			if err != nil {
 				return nil, err
 			}
-			ops, err = addOrUpdatePodSNATOps(e.nbClient, ni.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, podIPs, "", ops)
-			if err != nil {
-				return nil, err
+
+			// Handle each pod IP individually since each IP family needs its own SNAT match
+			for _, podIP := range podIPs {
+				ipFamily := utilnet.IPv4
+				if utilnet.IsIPv6CIDR(podIP) {
+					ipFamily = utilnet.IPv6
+				}
+				snatMatch, err := GetNetworkScopedClusterSubnetSNATMatch(e.nbClient, ni, pod.Spec.NodeName, util.IsPodNetworkAdvertisedAtNode(ni, pod.Spec.NodeName), ipFamily)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get SNAT match for node %s for network %s: %w", pod.Spec.NodeName, ni.GetNetworkName(), err)
+				}
+				ops, err = addOrUpdatePodSNATOps(e.nbClient, ni.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, []*net.IPNet{podIP}, snatMatch, ops)
+				if err != nil {
+					return nil, err
+				}
 			}
 			klog.V(5).Infof("Adding SNAT on %s since egress node managing %s/%s was the same: %s", pod.Spec.NodeName, pod.Namespace, pod.Name, status.Node)
 		}
@@ -2631,7 +2630,7 @@ func (e *EgressIPController) deleteExternalGWPodSNATOps(ni util.NetInfo, ops []o
 		if err != nil {
 			return nil, err
 		}
-		ops, err = deletePodSNATOps(e.nbClient, ops, ni.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, affectedIPs, "")
+		ops, err = deletePodSNATOps(e.nbClient, ops, ni.GetNetworkScopedGWRouterName(pod.Spec.NodeName), extIPs, affectedIPs)
 		if err != nil {
 			return nil, err
 		}
@@ -2689,9 +2688,9 @@ func (e *EgressIPController) getGatewayNextHop(ni util.NetInfo, nodeName string,
 		// Node is remote
 		// fetch Node gateway routers 'router to switch' port IP
 		if isIPv6 {
-			return util.ParseNodeGatewayRouterJoinIPv6(node, ni.GetNetworkName())
+			return udn.GetGWRouterIPv6(node, ni)
 		}
-		return util.ParseNodeGatewayRouterJoinIPv4(node, ni.GetNetworkName())
+		return udn.GetGWRouterIPv4(node, ni)
 	}
 	return nil, fmt.Errorf("unsupported network topology %s", ni.TopologyType())
 }
@@ -3185,7 +3184,7 @@ func createDefaultNoRerouteServicePolicies(nbClient libovsdbclient.Client, netwo
 	return nil
 }
 
-func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo) error {
+func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo, node *corev1.Node) error {
 	e.nodeUpdateMutex.Lock()
 	defer e.nodeUpdateMutex.Unlock()
 	subnetEntries := ni.Subnets()
@@ -3210,8 +3209,12 @@ func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo) err
 		return fmt.Errorf("failed to ensure no reroute node policies for network %s: %v", ni.GetNetworkName(), err)
 	}
 	if config.OVNKubernetesFeature.EnableInterconnect && ni.TopologyType() == types.Layer3Topology {
+		gatewayIPs, err := udn.GetGWRouterIPs(node, ni)
+		if err != nil {
+			return fmt.Errorf("failed to get %q network gateway router join IPs for node %q, err: %w", ni.GetNetworkName(), node.Name, err)
+		}
 		if err := libovsdbutil.CreateDefaultRouteToExternal(e.nbClient, routerName,
-			ni.GetNetworkScopedGWRouterName(localNode), subnetEntries); err != nil {
+			ni.GetNetworkScopedGWRouterName(localNode), subnetEntries, gatewayIPs); err != nil {
 			return fmt.Errorf("failed to create route to external for network %s: %v", ni.GetNetworkName(), err)
 		}
 	}
@@ -3649,12 +3652,12 @@ func (e *EgressIPController) createNATRuleOps(ni util.NetInfo, ops []ovsdb.Opera
 			nats = append(nats, nat)
 		}
 	}
-	router := &nbdb.LogicalRouter{
+	gwRouter := &nbdb.LogicalRouter{
 		Name: ni.GetNetworkScopedGWRouterName(status.Node),
 	}
-	ops, err = libovsdbops.CreateOrUpdateNATsOps(e.nbClient, ops, router, nats...)
+	ops, err = libovsdbops.CreateOrUpdateNATsOps(e.nbClient, ops, gwRouter, nats...)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create snat rules, for router: %s, error: %v", router.Name, err)
+		return nil, fmt.Errorf("unable to create snat rules, for router: %s, error: %v", gwRouter.Name, err)
 	}
 	return ops, nil
 }

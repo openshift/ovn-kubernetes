@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
@@ -159,7 +159,7 @@ func (extEgDNS *ExternalEgressDNS) reconcileDNSNameResolver(key string) error {
 			addresses = append(addresses, resolvedAddress.IP)
 		}
 	}
-	err = extEgDNS.dnsTracker.addDNSName(dnsName, addresses)
+	err = extEgDNS.dnsTracker.addOrUpdateDNSName(dnsName, addresses)
 	return err
 }
 

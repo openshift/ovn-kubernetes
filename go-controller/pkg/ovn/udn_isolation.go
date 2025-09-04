@@ -10,8 +10,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -30,6 +30,8 @@ const (
 	DenySecondaryACL      = "DenySecondary"
 	// OpenPortACLPrefix is used to build per-pod ACLs, pod name should be added to the prefix to build a unique name
 	OpenPortACLPrefix = "OpenPort-"
+	// the same tier is used for all UDN isolation ACLs
+	isolationTier = types.PrimaryACLTier
 )
 
 // setupUDNACLs should be called after the node's management port was configured
@@ -63,7 +65,8 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 	pgName := libovsdbutil.GetPortGroupName(pgIDs)
 	egressDenyIDs := oc.getUDNACLDbIDs(DenySecondaryACL, libovsdbutil.ACLEgress)
 	match := libovsdbutil.GetACLMatch(pgName, "", libovsdbutil.ACLEgress)
-	egressDenyACL := libovsdbutil.BuildACL(egressDenyIDs, types.PrimaryUDNDenyPriority, match, nbdb.ACLActionDrop, nil, libovsdbutil.LportEgress)
+	egressDenyACL := libovsdbutil.BuildACL(egressDenyIDs, types.PrimaryUDNDenyPriority, match, nbdb.ACLActionDrop,
+		nil, libovsdbutil.LportEgress, isolationTier)
 
 	getARPMatch := func(direction libovsdbutil.ACLDirection) string {
 		match := "("
@@ -89,15 +92,18 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 
 	egressARPIDs := oc.getUDNACLDbIDs(AllowHostARPACL, libovsdbutil.ACLEgress)
 	match = libovsdbutil.GetACLMatch(pgName, getARPMatch(libovsdbutil.ACLEgress), libovsdbutil.ACLEgress)
-	egressARPACL := libovsdbutil.BuildACL(egressARPIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllow, nil, libovsdbutil.LportEgress)
+	egressARPACL := libovsdbutil.BuildACL(egressARPIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllow,
+		nil, libovsdbutil.LportEgress, isolationTier)
 
 	ingressDenyIDs := oc.getUDNACLDbIDs(DenySecondaryACL, libovsdbutil.ACLIngress)
 	match = libovsdbutil.GetACLMatch(pgName, "", libovsdbutil.ACLIngress)
-	ingressDenyACL := libovsdbutil.BuildACL(ingressDenyIDs, types.PrimaryUDNDenyPriority, match, nbdb.ACLActionDrop, nil, libovsdbutil.LportIngress)
+	ingressDenyACL := libovsdbutil.BuildACL(ingressDenyIDs, types.PrimaryUDNDenyPriority, match, nbdb.ACLActionDrop,
+		nil, libovsdbutil.LportIngress, isolationTier)
 
 	ingressARPIDs := oc.getUDNACLDbIDs(AllowHostARPACL, libovsdbutil.ACLIngress)
 	match = libovsdbutil.GetACLMatch(pgName, getARPMatch(libovsdbutil.ACLIngress), libovsdbutil.ACLIngress)
-	ingressARPACL := libovsdbutil.BuildACL(ingressARPIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllow, nil, libovsdbutil.LportIngress)
+	ingressARPACL := libovsdbutil.BuildACL(ingressARPIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllow,
+		nil, libovsdbutil.LportIngress, isolationTier)
 
 	ingressAllowIDs := oc.getUDNACLDbIDs(AllowHostSecondaryACL, libovsdbutil.ACLIngress)
 	match = "("
@@ -114,7 +120,8 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 	}
 	match += ")"
 	match = libovsdbutil.GetACLMatch(pgName, match, libovsdbutil.ACLIngress)
-	ingressAllowACL := libovsdbutil.BuildACL(ingressAllowIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
+	ingressAllowACL := libovsdbutil.BuildACL(ingressAllowIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllowRelated,
+		nil, libovsdbutil.LportIngress, isolationTier)
 
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, oc.GetSamplingConfig(), egressDenyACL, egressARPACL, ingressARPACL, ingressDenyACL, ingressAllowACL)
 	if err != nil {
@@ -200,11 +207,11 @@ func (oc *DefaultNetworkController) setUDNPodOpenPortsOps(podNamespacedName stri
 	// don't return on parseErr, as we need to cleanup potentially present ACLs from the previous config
 	ingressIDs := oc.getUDNOpenPortDbIDs(podNamespacedName, libovsdbutil.ACLIngress)
 	ingressACL := libovsdbutil.BuildACL(ingressIDs, types.PrimaryUDNAllowPriority,
-		ingressMatch, nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
+		ingressMatch, nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress, isolationTier)
 
 	egressIDs := oc.getUDNOpenPortDbIDs(podNamespacedName, libovsdbutil.ACLEgress)
 	egressACL := libovsdbutil.BuildACL(egressIDs, types.PrimaryUDNAllowPriority,
-		egressMatch, nbdb.ACLActionAllow, nil, libovsdbutil.LportEgress)
+		egressMatch, nbdb.ACLActionAllow, nil, libovsdbutil.LportEgress, isolationTier)
 
 	var err error
 	if ingressMatch == "" && egressMatch == "" || parseErr != nil {
@@ -288,8 +295,8 @@ func BuildAdvertisedNetworkSubnetsDropACL(advertisedNetworkSubnetsAddressSet add
 		strings.Join(dropMatches, " || "),
 		nbdb.ACLActionDrop,
 		nil,
-		libovsdbutil.LportEgressAfterLB)
-	dropACL.Tier = types.PrimaryACLTier
+		libovsdbutil.LportEgressAfterLB,
+		isolationTier)
 	return dropACL
 }
 
@@ -331,8 +338,8 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 			strings.Join(passMatches, " || "),
 			nbdb.ACLActionPass,
 			nil,
-			libovsdbutil.LportEgressAfterLB)
-		passACL.Tier = types.PrimaryACLTier
+			libovsdbutil.LportEgressAfterLB,
+			isolationTier)
 
 		ops, err = libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, ops, nil, passACL)
 		if err != nil {
@@ -364,38 +371,45 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 // It removes the network CIDRs from the global advertised networks addresset together with the ACLs on the node switch.
 func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName string) error {
 	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
-	if err != nil {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to get advertised subnets addresset %s for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
 	}
 
-	var cidrs []string
-	for _, subnet := range bnc.Subnets() {
-		cidrs = append(cidrs, subnet.CIDR.String())
-	}
-	ops, err := addrSet.DeleteAddressesReturnOps(cidrs)
-	if err != nil {
-		return fmt.Errorf("failed to create ovsdb ops for deleting the addresses from %s addresset for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
+	var ops []ovsdb.Operation
+	if addrSet != nil {
+		var cidrs []string
+		for _, subnet := range bnc.Subnets() {
+			cidrs = append(cidrs, subnet.CIDR.String())
+		}
+		ops, err = addrSet.DeleteAddressesReturnOps(cidrs)
+		if err != nil {
+			return fmt.Errorf("failed to create ovsdb ops for deleting the addresses from %s addresset for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
+		}
 	}
 
 	passACLIDs := GetAdvertisedNetworkSubnetsPassACLdbIDs(bnc.controllerName, bnc.GetNetworkName(), bnc.GetNetworkID())
+	dropACLIDs := GetAdvertisedNetworkSubnetsDropACLdbIDs()
 	passACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](passACLIDs, nil)
-	passACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, passACLPredicate)
-	if err != nil {
-		return fmt.Errorf("unable to find the pass ACL for advertised network %s: %w", bnc.GetNetworkName(), err)
+	dropACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](dropACLIDs, nil)
+	// Create a combined predicate to find both ACLs in a single lookup
+	combinedACLPredicate := func(acl *nbdb.ACL) bool {
+		// Check if ACL matches either pass or drop ACL IDs
+		return passACLPredicate(acl) || dropACLPredicate(acl)
 	}
 
-	dropACLIDs := GetAdvertisedNetworkSubnetsDropACLdbIDs()
-	dropACLPredicate := libovsdbops.GetPredicate[*nbdb.ACL](dropACLIDs, nil)
-	dropACLs, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, dropACLPredicate)
+	// Find both ACLs in a single lookup
+	allACLsToRemove, err := libovsdbops.FindACLsWithPredicate(bnc.nbClient, combinedACLPredicate)
 	if err != nil {
-		return fmt.Errorf("unable to find the drop ACL for advertised network %s: %w", bnc.GetNetworkName(), err)
+		return fmt.Errorf("unable to find pass and/or drop ACLs for advertised network %s: %w", bnc.GetNetworkName(), err)
 	}
 
 	// ACLs referenced by the switch will be deleted by db if there are no other references
 	p := func(sw *nbdb.LogicalSwitch) bool { return sw.Name == bnc.GetNetworkScopedSwitchName(nodeName) }
-	ops, err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicateOps(bnc.nbClient, ops, p, append(passACLs, dropACLs...)...)
-	if err != nil {
-		return fmt.Errorf("failed to create ovsdb ops for removing network isolation ACLs from the %s switch for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
+	if len(allACLsToRemove) > 0 {
+		ops, err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicateOps(bnc.nbClient, ops, p, allACLsToRemove...)
+		if err != nil {
+			return fmt.Errorf("failed to create ovsdb ops for removing network isolation ACLs from the %s switch for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
+		}
 	}
 
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)

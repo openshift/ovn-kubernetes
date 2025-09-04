@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -36,13 +37,18 @@ type fakeEgressIPHealthClient struct {
 	Connected        bool
 	ProbeCount       int
 	FakeProbeFailure bool
+	mutex            sync.Mutex
 }
 
 func (fehc *fakeEgressIPHealthClient) IsConnected() bool {
+	fehc.mutex.Lock()
+	defer fehc.mutex.Unlock()
 	return fehc.Connected
 }
 
 func (fehc *fakeEgressIPHealthClient) Connect(context.Context, []net.IP, int) bool {
+	fehc.mutex.Lock()
+	defer fehc.mutex.Unlock()
 	if fehc.FakeProbeFailure {
 		return false
 	}
@@ -51,16 +57,32 @@ func (fehc *fakeEgressIPHealthClient) Connect(context.Context, []net.IP, int) bo
 }
 
 func (fehc *fakeEgressIPHealthClient) Disconnect() {
+	fehc.mutex.Lock()
+	defer fehc.mutex.Unlock()
 	fehc.Connected = false
 	fehc.ProbeCount = 0
 }
 
 func (fehc *fakeEgressIPHealthClient) Probe(context.Context) bool {
+	fehc.mutex.Lock()
+	defer fehc.mutex.Unlock()
 	if fehc.Connected && !fehc.FakeProbeFailure {
 		fehc.ProbeCount++
 		return true
 	}
 	return false
+}
+
+func (fehc *fakeEgressIPHealthClient) getProbeCount() int {
+	fehc.mutex.Lock()
+	defer fehc.mutex.Unlock()
+	return fehc.ProbeCount
+}
+
+func (fehc *fakeEgressIPHealthClient) setFakeProbeFailure(probeFailure bool) {
+	fehc.mutex.Lock()
+	defer fehc.mutex.Unlock()
+	fehc.FakeProbeFailure = probeFailure
 }
 
 type fakeEgressIPHealthClientAllocator struct{}
@@ -1122,26 +1144,26 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 					if !prevNodeIsConnected && !currNodeIsConnected {
 						// Not connected (before and after): no probes should be successful
-						gomega.Expect(hcc.ProbeCount).To(gomega.Equal(prevProbes), desc)
+						gomega.Expect(hcc.getProbeCount()).To(gomega.Equal(prevProbes), desc)
 					} else if prevNodeIsConnected && currNodeIsConnected {
 						if failProbes {
 							// Still connected, but no probes should be successful
-							gomega.Expect(prevProbes).To(gomega.Equal(hcc.ProbeCount), desc)
+							gomega.Expect(prevProbes).To(gomega.Equal(hcc.getProbeCount()), desc)
 						} else {
 							// Still connected and probe counters should be going up
-							gomega.Expect(prevProbes).To(gomega.BeNumerically("<", hcc.ProbeCount), desc)
+							gomega.Expect(prevProbes).To(gomega.BeNumerically("<", hcc.getProbeCount()), desc)
 						}
 					}
 				}
 
 				for _, tt := range tests {
-					hcc1.FakeProbeFailure = tt.node1FailProbes
-					hcc2.FakeProbeFailure = tt.node2FailProbes
+					hcc1.setFakeProbeFailure(tt.node1FailProbes)
+					hcc2.setFakeProbeFailure(tt.node2FailProbes)
 
 					prevNode1IsConnected := hcc1.IsConnected()
 					prevNode2IsConnected := hcc2.IsConnected()
-					prevNode1Probes := hcc1.ProbeCount
-					prevNode2Probes := hcc2.ProbeCount
+					prevNode1Probes := hcc1.getProbeCount()
+					prevNode2Probes := hcc2.getProbeCount()
 
 					if tt.tcPrepareFunc != nil {
 						tt.tcPrepareFunc(hcc1, hcc2)
@@ -1686,12 +1708,12 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				egressIPs, _ := getEgressIPStatus(eIP1.Name)
 				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
 				hcClient := fakeClusterManagerOVN.eIPC.nodeAllocator.cache[node.Name].healthClient.(*fakeEgressIPHealthClient)
-				hcClient.FakeProbeFailure = true
+				hcClient.setFakeProbeFailure(true)
 				// explicitly call check reachability, periodic checker is not active
 				checkEgressNodesReachabilityIterate(fakeClusterManagerOVN.eIPC)
 				gomega.Eventually(getEgressIPStatusLen(eIP1.Name)).Should(gomega.Equal(0))
 
-				hcClient.FakeProbeFailure = false
+				hcClient.setFakeProbeFailure(false)
 				node.Annotations["test"] = "dummy"
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

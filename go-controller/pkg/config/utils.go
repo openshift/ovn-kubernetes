@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"net"
+	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -60,7 +62,7 @@ func ParseClusterSubnetEntriesWithDefaults(clusterSubnetCmd string, ipv4HostLeng
 		splitClusterEntry := strings.Split(clusterEntry, "/")
 
 		if len(splitClusterEntry) < 2 || len(splitClusterEntry) > 3 {
-			return nil, fmt.Errorf("CIDR %q not properly formatted", clusterEntry)
+			return nil, NewCIDRNotProperlyFormattedError(clusterEntry)
 		}
 
 		var err error
@@ -76,7 +78,7 @@ func ParseClusterSubnetEntriesWithDefaults(clusterSubnetCmd string, ipv4HostLeng
 		entryMaskLength, _ := parsedClusterEntry.CIDR.Mask.Size()
 		if len(splitClusterEntry) == 3 {
 			if !hostLengthAllowed {
-				return nil, fmt.Errorf("CIDR %q not properly formatted", clusterEntry)
+				return nil, NewCIDRNotProperlyFormattedError(clusterEntry)
 			}
 			tmp, err := strconv.Atoi(splitClusterEntry[2])
 			if err != nil {
@@ -98,12 +100,11 @@ func ParseClusterSubnetEntriesWithDefaults(clusterSubnetCmd string, ipv4HostLeng
 			}
 
 			if !ipv6 && parsedClusterEntry.HostSubnetLength > 32 {
-				return nil, fmt.Errorf("invalid host subnet, IPv4 subnet must be < 32")
+				return nil, NewInvalidIPv4HostSubnetError()
 			}
 
 			if parsedClusterEntry.HostSubnetLength <= entryMaskLength {
-				return nil, fmt.Errorf("cannot use a host subnet length mask shorter than or equal to the cluster subnet mask. "+
-					"host subnet length: %d, cluster subnet length: %d", parsedClusterEntry.HostSubnetLength, entryMaskLength)
+				return nil, NewHostSubnetMaskError(parsedClusterEntry.HostSubnetLength, entryMaskLength)
 			}
 		}
 
@@ -214,9 +215,7 @@ func (cs *ConfigSubnets) CheckForOverlaps() error {
 		for j := 0; j < i; j++ {
 			sj := cs.Subnets[j]
 			if si.Subnet.Contains(sj.Subnet.IP) || sj.Subnet.Contains(si.Subnet.IP) {
-				return fmt.Errorf("illegal network configuration: %s %q overlaps %s %q",
-					si.SubnetType, si.Subnet.String(),
-					sj.SubnetType, sj.Subnet.String())
+				return NewSubnetOverlapError(si, sj)
 			}
 		}
 	}
@@ -327,4 +326,50 @@ func AllocateV6MasqueradeIPs(masqueradeSubnetNetworkAddress net.IP, masqueradeIP
 		return fmt.Errorf("error setting V6OVNServiceHairpinMasqueradeIP: %s", masqueradeIPs.V6DummyNextHopMasqueradeIP)
 	}
 	return nil
+}
+
+func isValidEphemeralPortRange(s string) bool {
+	// Regex to match "<number>-<number>" with no extra characters
+	re := regexp.MustCompile(`^(\d{1,5})-(\d{1,5})$`)
+	matches := re.FindStringSubmatch(s)
+	if matches == nil {
+		return false
+	}
+
+	minPort, err1 := strconv.Atoi(matches[1])
+	maxPort, err2 := strconv.Atoi(matches[2])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+
+	// Port numbers must be in the 1-65535 range
+	if minPort < 1 || minPort > 65535 || maxPort < 0 || maxPort > 65535 {
+		return false
+	}
+
+	return maxPort > minPort
+}
+
+func getKernelEphemeralPortRange() (string, error) {
+	data, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+	if err != nil {
+		return "", fmt.Errorf("failed to read port range: %w", err)
+	}
+
+	parts := strings.Fields(string(data))
+	if len(parts) != 2 {
+		return "", fmt.Errorf("unexpected format: %q", string(data))
+	}
+
+	minPort, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return "", fmt.Errorf("invalid min port: %w", err)
+	}
+
+	maxPort, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid max port: %w", err)
+	}
+
+	return fmt.Sprintf("%d-%d", minPort, maxPort), nil
 }

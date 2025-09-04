@@ -74,7 +74,7 @@ const (
 	TransitSwitchToRouterPrefix = "tstor-"
 	RouterToTransitSwitchPrefix = "rtots-"
 
-	// ACL Default Tier Priorities
+	// DefaultACLTier Priorities
 
 	// Default routed multicast allow acl rule priority
 	DefaultRoutedMcastAllowPriority = 1013
@@ -91,7 +91,8 @@ const (
 	// Deny priority for isolated advertised networks
 	AdvertisedNetworkDenyPriority = 1050
 
-	// ACL PlaceHolderACL Tier Priorities
+	// PrimaryACLTier Priorities
+
 	PrimaryUDNAllowPriority = 1001
 	// Default deny acl rule priority
 	PrimaryUDNDenyPriority = 1000
@@ -99,8 +100,6 @@ const (
 	// ACL Tiers
 	// Tier 0 is called Primary as it is evaluated before any other feature-related Tiers.
 	// Currently used for User Defined Network Feature.
-	// NOTE: When we upgrade from an OVN version without tiers to the new version with
-	// tiers, all values in the new ACL.Tier column will be set to 0.
 	PrimaryACLTier = 0
 	// Default Tier for all ACLs
 	DefaultACLTier = 2
@@ -187,6 +186,9 @@ const (
 	NodeModeFull    = "full"
 	NodeModeDPU     = "dpu"
 	NodeModeDPUHost = "dpu-host"
+
+	// Gateway interface configuration
+	DeriveFromMgmtPort = "derive-from-mgmt-port"
 
 	// Geneve header length for IPv4 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv4 = 58
@@ -310,11 +312,30 @@ const (
 	// CUDNPrefix of all CUDN network names
 	CUDNPrefix = "cluster_udn_"
 
-	// NFTNoPMTUDRemoteNodeIPsv4 is a set used to track remote node IPs that do not belong to
+	// NFTRemoteNodeIPsv4 is a set used to track remote node v4IPs that do not belong to
 	// the local node's subnet.
-	NFTNoPMTUDRemoteNodeIPsv4 = "no-pmtud-remote-node-ips-v4"
+	NFTRemoteNodeIPsv4 = "remote-node-ips-v4"
 
-	// NFTNoPMTUDRemoteNodeIPsv6 is a set used to track remote node IPs that do not belong to
+	// NFTRemoteNodeIPsv6 is a set used to track remote node v6IPs that do not belong to
 	// the local node's subnet.
-	NFTNoPMTUDRemoteNodeIPsv6 = "no-pmtud-remote-node-ips-v6"
+	NFTRemoteNodeIPsv6 = "remote-node-ips-v6"
+
+	// Metrics
+	MetricOvnkubeNamespace               = "ovnkube"
+	MetricOvnkubeSubsystemController     = "controller"
+	MetricOvnkubeSubsystemClusterManager = "clustermanager"
+	MetricOvnkubeSubsystemNode           = "node"
+	MetricOvnNamespace                   = "ovn"
+	MetricOvnSubsystemDB                 = "db"
+	MetricOvnSubsystemNorthd             = "northd"
+	MetricOvnSubsystemController         = "controller"
+	MetricOvsNamespace                   = "ovs"
+	MetricOvsSubsystemVswitchd           = "vswitchd"
+	MetricOvsSubsystemDB                 = "db"
+
+	// "mgmtport-no-snat-subnets-v4" and "mgmtport-no-snat-subnets-v6" are sets containing
+	// subnets, indicating traffic that should not be SNATted when passing through the
+	// management port.
+	NFTMgmtPortNoSNATSubnetsV4 = "mgmtport-no-snat-subnets-v4"
+	NFTMgmtPortNoSNATSubnetsV6 = "mgmtport-no-snat-subnets-v6"
 )
