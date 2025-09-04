@@ -355,8 +355,6 @@ github.com/mdlayher/socket v0.2.1 h1:F2aaOwb53VsBE+ebRS9bLd7yPOfYUMC8lOODdCBDY6w
 github.com/mdlayher/socket v0.2.1/go.mod h1:QLlNPkFR88mRUNQIzRBMfXxwKal8H7u1h3bL1CV+f0E=
 github.com/metallb/frr-k8s v0.0.16 h1:tlNIDW5wtBlKE7wUgXBs9GklyTCTFtdOGz8fvEl40vU=
 github.com/metallb/frr-k8s v0.0.16/go.mod h1:TjrGoAf+v00hYGlI8jUdyDxY5udMAOs2GWwrvLWnA4E=
-github.com/metallb/metallb v0.14.9 h1:rjhftr7b0vv56c8pXm7UDo7ad61EwKT6lbGGocrN/VM=
-github.com/metallb/metallb v0.14.9/go.mod h1:qUh1zVwYAfp3JLxhZrDH20j55QvYwCkI37QU4gUG3ns=
 github.com/miekg/dns v1.1.43 h1:JKfpVSCB84vrAmHzyrsxB5NAr5kLoMXZArPSw7Qlgyg=
 github.com/miekg/dns v1.1.43/go.mod h1:+evo5L0630/F6ca/Z9+GAqzhjGyn8/c+TBaOyfEl0V4=
 github.com/mistifyio/go-zfs v2.1.2-0.20190413222219-f784269be439+incompatible h1:aKW/4cBs+yK6gpqU3K/oIwk9Q/XICqd3zOX/UFuvqmk=
