@@ -609,6 +609,7 @@ func (r *DefaultGatewayReconciler) ReconcileIPv6AfterLiveMigration(liveMigration
 		if len(targetPodAnnotation.Gateways) == 0 {
 			return fmt.Errorf("missing gateways to calculate ipv6 gateway reconciler RA")
 		}
+<<<<<<< HEAD
 		// The LRP mac is calculated from the first address on the list.
 		gwIP := targetPodAnnotation.Gateways[0]
 
@@ -627,6 +628,12 @@ func (r *DefaultGatewayReconciler) ReconcileIPv6AfterLiveMigration(liveMigration
 		}
 
 		ras = append(ras, newRouterAdvertisementWithPrefixInfos(gwIP, destinationMAC, destinationIP.IP, 65535, []ndp.PrefixInformation{prefixInfo}))
+=======
+
+		// The LRP mac is calculated from the first address on the list.
+		gwIP := targetPodAnnotation.Gateways[0]
+		ras = append(ras, newRouterAdvertisementFromIPAndLifetime(gwIP, destinationMAC, destinationIP.IP, 65535))
+>>>>>>> 4d02af31e (kv: Reconcile transit router as gateway after LM)
 	}
 
 	return ndp.SendRouterAdvertisements(r.interfaceName, ras...)
