@@ -41,6 +41,8 @@ import (
 )
 
 const (
+	protoPrefixV4 = "ip"
+	protoPrefixV6 = "ipv6"
 	// etpSvcOpenFlowCookie identifies constant open flow rules added to the host OVS
 	// bridge to move packets between host and external for etp=local traffic.
 	// The hex number 0xe745ecf105, represents etp(e74)-service(5ec)-flows which makes it easier for debugging.
@@ -404,9 +406,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 			var flows []string
 			clusterIPs := util.GetClusterIPs(service)
 			for _, clusterIP := range clusterIPs {
-				ipPrefix := "ip"
+				ipPrefix := protoPrefixV4
 				if utilnet.IsIPv6String(clusterIP) {
-					ipPrefix = "ipv6"
+					ipPrefix = protoPrefixV6
 				}
 				// table 2, user-defined network host -> OVN towards default cluster network services
 				// sample flow: cookie=0xdeff105, duration=2319.685s, table=2, n_packets=496, n_bytes=67111, priority=300,
