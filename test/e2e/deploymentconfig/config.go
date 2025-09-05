@@ -1,6 +1,8 @@
 package deploymentconfig
 
 import (
+	"fmt"
+
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind"
 
@@ -15,7 +17,7 @@ func Set(_ *rest.Config) error {
 		deployment = kind.New()
 	}
 	if deployment == nil {
-		panic("failed to determine the deployment config")
+		return fmt.Errorf("failed to determine the deployment config")
 	}
 	return nil
 }
