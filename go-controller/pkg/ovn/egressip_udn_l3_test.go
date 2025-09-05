@@ -41,26 +41,26 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 	)
 
 	const (
-		nadName1           = "nad1"
-		networkName1       = "network1"
-		networkName1_      = networkName1 + "_"
-		node1Name          = "node1"
-		v4Net1             = "20.128.0.0/14"
-		v4Node1Net1        = "20.128.0.0/16"
-		v4Pod1IPNode1Net1  = "20.128.0.5"
-		podName3           = "egress-pod3"
-		v4Pod2IPNode1Net1  = "20.128.0.6"
-		v4Node1Tsp         = "100.88.0.2"
-		node2Name          = "node2"
-		v4Node2Net1        = "20.129.0.0/16"
-		v4Node2Tsp         = "100.88.0.3"
-		podName4           = "egress-pod4"
-		v4Pod1IPNode2Net1  = "20.129.0.2"
-		v4Pod2IPNode2Net1  = "20.129.0.3"
-		eIP1Mark           = 50000
-		eIP2Mark           = 50001
-		secondaryNetworkID = "2"
-		//tnlKey = zoneinterconnect.BaseTransitSwitchTunnelKey + secondaryNetworkID
+		nadName1             = "nad1"
+		networkName1         = "network1"
+		networkName1_        = networkName1 + "_"
+		node1Name            = "node1"
+		v4Net1               = "20.128.0.0/14"
+		v4Node1Net1          = "20.128.0.0/16"
+		v4Pod1IPNode1Net1    = "20.128.0.5"
+		podName3             = "egress-pod3"
+		v4Pod2IPNode1Net1    = "20.128.0.6"
+		v4Node1Tsp           = "100.88.0.2"
+		node2Name            = "node2"
+		v4Node2Net1          = "20.129.0.0/16"
+		v4Node2Tsp           = "100.88.0.3"
+		podName4             = "egress-pod4"
+		v4Pod1IPNode2Net1    = "20.129.0.2"
+		v4Pod2IPNode2Net1    = "20.129.0.3"
+		eIP1Mark             = 50000
+		eIP2Mark             = 50001
+		userDefinedNetworkID = "2"
+		//tnlKey = zoneinterconnect.BaseTransitSwitchTunnelKey + userDefinedNetworkID
 		tnlKey = "16711685"
 	)
 
@@ -157,7 +157,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -534,7 +534,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -672,14 +672,14 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				fakeOvn.controller.zone = node1.Name
 				fakeOvn.eIPController.zone = node1.Name
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDNLocal, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				defer fakeOvn.networkManager.Stop()
-				// simulate Start() of secondary network controller
+				// simulate Start() of UDN controller
 				err = fakeOvn.eIPController.ensureRouterPoliciesForNetwork(secConInfo.bnc.GetNetInfo(), &node1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.eIPController.ensureSwitchPoliciesForNode(secConInfo.bnc.GetNetInfo(), node1Name)
@@ -1055,7 +1055,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1204,7 +1204,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				// Add pod IPs to UDN cache
 				iUDN, nUDN, _ := net.ParseCIDR(v4Pod1IPNode1Net1 + "/23")
@@ -1439,11 +1439,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 						Ports:       []string{"k8s-" + networkName1_ + node1Name + "-UUID", "stor-" + networkName1_ + node1Name + "-UUID"},
 						ExternalIDs: map[string]string{ovntypes.NetworkExternalID: netInfo.GetNetworkName(), ovntypes.TopologyExternalID: ovntypes.Layer3Topology},
 						QOSRules:    []string{fmt.Sprintf("%s-QoS-UUID", netInfo.GetNetworkName())},
-						OtherConfig: map[string]string{
-							"exclude_ips": util.GetNodeManagementIfAddr(node1UDNSubnet).IP.String(),
-							"subnet":      node1UDNSubnet.String(),
-						},
-						ACLs: []string{netInfo.GetNetworkScopedSwitchName(node1.Name) + "-NetpolNode-UUID"},
+						ACLs:        []string{netInfo.GetNetworkScopedSwitchName(node1.Name) + "-NetpolNode-UUID"},
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID:      netInfo.GetNetworkScopedName(ovntypes.TransitSwitchToRouterPrefix+node1.Name) + "-UUID",
@@ -1688,11 +1684,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 						Ports:       []string{"k8s-" + networkName1_ + node1Name + "-UUID", "stor-" + networkName1_ + node1Name + "-UUID"},
 						ExternalIDs: map[string]string{ovntypes.NetworkExternalID: netInfo.GetNetworkName(), ovntypes.TopologyExternalID: ovntypes.Layer3Topology},
 						QOSRules:    []string{fmt.Sprintf("%s-QoS-UUID", netInfo.GetNetworkName())},
-						OtherConfig: map[string]string{
-							"exclude_ips": util.GetNodeManagementIfAddr(node1UDNSubnet).IP.String(),
-							"subnet":      node1UDNSubnet.String(),
-						},
-						ACLs: []string{netInfo.GetNetworkScopedSwitchName(node1.Name) + "-NetpolNode-UUID"},
+						ACLs:        []string{netInfo.GetNetworkScopedSwitchName(node1.Name) + "-NetpolNode-UUID"},
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID:      netInfo.GetNetworkScopedName(ovntypes.TransitSwitchToRouterPrefix+node1.Name) + "-UUID",
@@ -1791,7 +1783,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1949,7 +1941,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				// Add pod IPs to UDN cache
 				iUDN, nUDN, _ := net.ParseCIDR(v4Pod1IPNode1Net1 + "/23")
@@ -2161,7 +2153,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2522,7 +2514,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2674,7 +2666,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				secConInfo.bnc.zone = node1.Name
 				gomega.Expect(secConInfo.bnc.WatchNodes()).To(gomega.Succeed())
@@ -2913,11 +2905,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 						Ports:       []string{"k8s-" + networkName1_ + node1Name + "-UUID", "stor-" + networkName1_ + node1Name + "-UUID"},
 						ExternalIDs: map[string]string{ovntypes.NetworkExternalID: netInfo.GetNetworkName(), ovntypes.TopologyExternalID: ovntypes.Layer3Topology},
 						QOSRules:    []string{fmt.Sprintf("%s-QoS-UUID", netInfo.GetNetworkName())},
-						OtherConfig: map[string]string{
-							"exclude_ips": util.GetNodeManagementIfAddr(node1UDNSubnet).IP.String(),
-							"subnet":      node1UDNSubnet.String(),
-						},
-						ACLs: []string{netInfo.GetNetworkScopedSwitchName(node1.Name) + "-NetpolNode-UUID"},
+						ACLs:        []string{netInfo.GetNetworkScopedSwitchName(node1.Name) + "-NetpolNode-UUID"},
 					},
 					&nbdb.LogicalSwitchPort{
 						UUID:      netInfo.GetNetworkScopedName(ovntypes.TransitSwitchToRouterPrefix+node1.Name) + "-UUID",
