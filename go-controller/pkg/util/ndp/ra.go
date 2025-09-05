@@ -56,6 +56,21 @@ func SendRouterAdvertisements(interfaceName string, ras ...RouterAdvertisement) 
 	}
 	defer c.Close()
 
+	serializedRAs, err := generateRouterAdvertisements(ras...)
+	if err != nil {
+		return fmt.Errorf("failed to generate Router Advertisements: %w", err)
+	}
+
+	// Send each serialized Router Advertisement using the raw socket.
+	for _, serializedRA := range serializedRAs {
+		if err := c.Sendto(serializedRA, &unix.SockaddrLinklayer{Ifindex: iface.Index}, 0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func generateRouterAdvertisements(ras ...RouterAdvertisement) ([][]byte, error) {
 	serializedRAs := [][]byte{}
 	for _, ra := range ras {
 		serializeBuffer := gopacket.NewSerializeBuffer()
@@ -81,7 +96,7 @@ func SendRouterAdvertisements(interfaceName string, ras ...RouterAdvertisement) 
 			TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeRouterAdvertisement, 0),
 		}
 		if err := icmp6Layer.SetNetworkLayerForChecksum(&ip6Layer); err != nil {
-			return err
+			return nil, err
 		}
 
 		// https://datatracker.ietf.org/doc/html/rfc4861#section-4.2
@@ -132,18 +147,44 @@ func SendRouterAdvertisements(interfaceName string, ras ...RouterAdvertisement) 
 			&icmp6Layer,
 			&raLayer,
 		); err != nil {
-			return err
+			return nil, err
 		}
 		serializedRAs = append(serializedRAs, serializeBuffer.Bytes())
 	}
+	return serializedRAs, nil
+}
 
-	// Send each serialized Router Advertisement using the raw socket.
-	for _, serializedRA := range serializedRAs {
-		if err := c.Sendto(serializedRA, &unix.SockaddrLinklayer{Ifindex: iface.Index}, 0); err != nil {
-			return err
-		}
+// createPrefixInfoData creates the data payload for a Prefix Information Option
+// according to RFC 4861 Section 4.6.2
+func createPrefixInfoData(prefixInfo *PrefixInformation) []byte {
+	data := make([]byte, 30)
+
+	// Prefix Length (8 bits)
+	prefixLen, _ := prefixInfo.Prefix.Mask.Size()
+	data[0] = uint8(prefixLen)
+
+	// Flags (8 bits)
+	var flags uint8
+	if prefixInfo.OnLink {
+		flags |= 0x80 // L flag
 	}
-	return nil
+	if prefixInfo.Autonomous {
+		flags |= 0x40 // A flag
+	}
+	data[1] = flags
+
+	// Valid Lifetime (32 bits)
+	binary.BigEndian.PutUint32(data[2:6], prefixInfo.ValidLifetime)
+
+	// Preferred Lifetime (32 bits)
+	binary.BigEndian.PutUint32(data[6:10], prefixInfo.PreferredLifetime)
+
+	// Reserved (32 bits) - already zero from make
+
+	// Prefix (128 bits)
+	copy(data[14:], prefixInfo.Prefix.IP.To16())
+
+	return data
 }
 
 // createPrefixInfoData creates the data payload for a Prefix Information Option

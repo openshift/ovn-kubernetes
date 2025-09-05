@@ -154,6 +154,7 @@ func TestRouterAdvertisementSerialization(t *testing.T) {
 		PrefixInfos:    prefixInfos,
 	}
 
+<<<<<<< HEAD
 	// Test serialization logic (without actually sending)
 	serializeBuffer := gopacket.NewSerializeBuffer()
 
@@ -224,6 +225,13 @@ func TestRouterAdvertisementSerialization(t *testing.T) {
 
 	// Parse the serialized data to verify structure
 	packet := gopacket.NewPacket(serializedData, layers.LayerTypeEthernet, gopacket.Default)
+=======
+	serializedData, err := generateRouterAdvertisements(ra)
+	require.NoError(t, err)
+
+	// Parse the serialized data to verify structure
+	packet := gopacket.NewPacket(serializedData[0], layers.LayerTypeEthernet, gopacket.Default)
+>>>>>>> c94039ca3 (kv: Add join subnet ipv6 pio with lifetime 0)
 
 	// Verify Ethernet layer
 	ethLayer := packet.Layer(layers.LayerTypeEthernet)
@@ -324,6 +332,7 @@ func TestMultiplePrefixInfosSerialization(t *testing.T) {
 		PrefixInfos:    prefixInfos,
 	}
 
+<<<<<<< HEAD
 	// Test serialization with multiple PIOs
 	serializeBuffer := gopacket.NewSerializeBuffer()
 
@@ -386,6 +395,13 @@ func TestMultiplePrefixInfosSerialization(t *testing.T) {
 
 	// Parse and verify
 	packet := gopacket.NewPacket(serializedData, layers.LayerTypeEthernet, gopacket.Default)
+=======
+	serializedData, err := generateRouterAdvertisements(ra)
+	require.NoError(t, err)
+
+	// Parse and verify
+	packet := gopacket.NewPacket(serializedData[0], layers.LayerTypeEthernet, gopacket.Default)
+>>>>>>> c94039ca3 (kv: Add join subnet ipv6 pio with lifetime 0)
 	raLayerParsed := packet.Layer(layers.LayerTypeICMPv6RouterAdvertisement)
 	require.NotNil(t, raLayerParsed)
 	raParsed := raLayerParsed.(*layers.ICMPv6RouterAdvertisement)
