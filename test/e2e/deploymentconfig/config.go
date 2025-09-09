@@ -9,22 +9,22 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-var deployment api.DeploymentConfig
+var Deployment api.DeploymentConfig
 
 func Set(_ *rest.Config) error {
 	// upstream currently uses KinD as its preferred platform infra, so if we detect KinD, its upstream
 	if kind.IsKind() {
-		deployment = kind.New()
+		Deployment = kind.New()
 	}
-	if deployment == nil {
+	if Deployment == nil {
 		return fmt.Errorf("failed to determine the deployment config")
 	}
 	return nil
 }
 
 func Get() api.DeploymentConfig {
-	if deployment == nil {
+	if Deployment == nil {
 		panic("deployment config type not set")
 	}
-	return deployment
+	return Deployment
 }

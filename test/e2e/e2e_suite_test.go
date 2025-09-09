@@ -42,10 +42,6 @@ var _ = ginkgo.BeforeSuite(func() {
 	framework.ExpectNoError(err)
 	config, err := framework.LoadConfig()
 	framework.ExpectNoError(err)
-	err = infraprovider.Set(config)
-	framework.ExpectNoError(err, "must configure infrastructure provider")
-	err = deploymentconfig.Set(config)
-	framework.ExpectNoError(err, "must detect deployment configuration")
 	client, err := clientset.NewForConfig(config)
 	framework.ExpectNoError(err, "k8 clientset is required to list nodes")
 	err = ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes())
@@ -57,6 +53,19 @@ func TestMain(m *testing.M) {
 	// Register test flags, then parse flags.
 	handleFlags()
 	ProcessTestContextAndSetupLogging()
+
+	// Set up infrastructure provider and deployment config
+	config, err := framework.LoadConfig()
+	if err != nil {
+		klog.Fatalf("Failed to load config: %v", err)
+	}
+	if err := infraprovider.Set(config); err != nil {
+		klog.Fatalf("Failed to configure infrastructure provider: %v", err)
+	}
+	if err := deploymentconfig.Set(config); err != nil {
+		klog.Fatalf("Failed to detect deployment configuration: %v", err)
+	}
+
 	os.Exit(m.Run())
 }
 
