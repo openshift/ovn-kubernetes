@@ -754,16 +754,8 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 			// table 0, packets coming from external. Send it through conntrack and
 			// resubmit to table 1 to know the state and mark of the connection.
 			dftFlows = append(dftFlows,
-<<<<<<< HEAD
-				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ipv6, "+
-					"actions=ct(zone=%d, nat, table=1)", nodetypes.DefaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
-||||||| parent of e2625f41e (Make ip and ipv6 constants in flow code)
-				fmt.Sprintf("cookie=%s, priority=50, ipv6, dl_dst=%s, actions=ct(zone=%d, nat, table=1)",
-					nodetypes.DefaultOpenFlowCookie, bridgeMacAddress, config.Default.ConntrackZone))
-=======
-				fmt.Sprintf("cookie=%s, priority=50, %s, dl_dst=%s, actions=ct(zone=%d, nat, table=1)",
-					nodetypes.DefaultOpenFlowCookie, protoPrefixV6, bridgeMacAddress, config.Default.ConntrackZone))
->>>>>>> e2625f41e (Make ip and ipv6 constants in flow code)
+				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, %s, "+
+					"actions=ct(zone=%d, nat, table=1)", nodetypes.DefaultOpenFlowCookie, ofPortPhys, protoPrefixV6, config.Default.ConntrackZone))
 		}
 	}
 	if ofPortPhys != "" {
