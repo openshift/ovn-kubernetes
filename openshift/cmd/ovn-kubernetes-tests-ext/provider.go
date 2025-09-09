@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	ocphacke2e "github.com/ovn-org/ovn-kubernetes/openshift/test"
+	ocpdeploymentconfig "github.com/ovn-org/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpinfraprovider "github.com/ovn-org/ovn-kubernetes/openshift/test/infraprovider"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
 
@@ -82,10 +84,13 @@ func initializeTestFramework(provider string) error {
 	}
 	testContext.DumpLogsOnFailure = true
 	testContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
-	err = infraprovider.Set(cfg)
-	framework.ExpectNoError(err, "must configure infrastructure provider")
-	err = deploymentconfig.Set(cfg)
-	framework.ExpectNoError(err, "must configure deployment config")
+	ocpInfra, err := ocpinfraprovider.New(cfg)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(ocpInfra).NotTo(gomega.BeNil())
+	infraprovider.Provider = ocpInfra
+	ocpDeployment := ocpdeploymentconfig.New()
+	gomega.Expect(ocpDeployment).NotTo(gomega.BeNil())
+	deploymentconfig.Deployment = ocpDeployment
 	return nil
 }
 
