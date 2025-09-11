@@ -283,9 +283,9 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 	}
 }
 
-// BaseSecondaryNetworkController structure holds per-network fields and network specific
-// configuration for secondary network controller
-type BaseSecondaryNetworkController struct {
+// BaseUserDefinedNetworkController structure holds per-network fields and network specific
+// configuration for UDN controller
+type BaseUserDefinedNetworkController struct {
 	BaseNetworkController
 
 	// network policy events factory handler
@@ -294,7 +294,7 @@ type BaseSecondaryNetworkController struct {
 	multiNetPolicyHandler *factory.Handler
 }
 
-func (oc *BaseSecondaryNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {
+func (oc *BaseUserDefinedNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {
 	switch objType {
 	case factory.NamespaceType:
 		ns, ok := obj.(*corev1.Namespace)
@@ -343,19 +343,19 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 }
 
 func (bnc *BaseNetworkController) GetLogicalPortName(pod *corev1.Pod, nadName string) string {
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		return util.GetLogicalPortName(pod.Namespace, pod.Name)
 	} else {
-		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+		return util.GetUserDefinedNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
 	}
 }
 
 func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
 	[]ovsdb.Operation, func(), time.Time, error) {
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		return recorders.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
 	}
-	// TBD: no op for secondary network for now
+	// TBD: no-op for UDN for now
 	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
 }
 
@@ -505,22 +505,11 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := bnc.GetNodeGatewayIP(hostSubnet)
-		mgmtIfAddr := bnc.GetNodeManagementIP(hostSubnet)
 
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
-
-			logicalSwitch.OtherConfig["ipv6_prefix"] =
-				hostSubnet.IP.String()
 		} else {
 			v4Gateway = gwIfAddr.IP
-			excludeIPs := mgmtIfAddr.IP.String()
-			if config.HybridOverlay.Enabled {
-				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
-				excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
-			}
-			logicalSwitch.OtherConfig["subnet"] = hostSubnet.String()
-			logicalSwitch.OtherConfig["exclude_ips"] = excludeIPs
 		}
 	}
 
@@ -799,7 +788,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 				IPPrefix: hostSubnet.String(),
 				Nexthop:  mgmtIfAddr.IP.String(),
 			}
-			if bnc.IsSecondary() {
+			if bnc.IsUserDefinedNetwork() {
 				lrsr.ExternalIDs = map[string]string{
 					types.NetworkExternalID:  bnc.GetNetworkName(),
 					types.TopologyExternalID: bnc.TopologyType(),
@@ -878,8 +867,8 @@ func (bnc *BaseNetworkController) WatchNodes() error {
 }
 
 func (bnc *BaseNetworkController) recordNodeErrorEvent(node *corev1.Node, nodeErr error) {
-	if bnc.IsSecondary() {
-		// TBD, no op for secondary network for now
+	if bnc.IsUserDefinedNetwork() {
+		// TBD, noop for UDN for now
 		return
 	}
 	nodeRef, err := ref.GetReference(scheme.Scheme, node)
@@ -908,7 +897,7 @@ func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 }
 
 func (bnc *BaseNetworkController) getPodNADNames(pod *corev1.Pod) []string {
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		return []string{types.DefaultNetworkName}
 	}
 	podNadNames, _ := util.PodNadNames(pod, bnc.GetNetInfo())
@@ -1000,8 +989,8 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *corev
 }
 
 func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) ([]*net.IPNet, error) {
-	// live migration is not supported in combination with secondary networks
-	if bnc.IsSecondary() {
+	// live migration is not supported in combination with UDNs
+	if bnc.IsUserDefinedNetwork() {
 		return nil, nil
 	}
 

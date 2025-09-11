@@ -854,8 +854,8 @@ func portExists(namespace, name string) bool {
 /** HACK END **/
 
 // Init executes the first steps to start the DefaultNodeNetworkController.
-// It is split from Start() and executed before SecondaryNodeNetworkController (SNNC),
-// to allow SNNC to reference the openflow manager created in Init.
+// It is split from Start() and executed before UserDefinedNodeNetworkController (UDNNC)
+// to allow UDNNC to reference the openflow manager created in Init.
 func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	klog.Infof("Initializing the default node network controller")
 
@@ -1008,10 +1008,14 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
 	}
 
-	encapIPList := sets.New[string]()
-	encapIPList.Insert(strings.Split(config.Default.EffectiveEncapIP, ",")...)
-	if err := util.SetNodeEncapIPs(nodeAnnotator, encapIPList); err != nil {
-		return fmt.Errorf("failed to set node-encap-ips annotation for node %s: %w", nc.name, err)
+	// Set the node-encap-ips annotation with the configured encap IP.
+	// This encap IP is unavailable on the DPU host mode, so we don't need to set it there.
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		encapIPList := sets.New[string]()
+		encapIPList.Insert(strings.Split(config.Default.EffectiveEncapIP, ",")...)
+		if err := util.SetNodeEncapIPs(nodeAnnotator, encapIPList); err != nil {
+			return fmt.Errorf("failed to set node-encap-ips annotation for node %s: %w", nc.name, err)
+		}
 	}
 
 	if err := nodeAnnotator.Run(); err != nil {
