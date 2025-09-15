@@ -82,7 +82,6 @@ type NetInfo interface {
 	GetNetworkScopedExtPortName(bridgeID, nodeName string) string
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
-	GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string
 
 	// GetNetInfo is an identity method used to get the specific NetInfo
 	// implementation
@@ -543,10 +542,6 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
-func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(_ string) string {
-	return ""
-}
-
 func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
 	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
@@ -709,7 +704,7 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedGWRouterName(nodeName string) str
 func (nInfo *secondaryNetInfo) GetNetworkScopedSwitchName(nodeName string) string {
 	// In Layer2Topology there is just one global switch
 	if nInfo.TopologyType() == types.Layer2Topology {
-		return fmt.Sprintf("%s%s", nInfo.getPrefix(), types.OVNLayer2Switch)
+		return nInfo.GetNetworkScopedName(types.OVNLayer2Switch)
 	}
 	return nInfo.GetNetworkScopedName(nodeName)
 }
@@ -736,13 +731,6 @@ func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerName(lbName string) s
 
 func (nInfo *secondaryNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string {
 	return nInfo.GetNetworkScopedName(lbGroupName)
-}
-
-func (nInfo *secondaryNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string {
-	if nInfo.TopologyType() != types.Layer2Topology {
-		return ""
-	}
-	return fmt.Sprintf("outport == %q", types.GWRouterToExtSwitchPrefix+nInfo.GetNetworkScopedGWRouterName(nodeName))
 }
 
 // getPrefix returns if the logical entities prefix for this network
@@ -821,6 +809,11 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	}
 	if nInfo == nil && other == nil {
 		return true
+	}
+	// if network ID has changed, it means the network was re-created, and all controllers
+	// should execute delete+create instead of update
+	if nInfo.GetNetworkID() != types.InvalidID && other.GetNetworkID() != types.InvalidID && nInfo.GetNetworkID() != other.GetNetworkID() {
+		return false
 	}
 	if nInfo.netName != other.GetNetworkName() {
 		return false
@@ -1151,6 +1144,9 @@ func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnitypes.NetConf, error) {
 	netconf, err := config.ParseNetConf([]byte(netattachdef.Spec.Config))
 	if err != nil {
+		if err.Error() == ErrorAttachDefNotOvnManaged.Error() {
+			return nil, err
+		}
 		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
 	}
 
@@ -1368,6 +1364,12 @@ func IsRouteAdvertisementsEnabled() bool {
 	// for now, we require multi-network to be enabled because we rely on NADs,
 	// even for the default network
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
+}
+
+// IsPreconfiguredUDNAddressesEnabled indicates if user defined IPs / MAC
+// addresses can be set in primary UDNs
+func IsPreconfiguredUDNAddressesEnabled() bool {
+	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses
 }
 
 func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
