@@ -2512,7 +2512,7 @@ func completeConfig() error {
 		return err
 	}
 
-	if err := allSubnets.CheckForOverlaps(); err != nil {
+	if _, _, err := allSubnets.CheckForOverlaps(); err != nil {
 		return err
 	}
 
