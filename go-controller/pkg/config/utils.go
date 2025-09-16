@@ -209,7 +209,8 @@ func (cs *ConfigSubnets) Append(subnetType ConfigSubnetType, subnet *net.IPNet) 
 	}
 }
 
-// CheckForOverlaps checks if any of the subnets in cs overlap
+// CheckForOverlaps checks if any of the subnets in cs overlap, and returns the first overlapping subnets
+// together with an error.
 func (cs *ConfigSubnets) CheckForOverlaps() (*net.IPNet, *net.IPNet, error) {
 	for i, si := range cs.Subnets {
 		for j := 0; j < i; j++ {

@@ -1412,9 +1412,10 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 	return nil
 }
 
-// SubnetOverlapCheck validates whether POD and join subnet mentioned in a net-attach-def with
-// topology "layer2" and "layer3" does not overlap with ClusterSubnets, ServiceCIDRs, join subnet,
-// and masquerade subnet. It also considers excluded subnets mentioned in a net-attach-def.
+// SubnetOverlapCheck validates whether user-configured networks (e.g. POD and join subnet) mentioned in
+// a net-attach-def with topology "layer2" and "layer3" overlaps with internal and reserved networks
+// (e.g. ClusterSubnets, ServiceCIDRs, join subnet, etc.).
+// It also considers excluded subnets mentioned in a net-attach-def.
 func SubnetOverlapCheck(netconf *ovncnitypes.NetConf) (*net.IPNet, *net.IPNet, error) {
 	allSubnets := config.NewConfigSubnets()
 	for _, subnet := range config.Default.ClusterSubnets {
@@ -1954,7 +1955,8 @@ func getTransitSubnet(netconf *ovncnitypes.NetConf, isIPv4 bool) (string, error)
 	// repeat until we find a non-overlapping subnet,
 	// but limit the number of iterations to avoid infinite loop
 	for i := 0; i < 10; i++ {
-		// only add current transit subnet to the netconf for overlap check, final assignment should be done for all ipFamilies
+		// only add current transit subnet to the netconf for overlap check (for requested ipFamily),
+		// final assignment should be done for all ipFamilies outside this function.
 		netconf.TransitSubnet = transitSubnet.String()
 		// check if there is subnet overlap
 		subnet1, subnet2, err := SubnetOverlapCheck(netconf)
@@ -1972,6 +1974,9 @@ func getTransitSubnet(netconf *ovncnitypes.NetConf, isIPv4 bool) (string, error)
 	return "", fmt.Errorf("can't generate transit subnets: failed to find non-overlapping transit subnet: %w", err)
 }
 
+// getFirstNonOverlappingSubnet finds the first subnet with the same netmask as netMask that does not overlap with either subnet1 or subnet2.
+// It expects that subnet1 and subnet2 overlap with each other, and that netmask is one of the two subnet's netmask.
+// If these conditions are not met, the result won't be correct.
 func getFirstNonOverlappingSubnet(subnet1, subnet2 *net.IPNet, netMask net.IPMask) *net.IPNet {
 	// find the bigger network, and get the first subnet outside of it with the same netmask as default transit subnet
 	subnet1MaskSize, _ := subnet1.Mask.Size()

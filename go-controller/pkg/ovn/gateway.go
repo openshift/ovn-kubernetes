@@ -646,7 +646,7 @@ func (gw *GatewayManager) updateClusterRouterStaticRoutes(gwConfig *GatewayConfi
 			if gw.transitRouterInfo != nil {
 				// for layer2 networks with transit router it is not an error.
 				// JoinIPs are allocated for both IP families always, but transit router IPs and routes
-				// are only created for the actual IP familieis of the network
+				// are only created for the actual IP families of the network
 				continue
 			}
 			return fmt.Errorf("failed to add source IP address based "+

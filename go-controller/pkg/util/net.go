@@ -457,7 +457,7 @@ func GetLastIPOfSubnet(subnet *net.IPNet, indexFromLast int) *net.IPNet {
 	base := big.NewInt(1)
 	totalIPs := new(big.Int).Lsh(base, uint(total-mask))
 	lastIPIndex := totalIPs.Sub(totalIPs, big.NewInt(int64(indexFromLast+1)))
-	// this is copied form utilnet.AddIPOffset but to allow big.Int offset
+	// this is copied from utilnet.AddIPOffset but to allow big.Int offset
 	r := big.NewInt(0).Add(utilnet.BigForIP(subnet.IP), lastIPIndex).Bytes()
 	r = append(make([]byte, 16), r...)
 	lastIP := net.IP(r[len(r)-16:])
