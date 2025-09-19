@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -808,7 +809,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 	}
 	var remainingAssignments []egressipv1.EgressIPStatusItem
 	nadName := ni.GetNetworkName()
-	if ni.IsSecondary() {
+	if ni.IsUserDefinedNetwork() {
 		nadNames := ni.GetNADs()
 		if len(nadNames) == 0 {
 			return fmt.Errorf("expected at least one NAD name for Namespace %s", pod.Namespace)
@@ -868,7 +869,11 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 	}
 	for _, status := range remainingAssignments {
 		klog.V(2).Infof("Adding pod egress IP status: %v for EgressIP: %s and pod: %s/%s/%v", status, name, pod.Namespace, pod.Name, podIPNets)
-		err = e.nodeZoneState.DoWithLock(status.Node, func(_ string) error {
+		nodesToLock := []string{status.Node, pod.Spec.NodeName}
+		// Sort nodes lexicographically to ensure node locks are acquired in
+		// same order, preventing deadlock situations.
+		sort.Strings(nodesToLock)
+		err = e.nodeZoneState.DoWithLock(nodesToLock[0], func(_ string) error {
 			if status.Node == pod.Spec.NodeName {
 				// we are safe, no need to grab lock again
 				if err := e.addPodEgressIPAssignment(ni, name, status, mark, pod, podIPNets); err != nil {
@@ -877,7 +882,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 				podState.egressStatuses.statusMap[status] = ""
 				return nil
 			}
-			return e.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(_ string) error {
+			return e.nodeZoneState.DoWithLock(nodesToLock[1], func(_ string) error {
 				// we need to grab lock again for pod's node
 				if err := e.addPodEgressIPAssignment(ni, name, status, mark, pod, podIPNets); err != nil {
 					return fmt.Errorf("unable to create egressip configuration for pod %s/%s/%v, err: %w", pod.Namespace, pod.Name, podIPNets, err)
@@ -1041,7 +1046,11 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 			continue
 		}
 		klog.V(2).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", statusToRemove, name, pod.Name, pod.Namespace)
-		err := e.nodeZoneState.DoWithLock(statusToRemove.Node, func(_ string) error {
+		nodesToLock := []string{statusToRemove.Node, pod.Spec.NodeName}
+		// Sort nodes lexicographically to ensure node locks are acquired in
+		// same order, preventing deadlock situations.
+		sort.Strings(nodesToLock)
+		err := e.nodeZoneState.DoWithLock(nodesToLock[0], func(_ string) error {
 			if statusToRemove.Node == pod.Spec.NodeName {
 				// we are safe, no need to grab lock again
 				if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod); err != nil {
@@ -1050,7 +1059,7 @@ func (e *EgressIPController) deletePodEgressIPAssignments(ni util.NetInfo, name 
 				podStatus.egressStatuses.delete(statusToRemove)
 				return nil
 			}
-			return e.nodeZoneState.DoWithLock(pod.Spec.NodeName, func(_ string) error {
+			return e.nodeZoneState.DoWithLock(nodesToLock[1], func(_ string) error {
 				if err := e.deletePodEgressIPAssignment(ni, name, statusToRemove, pod); err != nil {
 					return err
 				}
@@ -1151,7 +1160,7 @@ type egressIPCache struct {
 	egressNodeRedirectsCache nodeNetworkRedirects
 	// network name -> OVN cluster router name
 	networkToRouter map[string]string
-	// packet mark for primary secondary networks
+	// packet mark for primary UDNs
 	// EgressIP name -> mark
 	markCache map[string]string
 }
@@ -1993,7 +2002,7 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 				egressRemotePods: map[string]sets.Set[string]{},
 			}
 			nadName := types.DefaultNetworkName
-			if ni.IsSecondary() {
+			if ni.IsUserDefinedNetwork() {
 				nadNames := ni.GetNADs()
 				if len(nadNames) == 0 {
 					klog.Errorf("Network %s: error build egress IP sync cache, expected at least one NAD name for Namespace %s", ni.GetNetworkName(), namespace.Name)
@@ -2297,7 +2306,7 @@ func (e *EgressIPController) addStandByEgressIPAssignment(ni util.NetInfo, podKe
 			continue
 		}
 		eipToAssign = eipName // use the first EIP we find successfully
-		if ni.IsSecondary() {
+		if ni.IsUserDefinedNetwork() {
 			mark = getEgressIPPktMark(eip.Name, eip.Annotations)
 		}
 		break
@@ -2308,7 +2317,7 @@ func (e *EgressIPController) addStandByEgressIPAssignment(ni util.NetInfo, podKe
 	}
 	// get IPs
 	nadName := ni.GetNetworkName()
-	if ni.IsSecondary() {
+	if ni.IsUserDefinedNetwork() {
 		nadNames := ni.GetNADs()
 		if len(nadNames) == 0 {
 			return fmt.Errorf("expected at least one NAD name for Namespace %s", pod.Namespace)
@@ -2391,7 +2400,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 					return fmt.Errorf("unable to create NAT rule ops for status: %v, err: %v", status, err)
 				}
 
-			} else if ni.IsSecondary() && ni.TopologyType() == types.Layer3Topology {
+			} else if ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer3Topology {
 				// not required for L2 because we always have LRPs using reroute action to pkt mark
 				ops, err = e.createGWMarkPolicyOps(ni, ops, podIPs, status, mark, pod.Namespace, pod.Name, egressIPName)
 				if err != nil {
@@ -2415,7 +2424,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 
 	// For L2, we always attach an LRP with reroute action to the Nodes gateway router. If the pod is remote, use the local zone Node name to generate the GW router name.
 	nodeName := pod.Spec.NodeName
-	if loadedEgressNode && loadedPodNode && !isLocalZonePod && isLocalZoneEgressNode && ni.IsSecondary() && ni.TopologyType() == types.Layer2Topology {
+	if loadedEgressNode && loadedPodNode && !isLocalZonePod && isLocalZoneEgressNode && ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer2Topology {
 		nodeName = status.Node
 	}
 	routerName, err := getTopologyScopedRouterName(ni, nodeName)
@@ -2426,7 +2435,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 	// exec when node is local OR when pods are local or L2 UDN
 	// don't add a reroute policy if the egress node towards which we are adding this doesn't exist
 	if loadedEgressNode && loadedPodNode {
-		if isLocalZonePod || (isLocalZoneEgressNode && ni.IsSecondary() && ni.TopologyType() == types.Layer2Topology) {
+		if isLocalZonePod || (isLocalZoneEgressNode && ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer2Topology) {
 			ops, err = e.createReroutePolicyOps(ni, ops, podIPs, status, mark, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
 			if err != nil {
 				return fmt.Errorf("unable to create logical router policy ops, err: %v", err)
@@ -2483,7 +2492,7 @@ func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egress
 	}
 	// For L2, we always attach an LRP with reroute action to the Nodes gateway router. If the pod is remote, use the local zone Node name to generate the GW router name.
 	nodeName := pod.Spec.NodeName
-	if !isLocalZonePod && isLocalZoneEgressNode && ni.IsSecondary() && ni.TopologyType() == types.Layer2Topology {
+	if !isLocalZonePod && isLocalZoneEgressNode && ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer2Topology {
 		nodeName = status.Node
 	}
 	routerName, err := getTopologyScopedRouterName(ni, nodeName)
@@ -2502,7 +2511,7 @@ func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egress
 	// Case 1 - node where pod is hosted is not known
 	// Case 2 - pod is within the local zone
 	// case 3 - a local zone node is egress node and pod is attached to layer 2. For layer2, there is always an LRP attached to the egress Node GW router
-	if !loadedPodNode || isLocalZonePod || (isLocalZoneEgressNode && ni.IsSecondary() && ni.TopologyType() == types.Layer2Topology) {
+	if !loadedPodNode || isLocalZonePod || (isLocalZoneEgressNode && ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer2Topology) {
 		ops, err = e.deleteReroutePolicyOps(ni, ops, status, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
 		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			// if the gateway router join IP setup is already gone, then don't count it as error.
@@ -2525,7 +2534,7 @@ func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egress
 			if err != nil {
 				return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
 			}
-		} else if ni.IsSecondary() && ni.TopologyType() == types.Layer3Topology {
+		} else if ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer3Topology {
 			ops, err = e.deleteGWMarkPolicyOps(ni, ops, status, pod.Namespace, pod.Name, egressIPName)
 			if err != nil {
 				return fmt.Errorf("unable to create GW router packet mark LRPs delete ops for pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -2788,7 +2797,7 @@ func (e *EgressIPController) getNextHop(ni util.NetInfo, egressNodeName, egressI
 			return gatewayRouterIP.String(), nil
 		} else {
 			// for an egress IP assigned to a host secondary interface, next hop IP is the networks management port IP
-			if ni.IsSecondary() {
+			if ni.IsUserDefinedNetwork() {
 				return "", fmt.Errorf("egress IP assigned to a host secondary interface for a user defined network (network name %s) is unsupported", ni.GetNetworkName())
 			}
 			return e.getLocalMgmtPortNextHop(ni, egressNodeName, egressIPName, egressIP, isEgressIPv6)
@@ -2826,7 +2835,7 @@ func (e *EgressIPController) createReroutePolicyOps(ni util.NetInfo, ops []ovsdb
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	ipFamily := getEIPIPFamily(isEgressIPv6)
 	options := make(map[string]string)
-	if ni.IsSecondary() {
+	if ni.IsUserDefinedNetwork() {
 		if !mark.IsAvailable() {
 			return nil, fmt.Errorf("egressIP %s object must contain a mark for user defined networks", egressIPName)
 		}
@@ -3025,7 +3034,7 @@ func (e *EgressIPController) deleteEgressIPStatusSetup(ni util.NetInfo, name str
 			if err != nil {
 				return fmt.Errorf("error removing egress ip %s nats on router %s: %v", name, routerName, err)
 			}
-		} else if ni.IsSecondary() {
+		} else if ni.IsUserDefinedNetwork() {
 			if ops, err = e.deleteGWMarkPolicyForStatusOps(ni, ops, status, name); err != nil {
 				return fmt.Errorf("failed to delete gateway mark policy: %v", err)
 			}
@@ -3582,7 +3591,7 @@ func (e *EgressIPController) getPodIPs(ni util.NetInfo, pod *corev1.Pod, nadName
 				return nil, fmt.Errorf("failed to get pod %s/%s IPs", pod.Namespace, pod.Name)
 			}
 			podIPs = getIPFromIPNetFn(podIPNets)
-		} else if ni.IsSecondary() {
+		} else if ni.IsUserDefinedNetwork() {
 			podIPNets := util.GetPodCIDRsWithFullMaskOfNetwork(pod, nadName)
 			if len(podIPNets) == 0 {
 				return nil, fmt.Errorf("failed to get pod %s/%s IPs", pod.Namespace, pod.Name)
