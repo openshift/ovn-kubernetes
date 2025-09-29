@@ -18,6 +18,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -35,7 +36,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-var _ = Describe("Node IP and MAC address migration", func() {
+var _ = Describe("Node IP and MAC address migration", feature.NodeIPMACMigration, func() {
 	const (
 		namespacePrefix            = "node-ip-migration"
 		podWorkerNodeName          = "primary"
@@ -131,7 +132,7 @@ spec:
 		framework.ExpectNoError(err, "failed to get primary network")
 		externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 		externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-			Args: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
+			CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 		externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 		framework.ExpectNoError(err, "failed to create external container")
 		externalContainerIPs[4], externalContainerIPs[6] = externalContainer.GetIPv4(), externalContainer.GetIPv6()
@@ -453,7 +454,7 @@ spec:
 					Expect(pods.Items).To(HaveLen(1))
 					ovnkPod = pods.Items[0]
 
-					cmd := "ovs-ofctl dump-flows breth0 table=0"
+					cmd := fmt.Sprintf("ovs-ofctl dump-flows %s table=0", deploymentconfig.Get().ExternalBridgeName())
 					err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 						stdout, err := e2epodoutput.RunHostCmdWithRetries(ovnkPod.Namespace, ovnkPod.Name, cmd, framework.Poll, 30*time.Second)
 						if err != nil {
@@ -514,7 +515,7 @@ spec:
 							time.Sleep(time.Duration(settleTimeout) * time.Second)
 
 							By(fmt.Sprintf("Checking nodeport flows have been updated to use new IP: %s", migrationWorkerNodeIP))
-							cmd := "ovs-ofctl dump-flows breth0 table=0"
+							cmd := fmt.Sprintf("ovs-ofctl dump-flows %s table=0", deploymentconfig.Get().ExternalBridgeName())
 							err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 								stdout, err := e2epodoutput.RunHostCmdWithRetries(ovnkPod.Namespace, ovnkPod.Name, cmd, framework.Poll, 30*time.Second)
 								if err != nil {
@@ -627,7 +628,7 @@ func checkFlowsForMACPeriodically(ovnkPod v1.Pod, addr net.HardwareAddr, duratio
 }
 
 func checkFlowsForMAC(ovnkPod v1.Pod, mac net.HardwareAddr) error {
-	cmd := "ovs-ofctl dump-flows breth0"
+	cmd := fmt.Sprintf("ovs-ofctl dump-flows %s", deploymentconfig.Get().ExternalBridgeName())
 	flowOutput := e2epodoutput.RunHostCmdOrDie(ovnkPod.Namespace, ovnkPod.Name, cmd)
 	lines := strings.Split(flowOutput, "\n")
 	for _, line := range lines {
@@ -952,26 +953,31 @@ func migrateWorkerNodeIP(nodeName, fromIP, targetIP string, invertOrder bool) (e
 
 	// Define a function to change the IP address for later use.
 	changeIPAddress := func() error {
-		// Add new IP first - this will preserve the default route.
 		newIPMask := targetIP + "/" + mask
-		framework.Logf("Adding new IP address %s to node %s", newIPMask, nodeName)
-		// Add cleanup command.
-		cleanupCmd := []string{"ip", "address", "del", newIPMask, "dev", iface}
-		cleanupCommands = append(cleanupCommands, cleanupCmd)
-		// Run command.
-		_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "address", "add", newIPMask, "dev", iface})
-		if err != nil {
-			return fmt.Errorf("failed to add new IP %s to interface %s on node %s: %v", newIPMask, iface, nodeName, err)
-		}
-		// Delete current IP address. On rollback, first add the old IP and then delete the new one.
+
+		// Delete current IP address. If you add a second ip from the same subnet to an interface, it will
+		// be considered a secondary IP address and will be deleted together with the primary (aka old) IP.
 		framework.Logf("Deleting current IP address %s from node %s", parsedNetIPMask.String(), nodeName)
-		// Add cleanup command.
-		cleanupCmd = []string{"ip", "address", "add", parsedNetIPMask.String(), "dev", iface}
-		cleanupCommands = append([][]string{cleanupCmd}, cleanupCommands...)
+		// Add cleanup command to add original IP back to the end of the cleanupCommands list.
+		// This way, we preserve first delete then add new IP sequence.
+		cleanupCmd := []string{"ip", "address", "add", parsedNetIPMask.String(), "dev", iface}
+		cleanupCommands = append(cleanupCommands, cleanupCmd)
 		// Run command.
 		_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "address", "del", parsedNetIPMask.String(), "dev", iface})
 		if err != nil {
 			return err
+		}
+
+		// Now add new IP.
+		framework.Logf("Adding new IP address %s to node %s", newIPMask, nodeName)
+		// Add cleanup command to remove the new IP address to the beginning of the cleanupCommands list.
+		cleanupCmd = []string{"ip", "address", "del", newIPMask, "dev", iface}
+		cleanupCommands = append([][]string{cleanupCmd}, cleanupCommands...)
+
+		// Run command.
+		_, err = infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "address", "add", newIPMask, "dev", iface})
+		if err != nil {
+			return fmt.Errorf("failed to add new IP %s to interface %s on node %s: %v", newIPMask, iface, nodeName, err)
 		}
 		return nil
 	}

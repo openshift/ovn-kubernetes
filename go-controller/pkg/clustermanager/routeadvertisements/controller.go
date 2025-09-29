@@ -373,10 +373,6 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 			return nil, nil, fmt.Errorf("%w: selected network %q has unsupported topology %q", errConfig, networkName, network.TopologyType())
 		}
 
-		if config.Gateway.Mode == config.GatewayModeLocal && network.TopologyType() == types.Layer2Topology {
-			return nil, nil, fmt.Errorf("%w: BGP is currently not supported for Layer2 networks in local gateway mode, network: %s", errConfig, network.GetNetworkName())
-		}
-
 		if advertisements.Has(ratypes.EgressIP) && network.TopologyType() == types.Layer2Topology {
 			return nil, nil, fmt.Errorf("%w: EgressIP advertisement is currently not supported for Layer2 networks, network: %s", errConfig, network.GetNetworkName())
 		}
@@ -955,10 +951,18 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		return nil
 	}
 
+	var updateStatus bool
 	condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
-	updateStatus := hadUpdates || condition == nil || condition.ObservedGeneration != ra.Generation
-	updateStatus = updateStatus || err != nil
-
+	switch {
+	case condition == nil:
+		fallthrough
+	case condition.ObservedGeneration != ra.Generation:
+		fallthrough
+	case (err == nil) != (condition.Status == metav1.ConditionTrue):
+		fallthrough
+	case hadUpdates:
+		updateStatus = true
+	}
 	if !updateStatus {
 		return nil
 	}

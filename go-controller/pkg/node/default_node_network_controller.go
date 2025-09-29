@@ -28,7 +28,7 @@ import (
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/knftables"
 
-	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/client"
 
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -45,6 +45,7 @@ import (
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -150,7 +151,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		routeManager: routeManager,
 		ovsClient:    ovsClient,
 	}
-	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
+	if util.IsNetworkSegmentationSupportEnabled() {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
 			cnnci.watchFactory.PodCoreInformer(), cnnci.name, cnnci.recorder)
 	}
@@ -830,7 +831,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	if node, err = nc.Kube.GetNode(nc.name); err != nil {
+	if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
 
@@ -895,7 +896,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
-		if node, err = nc.Kube.GetNode(nc.name); err != nil {
+		if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
 			return false, nil
 		}
@@ -964,8 +965,12 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// First part of gateway initialization. It will be completed by (nc *DefaultNodeNetworkController) Start()
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// IPv6 is not supported in DPU enabled nodes, error out if ovnkube is not set in IPv4 mode
+		if config.IPv6Mode && config.OvnKubeNode.Mode == types.NodeModeDPU {
+			return fmt.Errorf("IPv6 mode is not supported on a DPU enabled node")
+		}
 		// Initialize gateway for OVS internal port or representor management port
-		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, nc.mgmtPortController, nodeAddr)
+		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, nc.mgmtPortController)
 		if err != nil {
 			return err
 		}
@@ -999,7 +1004,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	if node, err = nc.Kube.GetNode(nc.name); err != nil {
+	if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
 
@@ -1028,7 +1033,37 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Complete gateway initialization
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		err = nc.initGatewayDPUHost(nc.nodeAddress)
+		// Resolve gateway interface from PCI address when configured as "derive-from-mgmt-port"
+		// This performs the following steps:
+		// Get the management port network device name
+		// Retrieve the PCI address of the management port device
+		// Get the Physical Function (PF) PCI address from the Virtual Function (VF) PCI address
+		// Retrieve all network devices associated with the PF PCI address
+		// Select the first available network device as the gateway interface
+		if config.Gateway.Interface == types.DeriveFromMgmtPort {
+			netdevName, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
+			if err != nil {
+				return err
+			}
+			pciAddr, err := util.GetSriovnetOps().GetPciFromNetDevice(netdevName)
+			if err != nil {
+				return err
+			}
+			pfPciAddr, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddr)
+			if err != nil {
+				return err
+			}
+			netdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddr)
+			if err != nil {
+				return err
+			}
+			if len(netdevs) == 0 {
+				return fmt.Errorf("no netdevs found for pci address %s", pfPciAddr)
+			}
+			netdevName = netdevs[0]
+			config.Gateway.Interface = netdevName
+		}
+		err = nc.initGatewayDPUHost(nc.nodeAddress, nodeAnnotator)
 		if err != nil {
 			return err
 		}
@@ -1079,7 +1114,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 			// we loop through all the nodes in the cluster and ensure ovnkube-controller has finished creating the LRSR required for pod2pod overlay communication
 			if !syncNodes {
-				nodes, err := nc.Kube.GetNodes()
+				nodes, err := nc.watchFactory.GetNodes()
 				if err != nil {
 					err1 = fmt.Errorf("upgrade hack: error retrieving node %s: %v", nc.name, err)
 					return false, nil
@@ -1186,10 +1221,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			bridgeName := nc.Gateway.GetGatewayIface()
-			// Configure route for svc towards shared gw bridge
-			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
-			if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
+			// Configure route for svc towards shared gateway interface
+			if err := configureSvcRouteViaInterface(nc.routeManager, nc.Gateway.GetGatewayIface(), DummyNextHopIPs()); err != nil {
 				return err
 			}
 		}
@@ -1292,7 +1325,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressService {
 		wf := nc.watchFactory.(*factory.WatchFactory)
-		c, err := egressservice.NewController(nc.stopChan, ovnKubeNodeSNATMark, nc.name,
+		c, err := egressservice.NewController(nc.stopChan, nodetypes.OvnKubeNodeSNATMark, nc.name,
 			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
 		if err != nil {
 			return err
@@ -1653,10 +1686,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 
 func getPMTUDKey(nodeName string) string {
 	return fmt.Sprintf("%s_pmtud", nodeName)
-}
-
-func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge string) error {
-	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs())
 }
 
 // DummyNextHopIPs returns the fake next hops used for service traffic routing.

@@ -124,6 +124,16 @@ or set to "shared" (share a network interface) or "local" (use a NAT-ed virtual 
 This interface will be used as the gateway interface in "shared" mode. If not
 specified the interface with the default route will be used.
 .TP
+\fBinterface\fR=derive-from-mgmt-port
+In DPU host mode, automatically resolve the gateway interface from PCI address.
+This performs the following steps:
+1. Get the management port network device name
+2. Retrieve the PCI address of the management port device
+3. Get the Physical Function (PF) PCI address from the Virtual Function (VF) PCI address
+4. Retrieve all network devices associated with the PF PCI address
+5. Select the first available network device as the gateway interface
+This option requires SR-IOV capable hardware and must be used with DPU host mode.
+.TP
 \fBnext-hop\fR=1.2.3.4
 This is the gateway IP address of \fBinterface\fR to which traffic exiting the
 OVN logical network should be sent in "shared" mode. If not specified

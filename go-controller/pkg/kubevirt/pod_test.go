@@ -98,6 +98,11 @@ var _ = Describe("Kubevirt Pod", func() {
 				pods: []corev1.Pod{successfullyMigratedKvSourcePod, failedMigrationKvTargetPod, successfulMigrationKvTargetPod},
 			},
 		),
+		Entry("returns nil when there is all the pods are completed (not running vm after migration)",
+			testParams{
+				pods: []corev1.Pod{completedKubevirtPod(t0), completedKubevirtPod(t1), completedKubevirtPod(t3)},
+			},
+		),
 		Entry("returns Migration in progress status when 2 pods are running, target pod is not yet ready",
 			testParams{
 				pods: []corev1.Pod{runningKvSourcePod, duringMigrationKvTargetPod},
@@ -146,12 +151,6 @@ var _ = Describe("Kubevirt Pod", func() {
 					TargetPod: &readyMigrationKvTargetPod,
 					State:     LiveMigrationTargetDomainReady,
 				},
-			},
-		),
-		Entry("returns err when kubevirt VM has several living pods and target pod failed",
-			testParams{
-				pods:          []corev1.Pod{runningKvSourcePod, successfulMigrationKvTargetPod, anotherFailedMigrationKvTargetPod},
-				expectedError: fmt.Errorf("unexpected live migration state: should have a single living pod"),
 			},
 		),
 		Entry("returns err when kubevirt VM has several living pods",
