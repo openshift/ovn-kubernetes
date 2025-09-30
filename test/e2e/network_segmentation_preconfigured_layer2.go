@@ -121,7 +121,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				role:                "primary",
 				defaultGatewayIPs:   joinStrings("172.31.0.10", "2014:100:200::100"),
 				reservedCIDRs:       joinStrings("172.31.1.0/24", "2014:100:200::/122"),
-				infrastructureCIDRs: joinStrings("172.31.0.10/30", "2014:100:200::100/122"),
+				infrastructureCIDRs: joinStrings("172.31.0.8/30", "2014:100:200::100/122"),
 			},
 			expectedGatewayIPs: []string{"172.31.0.10", "2014:100:200::100"},
 		}),
