@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #set -euo pipefail
 
 # Enable verbose shell output if OVNKUBE_SH_VERBOSE is set to 'true'
@@ -269,6 +269,8 @@ ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_NETWORK_SEGMENTATION_ENABLE - enable user defined primary networks for ovn-kubernetes
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
+#OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
+ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
 #OVN_NROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE:=false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -323,6 +325,16 @@ ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 # OVN_DISABLE_REQUESTEDCHASSIS - disable requested-chassis option during pod creation
 # should be set to true when dpu nodes are in the cluster
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
+
+# external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube stack
+# should function on behalf of a different host than external_ids:hostname. This includes
+# all the components that belond in an ovnkube stack (i.e. NB DB, SB DB, ovnkube etc)
+# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case
+ovn_k8s_node=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+if [[ ! -z $ovn_k8s_node ]]; then
+  echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
+  K8S_NODE=$ovn_k8s_node
+fi
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -977,6 +989,11 @@ local-nb-ovsdb() {
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
 
+ [[ "local" == "${OVN_GATEWAY_MODE}" &&  "true" == "${OVN_ROUTE_ADVERTISEMENTS_ENABLE}" ]] && {
+    ovn-nbctl set NB_Global . options:use_ct_inv_match=false
+    echo "=============== nb-ovsdb ========== reconfigured for route advertisements"
+  }
+
   # Let ovn-northd sleep and not use so much CPU
   ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=${ovn_northd_backoff_interval}
   echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
@@ -1259,7 +1276,7 @@ ovn-master() {
     ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
-  
+
   ovn_stateless_netpol_enable_flag=
   if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
           ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
@@ -1283,7 +1300,7 @@ ovn-master() {
     ovn_observ_enable_flag="--enable-observability"
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
-  
+
   nohostsubnet_label_option=
   if [[ ${ovn_nohostsubnet_label} != "" ]]; then
 	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
@@ -1356,6 +1373,7 @@ ovn-master() {
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${nohostsubnet_label_option} \
+    ${ovn_stateless_netpol_enable_flag} \
     ${ovn_disable_requestedchassis_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
@@ -1528,6 +1546,12 @@ ovnkube-controller() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  pre_conf_udn_addr_enable_flag=
+  if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
+	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
+  fi
+  echo "pre_conf_udn_addr_enable_flag=${pre_conf_udn_addr_enable_flag}"
+
   route_advertisements_enabled_flag=
   if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
@@ -1626,6 +1650,13 @@ ovnkube-controller() {
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
 
+
+  ovn_stateless_netpol_enable_flag=
+  if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
+          ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
+  fi
+  echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
+
   echo "=============== ovnkube-controller ========== MASTER ONLY"
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -1641,6 +1672,7 @@ ovnkube-controller() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_dbs} \
@@ -1825,6 +1857,12 @@ ovnkube-controller-with-node() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  pre_conf_udn_addr_enable_flag=
+  if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
+	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
+  fi
+  echo "pre_conf_udn_addr_enable_flag=${pre_conf_udn_addr_enable_flag}"
+
   route_advertisements_enabled_flag=
   if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
@@ -1943,7 +1981,7 @@ ovnkube-controller-with-node() {
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
   fi
-  
+
   ovn_metrics_bind_address="${metrics_endpoint_ip}:${metrics_bind_port}"
   metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
   echo "ovn_metrics_bind_address=${ovn_metrics_bind_address}"
@@ -2054,6 +2092,17 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
 
+  ovn_stateless_netpol_enable_flag=
+  if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
+          ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
+  fi
+
+  ovn_disable_requestedchassis_flag=
+  if [[ ${ovn_disable_requestedchassis} == "true" ]]; then
+          ovn_disable_requestedchassis_flag="--disable-requestedchassis"
+  fi
+  echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
+
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -2079,6 +2128,7 @@ ovnkube-controller-with-node() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
@@ -2106,6 +2156,7 @@ ovnkube-controller-with-node() {
     ${ssl_opts} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${ovn_disable_requestedchassis_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --export-ovs-metrics \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
@@ -2123,7 +2174,6 @@ ovnkube-controller-with-node() {
     --nodeport \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
-    --disable-udn-host-isolation \
     --zone ${ovn_zone} &
 
   wait_for_event attempts=3 process_ready ovnkube-controller-with-node
@@ -2246,6 +2296,12 @@ ovn-cluster-manager() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  pre_conf_udn_addr_enable_flag=
+  if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
+	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
+  fi
+  echo "pre_conf_udn_addr_enable_flag=${pre_conf_udn_addr_enable_flag}"
+
   route_advertisements_enabled_flag=
   if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
@@ -2313,6 +2369,7 @@ ovn-cluster-manager() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
@@ -2399,8 +2456,15 @@ ovn-node() {
     wait_for_event ovs_ready
   fi
 
-  echo "=============== ovn-node - (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node
+  if [[ ${ovnkube_node_mode} == "dpu-host" ]] && [[ ${ovn_enable_interconnect} == "true" ]]; then
+    # ready_to_start_node checks for the NB/SB readiness state.
+    # This is not available on the DPU host when interconnect is enabled,
+    # because the DBs will run locally on the DPU
+    echo "skipping ready_to_start_node on DPU Host and when interconnect is true"
+  else
+    echo "=============== ovn-node - (wait for ready_to_start_node)"
+    wait_for_event ready_to_start_node
+  fi
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
 
@@ -2481,6 +2545,11 @@ ovn-node() {
   network_segmentation_enabled_flag=
   if [[ ${ovn_network_segmentation_enable} == "true" ]]; then
 	  network_segmentation_enabled_flag="--enable-multi-network --enable-network-segmentation"
+  fi
+
+  pre_conf_udn_addr_enable_flag=
+  if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
+	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
   fi
 
   route_advertisements_enabled_flag=
@@ -2578,12 +2647,6 @@ ovn-node() {
   fi
 
   if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-    # in the case of dpu mode we want the host K8s Node Name and not the DPU K8s Node Name
-    K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
-    if [[ ${K8S_NODE} == "" ]]; then
-      echo "Couldn't get the required Host K8s Nodename. Exiting..."
-      exit 1
-    fi
     if [[ ${ovn_gateway_opts} == "" ]]; then
       # get the gateway interface
       gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
@@ -2724,6 +2787,7 @@ ovn-node() {
         ${multicast_enabled_flag} \
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
+        ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
         ${netflow_targets} \
         ${ofctrl_wait_before_clear} \
@@ -2761,7 +2825,6 @@ ovn-node() {
         --nodeport \
         --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
         --pidfile ${OVN_RUNDIR}/ovnkube.pid \
-        --disable-udn-host-isolation \
         --zone ${ovn_zone} &
 
   wait_for_event attempts=3 process_ready ovnkube

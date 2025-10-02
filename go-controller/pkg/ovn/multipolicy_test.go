@@ -20,6 +20,7 @@ import (
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -150,8 +151,8 @@ func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []
 						ovntypes.TopologyExternalID: ocInfo.bnc.TopologyType(),
 					},
 					Options: map[string]string{
-						"requested-chassis": pod.nodeName,
-						"iface-id-ver":      pod.podName,
+						libovsdbops.RequestedChassis: pod.nodeName,
+						"iface-id-ver":               pod.podName,
 					},
 
 					PortSecurity: []string{podAddr},

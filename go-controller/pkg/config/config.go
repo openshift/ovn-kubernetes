@@ -38,6 +38,9 @@ const DefaultVXLANPort = 4789
 
 const DefaultDBTxnTimeout = time.Second * 100
 
+// DefaultEphemeralPortRange is used for unit testing only
+const DefaultEphemeralPortRange = "32768-60999"
+
 // The following are global config parameters that other modules may access directly
 var (
 	// Build information. Populated at build-time.
@@ -420,19 +423,17 @@ type OVNKubernetesFeatureConfig struct {
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
+	EnablePreconfiguredUDNAddresses bool `gcfg:"enable-preconfigured-udn-addresses"`
 	EnableRouteAdvertisements       bool `gcfg:"enable-route-advertisements"`
-	// This feature requires a kernel fix https://github.com/torvalds/linux/commit/7f3287db654395f9c5ddd246325ff7889f550286
-	// to work on a kind cluster. Flag allows to disable it for current CI, will be turned on when github runners have this fix.
-	DisableUDNHostIsolation      bool `gcfg:"disable-udn-host-isolation"`
-	EnableMultiNetworkPolicy     bool `gcfg:"enable-multi-networkpolicy"`
-	EnableStatelessNetPol        bool `gcfg:"enable-stateless-netpol"`
-	EnableInterconnect           bool `gcfg:"enable-interconnect"`
-	EnableMultiExternalGateway   bool `gcfg:"enable-multi-external-gateway"`
-	EnablePersistentIPs          bool `gcfg:"enable-persistent-ips"`
-	EnableDNSNameResolver        bool `gcfg:"enable-dns-name-resolver"`
-	EnableServiceTemplateSupport bool `gcfg:"enable-svc-template-support"`
-	EnableObservability          bool `gcfg:"enable-observability"`
-	EnableNetworkQoS             bool `gcfg:"enable-network-qos"`
+	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
+	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
+	EnableInterconnect              bool `gcfg:"enable-interconnect"`
+	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
+	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
+	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
+	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
+	EnableObservability             bool `gcfg:"enable-observability"`
+	EnableNetworkQoS                bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -494,6 +495,10 @@ type GatewayConfig struct {
 	DisableForwarding bool `gcfg:"disable-forwarding"`
 	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
+	// EphemeralPortRange is the range of ports used by egress SNAT operations in OVN. Specifically for NAT where
+	// the source IP of the NAT will be a shared Node IP address. If unset, the value will be determined by sysctl lookup
+	// for the kernel's ephemeral range: net.ipv4.ip_local_port_range. Format is "<min port>-<max port>".
+	EphemeralPortRange string `gfcg:"ephemeral-port-range"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -664,6 +669,9 @@ func PrepareTestConfig() error {
 	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
 	Default.OVSDBTxnTimeout = 5 * time.Second
+	if Gateway.Mode != GatewayModeDisabled {
+		Gateway.EphemeralPortRange = DefaultEphemeralPortRange
+	}
 
 	if err := completeConfig(); err != nil {
 		return err
@@ -1077,16 +1085,16 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Value:       OVNKubernetesFeature.EnableMultiNetworkPolicy,
 	},
 	&cli.BoolFlag{
-		Name:        "disable-udn-host-isolation",
-		Usage:       "Configure to disable UDN host isolation with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.DisableUDNHostIsolation,
-		Value:       OVNKubernetesFeature.DisableUDNHostIsolation,
-	},
-	&cli.BoolFlag{
 		Name:        "enable-network-segmentation",
 		Usage:       "Configure to use network segmentation feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkSegmentation,
 		Value:       OVNKubernetesFeature.EnableNetworkSegmentation,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-preconfigured-udn-addresses",
+		Usage:       "Enable workloads connect to user-defined network with preconfigured addresses.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses,
+		Value:       OVNKubernetesFeature.EnablePreconfiguredUDNAddresses,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-route-advertisements",
@@ -1509,6 +1517,14 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Allow the external gateway bridge without an uplink port in local gateway mode",
 		Destination: &cliConfig.Gateway.AllowNoUplink,
 	},
+	&cli.StringFlag{
+		Name: "ephemeral-port-range",
+		Usage: "The port range in '<min port>-<max port>' format for OVN to use when SNAT'ing to a node IP. " +
+			"This range should not collide with the node port range being used in Kubernetes. If not provided, " +
+			"the default value will be derived from checking the sysctl value of net.ipv4.ip_local_port_range on the node.",
+		Destination: &cliConfig.Gateway.EphemeralPortRange,
+		Value:       Gateway.EphemeralPortRange,
+	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
@@ -1917,6 +1933,19 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		if !found {
 			return fmt.Errorf("invalid gateway mode %q: expect one of %s", string(Gateway.Mode), strings.Join(validModes, ","))
 		}
+
+		if len(Gateway.EphemeralPortRange) > 0 {
+			if !isValidEphemeralPortRange(Gateway.EphemeralPortRange) {
+				return fmt.Errorf("invalid ephemeral-port-range, should be in the format <min port>-<max port>")
+			}
+		} else {
+			// auto-detect ephermal range
+			portRange, err := getKernelEphemeralPortRange()
+			if err != nil {
+				return fmt.Errorf("unable to auto-detect ephemeral port range to use with OVN")
+			}
+			Gateway.EphemeralPortRange = portRange
+		}
 	}
 
 	// Options are only valid if Mode is not disabled
@@ -1926,6 +1955,9 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		}
 		if Gateway.NextHop != "" {
 			return fmt.Errorf("gateway next-hop option %q not allowed when gateway is disabled", Gateway.NextHop)
+		}
+		if len(Gateway.EphemeralPortRange) > 0 {
+			return fmt.Errorf("gateway ephemeral port range option not allowed when gateway is disabled")
 		}
 	}
 

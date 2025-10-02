@@ -23,7 +23,7 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -336,7 +336,7 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		Networks:       []string{node.NodeGWIP},
 		GatewayChassis: []string{chassisName + "-UUID"},
 		Options: map[string]string{
-			"gateway_mtu": "1400",
+			libovsdbops.GatewayMTU: "1400",
 		},
 	})
 	if serviceControllerEnabled {
@@ -356,8 +356,8 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		UUID: types.SwitchToRouterPrefix + node.Name + "-UUID",
 		Type: "router",
 		Options: map[string]string{
-			"router-port": types.RouterToSwitchPrefix + node.Name,
-			"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+			libovsdbops.RouterPort: types.RouterToSwitchPrefix + node.Name,
+			"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 		},
 		Addresses: []string{"router"},
 	})
@@ -383,14 +383,19 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 		Nexthops: []string{node.NodeMgmtPortIP},
 		Priority: intPriority,
 	})
-	testData = append(testData, &nbdb.LogicalRouterPolicy{
-		UUID:     "policy-based-route-2-UUID",
-		Action:   nbdb.LogicalRouterPolicyActionReroute,
-		Match:    matchStr2,
-		Nexthops: []string{node.NodeMgmtPortIP},
-		Priority: intPriority,
-	})
-	expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, []string{"policy-based-route-1-UUID", "policy-based-route-2-UUID"}...)
+	expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, "policy-based-route-1-UUID")
+
+	if config.Gateway.Mode == config.GatewayModeShared {
+		testData = append(testData, &nbdb.LogicalRouterPolicy{
+			UUID:     "policy-based-route-2-UUID",
+			Action:   nbdb.LogicalRouterPolicyActionReroute,
+			Match:    matchStr2,
+			Nexthops: []string{node.NodeMgmtPortIP},
+			Priority: intPriority,
+		})
+		expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, "policy-based-route-2-UUID")
+
+	}
 	testData = append(testData, expectedClusterPortGroup)
 	testData = append(testData, expectedClusterRouterPortGroup)
 	return testData
@@ -1093,9 +1098,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		}()
 
 		oc.SCTPSupport = true
-
-		expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
-			expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -1113,7 +1115,11 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			clusterSubnets := startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+
+			// Get node with the latest annotations set
+			testNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = oc.syncNodeGateway(testNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			retry.InitRetryObjWithAdd(testNode, testNode.Name, oc.retryNodes)
 			gomega.Expect(retry.RetryObjsLen(oc.retryNodes)).To(gomega.Equal(1))
@@ -1129,6 +1135,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(retry.CheckRetryObj(testNode.Name, oc.retryNodes)).To(gomega.BeFalse())
 
 			skipSnat := false
+			expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+				expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
@@ -1167,15 +1175,17 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				types.OVNClusterRouter, badRoute, p)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Syncing node with OVNK")
-			node, err := oc.kube.GetNode(testNode.Name)
+			node, err := oc.kube.GetNodeForWindows(testNode.Name)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = oc.syncNodeManagementPortDefault(node, node.Name, []*net.IPNet{subnet})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+			err = oc.syncNodeGateway(node)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.By("Stale route should have been removed")
 
 			skipSnat := false
+			expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+				expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
@@ -1202,10 +1212,15 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			clusterSubnets := startFakeController(oc, wg)
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+			// Get node with the latest annotations set
+			testNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = oc.syncNodeGateway(testNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			skipSnat := false
+			expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+				expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
@@ -1260,7 +1275,10 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				// ensure the stale SNAT's are cleaned up
 				gomega.Expect(oc.StartServiceController(wg, false)).To(gomega.Succeed())
 				subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-				err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, []string{node1.NodeIP})
+				// Get node with the latest annotations set
+				testNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = oc.syncNodeGateway(testNode)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				skipSnat := config.Gateway.DisableSNATMultipleGWs || oc.isPodNetworkAdvertisedAtNode(node1.Name)
@@ -1268,6 +1286,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				for _, clusterSubnet := range config.Default.ClusterSubnets {
 					clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 				}
+				expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+					expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 				expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 					expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 					[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
@@ -1349,6 +1369,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 			skipSnat := false
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+			expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+				expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
@@ -1394,6 +1416,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 			skipSnat := false
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+			expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
+				expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
 			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
 				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
@@ -1459,13 +1483,10 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			startFakeController(oc, wg)
 
-			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			nodeHostAddrs := []string{}
-			for _, nodeHostCIDR := range nodeHostCIDRs.UnsortedList() {
-				ip, _, _ := net.ParseCIDR(nodeHostCIDR)
-				nodeHostAddrs = append(nodeHostAddrs, ip.String())
-			}
-			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			// Get node with the latest annotations set
+			testNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = oc.syncNodeGateway(testNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// inject transient problem, nbdb is down
@@ -1558,13 +1579,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			startFakeController(oc, wg)
 
-			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			nodeHostAddrs := []string{}
-			for _, nodeHostCIDR := range nodeHostCIDRs.UnsortedList() {
-				ip, _, _ := net.ParseCIDR(nodeHostCIDR)
-				nodeHostAddrs = append(nodeHostAddrs, ip.String())
-			}
-			err = oc.syncDefaultGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+			testNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = oc.syncNodeGateway(testNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Delete the node's gateway Logical Router Port to force node delete to handle a
@@ -1639,7 +1656,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			ginkgo.By("adding the node becomes possible")
-			gomega.Expect(oc.retryNodes.ResourceHandler.AddResource(&testNode, false)).To(gomega.Succeed())
+			gomega.Eventually(oc.retryNodes.ResourceHandler.AddResource).WithArguments(&testNode, false).Should(gomega.Succeed())
 
 			return nil
 		}

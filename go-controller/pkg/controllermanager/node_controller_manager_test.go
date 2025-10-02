@@ -228,7 +228,7 @@ var _ = Describe("Healthcheck tests", func() {
 				},
 			}
 			nodeList := []*corev1.Node{node}
-			factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
+			factoryMock.On("GetNodeForWindows", nodeName).Return(nodeList[0], nil)
 			factoryMock.On("GetNodes").Return(nodeList, nil)
 			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
 			factoryMock.On("ClusterUserDefinedNetworkInformer").Return(nil)
