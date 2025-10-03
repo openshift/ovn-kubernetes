@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -44,6 +45,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		dnsServiceIPv6    = "fd7b:6b4d:7b25:d22f::3"
 		clusterCIDRIPv4   = "10.128.0.0/16"
 		clusterCIDRIPv6   = "fe00::/64"
+		subnetSuffixIPv4  = "/24"
+		subnetSuffixIPv6  = "/64"
 	)
 	type testDHCPOptions struct {
 		cidr     string
@@ -824,26 +827,63 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					Expect(err).ToNot(HaveOccurred())
 				}
 
-				if t.podName != "" {
-					pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					pod.Status.Phase = corev1.PodSucceeded
-					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, metav1.DeleteOptions{})
-					Expect(err).NotTo(HaveOccurred())
-
-					if t.migrationTarget.nodeName != "" {
-						pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.migrationTarget.podName, metav1.GetOptions{})
-						Expect(err).NotTo(HaveOccurred())
-						pod.Status.Phase = corev1.PodSucceeded
-						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
-						Expect(err).NotTo(HaveOccurred())
-						err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.migrationTarget.podName, metav1.DeleteOptions{})
-						Expect(err).NotTo(HaveOccurred())
-					}
-					Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedNBDBAfterCleanup(expectedStaticRoutes)), "should cleanup ovn")
+				var vmIPs []string
+				if t.addressIPv4 != "" {
+					vmIPs = append(vmIPs, t.addressIPv4+subnetSuffixIPv4)
 				}
+				if t.addressIPv6 != "" {
+					vmIPs = append(vmIPs, t.addressIPv6+subnetSuffixIPv6)
+				}
+				vmIPNets := testing.MustParseIPNets(vmIPs...)
+				subnet, checkRelease := fakeOvn.controller.lsManager.GetSubnetName(vmIPNets)
+
+				if t.podName == "" {
+					return nil
+				}
+
+				completeAndDeletePod := func(namespace, name string) {
+					pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+					ExpectWithOffset(1, err).NotTo(HaveOccurred())
+					pod.Status.Phase = corev1.PodSucceeded
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
+					ExpectWithOffset(1, err).NotTo(HaveOccurred())
+					err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+					ExpectWithOffset(1, err).NotTo(HaveOccurred())
+				}
+
+				deleteFirst := t.testVirtLauncherPod
+				deleteSecond := t.migrationTarget.testVirtLauncherPod
+				hasMigration := t.migrationTarget.nodeName != ""
+				hasUnsuccesfulMigration := hasMigration && t.migrationTarget.updatePhase != nil
+				if hasUnsuccesfulMigration {
+					deleteFirst = t.migrationTarget.testVirtLauncherPod
+					deleteSecond = t.testVirtLauncherPod
+				}
+
+				completeAndDeletePod(t.namespace, deleteFirst.podName)
+				if !hasMigration {
+					if checkRelease {
+						Eventually(fakeOvn.controller.lsManager.AllocateIPs).
+							WithArguments(subnet, vmIPNets).
+							Should(Succeed(), "should have de-allocated VM IP after termination")
+					}
+					Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedNBDBAfterCleanup(expectedStaticRoutes)), "should cleanup terminated pod data from ovn")
+					return nil
+				}
+				if checkRelease {
+					Consistently(fakeOvn.controller.lsManager.AllocateIPs).
+						WithArguments(subnet, vmIPNets).
+						ShouldNot(Succeed(), "should have not de-allocated VM IP after migration")
+				}
+
+				completeAndDeletePod(t.namespace, deleteSecond.podName)
+				if checkRelease {
+					Eventually(fakeOvn.controller.lsManager.AllocateIPs).
+						WithArguments(subnet, vmIPNets).
+						Should(Succeed(), "should have de-allocated target VM IP after termination")
+				}
+
+				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedNBDBAfterCleanup(expectedStaticRoutes)), "should cleanup terminated target pod data from ovn")
 
 				return nil
 			}
@@ -1255,7 +1295,18 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						zone:    kubevirt.OvnRemoteZone,
 					},
 				},
-				testVirtLauncherPod: virtLauncher2(node1, vm1),
+				testVirtLauncherPod: testVirtLauncherPod{
+					suffix: "1",
+					testPod: testPod{
+						nodeName: node2,
+					},
+					vmName:             vm1,
+					skipPodAnnotations: false, /* add ovn pod annotation */
+				},
+				migrationTarget: testMigrationTarget{
+					lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
+					testVirtLauncherPod: virtLauncher2(node1, vm1),
+				},
 				expectedDhcpv4: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv4,
 					dns:      dnsServiceIPv4,

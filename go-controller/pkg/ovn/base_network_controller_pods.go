@@ -1007,22 +1007,17 @@ func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
 
 func (bnc *BaseNetworkController) shouldReleaseDeletedPod(pod *kapi.Pod, switchName, nad string, podIfAddrs []*net.IPNet) (bool, error) {
 	var err error
-	var isMigratedSourcePodStale bool
-	if !bnc.IsSecondary() {
-		isMigratedSourcePodStale, err = kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, pod)
+	if !bnc.IsSecondary() && kubevirt.IsPodLiveMigratable(pod) {
+		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(bnc.watchFactory, pod)
 		if err != nil {
 			return false, err
 		}
-	}
 
-	// Removing the the kubevirt stale pods should not de allocate the IPs
-	// to ensure that new pods do not take them
-	if isMigratedSourcePodStale {
-		return false, nil
-	}
-
-	if !util.PodCompleted(pod) {
-		return true, nil
+		// Removing the the kubevirt stale pods should not de allocate the IPs
+		// to ensure that new pods do not take them
+		if !allVMPodsAreCompleted {
+			return false, nil
+		}
 	}
 
 	if bnc.wasPodReleasedBeforeStartup(string(pod.UID), nad) {
