@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/framework/debug"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
@@ -1137,6 +1138,12 @@ func isCIDRIPFamilySupported(cs kubernetes.Interface, cidr string) bool {
 	return (isIPv4Supported(cs) && !isIPv6) || (isIPv6Supported(cs) && isIPv6)
 }
 
+func isIPFamilySupported(cs clientset.Interface, cidr string) bool {
+	ginkgo.GinkgoHelper()
+	isIPv6 := utilnet.IsIPv6String(cidr)
+	return (isIPv4Supported(cs) && !isIPv6) || (isIPv6Supported(cs) && isIPv6)
+}
+
 func isIPv4Supported(cs kubernetes.Interface) bool {
 	v4, _ := getSupportedIPFamilies(cs)
 	return v4
@@ -1181,6 +1188,12 @@ func isNetworkSegmentationEnabled() bool {
 func isLocalGWModeEnabled() bool {
 	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
 	return present && val == "local"
+}
+
+func isPreConfiguredUdnAddressesEnabled() bool {
+	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+	val := getTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_PRE_CONF_UDN_ADDR_ENABLE")
+	return val == "true"
 }
 
 func singleNodePerZone() bool {
@@ -1515,4 +1528,9 @@ func executeFileTemplate(templates *template.Template, directory, name string, d
 		return err
 	}
 	return nil
+}
+
+func isDNSNameResolverEnabled() bool {
+	val, present := os.LookupEnv("OVN_ENABLE_DNSNAMERESOLVER")
+	return present && val == "true"
 }
