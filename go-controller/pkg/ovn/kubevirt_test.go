@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
@@ -250,6 +251,27 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			}
 			// Prepend previous data
 			return append(previousData, data...)
+		}
+
+		filterOutStaleVirtLauncherExpectedTestData = func(namespace, name string, previousData []libovsdb.TestData) []libovsdb.TestData {
+			var data []libovsdb.TestData
+			lspUUID := util.GetLogicalPortName(namespace, name) + "-UUID"
+			for _, d := range previousData {
+				switch model := d.(type) {
+				case *nbdb.LogicalSwitch:
+					lsp := *model
+					lsp.Ports = slices.Clone(lsp.Ports)
+					lsp.Ports = slices.DeleteFunc(lsp.Ports, func(port string) bool { return port == lspUUID })
+					d = &lsp
+				case *nbdb.LogicalSwitchPort:
+					if model.UUID == lspUUID {
+						continue
+					}
+				}
+				data = append(data, d)
+
+			}
+			return data
 		}
 
 		newPodFromTestVirtLauncherPod = func(t testVirtLauncherPod) *corev1.Pod {
@@ -867,7 +889,10 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 							WithArguments(subnet, vmIPNets).
 							Should(Succeed(), "should have de-allocated VM IP after termination")
 					}
-					Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedNBDBAfterCleanup(expectedStaticRoutes)), "should cleanup terminated pod data from ovn")
+					Eventually(fakeOvn.nbClient).Should(
+						libovsdb.HaveData(expectedNBDBAfterCleanup(expectedStaticRoutes)),
+						"should cleanup terminated pod data from ovn",
+					)
 					return nil
 				}
 				if checkRelease {
@@ -876,6 +901,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						ShouldNot(Succeed(), "should have not de-allocated VM IP after migration")
 				}
 
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdb.HaveData(filterOutStaleVirtLauncherExpectedTestData(t.namespace, deleteFirst.podName, expectedOVN)),
+					"should cleanup source pod data from ovn",
+				)
+
 				completeAndDeletePod(t.namespace, deleteSecond.podName)
 				if checkRelease {
 					Eventually(fakeOvn.controller.lsManager.AllocateIPs).
@@ -883,7 +913,10 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						Should(Succeed(), "should have de-allocated target VM IP after termination")
 				}
 
-				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedNBDBAfterCleanup(expectedStaticRoutes)), "should cleanup terminated target pod data from ovn")
+				Eventually(fakeOvn.nbClient).Should(
+					libovsdb.HaveData(expectedNBDBAfterCleanup(expectedStaticRoutes)),
+					"should cleanup terminated target pod data from ovn",
+				)
 
 				return nil
 			}
