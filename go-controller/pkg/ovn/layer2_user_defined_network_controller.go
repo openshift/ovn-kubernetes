@@ -745,14 +745,34 @@ func (oc *Layer2UserDefinedNetworkController) addPortForRemoteNodeGR(node *corev
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node) error {
-	if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
-		return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+func (oc *Layer2UserDefinedNetworkController) delPortForRemoteNodeGR(node *corev1.Node) error {
+	swName := oc.GetNetworkScopedSwitchName("")
+	sw := &nbdb.LogicalSwitch{Name: swName}
+	logicalSwitchPort := &nbdb.LogicalSwitchPort{
+		Name: types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName("") + "_" + node.Name,
 	}
-	oc.gatewayManagers.Delete(node.Name)
+	if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, sw, logicalSwitchPort); err != nil {
+		return fmt.Errorf("failed to delete remote GR switch port %q from layer 2 switch %q for the node %q, error: %w",
+			logicalSwitchPort.Name, swName, node.Name, err)
+	}
+	return nil
+}
+
+func (oc *Layer2UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node) error {
+	if _, local := oc.localZoneNodes.Load(node.Name); local {
+		if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+		}
+		oc.gatewayManagers.Delete(node.Name)
+	} else if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.delPortForRemoteNodeGR(node); err != nil {
+			return fmt.Errorf("failed to cleanup remote zone node %s's remote LRP, %w", node.Name, err)
+		}
+	}
 	oc.localZoneNodes.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.syncEIPNodeRerouteFailed.Delete(node.Name)
+	oc.syncZoneICFailed.Delete(node.Name)
 	return nil
 }
 
