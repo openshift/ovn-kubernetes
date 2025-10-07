@@ -1,8 +1,6 @@
 package ovn
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -399,7 +397,8 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 	}
 
-	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) {
+	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) &&
+		config.OVNKubernetesFeature.AdvertisedUDNIsolationMode == config.AdvertisedUDNIsolationModeStrict {
 		return oc.addAdvertisedNetworkIsolation(node.Name)
 	}
 	return oc.deleteAdvertisedNetworkIsolation(node.Name)
@@ -422,24 +421,6 @@ func nodeSubnetChanged(oldNode, node *corev1.Node, netName string) bool {
 	}
 
 	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, node, netName)
-}
-
-func joinCIDRChanged(oldNode, node *corev1.Node, netName string) bool {
-	var oldCIDRs, newCIDRs map[string]json.RawMessage
-
-	if oldNode.Annotations[util.OVNNodeGRLRPAddrs] == node.Annotations[util.OVNNodeGRLRPAddrs] {
-		return false
-	}
-
-	if err := json.Unmarshal([]byte(oldNode.Annotations[util.OVNNodeGRLRPAddrs]), &oldCIDRs); err != nil {
-		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
-		return false
-	}
-	if err := json.Unmarshal([]byte(node.Annotations[util.OVNNodeGRLRPAddrs]), &newCIDRs); err != nil {
-		klog.Errorf("Failed to unmarshal new node %s annotation: %v", node.Name, err)
-		return false
-	}
-	return !bytes.Equal(oldCIDRs[netName], newCIDRs[netName])
 }
 
 func primaryAddrChanged(oldNode, newNode *corev1.Node) bool {

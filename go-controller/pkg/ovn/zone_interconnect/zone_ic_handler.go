@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -191,7 +192,7 @@ func (zic *ZoneInterconnectHandler) ensureTransitSwitch(nodes []*corev1.Node) er
 // See createLocalZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 	klog.Infof("Creating interconnect resources for local zone node %s for the network %s", node.Name, zic.GetNetworkName())
-	nodeID := util.GetNodeID(node)
+	nodeID, _ := util.GetNodeID(node)
 	if nodeID == -1 {
 		// Don't consider this node as cluster-manager has not allocated node id yet.
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
@@ -209,7 +210,7 @@ func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	start := time.Now()
 
-	nodeID := util.GetNodeID(node)
+	nodeID, _ := util.GetNodeID(node)
 	if nodeID == -1 {
 		// Don't consider this node as cluster-manager has not allocated node id yet.
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
@@ -238,7 +239,7 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	// only primary networks have cluster router connected to join switch+GR
 	// used for adding routes to GR
 	if !zic.IsSecondary() || (util.IsNetworkSegmentationSupportEnabled() && zic.IsPrimaryNetwork()) {
-		nodeGRPIPs, err = util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+		nodeGRPIPs, err = udn.GetGWRouterIPs(node, zic.GetNetInfo())
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				// FIXME(tssurya): This is present for backwards compatibility
@@ -653,7 +654,7 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 	}
 
 	// Clear the routes connecting to the GW Router for the default network
-	nodeGRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+	nodeGRPIPs, err := udn.GetGWRouterIPs(node, zic.GetNetInfo())
 	if err != nil {
 		if util.IsAnnotationNotSetError(err) {
 			// FIXME(tssurya): This is present for backwards compatibility
