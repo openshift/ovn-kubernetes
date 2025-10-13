@@ -67,6 +67,10 @@ func (h *gwEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error)
 		}
 		return false, nil
 
+	case factory.PodType:
+		// For pods, we care about label changes and pod IP changes that might affect EgressIP matching
+		return false, nil
+
 	default:
 		return false, fmt.Errorf("no object comparison for type %s", h.objType)
 	}
@@ -96,6 +100,9 @@ func (h *gwEventHandler) GetResourceFromInformerCache(key string) (interface{}, 
 	case factory.EgressIPType:
 		obj, err = h.g.watchFactory.GetEgressIP(name)
 
+	case factory.PodType:
+		obj, err = h.g.watchFactory.GetPod(namespace, name)
+
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
 			h.objType)
@@ -121,6 +128,10 @@ func (h *gwEventHandler) AddResource(obj interface{}, _ bool) error {
 	case factory.EgressIPType:
 		eip := obj.(*egressipv1.EgressIP)
 		return h.g.AddEgressIP(eip)
+
+	case factory.PodType:
+		// For pods, we don't have individual add/update/delete methods, just sync all EgressIPs
+		return nil // Handled by SyncFunc
 
 	default:
 		return fmt.Errorf("no add function for object type %s", h.objType)
@@ -148,6 +159,10 @@ func (h *gwEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) erro
 		newEIP := newObj.(*egressipv1.EgressIP)
 		return h.g.UpdateEgressIP(oldEIP, newEIP)
 
+	case factory.PodType:
+		// For pods, we don't have individual add/update/delete methods, just sync all EgressIPs
+		return nil // Handled by SyncFunc
+
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
@@ -170,6 +185,10 @@ func (h *gwEventHandler) DeleteResource(obj, _ interface{}) error {
 	case factory.EgressIPType:
 		eip := obj.(*egressipv1.EgressIP)
 		return h.g.DeleteEgressIP(eip)
+
+	case factory.PodType:
+		// For pods, we don't have individual add/update/delete methods, just sync all EgressIPs
+		return nil // Handled by SyncFunc
 
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
@@ -194,6 +213,9 @@ func (h *gwEventHandler) SyncFunc(objs []interface{}) error {
 
 		case factory.EgressIPType:
 			syncFunc = h.g.SyncEgressIP
+
+		case factory.PodType:
+			syncFunc = h.g.SyncPodsForEgressIP
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)

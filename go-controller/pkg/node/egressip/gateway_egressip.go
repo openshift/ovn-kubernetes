@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/netip"
 	"sync"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1informers "k8s.io/client-go/informers/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -17,6 +20,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
+	"github.com/gaissmai/cidrtree"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipinformers "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
@@ -180,6 +184,8 @@ type BridgeEIPAddrManager struct {
 	eIPLister        egressiplisters.EgressIPLister
 	eIPInformer      cache.SharedIndexInformer
 	nodeLister       corev1listers.NodeLister
+	podLister        corev1listers.PodLister
+	namespaceLister  corev1listers.NamespaceLister
 	kube             kube.Interface
 	addrManager      *linkmanager.Controller
 	cache            *MarkIPsCache
@@ -190,9 +196,10 @@ type BridgeEIPAddrManager struct {
 // prior to restarting.
 // It provides the assigned IPs info node IP handler. Node IP handler must not consider assigned EgressIP IPs as possible node IPs.
 // Openflow manager must generate the SNAT openflow conditional on packet marks and therefore needs access to EIP IPs and associated packet marks.
-// BridgeEIPAddrManager must be able to force Openflow manager to resync if EgressIP assignment for the node changes.
-func NewBridgeEIPAddrManager(nodeName, bridgeName string, linkManager *linkmanager.Controller,
-	kube kube.Interface, eIPInformer egressipinformers.EgressIPInformer, nodeInformer corev1informers.NodeInformer) *BridgeEIPAddrManager {
+// bridgeEIPAddrManager must be able to force Openflow manager to resync if EgressIP assignment for the node changes.
+func newBridgeEIPAddrManager(nodeName, bridgeName string, linkManager *linkmanager.Controller,
+	kube kube.Interface, eIPInformer egressipinformers.EgressIPInformer, nodeInformer corev1informers.NodeInformer,
+	podInformer corev1informers.PodInformer, namespaceInformer corev1informers.NamespaceInformer) *BridgeEIPAddrManager {
 	return &BridgeEIPAddrManager{
 		nodeName:         nodeName,     // k8 node name
 		bridgeName:       bridgeName,   // bridge name for which EIP IPs are managed
@@ -200,6 +207,8 @@ func NewBridgeEIPAddrManager(nodeName, bridgeName string, linkManager *linkmanag
 		eIPLister:        eIPInformer.Lister(),
 		eIPInformer:      eIPInformer.Informer(),
 		nodeLister:       nodeInformer.Lister(),
+		podLister:        podInformer.Lister(),
+		namespaceLister:  namespaceInformer.Lister(),
 		kube:             kube,
 		addrManager:      linkManager,
 		cache:            NewMarkIPsCache(), // cache to store pkt mark -> EIP IP.
@@ -210,11 +219,150 @@ func (g *BridgeEIPAddrManager) GetCache() *MarkIPsCache {
 	return g.cache
 }
 
+// NewBridgeEIPAddrManager creates a new bridge EIP address manager
+func NewBridgeEIPAddrManager(nodeName, bridgeName string, linkManager *linkmanager.Controller,
+	kube kube.Interface, eIPInformer egressipinformers.EgressIPInformer, nodeInformer corev1informers.NodeInformer) *BridgeEIPAddrManager {
+	return newBridgeEIPAddrManager(nodeName, bridgeName, linkManager, kube, eIPInformer, nodeInformer, nil, nil)
+}
+
+// findLinkOnSameNetworkAsIPUsingLPM finds the correct interface for an EgressIP using longest prefix match
+// This is based on the implementation in the secondary EgressIP controller
+func (g *BridgeEIPAddrManager) findLinkOnSameNetworkAsIPUsingLPM(ip net.IP, v4, v6 bool) (bool, netlink.Link, error) {
+	prefixLinks := map[string]netlink.Link{} // key is network CIDR
+	prefixes := make([]netip.Prefix, 0)
+	links, err := util.GetNetLinkOps().LinkList()
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to list links: %v", err)
+	}
+	for _, link := range links {
+		link := link
+		linkPrefixes, err := g.getFilteredPrefixes(link, v4, v6)
+		if err != nil {
+			klog.Errorf("Failed to get address from link %s: %v", link.Attrs().Name, err)
+			continue
+		}
+		prefixes = append(prefixes, linkPrefixes...)
+		// create lookup table for later retrieval
+		for _, prefixFound := range linkPrefixes {
+			_, ipNet, err := net.ParseCIDR(prefixFound.String())
+			if err != nil {
+				klog.Errorf("Egress IP: skipping prefix %q due to parsing CIDR error: %v", prefixFound.String(), err)
+				continue
+			}
+			prefixLinks[ipNet.String()] = link
+		}
+	}
+	lpmTree := cidrtree.New(prefixes...)
+	addr, err := netip.ParseAddr(ip.String())
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to convert IP %s to netip addr: %v", ip.String(), err)
+	}
+	network, found := lpmTree.Lookup(addr)
+	if !found {
+		return false, nil, nil
+	}
+	link, ok := prefixLinks[network.String()]
+	if !ok {
+		return false, nil, nil
+	}
+	return true, link, nil
+}
+
+// getFilteredPrefixes returns address Prefixes from interfaces with filtering
+func (g *BridgeEIPAddrManager) getFilteredPrefixes(link netlink.Link, v4, v6 bool) ([]netip.Prefix, error) {
+	validAddresses := make([]netip.Prefix, 0)
+	flags := link.Attrs().Flags.String()
+	if !g.isLinkUp(flags) {
+		return validAddresses, nil
+	}
+	linkAddresses, err := util.GetFilteredInterfaceAddrs(link, v4, v6)
+	if err != nil {
+		return validAddresses, err
+	}
+	for _, addr := range linkAddresses {
+		// Skip single-host addresses (/32 for IPv4, /128 for IPv6)
+		ones, bits := addr.Mask.Size()
+		if ones == bits {
+			continue
+		}
+		// Convert to netip.Prefix
+		prefix, err := netip.ParsePrefix(addr.String())
+		if err != nil {
+			klog.Errorf("Failed to parse address %s as netip.Prefix: %v", addr.String(), err)
+			continue
+		}
+		validAddresses = append(validAddresses, prefix)
+	}
+	return validAddresses, nil
+}
+
+// isLinkUp checks if a network link is up
+func (g *BridgeEIPAddrManager) isLinkUp(flags string) bool {
+	return (flags != "" && (flags == "up" || flags == "up|broadcast|multicast"))
+}
+
+// hasMatchingPods checks if there are any pods matching the EgressIP's namespace and pod selectors
+func (g *BridgeEIPAddrManager) hasMatchingPods(eip *egressipv1.EgressIP) (bool, error) {
+	namespaceSelector, err := metav1.LabelSelectorAsSelector(&eip.Spec.NamespaceSelector)
+	if err != nil {
+		return false, fmt.Errorf("failed to convert namespace selector: %v", err)
+	}
+
+	podSelector, err := metav1.LabelSelectorAsSelector(&eip.Spec.PodSelector)
+	if err != nil {
+		return false, fmt.Errorf("failed to convert pod selector: %v", err)
+	}
+
+	// Get all namespaces and filter by label selector
+	allNamespaces, err := g.namespaceLister.List(labels.Everything())
+	if err != nil {
+		return false, fmt.Errorf("failed to list all namespaces: %v", err)
+	}
+
+	for _, namespace := range allNamespaces {
+		namespaceLabels := labels.Set(namespace.Labels)
+		if !namespaceSelector.Matches(namespaceLabels) {
+			continue
+		}
+
+		// Get all pods in this namespace and filter by pod selector
+		allPods, err := g.podLister.Pods(namespace.Name).List(labels.Everything())
+		if err != nil {
+			return false, fmt.Errorf("failed to list pods in namespace %s: %v", namespace.Name, err)
+		}
+
+		for _, pod := range allPods {
+			podLabels := labels.Set(pod.Labels)
+			if !podSelector.Matches(podLabels) {
+				continue
+			}
+
+			// Check if pod is actually running and has IPs
+			if !util.PodCompleted(pod) && !util.PodWantsHostNetwork(pod) && len(pod.Status.PodIPs) > 0 {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
 func (g *BridgeEIPAddrManager) AddEgressIP(eip *egressipv1.EgressIP) (bool, error) {
 	var isUpdated bool
 	if !util.IsEgressIPMarkSet(eip.Annotations) {
 		return isUpdated, nil
 	}
+
+	// First check if there are any matching pods for this EgressIP
+	hasMatchingPods, err := g.hasMatchingPods(eip)
+	if err != nil {
+		return isUpdated, fmt.Errorf("failed to check for matching pods: %v", err)
+	}
+	if !hasMatchingPods {
+		klog.V(5).Infof("EgressIP %s has no matching pods yet, skipping bridge IP assignment", eip.Name)
+		return isUpdated, nil
+	}
+
 	for _, status := range eip.Status.Items {
 		if status.Node != g.nodeName {
 			continue
@@ -223,6 +371,32 @@ func (g *BridgeEIPAddrManager) AddEgressIP(eip *egressipv1.EgressIP) (bool, erro
 		if err != nil {
 			return isUpdated, fmt.Errorf("failed to add EgressIP gateway config because unable to extract config from EgressIP obj: %v", err)
 		}
+
+		// Use longest prefix matching to determine the correct interface for this EgressIP
+		egressIP := net.ParseIP(status.EgressIP)
+		if egressIP == nil {
+			return isUpdated, fmt.Errorf("failed to parse EgressIP %s", status.EgressIP)
+		}
+
+		isEIPv4 := egressIP.To4() != nil
+		found, correctLink, err := g.findLinkOnSameNetworkAsIPUsingLPM(egressIP, isEIPv4, !isEIPv4)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to find correct interface using LPM: %v", err)
+		}
+		if !found {
+			klog.Warningf("No suitable interface found for EgressIP %s using LPM", status.EgressIP)
+			return isUpdated, nil
+		}
+
+		// Only proceed if the bridge we're managing is the correct interface
+		if correctLink.Attrs().Name != g.bridgeName {
+			klog.V(5).Infof("EgressIP %s should be assigned to interface %s, not bridge %s, skipping",
+				status.EgressIP, correctLink.Attrs().Name, g.bridgeName)
+			return isUpdated, nil
+		}
+
+		klog.Infof("Adding EgressIP %s to bridge %s based on LPM and matching pods", status.EgressIP, g.bridgeName)
+
 		// must always add to cache before adding IP because we want to inform node ip handler that this is not a valid node IP
 		g.cache.insertMarkIP(pktMark, ip)
 		if err = g.addIPToAnnotation(ip); err != nil {
