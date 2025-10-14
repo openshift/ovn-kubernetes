@@ -540,11 +540,10 @@ func (r *DefaultGatewayReconciler) ReconcileIPv4AfterLiveMigration(liveMigration
 
 	lrpMAC := util.IPAddrToHWAddr(lrpJoinAddress)
 	for _, subnet := range r.netInfo.Subnets() {
-		gwIP := r.netInfo.GetNodeGatewayIP(subnet.CIDR).IP.To4()
-		if gwIP == nil {
-			continue
+		garp, err := util.NewGARP(r.netInfo.GetNodeGatewayIP(subnet.CIDR).IP, &lrpMAC)
+		if err != nil {
+			return fmt.Errorf("failed to create GARP for gateway IP %s: %w", r.netInfo.GetNodeGatewayIP(subnet.CIDR).IP, err)
 		}
-		garp := util.GARP{IP: gwIP, MAC: &lrpMAC}
 		if err := util.BroadcastGARP(r.interfaceName, garp); err != nil {
 			return err
 		}

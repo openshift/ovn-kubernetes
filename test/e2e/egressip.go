@@ -2957,6 +2957,94 @@ spec:
 			"and verify the expected IP, failed for EgressIP %s: %v", egressIPName, err)
 	})
 
+	ginkgo.It("[secondary-host-eip] should send GARP for EgressIP", func() {
+		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
+			ginkgo.Skip("GARP test only supports IPv4")
+		}
+		egressIPSecondaryHost := "10.10.10.220"
+
+		// flush any potentially stale MACs and allow GARPs
+		_, err := infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
+			[]string{"ip", "neigh", "flush", egressIPSecondaryHost})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should flush neighbor cache")
+
+		_, err = infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
+			[]string{"sysctl", "-w", "net.ipv4.conf.all.arp_accept=1"})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should enable arp_accept")
+
+		podNamespace := f.Namespace
+		labels := map[string]string{"name": f.Namespace.Name}
+		updateNamespaceLabels(f, podNamespace, labels)
+
+		ginkgo.By("Labeling node as available for egress")
+		egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
+		egressNodeAvailabilityHandler.Enable(egress1Node.name)
+		defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
+
+		_, err = createGenericPodWithLabel(f, pod1Name, egress1Node.name, f.Namespace.Name, []string{"/agnhost", "pause"}, podEgressLabel)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should create egress pod")
+
+		egressIPConfig := `apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName + `
+spec:
+    egressIPs:
+    - ` + egressIPSecondaryHost + `
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`
+		if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+		e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+		status := verifyEgressIPStatusLengthEquals(1, nil)
+		networks, err := providerCtx.GetAttachedNetworks()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should get attached networks")
+		secondaryNetwork, exists := networks.Get(secondaryNetworkName)
+		gomega.Expect(exists).Should(gomega.BeTrue(), "network %s must exist", secondaryNetworkName)
+		inf, err := infraprovider.Get().GetK8NodeNetworkInterface(status[0].Node, secondaryNetwork)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should have network interface for network %s on instance %s", secondaryNetwork.Name(), egress1Node.name)
+
+		ginkgo.By("Verifying GARP populated neighbor table")
+		var neighborMAC string
+		gomega.Eventually(func() bool {
+			output, err := infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
+				[]string{"ip", "-j", "neigh", "show", egressIPSecondaryHost})
+			if err != nil {
+				framework.Logf("Failed to get neighbor table: %v", err)
+				return false
+			}
+
+			var neighbors []IpNeighbor
+			if err := json.Unmarshal([]byte(output), &neighbors); err != nil {
+				framework.Logf("Failed to parse neighbor JSON: %v", err)
+				return false
+			}
+
+			for _, n := range neighbors {
+				if n.Lladdr != "" {
+					neighborMAC = n.Lladdr
+					framework.Logf("Neighbor entry found for %s -> MAC %s", egressIPSecondaryHost, neighborMAC)
+					return true
+				}
+			}
+			return false
+		}, 30*time.Second, 2*time.Second).Should(gomega.BeTrue(),
+			"Neighbor entry should appear via GARP")
+		gomega.Expect(neighborMAC).Should(gomega.Equal(inf.MAC), "neighbor entry should have the correct MAC address")
+	})
+
 	// two pods attached to different namespaces but the same role primary user defined network
 	// One pod is deleted and ensure connectivity for the other pod is ok
 	// The previous pod namespace is deleted and again, ensure connectivity for the other pod is ok
