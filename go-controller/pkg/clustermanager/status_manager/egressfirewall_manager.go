@@ -71,9 +71,7 @@ func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.E
 
 //lint:ignore U1000 generic interfaces throw false-positives
 func (m *egressFirewallManager) cleanupStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions) error {
-	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace).
-		WithStatus(egressfirewallapply.EgressFirewallStatus())
-
+	applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace)
 	_, err := m.client.K8sV1().EgressFirewalls(egressFirewall.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
 	return err
 }
