@@ -223,6 +223,20 @@ func (g *BridgeEIPAddrManager) AddEgressIP(eip *egressipv1.EgressIP) (bool, erro
 		if err != nil {
 			return isUpdated, fmt.Errorf("failed to add EgressIP gateway config because unable to extract config from EgressIP obj: %v", err)
 		}
+		// Only add to bridge if IP belongs to OVN network (br-ex).
+		// IPs belonging to secondary networks should be handled by the multi-NIC controller.
+		node, err := g.nodeLister.Get(g.nodeName)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node for EgressIP gateway config: %v", err)
+		}
+		parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node EgressIP config: %v", err)
+		}
+		if !util.IsOVNNetwork(parsedNodeEIPConfig, ip) {
+			// IP belongs to a secondary network, skip it
+			return isUpdated, nil
+		}
 		// must always add to cache before adding IP because we want to inform node ip handler that this is not a valid node IP
 		g.cache.insertMarkIP(pktMark, ip)
 		if err = g.addIPToAnnotation(ip); err != nil {
@@ -257,6 +271,19 @@ func (g *BridgeEIPAddrManager) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressI
 		if err != nil {
 			return isUpdated, fmt.Errorf("failed to update EgressIP SNAT for ext bridge cache because unable to extract config from old EgressIP obj: %v", err)
 		}
+		// Only delete from bridge if old IP belonged to OVN network (br-ex).
+		node, err := g.nodeLister.Get(g.nodeName)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node for EgressIP gateway config: %v", err)
+		}
+		parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node EgressIP config: %v", err)
+		}
+		if !util.IsOVNNetwork(parsedNodeEIPConfig, ip) {
+			// IP belonged to a secondary network, skip deletion
+			break
+		}
 		if err = g.deleteIPBridge(ip); err != nil {
 			return isUpdated, fmt.Errorf("failed to update EgressIP gateway config because failed to delete address from link: %v", err)
 		}
@@ -278,6 +305,20 @@ func (g *BridgeEIPAddrManager) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressI
 		ip, pktMark, err := parseEIPMarkIP(newEIP.Annotations, newStatus.EgressIP)
 		if err != nil {
 			return isUpdated, fmt.Errorf("failed to update EgressIP gateway config because unable to extract config from EgressIP obj: %v", err)
+		}
+		// Only add to bridge if new IP belongs to OVN network (br-ex).
+		// IPs belonging to secondary networks should be handled by the multi-NIC controller.
+		node, err := g.nodeLister.Get(g.nodeName)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node for EgressIP gateway config: %v", err)
+		}
+		parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node EgressIP config: %v", err)
+		}
+		if !util.IsOVNNetwork(parsedNodeEIPConfig, ip) {
+			// IP belongs to a secondary network, skip it
+			return isUpdated, nil
 		}
 		// must always add to OF cache before adding IP because we want to inform node ip handler that this is not a valid node IP
 		g.cache.insertMarkIP(pktMark, ip)
@@ -309,6 +350,19 @@ func (g *BridgeEIPAddrManager) DeleteEgressIP(eip *egressipv1.EgressIP) (bool, e
 		if err != nil {
 			return isUpdated, fmt.Errorf("failed to delete EgressIP gateway config because unable to extract config from EgressIP obj: %v", err)
 		}
+		// Only delete from bridge if IP belonged to OVN network (br-ex).
+		node, err := g.nodeLister.Get(g.nodeName)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node for EgressIP gateway config: %v", err)
+		}
+		parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+		if err != nil {
+			return isUpdated, fmt.Errorf("failed to get node EgressIP config: %v", err)
+		}
+		if !util.IsOVNNetwork(parsedNodeEIPConfig, ip) {
+			// IP belonged to a secondary network, skip deletion
+			return isUpdated, nil
+		}
 		if err = g.deleteIPBridge(ip); err != nil {
 			return isUpdated, fmt.Errorf("failed to delete EgressIP gateway config because failed to delete address from link: %v", err)
 		}
@@ -328,6 +382,15 @@ func (g *BridgeEIPAddrManager) SyncEgressIP(objs []interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to sync EgressIP gateway config because unable to get Node annotation: %v", err)
 	}
+	// Get node EgressIP config once for all IP checks
+	node, err := g.nodeLister.Get(g.nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get node for EgressIP gateway config: %v", err)
+	}
+	parsedNodeEIPConfig, err := util.GetNodeEIPConfig(node)
+	if err != nil {
+		return fmt.Errorf("failed to get node EgressIP config: %v", err)
+	}
 	configs := markIPs{v4: map[int]string{}, v6: map[int]string{}}
 	for _, obj := range objs {
 		eip, ok := obj.(*egressipv1.EgressIP)
@@ -346,6 +409,12 @@ func (g *BridgeEIPAddrManager) SyncEgressIP(objs []interface{}) error {
 			if ip, pktMark, err := parseEIPMarkIP(eip.Annotations, status.EgressIP); err != nil {
 				klog.Errorf("Failed to sync EgressIP %s gateway config because unable to extract config from EIP obj: %v", eip.Name, err)
 			} else {
+				// Only add to bridge if IP belongs to OVN network (br-ex).
+				// IPs belonging to secondary networks should be handled by the multi-NIC controller.
+				if !util.IsOVNNetwork(parsedNodeEIPConfig, ip) {
+					// IP belongs to a secondary network, skip it
+					continue
+				}
 				configs.insert(pktMark, ip)
 				if err = g.addIPToAnnotation(ip); err != nil {
 					return fmt.Errorf("failed to sync EgressIP gateway config because unable to add EgressIP IP to Node annotation: %v", err)
