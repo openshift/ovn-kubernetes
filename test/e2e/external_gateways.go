@@ -93,6 +93,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 		podTCPPort          = 80
 		podUDPPort          = 90
 		singleTargetRetries = 50 // enough attempts to avoid hashing to the same gateway
+		bfdTimeout          = 4 * time.Second
 	)
 
 	// Validate pods can reach a network running in a container's loopback address via
@@ -1111,7 +1112,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 							ginkgo.By("Deleting one container")
 							err := providerCtx.DeleteExternalContainer(gwContainers[1])
 							framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
-							time.Sleep(3 * time.Second) // bfd timeout
+							time.Sleep(bfdTimeout)
 
 							tcpDumpSync = sync.WaitGroup{}
 							tcpDumpSync.Add(1)
@@ -1189,7 +1190,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 							err := providerCtx.DeleteExternalContainer(gwContainers[1])
 							framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
 							ginkgo.By("Waiting for BFD to sync")
-							time.Sleep(3 * time.Second) // bfd timeout
+							time.Sleep(bfdTimeout)
 
 							// ECMP should direct all the traffic to the only container
 							expectedHostName := hostNameForExternalContainer(gwContainers[0])
@@ -1328,7 +1329,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					ginkgo.By("Deleting one container")
 					err := providerCtx.DeleteExternalContainer(gwContainers[1])
 					framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
-					time.Sleep(3 * time.Second) // bfd timeout
+					time.Sleep(bfdTimeout)
 
 					pingSync = sync.WaitGroup{}
 					tcpDumpSync = sync.WaitGroup{}
@@ -1409,7 +1410,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					err := providerCtx.DeleteExternalContainer(gwContainers[1])
 					framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
 					ginkgo.By("Waiting for BFD to sync")
-					time.Sleep(3 * time.Second) // bfd timeout
+					time.Sleep(bfdTimeout)
 
 					// ECMP should direct all the traffic to the only container
 					expectedHostName := hostNameForExternalContainer(gwContainers[0])
@@ -2216,7 +2217,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 							err := providerCtx.DeleteExternalContainer(gwContainers[1])
 							framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
 
-							time.Sleep(3 * time.Second) // bfd timeout
+							time.Sleep(bfdTimeout)
 
 							tcpDumpSync = sync.WaitGroup{}
 							tcpDumpSync.Add(1)
@@ -2296,7 +2297,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 							err := providerCtx.DeleteExternalContainer(gwContainers[1])
 							framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
 							ginkgo.By("Waiting for BFD to sync")
-							time.Sleep(3 * time.Second) // bfd timeout
+							time.Sleep(bfdTimeout)
 
 							// ECMP should direct all the traffic to the only container
 							expectedHostName := hostNameForExternalContainer(gwContainers[0])
@@ -2433,7 +2434,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					ginkgo.By("Deleting one container")
 					err := providerCtx.DeleteExternalContainer(gwContainers[1])
 					framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
-					time.Sleep(3 * time.Second) // bfd timeout
+					time.Sleep(bfdTimeout)
 
 					pingSync = sync.WaitGroup{}
 					tcpDumpSync = sync.WaitGroup{}
@@ -2513,7 +2514,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					err := providerCtx.DeleteExternalContainer(gwContainers[1])
 					framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
 					ginkgo.By("Waiting for BFD to sync")
-					time.Sleep(3 * time.Second) // bfd timeout
+					time.Sleep(bfdTimeout)
 
 					// ECMP should direct all the traffic to the only container
 					expectedHostName := hostNameForExternalContainer(gwContainers[0])
