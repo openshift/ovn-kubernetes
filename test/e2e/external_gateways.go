@@ -88,10 +88,11 @@ type gatewayTestIPs struct {
 var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 	const (
-		gwTCPPort  = 80
-		gwUDPPort  = 90
-		podTCPPort = 80
-		podUDPPort = 90
+		gwTCPPort           = 80
+		gwUDPPort           = 90
+		podTCPPort          = 80
+		podUDPPort          = 90
+		singleTargetRetries = 50 // enough attempts to avoid hashing to the same gateway
 	)
 
 	// Validate pods can reach a network running in a container's loopback address via
@@ -577,7 +578,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					returnedHostNames := make(map[string]struct{})
 					gwIP := addresses.targetIPs[0]
 					success := false
-					for i := 0; i < 20; i++ {
+					for i := 0; i < singleTargetRetries; i++ {
 						args := []string{"exec", srcPingPodName, "--"}
 						if protocol == "tcp" {
 							args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 %s %d", gwIP, gwPort))
@@ -744,7 +745,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 				// Picking only the first address, the one the udp listener is set for
 				gwIP := addresses.targetIPs[0]
-				for i := 0; i < 20; i++ {
+				for i := 0; i < singleTargetRetries; i++ {
 					hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 					if hostname != "" {
 						returnedHostNames[hostname] = struct{}{}
@@ -1166,7 +1167,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 						returnedHostNames := make(map[string]struct{})
 						gwIP := addresses.targetIPs[0]
 						success := false
-						for i := 0; i < 20; i++ {
+						for i := 0; i < singleTargetRetries; i++ {
 							hostname := pokeHostnameViaNC(srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 							if hostname != "" {
 								returnedHostNames[hostname] = struct{}{}
@@ -1387,7 +1388,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 					// Picking only the first address, the one the udp listener is set for
 					gwIP := addresses.targetIPs[0]
-					for i := 0; i < 20; i++ {
+					for i := 0; i < singleTargetRetries; i++ {
 						hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 						if hostname != "" {
 							returnedHostNames[hostname] = struct{}{}
@@ -1554,7 +1555,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					returnedHostNames := make(map[string]struct{})
 					gwIP := addresses.targetIPs[0]
 					success := false
-					for i := 0; i < 20; i++ {
+					for i := 0; i < singleTargetRetries; i++ {
 						args := []string{"exec", srcPingPodName, "--"}
 						if protocol == "tcp" {
 							args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 %s %d", gwIP, gwPort))
@@ -1849,7 +1850,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 				// Picking only the first address, the one the udp listener is set for
 				gwIP := addresses.targetIPs[0]
-				for i := 0; i < 20; i++ {
+				for i := 0; i < singleTargetRetries; i++ {
 					hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 					if hostname != "" {
 						returnedHostNames[hostname] = struct{}{}
@@ -2273,7 +2274,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 						returnedHostNames := make(map[string]struct{})
 						gwIP := addresses.targetIPs[0]
 						success := false
-						for i := 0; i < 20; i++ {
+						for i := 0; i < singleTargetRetries; i++ {
 							hostname := pokeHostnameViaNC(srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 							if hostname != "" {
 								returnedHostNames[hostname] = struct{}{}
@@ -2491,7 +2492,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 					// Picking only the first address, the one the udp listener is set for
 					gwIP := addresses.targetIPs[0]
-					for i := 0; i < 20; i++ {
+					for i := 0; i < singleTargetRetries; i++ {
 						hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 						if hostname != "" {
 							returnedHostNames[hostname] = struct{}{}
@@ -2663,7 +2664,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					returnedHostNames := make(map[string]struct{})
 					gwIP := addresses.targetIPs[0]
 					success := false
-					for i := 0; i < 20; i++ {
+					for i := 0; i < singleTargetRetries; i++ {
 						args := []string{"exec", srcPingPodName, "--"}
 						if protocol == "tcp" {
 							args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 %s %d", gwIP, gwPort))
