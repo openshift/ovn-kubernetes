@@ -61,6 +61,12 @@ func (c *openflowManager) setDefaultBridgeMAC(macAddr net.HardwareAddr) {
 	c.defaultBridge.macAddress = macAddr
 }
 
+// setDefaultBridgeGARPDrop is used to enable or disable whether openflow manager generates ovs flows and adds them to
+// the default ext bridge to drop GARP
+func (c *openflowManager) setDefaultBridgeGARPDrop(isDropped bool) {
+	c.defaultBridge.setDropGARP(isDropped)
+}
+
 func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
 	c.flowMutex.Lock()
 	defer c.flowMutex.Unlock()
@@ -181,6 +187,9 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 				c.syncFlows()
 				timer.Reset(syncPeriod)
 			case <-stopChan:
+				// sync before shutting down because flows maybe added, and theres a race between flow channel (req sync)
+				// and stop chan on shutdown. ensure flows are sync before shut down
+				c.syncFlows()
 				return
 			}
 		}
