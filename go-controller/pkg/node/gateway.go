@@ -21,6 +21,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // Gateway responds to Service and Endpoint K8s events
@@ -34,6 +35,7 @@ type Gateway interface {
 	GetGatewayBridgeIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
 	Reconcile() error
+	SetDefaultBridgeGARPDropFlows(bool)
 }
 
 type gateway struct {
@@ -395,6 +397,15 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
 }
 
+// SetDefaultBridgeGARPDropFlows will enable flows to drop GARPs if the openflow
+// manager has been initialized.
+func (g *gateway) SetDefaultBridgeGARPDropFlows(isDropped bool) {
+	if g.openflowManager == nil {
+		return
+	}
+	g.openflowManager.setDefaultBridgeGARPDrop(isDropped)
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
 func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
@@ -451,6 +462,62 @@ type bridgeConfiguration struct {
 	ofPortPhys  string
 	ofPortHost  string
 	netConfig   map[string]*bridgeUDNConfiguration
+	dropGARP    bool
+}
+
+func (b *bridgeConfiguration) setDropGARP(drop bool) {
+	b.Lock()
+	defer b.Unlock()
+	b.dropGARP = drop
+}
+
+// dropGARPFlows generates the ovs flows for dropping gratuitous ARPs for cluster default network traffic only.
+// bridgeConfiguration lock must be held by caller
+func (b *bridgeConfiguration) dropGARPFlows() []string {
+	if config.Gateway.Mode != config.GatewayModeShared || !config.IPv4Mode {
+		return nil
+	}
+	const priority = 498
+	var flows []string
+
+	defaultNetInfo := util.DefaultNetInfo{}
+	defaultNetPatchPortName := defaultNetInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+
+	for _, netConfig := range b.patchedNetConfigs() {
+		if netConfig.patchPort != defaultNetPatchPortName {
+			continue
+		}
+		flows = append(flows, generateGratuitousARPDropFlow(netConfig.ofPortPatch, priority))
+	}
+	return flows
+}
+
+// allowNodeIPGARPFlows generates the OVS flows to allow gratuitous ARPs for Node IP(s) for the cluster default network traffic only.
+// bridgeConfiguration lock must be held by caller.
+// Remove when https://issues.redhat.com/browse/FDP-1537 is available
+func (b *bridgeConfiguration) allowNodeIPGARPFlows(nodeIPs []net.IP) []string {
+	if config.Gateway.Mode != config.GatewayModeShared || !config.IPv4Mode {
+		return nil
+	}
+	const priority = 499
+	var flows []string
+
+	defaultNetInfo := util.DefaultNetInfo{}
+	defaultNetPatchPortName := defaultNetInfo.GetNetworkScopedPatchPortName(b.bridgeName, b.nodeName)
+
+	for _, netConfig := range b.patchedNetConfigs() {
+		if netConfig.patchPort != defaultNetPatchPortName {
+			continue
+		}
+		for _, nodeIP := range nodeIPs {
+			if nodeIP == nil || nodeIP.IsUnspecified() || utilnet.IsIPv6(nodeIP) {
+				continue
+			}
+			flows = append(flows, generateGratuitousARPAllowFlow(netConfig.ofPortPatch, nodeIP, priority))
+		}
+
+	}
+	return flows
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -493,6 +560,16 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 			types.DefaultNetworkName: defaultNetConfig,
 		},
 	}
+	// temp workaround for https://issues.redhat.com/browse/FDP-1537
+	// we need to ensure we continue dropping GARPs for any new bridge config if the run mode is ovnkube controller + ovnkube node + IC + single zone node
+	// FIXME: only add if run mode is ovnkube controller + node in single process
+	if config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeFull {
+		// drop by default - set to false later when ovnkube controller has sync'd and changes propagated to OVN southbound database
+		// we should also match on run mode here to ensure ovnkube controller + ovnkube node are running in the same process
+		res.dropGARP = true
+	}
+	// end temp work around
+
 	gwIntf := intfName
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
