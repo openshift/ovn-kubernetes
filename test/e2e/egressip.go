@@ -2957,20 +2957,45 @@ spec:
 			"and verify the expected IP, failed for EgressIP %s: %v", egressIPName, err)
 	})
 
-	ginkgo.It("[secondary-host-eip] should send GARP for EgressIP", func() {
-		if utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP)) {
-			ginkgo.Skip("GARP test only supports IPv4")
+	ginkgo.It("[secondary-host-eip] should send address advertisements for EgressIP", func() {
+		if isUserDefinedNetwork(netConfigParams) {
+			ginkgo.Skip("Unsupported for UDNs")
 		}
+
 		egressIPSecondaryHost := "10.10.10.220"
+		isV6Node := utilnet.IsIPv6(net.ParseIP(egress1Node.nodeIP))
+		if isV6Node {
+			egressIPSecondaryHost = "2001:db8:abcd:1234:c001::"
+		}
 
 		// flush any potentially stale MACs and allow GARPs
 		_, err := infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
 			[]string{"ip", "neigh", "flush", egressIPSecondaryHost})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should flush neighbor cache")
 
-		_, err = infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
-			[]string{"sysctl", "-w", "net.ipv4.conf.all.arp_accept=1"})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should enable arp_accept")
+		networks, err := providerCtx.GetAttachedNetworks()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should get attached networks")
+		secondaryNetwork, exists := networks.Get(secondaryNetworkName)
+		gomega.Expect(exists).Should(gomega.BeTrue(), "network %s must exist", secondaryNetworkName)
+
+		inf, err := infraprovider.Get().GetK8NodeNetworkInterface(secondaryTargetExternalContainer.Name, secondaryNetwork)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should have network interface for network %s on instance %s", secondaryNetwork.Name(), secondaryTargetExternalContainer.Name)
+
+		// The following is required for the test purposes since we are sending and unsolicited advertisement
+		// for an address that is not tracked already
+		if !isV6Node {
+			_, err = infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
+				[]string{"sysctl", "-w", fmt.Sprintf("net.ipv4.conf.%s.arp_accept=1", inf.InfName)})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should enable arp_accept")
+		} else {
+			_, err = infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
+				[]string{"sysctl", "-w", fmt.Sprintf("net.ipv6.conf.%s.forwarding=1", inf.InfName)})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should enable forwarding")
+
+			_, err = infraprovider.Get().ExecK8NodeCommand(secondaryTargetExternalContainer.Name,
+				[]string{"sysctl", "-w", fmt.Sprintf("net.ipv6.conf.%s.accept_untracked_na=1", inf.InfName)})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should enable accept_untracked_na")
+		}
 
 		podNamespace := f.Namespace
 		labels := map[string]string{"name": f.Namespace.Name}
@@ -2990,7 +3015,7 @@ metadata:
     name: ` + egressIPName + `
 spec:
     egressIPs:
-    - ` + egressIPSecondaryHost + `
+    - "` + egressIPSecondaryHost + `"
     podSelector:
         matchLabels:
             wants: egress
@@ -3009,11 +3034,7 @@ spec:
 		e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
 
 		status := verifyEgressIPStatusLengthEquals(1, nil)
-		networks, err := providerCtx.GetAttachedNetworks()
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should get attached networks")
-		secondaryNetwork, exists := networks.Get(secondaryNetworkName)
-		gomega.Expect(exists).Should(gomega.BeTrue(), "network %s must exist", secondaryNetworkName)
-		inf, err := infraprovider.Get().GetK8NodeNetworkInterface(status[0].Node, secondaryNetwork)
+		inf, err = infraprovider.Get().GetK8NodeNetworkInterface(status[0].Node, secondaryNetwork)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should have network interface for network %s on instance %s", secondaryNetwork.Name(), egress1Node.name)
 
 		ginkgo.By("Verifying GARP populated neighbor table")
