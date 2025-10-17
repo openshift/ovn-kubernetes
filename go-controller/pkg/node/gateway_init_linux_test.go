@@ -19,7 +19,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/k8snetworkplumbingwg/sriovnet"
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
@@ -260,10 +259,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		// syncServices()
 
 		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
-		err := util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
-		Expect(err).NotTo(HaveOccurred())
-		err = afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
 
 		err = util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
@@ -715,12 +711,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		// syncServices()
 
 		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
-		err := util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
-		Expect(err).NotTo(HaveOccurred())
-		err = afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
 
-		err = util.SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = config.InitConfig(ctx, fexec, nil)
@@ -1185,12 +1178,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		// syncServices()
 
 		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
-		err := util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
-		Expect(err).NotTo(HaveOccurred())
-		err = afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
 
-		err = util.SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = config.InitConfig(ctx, fexec, nil)

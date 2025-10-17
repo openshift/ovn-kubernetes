@@ -14,7 +14,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -295,8 +294,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		// Set up a fake vsctl command mock interface
 		fexec = ovntest.NewFakeExec()
 		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
-		Expect(util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)).To(Succeed())
-		Expect(afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)).To(Succeed())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
 		Expect(util.SetExec(fexec)).To(Succeed())
 		// Set up a fake k8sMgmt interface
 		testNS, err = testutils.NewNS()
