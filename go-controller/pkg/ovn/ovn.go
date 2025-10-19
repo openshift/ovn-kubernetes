@@ -341,7 +341,7 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *corev1.Pod) error {
 	// called for migrations.
 	// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5627
 	if kubevirt.IsPodLiveMigratable(pod) {
-		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(oc.watchFactory, pod)
+		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(oc.watchFactory.PodCoreInformer().Lister(), pod)
 		if err != nil {
 			return err
 		}
@@ -471,7 +471,7 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, oc.svcTemplateSupport)
 	if err != nil {
 
-		return fmt.Errorf("error running OVN Kubernetes Services controller: %v", err)
+		return fmt.Errorf("error running OVN-Kubernetes Services controller: %v", err)
 	}
 	return nil
 }
