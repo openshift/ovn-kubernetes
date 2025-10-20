@@ -44,17 +44,7 @@ type lbConfig struct {
 	hasNodePort bool
 }
 
-<<<<<<< HEAD
-type lbEndpoints struct {
-	Port  int32
-	V4IPs []string
-	V6IPs []string
-}
-
 func makeNodeSwitchTargetIPs(service *corev1.Service, node string, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
-=======
-func makeNodeSwitchTargetIPs(node string, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
->>>>>>> upstream/master
 	targetIPsV4 = c.clusterEndpoints.V4IPs
 	targetIPsV6 = c.clusterEndpoints.V6IPs
 

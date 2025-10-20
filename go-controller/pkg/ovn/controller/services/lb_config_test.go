@@ -4592,7 +4592,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: corev1.ProtocolTCP,
 				inport:   80,
-				clusterEndpoints: lbEndpoints{
+				clusterEndpoints: util.LBEndpoints{
 					V4IPs: []string{"192.168.1.1"},     // on nodeB
 					V6IPs: []string{"fe00:0:0:0:2::2"}, // on nodeB
 					Port:  8080,
