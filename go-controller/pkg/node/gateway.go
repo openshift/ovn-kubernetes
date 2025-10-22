@@ -316,9 +316,35 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 		if _, err = eipRetryFramework.WatchResource(); err != nil {
 			return fmt.Errorf("gateway init failed to start watching EgressIPs: %v", err)
 		}
+
+		// Watch pod events to trigger EgressIP re-evaluation when pods are created/deleted
+		podRetryFramework := g.newRetryFrameworkNodeWithParameters(factory.PodType, g.SyncPodsForEgressIP)
+		if _, err = podRetryFramework.WatchResource(); err != nil {
+			return fmt.Errorf("gateway init failed to start watching Pods for EgressIP: %v", err)
+		}
 	}
 
 	return nil
+}
+
+// SyncPodsForEgressIP re-evaluates all EgressIPs when pods change
+func (g *gateway) SyncPodsForEgressIP(objs []interface{}) error {
+	if g.bridgeEIPAddrManager == nil {
+		return nil
+	}
+
+	// Get all EgressIPs and trigger re-evaluation
+	egressIPs, err := g.watchFactory.GetEgressIPs()
+	if err != nil {
+		return fmt.Errorf("failed to get EgressIPs for pod sync: %v", err)
+	}
+
+	var eipObjs []interface{}
+	for _, eip := range egressIPs {
+		eipObjs = append(eipObjs, eip)
+	}
+
+	return g.SyncEgressIP(eipObjs)
 }
 
 func (g *gateway) Start() error {
