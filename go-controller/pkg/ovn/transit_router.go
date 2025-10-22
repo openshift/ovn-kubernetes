@@ -11,6 +11,18 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// reserve 1-9 keys for any future local ports that may be needed.
+	// currently we only use 1 local port to connect transit router to the layer2 switch
+	transitRouterPortFirstTunnelKey = 10
+	// reserve tunnel key = 1 for transitRouterToSwitch port
+	transitRouterToSwitchTunnelKey = 1
+)
+
+func getTransitRouterPortTunnelKey(nodeID int) string {
+	return fmt.Sprintf("%d", transitRouterPortFirstTunnelKey+nodeID)
+}
+
 type transitRouterInfo struct {
 	gatewayRouterNets, transitRouterNets []*net.IPNet
 	nodeID                               int

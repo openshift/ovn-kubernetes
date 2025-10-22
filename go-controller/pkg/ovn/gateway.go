@@ -395,7 +395,7 @@ func (gw *GatewayManager) createGWRouterPeerRouterPort() error {
 		MAC:      util.IPAddrToHWAddr(gw.transitRouterInfo.transitRouterNets[0].IP).String(),
 		Networks: util.IPNetsToStringSlice(gw.transitRouterInfo.transitRouterNets),
 		Options: map[string]string{
-			libovsdbops.RequestedTnlKey: fmt.Sprintf("%d", gw.transitRouterInfo.nodeID),
+			libovsdbops.RequestedTnlKey: getTransitRouterPortTunnelKey(gw.transitRouterInfo.nodeID),
 		},
 		Peer: ptr.To(gwRouterPortName),
 		ExternalIDs: map[string]string{

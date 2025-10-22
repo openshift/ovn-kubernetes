@@ -870,7 +870,7 @@ func (oc *Layer2UserDefinedNetworkController) addRouterSetupForRemoteNodeGR(node
 		MAC:      util.IPAddrToHWAddr(transitRouterInfo.transitRouterNets[0].IP).String(),
 		Networks: util.IPNetsToStringSlice(transitRouterInfo.transitRouterNets),
 		Options: map[string]string{
-			libovsdbops.RequestedTnlKey:  strconv.Itoa(transitRouterInfo.nodeID),
+			libovsdbops.RequestedTnlKey:  getTransitRouterPortTunnelKey(transitRouterInfo.nodeID),
 			libovsdbops.RequestedChassis: node.Name,
 		},
 		ExternalIDs: map[string]string{
