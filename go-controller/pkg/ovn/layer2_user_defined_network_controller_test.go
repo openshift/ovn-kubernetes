@@ -768,14 +768,17 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			Networks:       []string{"100.200.0.1/16"},
 			MAC:            "0a:58:64:c8:00:01",
 			GatewayChassis: []string{gatewayChassisUUID},
-			Options:        map[string]string{libovsdbops.GatewayMTU: "1400"},
+			Options: map[string]string{
+				libovsdbops.GatewayMTU:      "1400",
+				libovsdbops.RequestedTnlKey: "1", // as defined by getTransitRouterPortTunnelKey(nodeID)
+			},
 		},
 		&nbdb.LogicalRouterPort{
 			UUID:        rtorLRPUUID,
 			Name:        rtorLRPName,
 			Networks:    []string{trInfo.transitRouterNets[0].String()},
 			MAC:         util.IPAddrToHWAddr(trInfo.transitRouterNets[0].IP).String(),
-			Options:     map[string]string{libovsdbops.RequestedTnlKey: "4"},
+			Options:     map[string]string{libovsdbops.RequestedTnlKey: "14"},
 			Peer:        ptr.To(fmt.Sprintf("%s%s", ovntypes.RouterToTransitRouterPrefix, gwRouterName)),
 			ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
 		},
@@ -800,7 +803,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			Networks: []string{remoteTRInfo.transitRouterNets[0].String()},
 			MAC:      util.IPAddrToHWAddr(remoteTRInfo.transitRouterNets[0].IP).String(),
 			Options: map[string]string{
-				libovsdbops.RequestedTnlKey:  "5",
+				libovsdbops.RequestedTnlKey:  "15", // as defined by getTransitRouterPortTunnelKey(nodeID)
 				libovsdbops.RequestedChassis: staleNodeName},
 			ExternalIDs: externalIDs,
 		}

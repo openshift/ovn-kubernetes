@@ -437,6 +437,14 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 			libovsdbops.GatewayMTU: strconv.Itoa(config.Default.MTU),
 		}
 	}
+	if bnc.TopologyType() == types.Layer2Topology {
+		// In layer2 topology transit router is a distributed router, so even local ports need to have a tunnel key.
+		// we reserve the same tunnel key for all transit router to l2 switch ports on all nodes.
+		if lrpOptions == nil {
+			lrpOptions = make(map[string]string)
+		}
+		lrpOptions[libovsdbops.RequestedTnlKey] = strconv.Itoa(transitRouterToSwitchTunnelKey)
+	}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     lrpName,
 		MAC:      nodeLRPMAC.String(),
