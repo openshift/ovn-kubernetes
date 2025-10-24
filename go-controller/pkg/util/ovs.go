@@ -73,6 +73,15 @@ func PrepareTestConfig() {
 	ovnRunDir = savedOVNRunDir
 }
 
+// SetupMockOVSPidFile setup mock filesystem for ovs-vswitchd.pid file.
+func SetupMockOVSPidFile() error {
+	err := AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
+	if err != nil {
+		return err
+	}
+	return afero.WriteFile(AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
+}
+
 func runningPlatform() (string, error) {
 	if runtime.GOOS == windowsOS {
 		return windowsOS, nil

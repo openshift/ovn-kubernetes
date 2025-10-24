@@ -19,7 +19,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/k8snetworkplumbingwg/sriovnet"
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
@@ -40,7 +39,7 @@ import (
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	nodemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	mgmtportmock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -260,10 +259,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		// syncServices()
 
 		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
-		err := util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
-		Expect(err).NotTo(HaveOccurred())
-		err = afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
 
 		err = util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
@@ -723,12 +719,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		// syncServices()
 
 		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
-		err := util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
-		Expect(err).NotTo(HaveOccurred())
-		err = afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
 
-		err = util.SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = config.InitConfig(ctx, fexec, nil)
@@ -791,7 +784,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		// FIXME(mk): starting the gateway causing go routines to be spawned within sub functions and therefore they escape the
 		// netns we wanted to set it to originally here. Refactor test cases to not spawn a go routine or just fake out everything
 		// and remove need to create netns
-		mpmock := &nodemocks.ManagementPort{}
+		mpmock := &mgmtportmock.Interface{}
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
@@ -1193,12 +1186,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		// syncServices()
 
 		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
-		err := util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
-		Expect(err).NotTo(HaveOccurred())
-		err = afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
 
-		err = util.SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = config.InitConfig(ctx, fexec, nil)
