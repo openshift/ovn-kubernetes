@@ -534,17 +534,21 @@ func CleanupClusterNode(name string) error {
 		klog.Errorf("Failed to cleanup Gateway, error: %v", err)
 	}
 
-	stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "remove", "Open_vSwitch", ".", "external_ids",
-		"ovn-bridge-mappings")
-	if err != nil {
-		klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "remove", "Open_vSwitch", ".", "external_ids",
+			"ovn-bridge-mappings")
+		if err != nil {
+			klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		}
 	}
 
-	// Clean up legacy IPTables rules for management port
-	managementport.DelLegacyMgtPortIptRules()
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		// Clean up legacy IPTables rules for management port
+		managementport.DelLegacyMgtPortIptRules()
 
-	// Delete nftables rules
-	nodenft.CleanupNFTables()
+		// Delete nftables rules
+		nodenft.CleanupNFTables()
+	}
 
 	return nil
 }

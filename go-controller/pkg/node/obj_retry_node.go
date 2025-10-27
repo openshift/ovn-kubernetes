@@ -176,7 +176,7 @@ func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
 		node := obj.(*corev1.Node)
 		// if it's our node that is changing, then nothing to do as we dont add our own IP to the nftables rules
 		if node.Name == h.nc.name {
-			if util.NodeDontSNATSubnetAnnotationExist(node) {
+			if config.OvnKubeNode.Mode != types.NodeModeDPU && util.NodeDontSNATSubnetAnnotationExist(node) {
 				err := managementport.UpdateNoSNATSubnetsSets(node, util.ParseNodeDontSNATSubnetsList)
 				if err != nil {
 					return fmt.Errorf("error updating no snat subnets sets: %w", err)
@@ -228,7 +228,8 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 		if newNode.Name == h.nc.name {
 
 			// if node's dont SNAT subnet annotation changed sync nftables
-			if !reflect.DeepEqual(oldNode.Annotations, newNode.Annotations) &&
+			if config.OvnKubeNode.Mode != types.NodeModeDPU &&
+				!reflect.DeepEqual(oldNode.Annotations, newNode.Annotations) &&
 				util.NodeDontSNATSubnetAnnotationChanged(oldNode, newNode) {
 				err := managementport.UpdateNoSNATSubnetsSets(newNode, util.ParseNodeDontSNATSubnetsList)
 				if err != nil {
@@ -238,7 +239,7 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 			return nil
 		}
 
-		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+		if config.OvnKubeNode.Mode != types.NodeModeDPU && util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			// remote node that is changing
 			// Use GetNodeAddresses to get new node IPs
 			newIPsv4, newIPsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, newNode)
@@ -299,9 +300,11 @@ func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 
 	case factory.NodeType:
 		h.nc.deleteNode(obj.(*corev1.Node))
-		_ = managementport.UpdateNoSNATSubnetsSets(obj.(*corev1.Node), func(_ *corev1.Node) ([]string, error) {
-			return []string{}, nil
-		})
+		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			_ = managementport.UpdateNoSNATSubnetsSets(obj.(*corev1.Node), func(_ *corev1.Node) ([]string, error) {
+				return []string{}, nil
+			})
+		}
 
 		return nil
 

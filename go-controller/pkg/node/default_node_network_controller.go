@@ -188,14 +188,16 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 
 	nc.initRetryFrameworkForNode()
 
-	err = setupRemoteNodeNFTSets()
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup PMTUD nftables sets: %w", err)
-	}
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		err = setupRemoteNodeNFTSets()
+		if err != nil {
+			return nil, fmt.Errorf("failed to setup PMTUD nftables sets: %w", err)
+		}
 
-	err = setupPMTUDNFTChain()
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup PMTUD nftables chain: %w", err)
+		err = setupPMTUDNFTChain()
+		if err != nil {
+			return nil, fmt.Errorf("failed to setup PMTUD nftables chain: %w", err)
+		}
 	}
 
 	return nc, nil
@@ -1345,7 +1347,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableEgressService {
+	// configure NFT/IPT rules for egressService
+	if config.OVNKubernetesFeature.EnableEgressService && config.OvnKubeNode.Mode != types.NodeModeDPU {
 		wf := nc.watchFactory.(*factory.WatchFactory)
 		c, err := egressservice.NewController(nc.stopChan, nodetypes.OvnKubeNodeSNATMark, nc.name,
 			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
@@ -1549,7 +1552,7 @@ func (nc *DefaultNodeNetworkController) addOrUpdateNode(node *corev1.Node) error
 		addrs = append(addrs, nodeIP.String())
 		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
 		// Only add to nftables if this is remote node
-		if node.Name != nc.name {
+		if config.OvnKubeNode.Mode != types.NodeModeDPU && node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{
 				Set: types.NFTRemoteNodeIPsv4,
 				Key: []string{nodeIP.String()},
@@ -1562,22 +1565,21 @@ func (nc *DefaultNodeNetworkController) addOrUpdateNode(node *corev1.Node) error
 		addrs = append(addrs, nodeIP.String())
 		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
 		// Only add to nftables if this is remote node
-		if node.Name != nc.name {
+		if config.OvnKubeNode.Mode != types.NodeModeDPU && node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{
 				Set: types.NFTRemoteNodeIPsv6,
 				Key: []string{nodeIP.String()},
 			})
 		}
 	}
-
-	gw := nc.Gateway.(*gateway)
-	gw.openflowManager.updateBridgePMTUDFlowCache(getPMTUDKey(node.Name), addrs)
-
-	if len(nftElems) > 0 {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU && len(nftElems) > 0 {
 		if err := nodenft.UpdateNFTElements(nftElems); err != nil {
 			return fmt.Errorf("unable to update NFT elements for node %q, error: %w", node.Name, err)
 		}
 	}
+
+	gw := nc.Gateway.(*gateway)
+	gw.openflowManager.updateBridgePMTUDFlowCache(getPMTUDKey(node.Name), addrs)
 
 	return nil
 }
@@ -1630,6 +1632,11 @@ func (nc *DefaultNodeNetworkController) deleteNode(node *corev1.Node) {
 func (nc *DefaultNodeNetworkController) syncNodes(objs []interface{}) error {
 	var keepNFTSetElemsV4, keepNFTSetElemsV6 []*knftables.Element
 	var errors []error
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		return nil
+	}
+
 	klog.Infof("Starting node controller node sync")
 	start := time.Now()
 	for _, obj := range objs {
