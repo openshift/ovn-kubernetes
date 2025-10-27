@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"slices"
 	"strconv"
@@ -83,10 +84,10 @@ type egressFirewallRule struct {
 type destination struct {
 	cidrSelector string
 	dnsName      string
-	// clusterSubnetIntersection is true, if egress firewall rule CIDRSelector intersects with clusterSubnet.
-	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
+	// clusterSubnetIntersection if egress firewall rule CIDRSelector intersects with clusterSubnet.
+	// Based on these values we can omit clusterSubnet exclusion from the related ACL.
 	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
-	clusterSubnetIntersection bool
+	clusterSubnetIntersection []*net.IPNet
 	// nodeName: nodeIPs
 	nodeAddrs    map[string][]string
 	nodeSelector *metav1.LabelSelector
@@ -96,10 +97,10 @@ type matchTarget struct {
 	kind  matchKind
 	value string
 	// clusterSubnetIntersection is inherited from the egressFirewallRule destination.
-	// clusterSubnetIntersection is true, if egress firewall rule CIDRSelector intersects with clusterSubnet.
-	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
+	// clusterSubnetIntersection holds the cluster network CIDRs for default network or UDN.
+	// Based on these values we can omit clusterSubnet exclusion from the related ACL.
 	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
-	clusterSubnetIntersection bool
+	clusterSubnetIntersection []*net.IPNet
 }
 
 type matchKind int
@@ -425,7 +426,7 @@ func (oc *EFController) buildEgressFirewallConstruct(egressFirewall *egressfirew
 				egressFirewall.Namespace, types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority))
 			break
 		}
-		efr, err := oc.newEgressFirewallRule(egressFirewallRule, i)
+		efr, err := oc.newEgressFirewallRule(egressFirewall.Namespace, egressFirewallRule, i)
 		if err != nil {
 			errorList = append(errorList, fmt.Errorf("cannot create EgressFirewall Rule to destination %s for namespace %s: %w",
 				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
@@ -460,9 +461,55 @@ func (oc *EFController) addEgressFirewall(egressFirewall *egressfirewallapi.Egre
 	return nil
 }
 
+// validateAndGetEgressFirewallDestination validates an egress firewall rule destination and returns
+// the parsed contents of the destination.
+func (oc *EFController) validateAndGetEgressFirewallDestination(namespace string, egressFirewallDestination egressfirewallapi.EgressFirewallDestination) (
+	cidrSelector string,
+	dnsName string,
+	clusterSubnetIntersection []*net.IPNet,
+	nodeSelector *metav1.LabelSelector,
+	err error) {
+	// Validate the egress firewall rule.
+	if egressFirewallDestination.DNSName != "" {
+		n, err := util.ValidateAndGetEgressFirewallDNSDestination(egressFirewallDestination)
+		if err != nil {
+			return "", "", nil, nil, err
+		}
+		dnsName = n
+	} else if len(egressFirewallDestination.CIDRSelector) > 0 {
+		// Validate CIDR selector.
+		_, ipNet, err := net.ParseCIDR(egressFirewallDestination.CIDRSelector)
+		if err != nil {
+			return "", "", nil, nil, err
+		}
+		cidrSelector = egressFirewallDestination.CIDRSelector
+		netInfo, err := oc.networkManager.GetActiveNetworkForNamespace(namespace)
+		if err != nil {
+			return "", "", nil, nil,
+				fmt.Errorf("failed to validate egress firewall destination: %w", err)
+		}
+		subnets := netInfo.Subnets()
+		for _, clusterSubnet := range subnets {
+			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
+				clusterSubnetIntersection = append(clusterSubnetIntersection, clusterSubnet.CIDR)
+				break
+			}
+		}
+	} else {
+		// Validate node selector.
+		_, err := metav1.LabelSelectorAsSelector(egressFirewallDestination.NodeSelector)
+		if err != nil {
+			return "", "", nil, nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
+		}
+		nodeSelector = egressFirewallDestination.NodeSelector
+	}
+
+	return
+}
+
 // newEgressFirewallRule creates a new egressFirewallRule. For the logging level, it will pick either of
 // aclLoggingAllow or aclLoggingDeny depending if this is an allow or deny rule.
-func (oc *EFController) newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewallRule, id int) (*egressFirewallRule, error) {
+func (oc *EFController) newEgressFirewallRule(namespace string, rawEgressFirewallRule egressfirewallapi.EgressFirewallRule, id int) (*egressFirewallRule, error) {
 	efr := &egressFirewallRule{
 		id:     id,
 		access: rawEgressFirewallRule.Type,
@@ -472,7 +519,7 @@ func (oc *EFController) newEgressFirewallRule(rawEgressFirewallRule egressfirewa
 	// fields of efr.
 	var err error
 	efr.to.cidrSelector, efr.to.dnsName, efr.to.clusterSubnetIntersection, efr.to.nodeSelector, err =
-		util.ValidateAndGetEgressFirewallDestination(rawEgressFirewallRule.To)
+		oc.validateAndGetEgressFirewallDestination(namespace, rawEgressFirewallRule.To)
 	if err != nil {
 		return efr, err
 	}
@@ -587,9 +634,9 @@ func (oc *EFController) addEgressFirewallRules(ef *egressFirewall, pgName string
 
 			for _, addr := range allIPs {
 				if utilnet.IsIPv6String(addr) {
-					matchTargets = append(matchTargets, matchTarget{matchKindV6CIDR, addr, false})
+					matchTargets = append(matchTargets, matchTarget{matchKindV6CIDR, addr, nil})
 				} else {
-					matchTargets = append(matchTargets, matchTarget{matchKindV4CIDR, addr, false})
+					matchTargets = append(matchTargets, matchTarget{matchKindV4CIDR, addr, nil})
 				}
 			}
 		} else if rule.to.cidrSelector != "" {
@@ -1082,21 +1129,21 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 	return fmt.Sprintf("(%s)", l4Match)
 }
 
-func getV4ClusterSubnetsExclusion() string {
+func getV4ClusterSubnetsExclusion(subnets []*net.IPNet) string {
 	var exclusions []string
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		if utilnet.IsIPv4CIDR(clusterSubnet.CIDR) {
-			exclusions = append(exclusions, fmt.Sprintf("%s.dst != %s", "ip4", clusterSubnet.CIDR))
+	for _, clusterSubnet := range subnets {
+		if utilnet.IsIPv4CIDR(clusterSubnet) {
+			exclusions = append(exclusions, fmt.Sprintf("%s.dst != %s", "ip4", clusterSubnet))
 		}
 	}
 	return strings.Join(exclusions, "&&")
 }
 
-func getV6ClusterSubnetsExclusion() string {
+func getV6ClusterSubnetsExclusion(subnets []*net.IPNet) string {
 	var exclusions []string
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			exclusions = append(exclusions, fmt.Sprintf("%s.dst != %s", "ip6", clusterSubnet.CIDR))
+	for _, clusterSubnet := range subnets {
+		if utilnet.IsIPv6CIDR(clusterSubnet) {
+			exclusions = append(exclusions, fmt.Sprintf("%s.dst != %s", "ip6", clusterSubnet))
 		}
 	}
 	return strings.Join(exclusions, "&&")
@@ -1111,13 +1158,13 @@ func (m *matchTarget) toExpr() (string, error) {
 	switch m.kind {
 	case matchKindV4CIDR:
 		match = fmt.Sprintf("ip4.dst == %s", m.value)
-		if m.clusterSubnetIntersection {
-			match = fmt.Sprintf("%s && %s", match, getV4ClusterSubnetsExclusion())
+		if m.clusterSubnetIntersection != nil {
+			match = fmt.Sprintf("%s && %s", match, getV4ClusterSubnetsExclusion(m.clusterSubnetIntersection))
 		}
 	case matchKindV6CIDR:
 		match = fmt.Sprintf("ip6.dst == %s", m.value)
-		if m.clusterSubnetIntersection {
-			match = fmt.Sprintf("%s && %s", match, getV6ClusterSubnetsExclusion())
+		if m.clusterSubnetIntersection != nil {
+			match = fmt.Sprintf("%s && %s", match, getV6ClusterSubnetsExclusion(m.clusterSubnetIntersection))
 		}
 	case matchKindV4AddressSet:
 		if m.value != "" {

@@ -5,8 +5,11 @@ import (
 	"net"
 	"testing"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +19,7 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -26,6 +30,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	fakenetworkmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -170,13 +175,15 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 			ports          []egressfirewallapi.EgressFirewallPort
 			output         string
 		}
+		_, clusterSubnetV4, _ := net.ParseCIDR("10.128.0.0/14")
+		_, clusterSubnetV6, _ := net.ParseCIDR("2002:0:0:1234::/64")
 		testcases := []testcase{
 			{
 				clusterSubnets: []string{"10.128.0.0/14"},
 				pgName:         "a123456",
 				ipv4Mode:       true,
 				ipv6Mode:       false,
-				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", false}},
+				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", nil}},
 				ports:          nil,
 				output:         "(ip4.dst == 1.2.3.4/32) && inport == @a123456",
 			},
@@ -185,7 +192,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       true,
 				ipv6Mode:       true,
-				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", false}},
+				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", nil}},
 				ports:          nil,
 				output:         "(ip4.dst == 1.2.3.4/32) && inport == @a123456",
 			},
@@ -194,7 +201,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       true,
 				ipv6Mode:       true,
-				destinations:   []matchTarget{{matchKindV4AddressSet, "destv4", false}, {matchKindV6AddressSet, "destv6", false}},
+				destinations:   []matchTarget{{matchKindV4AddressSet, "destv4", nil}, {matchKindV6AddressSet, "destv6", nil}},
 				ports:          nil,
 				output:         "(ip4.dst == $destv4 || ip6.dst == $destv6) && inport == @a123456",
 			},
@@ -203,7 +210,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       true,
 				ipv6Mode:       false,
-				destinations:   []matchTarget{{matchKindV4AddressSet, "destv4", false}, {matchKindV6AddressSet, "", false}},
+				destinations:   []matchTarget{{matchKindV4AddressSet, "destv4", nil}, {matchKindV6AddressSet, "", nil}},
 				ports:          nil,
 				output:         "(ip4.dst == $destv4) && inport == @a123456",
 			},
@@ -212,7 +219,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       true,
 				ipv6Mode:       true,
-				destinations:   []matchTarget{{matchKindV6CIDR, "2001::/64", false}},
+				destinations:   []matchTarget{{matchKindV6CIDR, "2001::/64", nil}},
 				ports:          nil,
 				output:         "(ip6.dst == 2001::/64) && inport == @a123456",
 			},
@@ -221,7 +228,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       false,
 				ipv6Mode:       true,
-				destinations:   []matchTarget{{matchKindV6AddressSet, "destv6", false}},
+				destinations:   []matchTarget{{matchKindV6AddressSet, "destv6", nil}},
 				ports:          nil,
 				output:         "(ip6.dst == $destv6) && inport == @a123456",
 			},
@@ -231,7 +238,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       true,
 				ipv6Mode:       false,
-				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", true}},
+				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", []*net.IPNet{clusterSubnetV4}}},
 				ports:          nil,
 				output:         "(ip4.dst == 1.2.3.4/32 && ip4.dst != 10.128.0.0/14) && inport == @a123456",
 			},
@@ -240,7 +247,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       false,
 				ipv6Mode:       true,
-				destinations:   []matchTarget{{matchKindV6AddressSet, "destv6", true}},
+				destinations:   []matchTarget{{matchKindV6AddressSet, "destv6", []*net.IPNet{clusterSubnetV6}}},
 				ports:          nil,
 				output:         "(ip6.dst == $destv6) && inport == @a123456",
 			},
@@ -249,7 +256,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				pgName:         "a123456",
 				ipv4Mode:       true,
 				ipv6Mode:       true,
-				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", true}},
+				destinations:   []matchTarget{{matchKindV4CIDR, "1.2.3.4/32", []*net.IPNet{clusterSubnetV4}}},
 				ports:          nil,
 				output:         "(ip4.dst == 1.2.3.4/32 && ip4.dst != 10.128.0.0/14) && inport == @a123456",
 			},
@@ -279,6 +286,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 			output             egressFirewallRule
 			clusterSubnets     []string
 		}
+		_, clusterSubnetV4, _ := net.ParseCIDR("10.128.0.0/16")
+		_, clusterSubnetV6, _ := net.ParseCIDR("2002:0:0:1234::/64")
 		testcases := []testcase{
 			{
 				egressFirewallRule: egressfirewallapi.EgressFirewallRule{
@@ -330,7 +339,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{cidrSelector: "1.2.3.4/32", clusterSubnetIntersection: false},
+					to:     destination{cidrSelector: "1.2.3.4/32", clusterSubnetIntersection: nil},
 				},
 			},
 			{
@@ -344,7 +353,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{cidrSelector: "10.128.3.4/32", clusterSubnetIntersection: true},
+					to:     destination{cidrSelector: "10.128.3.4/32", clusterSubnetIntersection: []*net.IPNet{clusterSubnetV4}},
 				},
 			},
 			{
@@ -358,7 +367,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{cidrSelector: "10.128.3.0/24", clusterSubnetIntersection: true},
+					to:     destination{cidrSelector: "10.128.3.0/24", clusterSubnetIntersection: []*net.IPNet{clusterSubnetV4}},
 				},
 			},
 			{
@@ -372,7 +381,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{cidrSelector: "2002:0:0:1234:0001::/80", clusterSubnetIntersection: true},
+					to:     destination{cidrSelector: "2002:0:0:1234:0001::/80", clusterSubnetIntersection: []*net.IPNet{clusterSubnetV6}},
 				},
 			},
 			{
@@ -386,7 +395,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{cidrSelector: "2002:0:0:1235::/80", clusterSubnetIntersection: false},
+					to:     destination{cidrSelector: "2002:0:0:1235::/80", clusterSubnetIntersection: nil},
 				},
 			},
 			// dual stack
@@ -401,7 +410,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{cidrSelector: "10.128.3.4/32", clusterSubnetIntersection: true},
+					to:     destination{cidrSelector: "10.128.3.4/32", clusterSubnetIntersection: []*net.IPNet{clusterSubnetV4}},
 				},
 			},
 			{
@@ -415,7 +424,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{cidrSelector: "2002:0:0:1234:0001::/80", clusterSubnetIntersection: true},
+					to:     destination{cidrSelector: "2002:0:0:1234:0001::/80", clusterSubnetIntersection: []*net.IPNet{clusterSubnetV6}},
 				},
 			},
 			// nodeSelector tests
@@ -471,7 +480,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				subnets = append(subnets, config.CIDRNetworkEntry{CIDR: cidr})
 			}
 			config.Default.ClusterSubnets = subnets
-			output, err := efController.newEgressFirewallRule(tc.egressFirewallRule, tc.id)
+			output, err := efController.newEgressFirewallRule("default", tc.egressFirewallRule, tc.id)
 			if tc.err == true {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(tc.errOutput).To(gomega.Equal(err.Error()))
@@ -482,3 +491,223 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		}
 	})
 })
+
+type output struct {
+	cidrSelector              string
+	dnsName                   string
+	clusterSubnetIntersection []*net.IPNet
+	nodeSelector              *metav1.LabelSelector
+}
+
+func TestValidateAndGetEgressFirewallDestination(t *testing.T) {
+	clusterSubnetStr := "10.1.0.0/16"
+	_, clusterSubnet, _ := net.ParseCIDR(clusterSubnetStr)
+	udnClusterSubnetStr := "9.0.0.0/16"
+	_, udnClusterSubnet, _ := net.ParseCIDR(udnClusterSubnetStr)
+	validUDNName := "udn-test"
+	testcases := []struct {
+		name                      string
+		egressFirewallDestination egressfirewallapi.EgressFirewallDestination
+		dnsNameResolverEnabled    bool
+		expectedErr               bool
+		expectedOutput            output
+		udnName                   string
+	}{
+		{
+			name: "should correctly validate dns name",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "www.example.com",
+			},
+			dnsNameResolverEnabled: false,
+			expectedErr:            false,
+			expectedOutput: output{
+				dnsName: "www.example.com",
+			},
+		},
+		{
+			name: "should throw an error for wildcard dns name when dns name resolver is not enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "*.example.com",
+			},
+			dnsNameResolverEnabled: false,
+			expectedErr:            true,
+		},
+		{
+			name: "should correctly validate wildcard dns name when dns name resolver is enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "*.example.com",
+			},
+			dnsNameResolverEnabled: true,
+			expectedErr:            false,
+			expectedOutput: output{
+				dnsName: "*.example.com",
+			},
+		},
+		{
+			name: "should throw an error for tld dns name when dns name resolver is enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "com",
+			},
+			dnsNameResolverEnabled: true,
+			expectedErr:            true,
+		},
+		{
+			name: "should throw an error for tld wildcard dns name when dns name resolver is enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "*.com",
+			},
+			dnsNameResolverEnabled: true,
+			expectedErr:            true,
+		},
+		{
+			name: "should throw an error for dns name with more than 63 characters when dns name resolver is enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz123456789012.com",
+			},
+			dnsNameResolverEnabled: true,
+			expectedErr:            true,
+		},
+		{
+			name: "should validate dns name with 63 characters when dns name resolver is enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz12345678901.com",
+			},
+			dnsNameResolverEnabled: true,
+			expectedErr:            false,
+			expectedOutput: output{
+				dnsName: "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz12345678901.com",
+			},
+		},
+		{
+			name: "should throw an error for a dns name with a label starting with '-' when dns name resolver is enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "-example.com",
+			},
+			dnsNameResolverEnabled: true,
+			expectedErr:            true,
+		},
+		{
+			name: "should throw an error for a dns name with a label ending with '-' when dns name resolver is enabled",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				DNSName: "example-.com",
+			},
+			dnsNameResolverEnabled: true,
+			expectedErr:            true,
+		},
+		{
+			name: "should correctly validate cidr selector",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				CIDRSelector: "1.2.3.5/23",
+			},
+			expectedErr: false,
+			expectedOutput: output{
+				cidrSelector:              "1.2.3.5/23",
+				clusterSubnetIntersection: nil,
+			},
+		},
+		{
+			name: "should throw an error for invalid cidr selector",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				CIDRSelector: "1.2.3.5",
+			},
+			expectedErr: true,
+		},
+		{
+			name: "should correctly validate cidr selector and cluster subnet intersection",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				CIDRSelector: "10.1.1.1/24",
+			},
+			expectedErr: false,
+			expectedOutput: output{
+				cidrSelector:              "10.1.1.1/24",
+				clusterSubnetIntersection: []*net.IPNet{clusterSubnet},
+			},
+		},
+		{
+			name: "should correctly validate UDN cidr selector without cluster subnet intersection",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				CIDRSelector: "10.1.1.1/24",
+			},
+			expectedErr: false,
+			expectedOutput: output{
+				cidrSelector:              "10.1.1.1/24",
+				clusterSubnetIntersection: nil,
+			},
+			udnName: validUDNName,
+		},
+		{
+			name: "should correctly validate UDN cidr selector with cluster subnet intersection",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				CIDRSelector: "9.0.1.1/24",
+			},
+			expectedErr: false,
+			expectedOutput: output{
+				cidrSelector:              "9.0.1.1/24",
+				clusterSubnetIntersection: []*net.IPNet{udnClusterSubnet},
+			},
+			udnName: validUDNName,
+		},
+		{
+			name: "should correctly validate node selector",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				NodeSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"foo": "bar"},
+				},
+			},
+			expectedErr: false,
+			expectedOutput: output{
+				nodeSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"foo": "bar"},
+				},
+			},
+		},
+		{
+			name: "should correctly validate empty node selector",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				NodeSelector: &metav1.LabelSelector{},
+			},
+			expectedErr: false,
+			expectedOutput: output{
+				nodeSelector: &metav1.LabelSelector{},
+			},
+		},
+	}
+
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to PrepareTestConfig: %v", err)
+	}
+
+	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: clusterSubnet}}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+
+			config.OVNKubernetesFeature.EnableDNSNameResolver = tc.dnsNameResolverEnabled
+			netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: validUDNName},
+				Topology: types.Layer3Topology,
+				Subnets:  udnClusterSubnetStr,
+			})
+			require.NoError(t, err)
+			primaryNetworks := map[string]util.NetInfo{
+				validUDNName: netInfo,
+			}
+			networkManager := &fakenetworkmanager.FakeNetworkManager{PrimaryNetworks: primaryNetworks}
+			efController := EFController{networkManager: networkManager}
+			network := "default"
+			if len(tc.udnName) > 0 {
+				network = tc.udnName
+			}
+			cidrSelector, dnsName, clusterSubnetIntersection, nodeSelector, err :=
+				efController.validateAndGetEgressFirewallDestination(network, tc.egressFirewallDestination)
+			if tc.expectedErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedOutput.dnsName, dnsName)
+				assert.Equal(t, tc.expectedOutput.cidrSelector, cidrSelector)
+				assert.Equal(t, tc.expectedOutput.clusterSubnetIntersection, clusterSubnetIntersection)
+				assert.Equal(t, tc.expectedOutput.nodeSelector, nodeSelector)
+			}
+		})
+	}
+}
