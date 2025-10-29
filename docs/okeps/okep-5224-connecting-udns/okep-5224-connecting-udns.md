@@ -1469,7 +1469,8 @@ A new `network-connect-controller` will be created that watches the
    connect N_L3 Layer3 networks on M nodes and N_L2 tunnel keys to connect
    N_L2 Layer2 networks on M nodes. So total of `N_L3*M+N_L2` keys.
    * This will be done statically based on subnets allocated out for each
-     node-network pair for layer3 networks and for each layer2 network.
+     node-network pair for layer3 networks and for each layer2 network. See the
+     Deterministic Static TunnelID Allocator approach mentioned below for details.
 5) Creates the `pass` and `drop` ACLs if only partial service connectivity
    is requested
 6) If `ClusterIPServiceNetwork` is set, then once the services
@@ -1482,6 +1483,49 @@ A new `network-connect-controller` will be created that watches the
 
 This controller watches for CNCs, NADs, Services, Endpointslices
 and Nodes to react to events. It will be a level driven controller.
+
+**Deterministic Static Tunnel ID Allocation Algorithm used by ovnkube-controller**
+
+The tunnel IDs for connect-router ports are allocated deterministically based on the existing subnet allocations. This ensures consistency across all ovnkube-controller instances without requiring coordination.
+
+##### Algorithm Overview
+
+1. **Calculate maxNodes**: `maxNodes = 2^(32 - NetworkPrefix)`
+   - For NetworkPrefix=24: maxNodes=128
+   - For NetworkPrefix=25: maxNodes=64
+
+2. **Calculate network index**: Based on the subnet's position in the NetworkPrefix range
+
+3. **Allocate tunnel keys**:
+   - **Layer3 networks**: `tunnelKey = networkIndex * maxNodes + nodeID + 1`
+   - **Layer2 networks**: `tunnelKey = networkIndex * maxNodes + subIndex + 1`
+
+##### Example Allocation
+
+Given NetworkPrefix=24 (maxNodes=128):
+
+| Network | Subnet | Type | Index | Tunnel Key Range |
+|---------|--------|------|-------|------------------|
+| network1 | 192.168.0.0/24 | Layer3 | 0 | [1, 128] |
+| network2 | 192.168.1.0/24 | Layer3 | 1 | [129, 256] |
+| network5 | 192.168.2.0/24 | Layer3 | 2 | [257, 384] |
+| network12 | 192.168.3.0/24 | Layer3 | 3 | [385, 512] |
+| network40 | 192.168.4.0/31 | Layer2 | 4 | [513] | --> at the end of the day its the same logic as layer3 since each layer2 is part of a layer3 subnet
+| network103 | 192.168.4.2/31 | Layer2 | 4 | [514] |
+| network15 | 192.168.5.0/24 | Layer3 | 5 | [641, 768] |
+
+##### Scale Limitations
+
+The maximum number of connectable networks is limited by:
+- **Tunnel key limit**: 32767 (reserved: 0 since 0 is invalid tunnelKey)
+- **Available keys**: 32766
+- **Max networks**: `32766 / maxNodes`
+
+| NetworkPrefix | maxNodes | Max Networks |
+|---------------|----------|--------------|
+| /24 | 128 | 255 |
+| /25 | 64 | 511 |
+| /26 | 32 | 1023 |
 
 ## Cross Feature Interaction
 
