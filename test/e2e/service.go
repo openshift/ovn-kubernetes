@@ -42,6 +42,7 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -386,6 +387,9 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 									Selector: map[string]string{"app": serverPodName},
 									Type:     v1.ServiceTypeNodePort},
 							}
+							if isDualStackCluster(nodes) {
+								svc.Spec.IPFamilyPolicy = ptr.To(v1.IPFamilyPolicyRequireDualStack)
+							}
 							svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.TODO(), svc, metav1.CreateOptions{})
 							if err != nil {
 								framework.Logf("creating service failed, err: %v", err)
@@ -413,7 +417,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 							for _, size := range packetSizes {
 								for _, serviceNodeIP := range serviceNodeInternalIPs {
 									serviceNodeIP := serviceNodeIP
-									if IsIPv6Cluster(f.ClientSet) {
+									if utilnet.IsIPv6String(serviceNodeIP) {
 										serviceNodeIP = fmt.Sprintf("[%s]", serviceNodeIP)
 									}
 									ginkgo.By(fmt.Sprintf("Sending TCP %s payload to service IP %s "+
