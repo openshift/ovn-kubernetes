@@ -45,6 +45,11 @@ func (m *networkQoSManager) getMessages(networkQoS *networkqosapi.NetworkQoS) []
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
+func (m *networkQoSManager) getManagedFields(networkQoS *networkqosapi.NetworkQoS) []metav1.ManagedFieldsEntry {
+	return networkQoS.ManagedFields
+}
+
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *networkQoSManager) updateStatus(networkQoS *networkqosapi.NetworkQoS, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if networkQoS == nil {
