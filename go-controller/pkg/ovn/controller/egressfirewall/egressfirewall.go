@@ -106,10 +106,9 @@ type matchTarget struct {
 type matchKind int
 
 type EFController struct {
-	sync.RWMutex // used only for unit testing
-	name         string
-	zone         string
-	ruleCounter  sync.Map
+	name        string
+	zone        string
+	ruleCounter sync.Map
 
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
@@ -315,8 +314,6 @@ func (oc *EFController) Stop() {
 }
 
 func (oc *EFController) sync(key string) (updateErr error) {
-	oc.RLock()
-	defer oc.RUnlock()
 	klog.V(5).Info("Syncing EgressFirewall", key)
 	namespace, efName, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
