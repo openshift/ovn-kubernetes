@@ -36,6 +36,11 @@ func (m *egressFirewallManager) getMessages(egressFirewall *egressfirewallapi.Eg
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
+func (m *egressFirewallManager) getManagedFields(egressFirewall *egressfirewallapi.EgressFirewall) []metav1.ManagedFieldsEntry {
+	return egressFirewall.ManagedFields
+}
+
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *egressFirewallManager) updateStatus(egressFirewall *egressfirewallapi.EgressFirewall, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if egressFirewall == nil {

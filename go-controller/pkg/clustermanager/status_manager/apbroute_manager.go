@@ -36,6 +36,11 @@ func (m *apbRouteManager) getMessages(route *adminpolicybasedrouteapi.AdminPolic
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
+func (m *apbRouteManager) getManagedFields(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute) []metav1.ManagedFieldsEntry {
+	return route.ManagedFields
+}
+
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *apbRouteManager) updateStatus(route *adminpolicybasedrouteapi.AdminPolicyBasedExternalRoute, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if route == nil {
