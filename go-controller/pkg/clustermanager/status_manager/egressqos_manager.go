@@ -45,6 +45,11 @@ func (m *egressQoSManager) getMessages(egressQoS *egressqosapi.EgressQoS) []stri
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
+func (m *egressQoSManager) getManagedFields(egressQoS *egressqosapi.EgressQoS) []metav1.ManagedFieldsEntry {
+	return egressQoS.ManagedFields
+}
+
+//lint:ignore U1000 generic interfaces throw false-positives
 func (m *egressQoSManager) updateStatus(egressQoS *egressqosapi.EgressQoS, applyOpts *metav1.ApplyOptions,
 	applyEmptyOrFailed bool) error {
 	if egressQoS == nil {
