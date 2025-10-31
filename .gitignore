@@ -7,3 +7,6 @@ contrib/bin
 ovn-kubernetes-anp-test-report.yaml
 
 **/ginkgo.report
+
+# Claude Code personal settings
+.claude/settings.local.json
