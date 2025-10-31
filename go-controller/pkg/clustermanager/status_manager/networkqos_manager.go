@@ -34,7 +34,12 @@ func (m *networkQoSManager) get(namespace, name string) (*networkqosapi.NetworkQ
 func (m *networkQoSManager) getMessages(networkQoS *networkqosapi.NetworkQoS) []string {
 	var messages []string
 	for _, condition := range networkQoS.Status.Conditions {
-		messages = append(messages, condition.Message)
+		// Extract zone name from condition Type (format: "Ready-In-Zone-zoneName")
+		// and format message as "zoneName: message" for consistency with message-based resources
+		if strings.HasPrefix(condition.Type, readyInZonePrefix) {
+			zoneName := strings.TrimPrefix(condition.Type, readyInZonePrefix)
+			messages = append(messages, types.GetZoneStatus(zoneName, condition.Message))
+		}
 	}
 	return messages
 }
