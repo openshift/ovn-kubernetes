@@ -27,7 +27,10 @@ import (
 )
 
 // clusterManagerName should be different from any zone name
-const clusterManagerName = "cluster-manager"
+const (
+	clusterManagerName = "cluster-manager"
+	readyInZonePrefix  = "Ready-In-Zone-"
+)
 
 type resourceManager[T any] interface {
 	// cluster-scoped resources should ignore namespace
