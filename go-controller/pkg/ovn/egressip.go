@@ -570,7 +570,6 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 			egressStatuses:       egressStatuses{make(map[egressipv1.EgressIPStatusItem]string)},
 			standbyEgressIPNames: sets.New[string](),
 		}
-		oc.eIPC.podAssignment[podKey] = podState
 	} else if podState.egressIPName == name || podState.egressIPName == "" {
 		// We do the setup only if this egressIP object is the one serving this pod OR
 		// podState.egressIPName can be empty if no re-routes were found in
@@ -613,6 +612,10 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 		}
 		delete(podState.egressStatuses.statusMap, staleStatus)
 	}
+	// We store podState into podAssignment cache at this place for two reasons.
+	// 1. When podAssignmentState is newly created.
+	// 2. deletePodEgressIPAssignments might clean the podAssignment cache, make sure we add it back.
+	oc.eIPC.podAssignment[podKey] = podState
 	// We need to proceed with add only under two conditions
 	// 1) egressNode present in at least one status is local to this zone
 	// (NOTE: The relation between egressIPName and nodeName is 1:1 i.e in the same object the given node will be present only in one status)
