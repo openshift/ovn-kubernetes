@@ -42,6 +42,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
@@ -105,10 +106,16 @@ type matchTarget struct {
 
 type matchKind int
 
+type cacheEntry struct {
+	pgName          string
+	hasNodeSelector bool
+}
+
 type EFController struct {
 	name        string
 	zone        string
 	ruleCounter sync.Map
+	cache       *syncmap.SyncMap[*cacheEntry] // cache stores a mapping of rendered firewalls -> nodes + networks
 
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
@@ -142,6 +149,7 @@ func NewEFController(
 	c := &EFController{
 		name:            name,
 		zone:            zone,
+		cache:           syncmap.NewSyncMap[*cacheEntry](),
 		nbClient:        nbClient,
 		kube:            kube,
 		nodeLister:      nodeInformer.Lister(),
@@ -314,6 +322,8 @@ func (oc *EFController) Stop() {
 }
 
 func (oc *EFController) sync(key string) (updateErr error) {
+	oc.cache.LockKey(key)
+	defer oc.cache.UnlockKey(key)
 	klog.V(5).Info("Syncing EgressFirewall", key)
 	namespace, efName, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -325,31 +335,19 @@ func (oc *EFController) sync(key string) (updateErr error) {
 			return err
 		}
 		// delete case
-		klog.V(3).Infof("Removing egress firewall %s", key)
+		cacheEntry, ok := oc.cache.Load(key)
+		if !ok {
+			return nil
+		}
+		klog.Infof("Removing egress firewall %s", key)
+		pgName := cacheEntry.pgName
+
 		p := libovsdbops.GetPredicate[*nbdb.ACL](oc.GetEgressFirewallACLDbIDsNoRule(namespace), nil)
 		invalidACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 		if err != nil {
 			return fmt.Errorf("error finding ACLs for egress firewall %s: %w", key, err)
 		}
-		pgPredicate := func(item *nbdb.PortGroup) bool {
-			if len(item.ACLs) == 0 {
-				return false
-			}
-			if item.ExternalIDs[libovsdbops.ObjectNameKey.String()] == namespace &&
-				item.ExternalIDs[libovsdbops.OwnerTypeKey.String()] == libovsdbops.NamespaceOwnerType {
-				return true
-			}
-			return false
-		}
-		pgs, err := libovsdbops.FindPortGroupsWithPredicate(oc.nbClient, pgPredicate)
-		if err != nil {
-			return fmt.Errorf("error finding port groups for egress firewall namespace %s: %w", namespace, err)
-		}
-		pgNames := make([]string, 0, len(pgs))
-		for _, pg := range pgs {
-			pgNames = append(pgNames, pg.Name)
-		}
-		if err := libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, pgNames, invalidACLs...); err != nil {
+		if err := libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{pgName}, invalidACLs...); err != nil {
 			return fmt.Errorf("error deleting stale ACLs for egress firewall %s: %w", key, err)
 		}
 		if err := oc.dnsNameResolver.Delete(namespace); err != nil {
@@ -380,10 +378,14 @@ func (oc *EFController) sync(key string) (updateErr error) {
 			ef.Namespace, ef.Name, err)
 	}
 
-	updateErr = oc.addEgressFirewall(ef, pgName)
+	entry := &cacheEntry{
+		pgName: pgName,
+	}
+	updateErr = oc.addEgressFirewall(ef, entry)
 	if updateErr != nil {
 		return
 	}
+	oc.cache.Store(key, entry)
 	// remove stale ACLs
 	p := libovsdbops.GetPredicate[*nbdb.ACL](oc.GetEgressFirewallACLDbIDsNoRule(namespace),
 		func(acl *nbdb.ACL) bool {
@@ -413,7 +415,7 @@ func (oc *EFController) sync(key string) (updateErr error) {
 	return
 }
 
-func (oc *EFController) buildEgressFirewallConstruct(egressFirewall *egressfirewallapi.EgressFirewall) (*egressFirewall, error) {
+func (oc *EFController) buildEgressFirewallConstruct(egressFirewall *egressfirewallapi.EgressFirewall, entry *cacheEntry) (*egressFirewall, error) {
 	ef := cloneEgressFirewall(egressFirewall)
 	var errorList []error
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
@@ -423,7 +425,7 @@ func (oc *EFController) buildEgressFirewallConstruct(egressFirewall *egressfirew
 				egressFirewall.Namespace, types.EgressFirewallStartPriority-types.MinimumReservedEgressFirewallPriority))
 			break
 		}
-		efr, err := oc.newEgressFirewallRule(egressFirewall.Namespace, egressFirewallRule, i)
+		efr, err := oc.newEgressFirewallRule(egressFirewall.Namespace, egressFirewallRule, i, entry)
 		if err != nil {
 			errorList = append(errorList, fmt.Errorf("cannot create EgressFirewall Rule to destination %s for namespace %s: %w",
 				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
@@ -438,10 +440,10 @@ func (oc *EFController) buildEgressFirewallConstruct(egressFirewall *egressfirew
 	return ef, nil
 }
 
-func (oc *EFController) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall, pgName string) error {
+func (oc *EFController) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall, c *cacheEntry) error {
 	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
 
-	ef, err := oc.buildEgressFirewallConstruct(egressFirewall)
+	ef, err := oc.buildEgressFirewallConstruct(egressFirewall, c)
 	if err != nil {
 		return err
 	}
@@ -452,7 +454,7 @@ func (oc *EFController) addEgressFirewall(egressFirewall *egressfirewallapi.Egre
 			egressFirewall.Namespace, egressFirewall.Name, err)
 	}
 
-	if err := oc.addEgressFirewallRules(ef, pgName, aclLoggingLevels); err != nil {
+	if err := oc.addEgressFirewallRules(ef, c.pgName, aclLoggingLevels); err != nil {
 		return err
 	}
 	return nil
@@ -506,7 +508,8 @@ func (oc *EFController) validateAndGetEgressFirewallDestination(namespace string
 
 // newEgressFirewallRule creates a new egressFirewallRule. For the logging level, it will pick either of
 // aclLoggingAllow or aclLoggingDeny depending if this is an allow or deny rule.
-func (oc *EFController) newEgressFirewallRule(namespace string, rawEgressFirewallRule egressfirewallapi.EgressFirewallRule, id int) (*egressFirewallRule, error) {
+func (oc *EFController) newEgressFirewallRule(namespace string, rawEgressFirewallRule egressfirewallapi.EgressFirewallRule,
+	id int, entry *cacheEntry) (*egressFirewallRule, error) {
 	efr := &egressFirewallRule{
 		id:     id,
 		access: rawEgressFirewallRule.Type,
@@ -522,6 +525,9 @@ func (oc *EFController) newEgressFirewallRule(namespace string, rawEgressFirewal
 	}
 	// If nodeSelector is set then fetch the node addresses.
 	if efr.to.nodeSelector != nil {
+		if entry != nil {
+			entry.hasNodeSelector = true
+		}
 		efr.to.nodeAddrs = map[string][]string{}
 		selector, err := metav1.LabelSelectorAsSelector(rawEgressFirewallRule.To.NodeSelector)
 		if err != nil {
@@ -555,40 +561,18 @@ func efNodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 func (oc *EFController) updateEgressFirewallForNode(nodeName string) error {
 	klog.V(3).Infof("Syncing node %q for egress firewall", nodeName)
 
-	// cycle through egress firewalls and check if any match this node's labels
-	egressFirewalls, err := oc.efLister.List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("failed to list all egress firewalls: %w", err)
-	}
-
-	for _, egressFirewall := range egressFirewalls {
-		ef, err := oc.buildEgressFirewallConstruct(egressFirewall)
-		if err != nil {
-			return fmt.Errorf("failed to create EgressFirewall object for egress firewall %s/%s: %w",
-				egressFirewall.Namespace, egressFirewall.Name, err)
+	efKeys := oc.cache.GetKeys()
+	for _, key := range efKeys {
+		if err := oc.cache.DoWithLock(key, func(key string) error {
+			if cacheEntry, ok := oc.cache.Load(key); ok && cacheEntry.hasNodeSelector {
+				klog.Infof("Syncing egress firewall %s due to node %q change", key, nodeName)
+				oc.controller.Reconcile(key)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 
-		for _, rule := range ef.egressRules {
-			// nodeSelector will always have a value, but it is mutually exclusive from cidrSelector and dnsName
-			if len(rule.to.cidrSelector) != 0 || len(rule.to.dnsName) != 0 {
-				continue
-			}
-			_, err := metav1.LabelSelectorAsSelector(rule.to.nodeSelector)
-			if err != nil {
-				klog.Errorf("Error while parsing label selector %#v for egress firewall in namespace %s",
-					rule.to.nodeSelector, egressFirewall.Namespace)
-				continue
-			}
-			// selector is a valid node selector, could be affected by this node, need to sync
-			key, err := cache.MetaNamespaceKeyFunc(egressFirewall)
-			if err != nil {
-				return fmt.Errorf("failed to get key for egress firewall %s/%s: %w",
-					egressFirewall.Namespace, egressFirewall.Name, err)
-			}
-			klog.Infof("Syncing egress firewall %s due to node %q change", key, nodeName)
-			oc.controller.Reconcile(key)
-			break
-		}
 	}
 
 	return nil

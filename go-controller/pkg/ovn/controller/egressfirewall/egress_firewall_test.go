@@ -285,6 +285,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 			errOutput          string
 			output             egressFirewallRule
 			clusterSubnets     []string
+			hasNodeSelector    bool
 		}
 		_, clusterSubnetV4, _ := net.ParseCIDR("10.128.0.0/16")
 		_, clusterSubnetV6, _ := net.ParseCIDR("2002:0:0:1234::/64")
@@ -443,6 +444,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 					to: destination{nodeAddrs: map[string][]string{}, nodeSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"no": "match"}}},
 				},
+				hasNodeSelector: true,
 			},
 			// empty selector, match all
 			{
@@ -457,6 +459,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 					access: egressfirewallapi.EgressFirewallRuleAllow,
 					to:     destination{nodeAddrs: map[string][]string{node1Name: {node1Addr}, node2Name: {node2Addr}}, nodeSelector: &metav1.LabelSelector{}},
 				},
+				hasNodeSelector: true,
 			},
 			// match one node
 			{
@@ -471,6 +474,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 					access: egressfirewallapi.EgressFirewallRuleAllow,
 					to:     destination{nodeAddrs: map[string][]string{node1Name: {node1Addr}}, nodeSelector: &metav1.LabelSelector{MatchLabels: nodeLabel}},
 				},
+				hasNodeSelector: true,
 			},
 		}
 		for _, tc := range testcases {
@@ -480,7 +484,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				subnets = append(subnets, config.CIDRNetworkEntry{CIDR: cidr})
 			}
 			config.Default.ClusterSubnets = subnets
-			output, err := efController.newEgressFirewallRule("default", tc.egressFirewallRule, tc.id)
+			entry := &cacheEntry{}
+			output, err := efController.newEgressFirewallRule("default", tc.egressFirewallRule, tc.id, entry)
 			if tc.err == true {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(tc.errOutput).To(gomega.Equal(err.Error()))
@@ -488,6 +493,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(*output).To(gomega.Equal(tc.output))
 			}
+			gomega.Expect(entry.hasNodeSelector).To(gomega.Equal(tc.hasNodeSelector))
 		}
 	})
 })
