@@ -11,11 +11,17 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func initLocalGateway(hostSubnets []*net.IPNet, mgmtPort managementport.Interface) error {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		return nil
+	}
+
 	klog.Info("Adding iptables masquerading rules for new local gateway")
 
 	var allCIDRs []*net.IPNet
@@ -80,6 +86,9 @@ func getLocalAddrs() (map[string]net.IPNet, error) {
 }
 
 func cleanupLocalnetGateway(physnet string) error {
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return nil
+	}
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
