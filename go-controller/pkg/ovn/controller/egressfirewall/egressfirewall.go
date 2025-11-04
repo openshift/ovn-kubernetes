@@ -60,6 +60,7 @@ const (
 	// This is due to legacy reasons and left alone for now to avoid upgrade issues. May be updated in the future.
 	defaultControllerOwner         = "default-network-controller"
 	EgressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
+	egressFirewallName             = "default"
 )
 
 const (
@@ -109,13 +110,16 @@ type matchKind int
 type cacheEntry struct {
 	pgName          string
 	hasNodeSelector bool
+	stale           bool
 }
 
 type EFController struct {
 	name        string
 	zone        string
 	ruleCounter sync.Map
-	cache       *syncmap.SyncMap[*cacheEntry] // cache stores a mapping of rendered firewalls -> nodes + networks
+	// cache stores a mapping of rendered firewall namespace -> nodes + networks
+	// only one firewall (named "default") can exist per namespace
+	cache *syncmap.SyncMap[*cacheEntry]
 
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
@@ -313,7 +317,10 @@ func (oc *EFController) initialSync() error {
 
 func (oc *EFController) Start() error {
 	klog.Infof("Starting EgressFirewall controller")
-	return controller.StartWithInitialSync(oc.initialSync, oc.controller, oc.nodeController)
+	if err := controller.StartWithInitialSync(oc.initialSync, oc.controller, oc.nodeController); err != nil {
+		return err
+	}
+	return oc.networkManager.RegisterNADHandler(oc.handleNetworkEvent)
 }
 
 func (oc *EFController) Stop() {
@@ -321,26 +328,82 @@ func (oc *EFController) Stop() {
 	controller.Stop(oc.nodeController, oc.controller)
 }
 
+func (oc *EFController) handleNetworkEvent(nadName string, info util.NetInfo, removed bool) {
+	if info != nil && !info.IsPrimaryNetwork() { // egressFirewall only supported for primary network
+		return
+	}
+	if removed { // delete case
+		namespace, _, err := cache.SplitMetaNamespaceKey(nadName)
+		if err != nil {
+			klog.Errorf("%s: failed splitting key %s: %v", oc.name, nadName, err)
+			return
+		}
+		oc.cache.LockKey(namespace)
+		entry, ok := oc.cache.Load(namespace)
+		if !ok {
+			oc.cache.UnlockKey(namespace)
+			return // no cache entry exists, so nothing to remove
+		}
+		entry.stale = true
+		oc.cache.UnlockKey(namespace)
+		klog.V(3).Infof("NAD removed for egress firewall in namespace: %q. Will sync.", namespace)
+		oc.controller.Reconcile(fmt.Sprintf("%s/%s", namespace, egressFirewallName))
+		return
+	}
+	// add/update case
+	namespace, _, err := cache.SplitMetaNamespaceKey(nadName)
+	if err != nil {
+		klog.Errorf("%s: failed splitting key %s: %v", oc.name, nadName, err)
+		return
+	}
+	ef, err := oc.efLister.EgressFirewalls(namespace).Get(egressFirewallName)
+	if err != nil || ef == nil {
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(ef)
+	if err != nil {
+		return
+	}
+	klog.V(3).Infof("NAD add/update for egress firewall in namespace: %q. Will sync.", namespace)
+	oc.controller.Reconcile(key)
+}
+
 func (oc *EFController) sync(key string) (updateErr error) {
-	oc.cache.LockKey(key)
-	defer oc.cache.UnlockKey(key)
-	klog.V(5).Info("Syncing EgressFirewall", key)
+	klog.V(5).Infof("Syncing EgressFirewall %s", key)
 	namespace, efName, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return fmt.Errorf("invalid resource key for egress firewall: %s", key)
 	}
+	shouldRemove := false
+	shouldAddUpdate := false
+
 	ef, err := oc.efLister.EgressFirewalls(namespace).Get(efName)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return err
 		}
+		shouldRemove = true
+	} else {
+		shouldAddUpdate = true
+	}
+
+	oc.cache.LockKey(namespace)
+	defer oc.cache.UnlockKey(namespace)
+
+	if entry, ok := oc.cache.Load(namespace); ok {
+		if entry.stale {
+			shouldRemove = true
+		}
+	}
+
+	if shouldRemove {
 		// delete case
-		cacheEntry, ok := oc.cache.Load(key)
+		entry, ok := oc.cache.Load(namespace)
 		if !ok {
 			return nil
 		}
 		klog.Infof("Removing egress firewall %s", key)
-		pgName := cacheEntry.pgName
+		pgName := entry.pgName
 
 		p := libovsdbops.GetPredicate[*nbdb.ACL](oc.GetEgressFirewallACLDbIDsNoRule(namespace), nil)
 		invalidACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
@@ -350,6 +413,7 @@ func (oc *EFController) sync(key string) (updateErr error) {
 		if err := libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{pgName}, invalidACLs...); err != nil {
 			return fmt.Errorf("error deleting stale ACLs for egress firewall %s: %w", key, err)
 		}
+		oc.cache.Delete(namespace)
 		if err := oc.dnsNameResolver.Delete(namespace); err != nil {
 			return err
 		}
@@ -361,6 +425,9 @@ func (oc *EFController) sync(key string) (updateErr error) {
 			klog.Errorf("Unable to decrement egress firewall rule count, cache miss for key: %s", key)
 		}
 		metrics.DecrementEgressFirewallCount()
+	}
+
+	if !shouldAddUpdate {
 		return nil
 	}
 
@@ -385,7 +452,7 @@ func (oc *EFController) sync(key string) (updateErr error) {
 	if updateErr != nil {
 		return
 	}
-	oc.cache.Store(key, entry)
+	oc.cache.Store(namespace, entry)
 	// remove stale ACLs
 	p := libovsdbops.GetPredicate[*nbdb.ACL](oc.GetEgressFirewallACLDbIDsNoRule(namespace),
 		func(acl *nbdb.ACL) bool {
@@ -561,12 +628,23 @@ func efNodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 func (oc *EFController) updateEgressFirewallForNode(nodeName string) error {
 	klog.V(3).Infof("Syncing node %q for egress firewall", nodeName)
 
-	efKeys := oc.cache.GetKeys()
-	for _, key := range efKeys {
-		if err := oc.cache.DoWithLock(key, func(key string) error {
-			if cacheEntry, ok := oc.cache.Load(key); ok && cacheEntry.hasNodeSelector {
-				klog.Infof("Syncing egress firewall %s due to node %q change", key, nodeName)
-				oc.controller.Reconcile(key)
+	efNamespaces := oc.cache.GetKeys()
+	for _, namespace := range efNamespaces {
+		if err := oc.cache.DoWithLock(namespace, func(key string) error {
+			if entry, ok := oc.cache.Load(key); ok && entry.hasNodeSelector {
+				ef, err := oc.efLister.EgressFirewalls(namespace).Get(egressFirewallName)
+				if err != nil {
+					if !apierrors.IsNotFound(err) {
+						return err
+					}
+					return nil
+				}
+				efKey, err := cache.MetaNamespaceKeyFunc(ef)
+				if err != nil {
+					return fmt.Errorf("couldn't get key for egress firewall object %+v: %v", ef, err)
+				}
+				klog.Infof("Syncing egress firewall %s due to node %q change", efKey, nodeName)
+				oc.controller.Reconcile(efKey)
 			}
 			return nil
 		}); err != nil {

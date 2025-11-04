@@ -2,6 +2,9 @@ package networkmanager
 
 import (
 	"context"
+	"sync"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -44,13 +47,28 @@ func (fcm *FakeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 }
 
 type FakeNetworkManager struct {
+	sync.Mutex
 	// namespace -> netInfo
 	// if netInfo is nil, it represents a namespace which contains the required UDN label but with no valid network. It will return invalid network error.
 	PrimaryNetworks map[string]util.NetInfo
+	HandlerFuncs    []handlerFunc
+	// UDNNamespaces are a list of namespaces that require UDN for primary network
+	UDNNamespaces sets.Set[string]
 }
 
-func (fnm *FakeNetworkManager) RegisterNADHandler(_ handlerFunc) error {
+func (fnm *FakeNetworkManager) RegisterNADHandler(h handlerFunc) error {
+	fnm.Lock()
+	defer fnm.Unlock()
+	fnm.HandlerFuncs = append(fnm.HandlerFuncs, h)
 	return nil
+}
+
+func (fnm *FakeNetworkManager) TriggerHandlers(nadName string, info util.NetInfo, removed bool) {
+	fnm.Lock()
+	defer fnm.Unlock()
+	for _, h := range fnm.HandlerFuncs {
+		h(nadName, info, removed)
+	}
 }
 
 func (fnm *FakeNetworkManager) Interface() Interface {
@@ -70,8 +88,13 @@ func (fnm *FakeNetworkManager) GetActiveNetworkForNamespace(namespace string) (u
 }
 
 func (fnm *FakeNetworkManager) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
+	fnm.Lock()
+	defer fnm.Unlock()
 	if primaryNetworks, ok := fnm.PrimaryNetworks[namespace]; ok {
 		return primaryNetworks
+	}
+	if fnm.UDNNamespaces != nil && fnm.UDNNamespaces.Has(namespace) {
+		return nil
 	}
 	return &util.DefaultNetInfo{}
 }
