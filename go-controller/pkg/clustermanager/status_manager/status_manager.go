@@ -319,6 +319,20 @@ func (sm *StatusManager) Start() error {
 			return fmt.Errorf("failed to start %s: %w", managerName, err)
 		}
 	}
+
+	// Perform one-time startup cleanup for ANP/BANP managedFields
+	// This handles the upgrade scenario where nodes were deleted before cluster-manager restart
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		sm.zonesLock.RLock()
+		zones := sm.zones.Clone()
+		sm.zonesLock.RUnlock()
+
+		anpManager := newANPManager(sm.ovnClient.ANPClient)
+		if err := anpManager.doStartupCleanup(zones); err != nil {
+			return fmt.Errorf("failed to run ANP/BANP startup cleanup: %w", err)
+		}
+	}
+
 	return nil
 }
 
