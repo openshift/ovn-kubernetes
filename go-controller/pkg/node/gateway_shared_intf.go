@@ -1624,20 +1624,20 @@ func newNodePortWatcher(
 				return nil, fmt.Errorf("unable to configure UDN isolation nftables: %w", err)
 			}
 		}
-	}
 
-	var subnets []*net.IPNet
-	for _, subnet := range config.Default.ClusterSubnets {
-		subnets = append(subnets, subnet.CIDR)
-	}
-	subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
-	if config.Gateway.DisableForwarding {
-		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.GetGatewayIface(), err)
+		var subnets []*net.IPNet
+		for _, subnet := range config.Default.ClusterSubnets {
+			subnets = append(subnets, subnet.CIDR)
 		}
-	} else {
-		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.GetGatewayIface(), err)
+		subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
+		if config.Gateway.DisableForwarding {
+			if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
+				return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.GetGatewayIface(), err)
+			}
+		} else {
+			if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
+				return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.GetGatewayIface(), err)
+			}
 		}
 	}
 
@@ -1666,47 +1666,51 @@ func newNodePortWatcher(
 }
 
 func cleanupSharedGateway() error {
-	// NicToBridge() may be created before-hand, only delete the patch port here
-	stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
-		"external_ids:ovn-localnet-port!=_")
-	if err != nil {
-		return fmt.Errorf("failed to get ovn-localnet-port port stderr:%s (%v)", stderr, err)
-	}
-	ports := strings.Fields(strings.Trim(stdout, "\""))
-	for _, port := range ports {
-		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-port", strings.Trim(port, "\""))
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// NicToBridge() may be created before-hand, only delete the patch port here
+		stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
+			"external_ids:ovn-localnet-port!=_")
 		if err != nil {
-			return fmt.Errorf("failed to delete port %s stderr:%s (%v)", port, stderr, err)
+			return fmt.Errorf("failed to get ovn-localnet-port port stderr:%s (%v)", stderr, err)
+		}
+		ports := strings.Fields(strings.Trim(stdout, "\""))
+		for _, port := range ports {
+			_, stderr, err := util.RunOVSVsctl("--if-exists", "del-port", strings.Trim(port, "\""))
+			if err != nil {
+				return fmt.Errorf("failed to delete port %s stderr:%s (%v)", port, stderr, err)
+			}
+		}
+
+		// Get the OVS bridge name from ovn-bridge-mappings
+		stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+			"external_ids:ovn-bridge-mappings")
+		if err != nil {
+			return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+		}
+
+		// skip the existing mapping setting for the specified physicalNetworkName
+		bridgeName := ""
+		bridgeMappings := strings.Split(stdout, ",")
+		for _, bridgeMapping := range bridgeMappings {
+			m := strings.Split(bridgeMapping, ":")
+			if network := m[0]; network == types.PhysicalNetworkName {
+				bridgeName = m[1]
+				break
+			}
+		}
+		if len(bridgeName) == 0 {
+			return nil
+		}
+
+		_, stderr, err = util.AddOFFlowWithSpecificAction(bridgeName, util.NormalAction)
+		if err != nil {
+			return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 		}
 	}
 
-	// Get the OVS bridge name from ovn-bridge-mappings
-	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ovn-bridge-mappings")
-	if err != nil {
-		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		cleanupSharedGatewayIPTChains()
 	}
-
-	// skip the existing mapping setting for the specified physicalNetworkName
-	bridgeName := ""
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
-		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network == types.PhysicalNetworkName {
-			bridgeName = m[1]
-			break
-		}
-	}
-	if len(bridgeName) == 0 {
-		return nil
-	}
-
-	_, stderr, err = util.AddOFFlowWithSpecificAction(bridgeName, util.NormalAction)
-	if err != nil {
-		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
-	}
-
-	cleanupSharedGatewayIPTChains()
 	return nil
 }
 
