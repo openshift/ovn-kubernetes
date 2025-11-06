@@ -470,6 +470,12 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP ne
 		return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 	}
 
+	// Configure iptables FORWARD rules for cluster and service CIDRs
+	// These are needed even in DPU-host mode to allow kernel forwarding
+	if err := configureForwardingRules(); err != nil {
+		return fmt.Errorf("failed to configure forwarding rules for DPU host: %v", err)
+	}
+
 	gatewayNextHops, _, err := getGatewayNextHops()
 	if err != nil {
 		return err
