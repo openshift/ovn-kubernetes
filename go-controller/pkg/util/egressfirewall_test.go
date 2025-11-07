@@ -1,13 +1,11 @@
 package util
 
 import (
-	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -15,15 +13,10 @@ import (
 )
 
 type output struct {
-	cidrSelector              string
-	dnsName                   string
-	clusterSubnetIntersection bool
-	nodeSelector              *metav1.LabelSelector
+	dnsName string
 }
 
-func TestValidateAndGetEgressFirewallDestination(t *testing.T) {
-	clusterSubnetStr := "10.1.0.0/16"
-	_, clusterSubnet, _ := net.ParseCIDR(clusterSubnetStr)
+func TestValidateAndGetEgressFirewallDNSDestination(t *testing.T) {
 	testcases := []struct {
 		name                      string
 		egressFirewallDestination egressfirewallapi.EgressFirewallDestination
@@ -112,83 +105,24 @@ func TestValidateAndGetEgressFirewallDestination(t *testing.T) {
 			dnsNameResolverEnabled: true,
 			expectedErr:            true,
 		},
-		{
-			name: "should correctly validate cidr selector",
-			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
-				CIDRSelector: "1.2.3.5/23",
-			},
-			expectedErr: false,
-			expectedOutput: output{
-				cidrSelector:              "1.2.3.5/23",
-				clusterSubnetIntersection: false,
-			},
-		},
-		{
-			name: "should throw an error for invalid cidr selector",
-			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
-				CIDRSelector: "1.2.3.5",
-			},
-			expectedErr: true,
-		},
-		{
-			name: "should correctly validate cidr selector and cluster subnet intersection",
-			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
-				CIDRSelector: "10.1.1.1/24",
-			},
-			expectedErr: false,
-			expectedOutput: output{
-				cidrSelector:              "10.1.1.1/24",
-				clusterSubnetIntersection: true,
-			},
-		},
-		{
-			name: "should correctly validate node selector",
-			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
-				NodeSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"foo": "bar"},
-				},
-			},
-			expectedErr: false,
-			expectedOutput: output{
-				nodeSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"foo": "bar"},
-				},
-			},
-		},
-		{
-			name: "should correctly validate empty node selector",
-			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
-				NodeSelector: &metav1.LabelSelector{},
-			},
-			expectedErr: false,
-			expectedOutput: output{
-				nodeSelector: &metav1.LabelSelector{},
-			},
-		},
 	}
 
 	if err := config.PrepareTestConfig(); err != nil {
 		t.Fatalf("failed to PrepareTestConfig: %v", err)
 	}
 
-	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: clusterSubnet}}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 
-			if tc.dnsNameResolverEnabled {
-				config.OVNKubernetesFeature.EnableDNSNameResolver = true
-			}
+			config.OVNKubernetesFeature.EnableDNSNameResolver = tc.dnsNameResolverEnabled
 
-			cidrSelector, dnsName, clusterSubnetIntersection, nodeSelector, err :=
-				ValidateAndGetEgressFirewallDestination(tc.egressFirewallDestination)
+			dnsName, err :=
+				ValidateAndGetEgressFirewallDNSDestination(tc.egressFirewallDestination)
 			if tc.expectedErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, tc.expectedOutput.dnsName, dnsName)
-				assert.Equal(t, tc.expectedOutput.cidrSelector, cidrSelector)
-				assert.Equal(t, tc.expectedOutput.clusterSubnetIntersection, clusterSubnetIntersection)
-				assert.Equal(t, tc.expectedOutput.nodeSelector, nodeSelector)
 			}
 		})
 	}
