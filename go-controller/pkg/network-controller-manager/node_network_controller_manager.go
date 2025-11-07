@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -153,7 +154,7 @@ func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() erro
 }
 
 // Start the node network controller manager
-func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) {
+func (ncm *nodeNetworkControllerManager) Start(ctx context.Context, isOVNKubeControllerSyncd *atomic.Bool) (err error) {
 	klog.Infof("Starting the node network controller manager, Mode: %s", config.OvnKubeNode.Mode)
 
 	// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
@@ -171,7 +172,7 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	// make sure we clean up after ourselves on failure
 	defer func() {
 		if err != nil {
-			ncm.Stop()
+			ncm.Stop(isOVNKubeControllerSyncd)
 		}
 	}()
 
@@ -228,15 +229,46 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 			return fmt.Errorf("failed to own priority %d for IP rules: %v", node.UDNMasqueradeIPRulePriority, err)
 		}
 	}
+
+	// start workaround and remove when ovn has native support for silencing GARPs for LRPs
+	// https://issues.redhat.com/browse/FDP-1537
+	// when in mode ovnkube controller with node, wait until ovnkube controller is syncd before removing drop flows for GARPs
+waitForControllerSyncLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			if isOVNKubeControllerSyncd != nil && !isOVNKubeControllerSyncd.Load() {
+				klog.V(5).Infof("Waiting for ovnkube controller to start before removing GARP drop flows")
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			klog.Infof("Removing flows to drop GARP")
+			ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController).Gateway.SetDefaultBridgeGARPDropFlows(false)
+			if err := ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController).Gateway.Reconcile(); err != nil {
+				return fmt.Errorf("failed to reconcile gateway after removing GARP drop flows for ext bridge: %v", err)
+			}
+			break waitForControllerSyncLoop
+		}
+	}
+	// end workaround
+
 	return nil
 }
 
 // Stop gracefully stops all managed controllers
-func (ncm *nodeNetworkControllerManager) Stop() {
+func (ncm *nodeNetworkControllerManager) Stop(isOVNKubeControllerSyncd *atomic.Bool) {
 	// stop stale ovs ports cleanup
 	close(ncm.stopChan)
 
 	if ncm.defaultNodeNetworkController != nil {
+		if isOVNKubeControllerSyncd != nil && ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController).Gateway != nil {
+			ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController).Gateway.SetDefaultBridgeGARPDropFlows(true)
+			if err := ncm.defaultNodeNetworkController.(*node.DefaultNodeNetworkController).Gateway.Reconcile(); err != nil {
+				klog.Errorf("Failed to reconcile gateway after attempting to add flows to the external bridge to drop GARPs: %v", err)
+			}
+		}
 		ncm.defaultNodeNetworkController.Stop()
 	}
 
