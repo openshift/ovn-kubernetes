@@ -2,13 +2,11 @@ package util
 
 import (
 	"fmt"
-	"net"
 	"regexp"
 	"strings"
 
 	"github.com/miekg/dns"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -21,48 +19,25 @@ const (
 	dnsRegex = `^(\*\.)?([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.?$`
 )
 
-// ValidateAndGetEgressFirewallDestination validates an egress firewall rule destination and returns
+// ValidateAndGetEgressFirewallDNSDestination validates an egress firewall rule destination and returns
 // the parsed contents of the destination.
-func ValidateAndGetEgressFirewallDestination(egressFirewallDestination egressfirewallv1.EgressFirewallDestination) (
-	cidrSelector string,
+func ValidateAndGetEgressFirewallDNSDestination(egressFirewallDestination egressfirewallv1.EgressFirewallDestination) (
 	dnsName string,
-	clusterSubnetIntersection bool,
-	nodeSelector *metav1.LabelSelector,
 	err error) {
 	// Validate the egress firewall rule.
 	if egressFirewallDestination.DNSName != "" {
 		// Validate that DNS name is not wildcard when DNSNameResolver is not enabled.
 		if !config.OVNKubernetesFeature.EnableDNSNameResolver && IsWildcard(egressFirewallDestination.DNSName) {
-			return "", "", false, nil, fmt.Errorf("wildcard dns name is not supported as rule destination, %s", egressFirewallDestination.DNSName)
+			return "", fmt.Errorf("wildcard dns name is not supported as rule destination, %s", egressFirewallDestination.DNSName)
 		}
 		// Validate that DNS name if DNSNameResolver is enabled.
 		if config.OVNKubernetesFeature.EnableDNSNameResolver {
 			exp := regexp.MustCompile(dnsRegex)
 			if !exp.MatchString(egressFirewallDestination.DNSName) {
-				return "", "", false, nil, fmt.Errorf("invalid dns name used as rule destination, %s", egressFirewallDestination.DNSName)
+				return "", fmt.Errorf("invalid dns name used as rule destination, %s", egressFirewallDestination.DNSName)
 			}
 		}
 		dnsName = egressFirewallDestination.DNSName
-	} else if len(egressFirewallDestination.CIDRSelector) > 0 {
-		// Validate CIDR selector.
-		_, ipNet, err := net.ParseCIDR(egressFirewallDestination.CIDRSelector)
-		if err != nil {
-			return "", "", false, nil, err
-		}
-		cidrSelector = egressFirewallDestination.CIDRSelector
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
-				clusterSubnetIntersection = true
-				break
-			}
-		}
-	} else {
-		// Validate node selector.
-		_, err := metav1.LabelSelectorAsSelector(egressFirewallDestination.NodeSelector)
-		if err != nil {
-			return "", "", false, nil, fmt.Errorf("rule destination has invalid node selector, err: %v", err)
-		}
-		nodeSelector = egressFirewallDestination.NodeSelector
 	}
 
 	return
@@ -97,7 +72,7 @@ func GetDNSNames(ef *egressfirewallv1.EgressFirewall) []string {
 
 		// Validate egress firewall rule destination and get the DNS name
 		// if used in the rule.
-		_, dnsName, _, _, err := ValidateAndGetEgressFirewallDestination(egressFirewallRule.To)
+		dnsName, err := ValidateAndGetEgressFirewallDNSDestination(egressFirewallRule.To)
 		if err != nil {
 			return []string{}
 		}

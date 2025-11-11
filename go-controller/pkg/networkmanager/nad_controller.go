@@ -45,6 +45,9 @@ type watchFactory interface {
 	NodeCoreInformer() coreinformers.NodeInformer
 }
 
+// handlerFunc used as a callback that can be registered with nadController
+type handlerFunc func(nadName string, info util.NetInfo, removed bool)
+
 // nadController handles namespaced scoped NAD events and
 // manages cluster scoped networks defined in those NADs. NADs are mostly
 // referenced from pods to give them access to the network. Different NADs can
@@ -76,6 +79,8 @@ type nadController struct {
 	networkIDAllocator  id.Allocator
 	tunnelKeysAllocator *id.TunnelKeysAllocator
 	nadClient           nadclientset.Interface
+	// handlerFuncs is a list of registered callbacks that is called during events
+	handlerFuncs []handlerFunc
 }
 
 func newController(
@@ -96,6 +101,7 @@ func newController(
 		networkController: newNetworkController(name, zone, node, cm, wf),
 		nads:              map[string]string{},
 		primaryNADs:       map[string]string{},
+		handlerFuncs:      []handlerFunc{},
 	}
 
 	if ovnClient != nil {
@@ -171,6 +177,22 @@ func (c *nadController) Stop() {
 	klog.Infof("%s: shutting down", c.name)
 	controller.Stop(c.controller)
 	c.networkController.Stop()
+}
+
+// RegisterNADHandler adds functions to be executed during NAD delete/update/add calls
+// usage of this function should be restricted to lightweight, non-blocking operations
+func (c *nadController) RegisterNADHandler(handler handlerFunc) error {
+	c.Lock()
+	defer c.Unlock()
+	c.handlerFuncs = append(c.handlerFuncs, handler)
+	return nil
+}
+
+// executeHandlers should always be done under lock
+func (c *nadController) executeHandlers(nadName string, info util.NetInfo, removed bool) {
+	for _, handler := range c.handlerFuncs {
+		handler(nadName, info, removed)
+	}
 }
 
 func (c *nadController) syncAll() (err error) {
@@ -350,6 +372,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		} else {
 			c.networkController.EnsureNetwork(oldNetwork)
 		}
+		c.executeHandlers(key, oldNetwork, true)
 	}
 
 	if err := c.handleNetworkAnnotations(oldNetwork, ensureNetwork, nad); err != nil {
@@ -388,6 +411,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 
 	// reconcile the network
 	c.networkController.EnsureNetwork(ensureNetwork)
+	c.executeHandlers(key, ensureNetwork, false)
 	return nil
 }
 

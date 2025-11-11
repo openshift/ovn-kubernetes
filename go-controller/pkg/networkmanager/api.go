@@ -48,6 +48,9 @@ type Interface interface {
 	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
 	DoWithLock(f func(network util.NetInfo) error) error
 	GetActiveNetworkNamespaces(networkName string) ([]string, error)
+	// RegisterNADHandler allows external entities to register callback functions to be executed when
+	// a NAD is deleted/created/updated. These operations should be non-blocking and lightweight.
+	RegisterNADHandler(handler handlerFunc) error
 }
 
 // Controller handles the runtime of the package
@@ -220,6 +223,10 @@ func (nm defaultNetworkManager) GetActiveNetwork(network string) util.NetInfo {
 		return nil
 	}
 	return &util.DefaultNetInfo{}
+}
+
+func (nm defaultNetworkManager) RegisterNADHandler(_ handlerFunc) error {
+	return nil
 }
 
 var def Controller = &defaultNetworkManager{}
