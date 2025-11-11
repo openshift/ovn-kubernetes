@@ -258,6 +258,51 @@ func validateStaticIPRequest(netInfo util.NetInfo, network *nadapi.NetworkSelect
 			}
 		}
 	}
+
+	if err := validateIPFamilyMatchesNetwork(netInfo, network.IPRequest); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+var (
+	ErrIPFamilyMismatch = errors.New("requested IPs family types must match network's IP family configuration")
+)
+
+func validateIPFamilyMatchesNetwork(netInfo util.NetInfo, ipRequests []string) error {
+	if len(ipRequests) == 0 {
+		return nil
+	}
+
+	if len(ipRequests) > 2 {
+		return fmt.Errorf("layer2 network expects at most 2 IPs, got %d: %w", len(ipRequests), ErrIPFamilyMismatch)
+	}
+
+	if len(ipRequests) != len(netInfo.Subnets()) {
+		return fmt.Errorf("layer2 network expects %d IP(s), got %d: %w", len(netInfo.Subnets()), len(ipRequests), ErrIPFamilyMismatch)
+	}
+
+	requestedIPs, err := util.ParseIPNets(ipRequests)
+	if err != nil {
+		return fmt.Errorf("failed to parse IP requests: %w", err)
+	}
+
+	var requestedIPv4, requestedIPv6 bool
+	for _, ipNet := range requestedIPs {
+		if utilnet.IsIPv6CIDR(ipNet) {
+			requestedIPv6 = true
+		} else {
+			requestedIPv4 = true
+		}
+	}
+
+	ipv4Mode, ipv6Mode := netInfo.IPMode()
+	if ipv4Mode != requestedIPv4 || ipv6Mode != requestedIPv6 {
+		return fmt.Errorf("layer2 network IP family mismatch: network supports IPv4=%t IPv6=%t, but requested types IPv4=%t IPv6=%t: %w",
+			ipv4Mode, ipv6Mode, requestedIPv4, requestedIPv6, ErrIPFamilyMismatch)
+	}
+
 	return nil
 }
 
