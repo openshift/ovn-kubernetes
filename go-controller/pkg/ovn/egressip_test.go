@@ -5070,7 +5070,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil, types.DefaultNetworkName, DefaultNetworkControllerName)
+					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil)
 					dynamicNeighRouters := "true"
 					if config.OVNKubernetesFeature.EnableInterconnect {
 						dynamicNeighRouters = "false"
@@ -5176,7 +5176,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 					expectedNatLogicalPort := "k8s-node2"
 
-					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil)
+					egressIPServedPodsASv4, _ = buildEgressIPServedPodsAddressSets(nil)
 
 					expectedDatabaseState := []libovsdbtest.TestData{
 						getReRoutePolicy(egressPod.Status.PodIP, "6", "reroute-UUID", node2LogicalRouterIPv6, eipExternalID),
@@ -5924,7 +5924,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressNamespace := newNamespaceWithLabels(eipNamespace, egressPodLabel)
 				_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 				_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
-				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil, types.DefaultNetworkName, DefaultNetworkControllerName)
+				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil)
 				dynamicNeighRouters := "true"
 				if config.OVNKubernetesFeature.EnableInterconnect {
 					dynamicNeighRouters = "false"
@@ -6040,7 +6040,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						"stateless": "false",
 					},
 				}
-				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil)
+				egressIPServedPodsASv4, _ = buildEgressIPServedPodsAddressSets(nil)
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.EgressIPReroutePriority,
@@ -10613,7 +10613,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.DescribeTable(
+		ginkgotable.DescribeTable(
 			"DualStack cluster with single stack egressIP removes the correct snat rule when DisableSNATMultipleGWs=true",
 			func(
 				egressIP net.IP,
@@ -10884,11 +10884,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			ginkgo.Entry(
+			ginkgotable.Entry(
 				"When EgressIP is ipv4",
 				net.ParseIP("192.168.126.101"),
 			),
-			ginkgo.Entry(
+			ginkgotable.Entry(
 				"When EgressIP is ipv6",
 				net.ParseIP("fc00:f853:0ccd:e793:ffff:ffff:ffff:0000"),
 			),
