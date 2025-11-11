@@ -1,6 +1,7 @@
 package status_manager
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sync"
@@ -27,13 +28,18 @@ import (
 )
 
 // clusterManagerName should be different from any zone name
-const clusterManagerName = "cluster-manager"
+const (
+	clusterManagerName = "cluster-manager"
+	readyInZonePrefix  = "Ready-In-Zone-"
+)
 
 type resourceManager[T any] interface {
 	// cluster-scoped resources should ignore namespace
 	get(namespace, name string) (*T, error)
 	// messages should be built using types.GetZoneStatus, zone will be extracted by types.GetZoneFromStatus
 	getMessages(*T) []string
+	// getManagedFields returns the list of managedFields entries from the object
+	getManagedFields(*T) []metav1.ManagedFieldsEntry
 	// updateStatus should update obj status using given applyOpts. If applyEmptyOrFailed is true, we can't be sure about
 	// success, but can be sure about failure. So if at least 1 message is a failure, we can apply failed status, but if
 	// all messages are successful, empty patch should be sent.
@@ -50,6 +56,7 @@ type typedStatusManager[T any] struct {
 	objController  controller.Controller
 	resource       resourceManager[T]
 	withZonesRLock func(f func(zones sets.Set[string]) error) error
+	lister         func(selector labels.Selector) (ret []*T, err error)
 }
 
 func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
@@ -59,6 +66,7 @@ func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
 		name:           name,
 		resource:       resource,
 		withZonesRLock: withZonesRLock,
+		lister:         lister,
 	}
 	controllerConfig := &controller.ControllerConfig[T]{
 		Informer:       informer,
@@ -80,11 +88,92 @@ func (m *typedStatusManager[T]) needsUpdate(oldObj, newObj *T) bool {
 }
 
 func (m *typedStatusManager[T]) Start() error {
-	return controller.Start(m.objController)
+	// Perform one-time startup cleanup of stale managedFields (upgrade scenario)
+	initialSync := func() error {
+		return m.withZonesRLock(func(zones sets.Set[string]) error {
+			// Run cleanup immediately with whatever zones we have (even if empty)
+			// The cleanup logic only removes empty-status managedFields from managers
+			// not in the zones set, which is safe even when zones is empty or contains UnknownZone
+			return m.doStartupCleanup(zones)
+		})
+	}
+	return controller.StartWithInitialSync(initialSync, m.objController)
 }
 
 func (m *typedStatusManager[T]) Stop() {
 	controller.Stop(m.objController)
+}
+
+// isEmptyStatusManagedField checks if a managedField entry is managing only an empty status field.
+// This is the signature left by previous code that called ApplyStatus with an empty status.
+// Example: fieldsV1: {"f:status":{}}
+func isEmptyStatusManagedField(mf metav1.ManagedFieldsEntry) bool {
+	if mf.FieldsV1 == nil || mf.Subresource != "status" {
+		return false
+	}
+
+	// Parse the fieldsV1 JSON to check if it's just {"f:status":{}}
+	var fields map[string]interface{}
+	if err := json.Unmarshal(mf.FieldsV1.Raw, &fields); err != nil {
+		return false
+	}
+
+	// Check if it only has one "f:status" key
+	if len(fields) != 1 {
+		return false
+	}
+
+	statusField, ok := fields["f:status"]
+	if !ok {
+		return false
+	}
+
+	// Check if "f:status" is empty
+	statusMap, ok := statusField.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	// Empty status: {} or contains only empty nested fields
+	return len(statusMap) == 0
+}
+
+// doStartupCleanup performs a one-time cleanup of stale managedFields for all objects.
+// This handles the upgrade scenario where previous code left stale managedFields.
+// Returns an error if any cleanup operations failed.
+func (m *typedStatusManager[T]) doStartupCleanup(zones sets.Set[string]) error {
+	klog.Infof("StatusManager %s: performing a one-time startup cleanup of stale managedFields", m.name)
+
+	objects, err := m.lister(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list objects for startup cleanup: %w", err)
+	}
+
+	var cleanupErrors []error
+	for _, obj := range objects {
+		managedFields := m.resource.getManagedFields(obj)
+
+		// Check for stale empty-status managedFields
+		for _, mf := range managedFields {
+			if !zones.Has(mf.Manager) && isEmptyStatusManagedField(mf) {
+				klog.V(5).Infof("StatusManager %s: cleaning up stale empty-status managedField for manager: %s", m.name, mf.Manager)
+				applyAsZoneController := &metav1.ApplyOptions{
+					Force:        true,
+					FieldManager: mf.Manager,
+				}
+				err := m.resource.cleanupStatus(obj, applyAsZoneController)
+				if err != nil {
+					cleanupErrors = append(cleanupErrors, fmt.Errorf("failed to cleanup status for stale manager %s: %w", mf.Manager, err))
+				}
+			}
+		}
+	}
+
+	if len(cleanupErrors) > 0 {
+		return fmt.Errorf("startup cleanup encountered %d error(s): %v", len(cleanupErrors), cleanupErrors)
+	}
+
+	klog.Infof("StatusManager %s: startup cleanup complete", m.name)
+	return nil
 }
 
 func (m *typedStatusManager[T]) updateStatus(key string) error {
@@ -128,7 +217,7 @@ func (m *typedStatusManager[T]) updateStatus(key string) error {
 					klog.Infof("StatusManager %s: delete stale zone %s", m.name, zoneID)
 					err = m.resource.cleanupStatus(obj, applyAsZoneController)
 					if err != nil {
-						return err
+						return fmt.Errorf("StatusManager %s: failed to cleanup status for stale zone %s: %w", m.name, zoneID, err)
 					}
 				}
 			}
@@ -230,6 +319,20 @@ func (sm *StatusManager) Start() error {
 			return fmt.Errorf("failed to start %s: %w", managerName, err)
 		}
 	}
+
+	// Perform one-time startup cleanup for ANP/BANP managedFields
+	// This handles the upgrade scenario where nodes were deleted before cluster-manager restart
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		sm.zonesLock.RLock()
+		zones := sm.zones.Clone()
+		sm.zonesLock.RUnlock()
+
+		anpManager := newANPManager(sm.ovnClient.ANPClient)
+		if err := anpManager.doStartupCleanup(zones); err != nil {
+			return fmt.Errorf("failed to run ANP/BANP startup cleanup: %w", err)
+		}
+	}
+
 	return nil
 }
 

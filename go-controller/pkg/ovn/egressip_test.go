@@ -339,9 +339,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					Items: []corev1.Namespace{*egressNamespace},
 				})
 
-			err := fakeOvn.controller.WatchEgressIPNamespaces()
+			err := fakeOvn.controller.WatchEgressIPPods()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = fakeOvn.controller.WatchEgressIPPods()
+			err = fakeOvn.controller.WatchEgressIPNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = fakeOvn.controller.WatchEgressNodes()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -554,9 +554,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					Items: []corev1.Namespace{*egressNamespace},
 				})
 
-			err := fakeOvn.controller.WatchEgressIPNamespaces()
+			err := fakeOvn.controller.WatchEgressIPPods()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = fakeOvn.controller.WatchEgressIPPods()
+			err = fakeOvn.controller.WatchEgressIPNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = fakeOvn.controller.WatchEgressNodes()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -797,9 +797,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Items: []corev1.Namespace{*egressNamespace},
 						})
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1135,9 +1135,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Items: []corev1.Namespace{*egressNamespace},
 						})
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1556,9 +1556,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Items: []corev1.Namespace{*egressNamespace},
 						})
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1946,9 +1946,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					n.IP = i
 					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2349,9 +2349,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						n.IP = i
 						fakeOvn.controller.logicalPortCache.add(&p.Pod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					}
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2766,9 +2766,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 							Items: []corev1.Namespace{*egressNamespace},
 						})
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3219,9 +3219,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					n.IP = i
 					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3494,9 +3494,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
 				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3732,9 +3732,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					n.IP = i
 					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4015,9 +4015,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, false)
 					}
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4233,9 +4233,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				n.IP = i
 				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4600,9 +4600,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						},
 					}
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4734,9 +4734,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					},
 				}
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4871,9 +4871,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, false)
 					}
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -5108,9 +5108,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, false)
 					}
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -5368,9 +5368,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						},
 					}
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIP()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -5547,9 +5547,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					},
 				}
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -5748,9 +5748,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						fakeOvn.controller.zone = "local"
 						fakeOvn.controller.eIPC.zone = "local"
 					}
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -6227,9 +6227,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					},
 				}
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -6952,9 +6952,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -7307,8 +7307,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(node1.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fakeOvn.controller.WatchPods()).To(gomega.Succeed())
-				gomega.Expect(fakeOvn.controller.WatchEgressIPNamespaces()).To(gomega.Succeed())
 				gomega.Expect(fakeOvn.controller.WatchEgressIPPods()).To(gomega.Succeed())
+				gomega.Expect(fakeOvn.controller.WatchEgressIPNamespaces()).To(gomega.Succeed())
 				gomega.Expect(fakeOvn.controller.WatchEgressNodes()).To(gomega.Succeed())
 				gomega.Expect(fakeOvn.controller.WatchEgressIP()).To(gomega.Succeed())
 
@@ -7691,9 +7691,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPNamespaces()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIPPods()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -8246,9 +8246,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Node{node},
 					})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -8518,9 +8518,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Node{node1, node2},
 					})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -8717,9 +8717,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Node{node1, node2},
 					})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -9038,9 +9038,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				n.IP = i
 				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -9293,9 +9293,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					},
 				)
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -9490,9 +9490,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -9678,9 +9678,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Node{node1, node2},
 					})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -10052,9 +10052,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Node{node1, node2},
 					})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -10460,9 +10460,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -10657,9 +10657,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -10980,9 +10980,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 					err = fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPNamespaces()
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressIPPods()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -11334,9 +11334,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node3Name, false)
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -11355,6 +11355,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				}
 				err = fakeOvn.controller.eIPC.reconcileEgressIP(nil, &eIP)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(getPodAssignmentState(&egressPod)).NotTo(gomega.BeNil())
 
 				egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
 				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{podV4IP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
@@ -11495,6 +11496,145 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					egressSVCServedPodsASv4, egressIPServedPodsASv4, egressNodeIPsASv4,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				// Since we called reconcileEgressIP manually with new eIP status in the above step, so update EIP object with
+				// same status as well.
+				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), &eIP, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				// Now delete local zone egressPod and check LRP is removed.
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Delete(context.TODO(), egressPod.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				egressIPServedPodsASv4, _ = buildEgressIPServedPodsAddressSets([]string{}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
+				node1Switch.QOSRules = []string{"default-QoS-UUID"}
+				expectedDatabaseState = []libovsdbtest.TestData{
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.DefaultNoRereoutePriority,
+						Match: fmt.Sprintf("(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s",
+							egressIPServedPodsASv4.Name, egressSVCServedPodsASv4.Name, egressNodeIPsASv4.Name),
+						Action:      nbdb.LogicalRouterPolicyActionAllow,
+						UUID:        "default-no-reroute-node-UUID",
+						Options:     map[string]string{"pkt_mark": types.EgressIPNodeConnectionMark},
+						ExternalIDs: getEgressIPLRPNoReRoutePodToNodeDbIDs(IPFamilyValueV4, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs(),
+					},
+					getNoReRouteReplyTrafficPolicy(types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName),
+					&nbdb.LogicalRouterPolicy{
+						Priority:    types.DefaultNoRereoutePriority,
+						Match:       "ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14",
+						Action:      nbdb.LogicalRouterPolicyActionAllow,
+						UUID:        "no-reroute-UUID",
+						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV4, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs(),
+					},
+					&nbdb.LogicalRouterPolicy{
+						Priority:    types.DefaultNoRereoutePriority,
+						Match:       fmt.Sprintf("ip4.src == 10.128.0.0/14 && ip4.dst == %s", config.Gateway.V4JoinSubnet),
+						Action:      nbdb.LogicalRouterPolicyActionAllow,
+						UUID:        "no-reroute-service-UUID",
+						ExternalIDs: getEgressIPLRPNoReRoutePodToJoinDbIDs(IPFamilyValueV4, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName).GetExternalIDs(),
+					},
+					&nbdb.LogicalRouter{
+						Name:     types.OVNClusterRouter,
+						UUID:     types.OVNClusterRouter + "-UUID",
+						Policies: []string{"no-reroute-UUID", "no-reroute-service-UUID", "default-no-reroute-node-UUID", "default-no-reroute-reply-traffic"},
+					},
+					&nbdb.LogicalRouter{
+						Name:    types.GWRouterPrefix + node1.Name,
+						UUID:    types.GWRouterPrefix + node1.Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID"},
+						Nat:     []string{"pod-node-nat-UUID1"},
+						Options: logicalRouterOptions,
+					},
+					&nbdb.LogicalRouter{
+						Name:    types.GWRouterPrefix + node2.Name,
+						UUID:    types.GWRouterPrefix + node2.Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID"},
+						Options: logicalRouterOptions,
+					},
+					&nbdb.LogicalRouter{
+						Name:    types.GWRouterPrefix + node3.Name,
+						UUID:    types.GWRouterPrefix + node3.Name + "-UUID",
+						Ports:   []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID"},
+						Options: logicalRouterOptions,
+					},
+					// we still expect the SNAT at the end because we are not watching pod events that would remove the SNAT on pod deletion
+					&nbdb.NAT{
+						UUID:        "pod-node-nat-UUID1",
+						LogicalIP:   podV4IP,
+						ExternalIP:  node1IPv4,
+						ExternalIDs: nil,
+						Type:        nbdb.NATTypeSNAT,
+						Options: map[string]string{
+							"stateless": "false",
+						},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name + "-UUID",
+						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node2.Name,
+						Networks: []string{node2LogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name + "-UUID",
+						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node1.Name,
+						Networks: []string{nodeLogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name + "-UUID",
+						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node3.Name,
+						Networks: []string{node3LogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID",
+						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
+						Type: "router",
+						Options: map[string]string{
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
+						},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name + "-UUID",
+						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
+						Type: "router",
+						Options: map[string]string{
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
+						},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name + "-UUID",
+						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name,
+						Type: "router",
+						Options: map[string]string{
+							libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + "GR_" + node3Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
+						},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  types.ExternalSwitchPrefix + node1Name + "-UUID",
+						Name:  types.ExternalSwitchPrefix + node1Name,
+						Ports: []string{types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "-UUID"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  types.ExternalSwitchPrefix + node2Name + "-UUID",
+						Name:  types.ExternalSwitchPrefix + node2Name,
+						Ports: []string{types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name + "-UUID"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID:  types.ExternalSwitchPrefix + node3Name + "-UUID",
+						Name:  types.ExternalSwitchPrefix + node3Name,
+						Ports: []string{types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node3Name + "-UUID"},
+					},
+					node1Switch,
+					node2Switch,
+					node3Switch,
+					getDefaultQoSRule(false, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName),
+					egressSVCServedPodsASv4, egressIPServedPodsASv4, egressNodeIPsASv4,
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -11717,9 +11857,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
 					}
 
-					err := fakeOvn.controller.WatchEgressIPNamespaces()
+					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = fakeOvn.controller.WatchEgressIPPods()
+					err = fakeOvn.controller.WatchEgressIPNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = fakeOvn.controller.WatchEgressNodes()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -12174,9 +12314,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Namespace{*egressNamespace, *egressNamespace2},
 					})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -12613,9 +12753,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				n.IP = i
 				fakeOvn.controller.logicalPortCache.add(&egressPod2, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -13404,9 +13544,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						Items: []corev1.Namespace{*egressNamespace},
 					},
 				)
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -13711,9 +13851,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				n.IP = i
 				fakeOvn.controller.logicalPortCache.add(&egressPod1, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -14404,9 +14544,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				fakeOvn.controller.logicalPortCache.add(egressPod, "", types.DefaultNetworkName, "",
 					nil, []*net.IPNet{podIPv4Net})
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -14643,9 +14783,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				fakeOvn.controller.localZoneNodes.Store(node1Name, true)
 				fakeOvn.controller.localZoneNodes.Store(node2Name, false)
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -14930,9 +15070,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				fakeOvn.controller.localZoneNodes.Store(node1Name, true)
 				fakeOvn.controller.localZoneNodes.Store(node2Name, false)
 
-				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = fakeOvn.controller.WatchEgressIPPods()
+				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
