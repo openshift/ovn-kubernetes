@@ -118,8 +118,8 @@ metadata:
 rules:
     - apiGroups: [""]
       resources:
-          - nodes/status
-      verbs: [ "get" ]
+          - nodes
+      verbs: [ "get", "list", "watch" ]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
