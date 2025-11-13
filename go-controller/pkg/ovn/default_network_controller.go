@@ -456,7 +456,7 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		// This is probably the best starting order for all egress IP handlers.
-		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
+		// WatchEgressIPPods and WatchEgressIPNamespaces only use the informer
 		// cache to retrieve the egress IPs when determining if namespace/pods
 		// match. It is thus better if we initialize them first and allow
 		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
@@ -465,10 +465,14 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 		// risk performing a bunch of modifications on the EgressIP objects when
 		// we restart and then have these handlers act on stale data when they
 		// sync.
-		if err := WithSyncDurationMetric("egress ip namespace", oc.WatchEgressIPNamespaces); err != nil {
+		// Initialize WatchEgressIPPods before WatchEgressIPNamespaces to ensure
+		// that no pod events are missed by the EgressIPController. It's acceptable
+		// to miss a namespace event, as it will be handled indirectly through
+		// the pod delete event within that namespace.
+		if err := WithSyncDurationMetric("egress ip pod", oc.WatchEgressIPPods); err != nil {
 			return err
 		}
-		if err := WithSyncDurationMetric("egress ip pod", oc.WatchEgressIPPods); err != nil {
+		if err := WithSyncDurationMetric("egress ip namespace", oc.WatchEgressIPNamespaces); err != nil {
 			return err
 		}
 		if err := WithSyncDurationMetric("egress node", oc.WatchEgressNodes); err != nil {
@@ -1183,13 +1187,13 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 		case factory.EgressFirewallType:
 			syncFunc = h.oc.syncEgressFirewall
 
-		case factory.EgressIPNamespaceType:
+		case factory.EgressIPPodType:
 			syncFunc = h.oc.eIPC.syncEgressIPs
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.eIPC.initClusterEgressPolicies
 
-		case factory.EgressIPPodType,
+		case factory.EgressIPNamespaceType,
 			factory.EgressIPType:
 			syncFunc = nil
 
