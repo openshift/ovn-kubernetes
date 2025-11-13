@@ -39,6 +39,10 @@ const (
 	// bridge to move packets between host and external for etp=local traffic.
 	// The hex number 0xe745ecf105, represents etp(e74)-service(5ec)-flows which makes it easier for debugging.
 	etpSvcOpenFlowCookie = "0xe745ecf105"
+	// GARPCookie identifies the flows used to allow node IPs and drop other GARPs from CDN.
+	// Temp workaround until OVN has native supported for silencing GARPs on startup.
+	// https://issues.redhat.com/browse/FDP-1537
+	garpCookie = "0x0305"
 	// ovsLocalPort is the name of the OVS bridge local port
 	ovsLocalPort = "LOCAL"
 	// ctMarkOVN is the conntrack mark value for OVN traffic
@@ -1101,6 +1105,19 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	// 14 bytes of overhead for ethernet header (does not include VLAN)
 	maxPktLength := getMaxFrameLength()
 
+	// Problem: ovn-controller connects to SB DB and then GARPs for any EIPs configured however for IC, SB DB maybe stale if
+	// ovnkube-controller is not processing.
+	// Solution: add a logical flow on startup to allow GARPs from Node IPs but drop other GARPs and remove when ovnkube-controller
+	// has sync'd and changes propagated to OVN SB DB.
+	// remove when ovn contains native support for logical router ports to contain an option to silence GARPs on startup of ovn-controller.
+	// https://issues.redhat.com/browse/FDP-1537
+	if bridge.dropGARP {
+		// priority 499 flows to allow GARP pkts when src IP is a Node IP
+		dftFlows = append(dftFlows, bridge.allowNodeIPGARPFlows(extraIPs)...)
+		// priority 498 flows to drop GARP pkts with no regards to src IP
+		dftFlows = append(dftFlows, bridge.dropGARPFlows()...)
+	}
+
 	if config.IPv4Mode {
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
 		// if dest mac is the shared mac send directly to host.
@@ -1363,6 +1380,26 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				defaultOpenFlowCookie, config.Default.HostMasqConntrackZone))
 	}
 	return dftFlows, nil
+}
+
+// generateGratuitousARPDropFlow returns a single flow to drop GARPs
+// Remove when https://issues.redhat.com/browse/FDP-1537 available
+func generateGratuitousARPDropFlow(inPort string, priority int) string {
+	// set to op code 1 - see rfc5227 particularly section:
+	// Why Are ARP Announcements Performed Using ARP Request Packets and Not ARP Reply Packets?
+	// ovn follows this practise of using op code 1
+	return fmt.Sprintf("cookie=%s,table=0,priority=%d,in_port=%s,dl_dst=ff:ff:ff:ff:ff:ff,arp,arp_op=1,actions=drop",
+		garpCookie, priority, inPort)
+}
+
+// generateGratuitousARPAllowFlow returns a single flow to allow GARP only for a specific source IP.
+// Remove when https://issues.redhat.com/browse/FDP-1537 available
+func generateGratuitousARPAllowFlow(inPort string, ip net.IP, priority int) string {
+	// set to op code 1 - see rfc5227 particularly section:
+	// Why Are ARP Announcements Performed Using ARP Request Packets and Not ARP Reply Packets?
+	// ovn follows this practise of using op code 1
+	return fmt.Sprintf("cookie=%s,table=0,priority=%d,in_port=%s,dl_dst=ff:ff:ff:ff:ff:ff,arp,arp_op=1,arp_spa=%s,actions=output:NORMAL",
+		garpCookie, priority, inPort, ip)
 }
 
 func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, error) {
