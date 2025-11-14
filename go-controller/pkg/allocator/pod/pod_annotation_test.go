@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/mac"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
@@ -89,6 +90,22 @@ func ipamClaimKey(namespace string, claimName string) string {
 	return fmt.Sprintf("%s/%s", namespace, claimName)
 }
 
+type macRegistryStub struct {
+	reserveErr  error
+	releaseMAC  net.HardwareAddr
+	reservedMAC net.HardwareAddr
+}
+
+func (m *macRegistryStub) Reserve(_ string, mac net.HardwareAddr) error {
+	m.reservedMAC = mac
+	return m.reserveErr
+}
+
+func (m *macRegistryStub) Release(_ string, mac net.HardwareAddr) error {
+	m.releaseMAC = mac
+	return nil
+}
+
 func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 	randomMac, err := util.GenerateRandMAC()
 	if err != nil {
@@ -104,6 +121,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 	type args struct {
 		ipAllocator subnet.NamedAllocator
 		idAllocator id.NamedAllocator
+		macRegistry *macRegistryStub
 		network     *nadapi.NetworkSelectionElement
 		ipamClaim   *ipamclaimsapi.IPAMClaim
 		reallocate  bool
@@ -125,6 +143,8 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		wantPodAnnotation               *util.PodAnnotation
 		wantReleasedIPs                 []*net.IPNet
 		wantReleasedIPsOnRollback       []*net.IPNet
+		wantReservedMAC                 net.HardwareAddr
+		wantReleaseMACOnRollback        net.HardwareAddr
 		wantReleaseID                   bool
 		wantRelasedIDOnRollback         bool
 		wantErr                         bool
@@ -718,6 +738,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			name:                   "IPAM persistent IPs, IP address re-use",
 			ipam:                   true,
 			persistentIPAllocation: true,
+			podAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("192.168.0.200/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.200/24")[0].IP),
+			},
 			args: args{
 				network: &nadapi.NetworkSelectionElement{
 					IPAMClaimReference: "my-ipam-claim",
@@ -734,7 +758,6 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
-			wantUpdatedPod: true,
 			wantPodAnnotation: &util.PodAnnotation{
 				IPs: ovntest.MustParseIPNets("192.168.0.200/24"),
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.200/24")[0].IP),
@@ -880,6 +903,153 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantErr:       true,
 			wantReleaseID: true,
 		},
+		{
+			// Test ErrAllocated is always skipped with EnablePreconfiguredUDNAddresses disabled (legacy behavior)
+			name:                            "ErrAllocated should be skipped when EnablePreconfiguredUDNAddresses disabled",
+			ipam:                            true,
+			persistentIPAllocation:          true,
+			enablePreconfiguredUDNAddresses: false,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPAMClaimReference: "my-ipam-claim",
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{"192.168.0.200/24"},
+					},
+				},
+				ipAllocator: &ipAllocatorStub{
+					nextIPs:          ovntest.MustParseIPNets("192.168.0.200/24"),
+					allocateIPsError: ipam.ErrAllocated,
+				},
+			},
+			wantUpdatedPod: true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs:      ovntest.MustParseIPNets("192.168.0.200/24"),
+				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.200/24")[0].IP),
+				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4()},
+				Routes: []util.PodRoute{
+					{
+						Dest: &net.IPNet{
+							IP:   ovntest.MustParseIP("100.65.0.0").To4(),
+							Mask: net.CIDRMask(16, 32),
+						},
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+				},
+				Role: types.NetworkRolePrimary,
+			},
+			// With legacy behavior (feature flag disabled), IPs should NOT be tracked for rollback when hasIPAMClaim is true
+			role: types.NetworkRolePrimary,
+		},
+		{
+			// Test ErrAllocated with EnablePreconfiguredUDNAddresses enabled and network annotation persisted - should not fail with ErrAllocated
+			name:                            "Pod with persisted annotation should skip ErrAllocated",
+			ipam:                            true,
+			persistentIPAllocation:          true,
+			enablePreconfiguredUDNAddresses: true,
+			podAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("192.168.0.150/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.150/24")[0].IP),
+			},
+			args: args{
+				ipAllocator: &ipAllocatorStub{
+					nextIPs:          ovntest.MustParseIPNets("192.168.0.3/24"),
+					allocateIPsError: ipam.ErrAllocated, // Should be skipped because network already allocated
+				},
+			},
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs: ovntest.MustParseIPNets("192.168.0.150/24"),
+				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.150/24")[0].IP),
+			},
+			// No wantUpdatedPod because annotation already exists and no changes needed
+		},
+		{
+			// Test VM restart/migration case: new pod spawned with no network annotation but IPAMClaim has IPs
+			name:                            "VM restart/migration new pod with IPAMClaim IPs should skip ErrAllocated",
+			ipam:                            true,
+			persistentIPAllocation:          true,
+			enablePreconfiguredUDNAddresses: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPAMClaimReference: "vm-ipam-claim",
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "vm-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{"192.168.0.250/24"}, // IPAMClaim has IPs from previous pod
+					},
+				},
+				ipAllocator: &ipAllocatorStub{
+					nextIPs:          ovntest.MustParseIPNets("192.168.0.3/24"),
+					allocateIPsError: ipam.ErrAllocated, // Should be skipped because IPAMClaim has IPs
+				},
+			},
+			wantUpdatedPod: true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs:      ovntest.MustParseIPNets("192.168.0.250/24"),
+				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.250/24")[0].IP),
+				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4()},
+				Routes: []util.PodRoute{
+					{
+						Dest: &net.IPNet{
+							IP:   ovntest.MustParseIP("100.65.0.0").To4(),
+							Mask: net.CIDRMask(16, 32),
+						},
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+				},
+				Role: types.NetworkRolePrimary,
+			},
+			role: types.NetworkRolePrimary,
+		},
+		{
+			// Test ErrAllocated when pod with no annotation and IPAMClaim has no IPs allocated yet - should fail on ErrAllocated
+			name:                            "New pod with IPAMClaim but no IPs yet should fail on ErrAllocated",
+			ipam:                            true,
+			persistentIPAllocation:          true,
+			enablePreconfiguredUDNAddresses: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					IPAMClaimReference: "empty-ipam-claim",
+					IPRequest:          []string{"192.168.0.100/24"}, // Request specific IP to trigger AllocateIPs call
+				},
+				reallocate: false, // Don't reallocate on error
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "empty-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{}, // No IPs allocated yet
+					},
+				},
+				ipAllocator: &ipAllocatorStub{
+					nextIPs:          ovntest.MustParseIPNets("192.168.0.3/24"),
+					allocateIPsError: ipam.ErrAllocated, // Should NOT be skipped, should cause failure
+				},
+			},
+			wantErr: true, // Should fail because ErrAllocated is not skipped
+		},
+		{
+			// In a scenario of VM migration multiple pods using the same network configuration including the MAC address.
+			// When the migration destination pod is created, the pod-allocator should relax ErrMACReserved error
+			// to allow the migration destination pod use the same MAC as the migration source pod, for the migration to succeed.
+			name: "macRegistry should not release already reserved MAC on rollback",
+			args: args{
+				network:     &nadapi.NetworkSelectionElement{MacRequest: requestedMAC},
+				macRegistry: &macRegistryStub{reserveErr: mac.ErrMACReserved},
+			},
+			wantPodAnnotation: &util.PodAnnotation{
+				MAC: requestedMACParsed,
+			},
+			wantReservedMAC:          requestedMACParsed,
+			wantReleaseMACOnRollback: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -898,6 +1068,13 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = !tt.multiNetworkDisabled
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses = tt.enablePreconfiguredUDNAddresses
+
+			var macRegistry mac.Register
+			macRegistry = mac.NewManager()
+			if tt.args.macRegistry != nil {
+				macRegistry = tt.args.macRegistry
+			}
+
 			config.IPv4Mode = true
 			if tt.isSingleStackIPv6 {
 				config.IPv4Mode = false
@@ -982,6 +1159,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				pod,
 				network,
 				claimsReconciler,
+				macRegistry,
 				tt.args.reallocate,
 				tt.role,
 			)
@@ -998,6 +1176,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				tt.args.idAllocator.(*idAllocatorStub).releasedID = false
 			}
 
+			if tt.args.macRegistry != nil {
+				reservedMAC := tt.args.macRegistry.reservedMAC
+				g.Expect(reservedMAC).To(gomega.Equal(tt.wantReservedMAC), "Reserve MAC on error behaved unexpectedly")
+				tt.args.macRegistry.reservedMAC = nil
+			}
+
 			rollback()
 
 			if tt.args.ipAllocator != nil {
@@ -1008,6 +1192,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			if tt.args.idAllocator != nil {
 				releasedID := tt.args.idAllocator.(*idAllocatorStub).releasedID
 				g.Expect(releasedID).To(gomega.Equal(tt.wantRelasedIDOnRollback), "Release ID on rollback behaved unexpectedly")
+			}
+
+			if tt.args.macRegistry != nil {
+				releaseMAC := tt.args.macRegistry.releaseMAC
+				g.Expect(releaseMAC).To(gomega.Equal(tt.wantReleaseMACOnRollback), "Release MAC on rollback behaved unexpectedly")
+				tt.args.macRegistry.releaseMAC = nil
 			}
 
 			if tt.wantErr {

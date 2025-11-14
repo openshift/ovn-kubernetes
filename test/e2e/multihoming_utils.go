@@ -199,6 +199,7 @@ type podConfiguration struct {
 	nodeSelector           map[string]string
 	isPrivileged           bool
 	labels                 map[string]string
+	annotations                  map[string]string
 	requiresExtraNamespace bool
 	hostNetwork            bool
 	ipRequestFromSubnet    string
@@ -207,9 +208,21 @@ type podConfiguration struct {
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec := e2epod.NewAgnhostPod(config.namespace, config.name, nil, nil, nil, config.containerCmd...)
-	if len(config.attachments) > 0 {
-		podSpec.Annotations = networkSelectionElements(config.attachments...)
+
+	// Merge network attachments and custom annotations
+	if podSpec.Annotations == nil {
+		podSpec.Annotations = make(map[string]string)
 	}
+	if len(config.attachments) > 0 {
+		attachmentAnnotations := networkSelectionElements(config.attachments...)
+		for k, v := range attachmentAnnotations {
+			podSpec.Annotations[k] = v
+		}
+	}
+	for k, v := range config.annotations {
+		podSpec.Annotations[k] = v
+	}
+
 	podSpec.Spec.NodeSelector = config.nodeSelector
 	podSpec.Labels = config.labels
 	podSpec.Spec.HostNetwork = config.hostNetwork

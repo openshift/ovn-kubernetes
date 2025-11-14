@@ -341,7 +341,7 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *corev1.Pod) error {
 	// called for migrations.
 	// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5627
 	if kubevirt.IsPodLiveMigratable(pod) {
-		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(oc.watchFactory, pod)
+		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(oc.watchFactory.PodCoreInformer().Lister(), pod)
 		if err != nil {
 			return err
 		}
