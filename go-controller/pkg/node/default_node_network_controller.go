@@ -153,7 +153,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		routeManager: routeManager,
 		ovsClient:    ovsClient,
 	}
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsNetworkSegmentationSupportEnabled() && config.OvnKubeNode.Mode != types.NodeModeDPU {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
 			cnnci.watchFactory.PodCoreInformer(), cnnci.name, cnnci.recorder)
 	}
@@ -936,6 +936,9 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		if nc.udnHostIsolationManager != nil {
 			if err = nc.udnHostIsolationManager.Start(ctx); err != nil {
 				return err
@@ -980,9 +983,11 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 
-	// Use the device from environment when the DP resource name is specified.
-	if err := configureMgmtPortNetdevFromResource(); err != nil {
-		return err
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		// Use the device from environment when the DP resource name is specified.
+		if err := configureMgmtPortNetdevFromResource(); err != nil {
+			return err
+		}
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
@@ -1043,6 +1048,11 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 			return err
 		}
 		nc.Gateway = gw
+	} else {
+		err = nc.initGatewayDPUHostPreStart(nc.nodeAddress, nodeAnnotator)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
@@ -1081,7 +1091,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Complete gateway initialization
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		err = nc.initGatewayDPUHost(nc.nodeAddress, nodeAnnotator)
+		err = nc.initGatewayDPUHost()
 		if err != nil {
 			return err
 		}
