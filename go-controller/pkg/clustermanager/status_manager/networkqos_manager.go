@@ -34,9 +34,19 @@ func (m *networkQoSManager) get(namespace, name string) (*networkqosapi.NetworkQ
 func (m *networkQoSManager) getMessages(networkQoS *networkqosapi.NetworkQoS) []string {
 	var messages []string
 	for _, condition := range networkQoS.Status.Conditions {
-		messages = append(messages, condition.Message)
+		// Extract zone name from condition Type (format: "Ready-In-Zone-zoneName")
+		// and format message as "zoneName: message" for consistency with message-based resources
+		if strings.HasPrefix(condition.Type, readyInZonePrefix) {
+			zoneName := strings.TrimPrefix(condition.Type, readyInZonePrefix)
+			messages = append(messages, types.GetZoneStatus(zoneName, condition.Message))
+		}
 	}
 	return messages
+}
+
+//lint:ignore U1000 generic interfaces throw false-positives
+func (m *networkQoSManager) getManagedFields(networkQoS *networkqosapi.NetworkQoS) []metav1.ManagedFieldsEntry {
+	return networkQoS.ManagedFields
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
@@ -75,8 +85,7 @@ func (m *networkQoSManager) updateStatus(networkQoS *networkqosapi.NetworkQoS, a
 
 //lint:ignore U1000 generic interfaces throw false-positives
 func (m *networkQoSManager) cleanupStatus(networkQoS *networkqosapi.NetworkQoS, applyOpts *metav1.ApplyOptions) error {
-	applyObj := networkqosapply.NetworkQoS(networkQoS.Name, networkQoS.Namespace).
-		WithStatus(networkqosapply.Status())
+	applyObj := networkqosapply.NetworkQoS(networkQoS.Name, networkQoS.Namespace)
 
 	_, err := m.client.K8sV1alpha1().NetworkQoSes(networkQoS.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
 	return err

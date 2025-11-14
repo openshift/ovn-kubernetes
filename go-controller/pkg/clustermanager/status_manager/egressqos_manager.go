@@ -34,9 +34,19 @@ func (m *egressQoSManager) get(namespace, name string) (*egressqosapi.EgressQoS,
 func (m *egressQoSManager) getMessages(egressQoS *egressqosapi.EgressQoS) []string {
 	var messages []string
 	for _, condition := range egressQoS.Status.Conditions {
-		messages = append(messages, condition.Message)
+		// Extract zone name from condition Type (format: "Ready-In-Zone-zoneName")
+		// and format message as "zoneName: message" for consistency with message-based resources
+		if strings.HasPrefix(condition.Type, readyInZonePrefix) {
+			zoneName := strings.TrimPrefix(condition.Type, readyInZonePrefix)
+			messages = append(messages, types.GetZoneStatus(zoneName, condition.Message))
+		}
 	}
 	return messages
+}
+
+//lint:ignore U1000 generic interfaces throw false-positives
+func (m *egressQoSManager) getManagedFields(egressQoS *egressqosapi.EgressQoS) []metav1.ManagedFieldsEntry {
+	return egressQoS.ManagedFields
 }
 
 //lint:ignore U1000 generic interfaces throw false-positives
@@ -75,8 +85,7 @@ func (m *egressQoSManager) updateStatus(egressQoS *egressqosapi.EgressQoS, apply
 
 //lint:ignore U1000 generic interfaces throw false-positives
 func (m *egressQoSManager) cleanupStatus(egressQoS *egressqosapi.EgressQoS, applyOpts *metav1.ApplyOptions) error {
-	applyObj := egressqosapply.EgressQoS(egressQoS.Name, egressQoS.Namespace).
-		WithStatus(egressqosapply.EgressQoSStatus())
+	applyObj := egressqosapply.EgressQoS(egressQoS.Name, egressQoS.Namespace)
 
 	_, err := m.client.K8sV1().EgressQoSes(egressQoS.Namespace).ApplyStatus(context.TODO(), applyObj, *applyOpts)
 	return err
