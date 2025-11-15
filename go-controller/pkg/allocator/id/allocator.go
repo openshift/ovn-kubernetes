@@ -18,6 +18,7 @@ type Allocator interface {
 	ReserveID(name string, id int) error
 	ReleaseID(name string)
 	ForName(name string) NamedAllocator
+	GetID(name string) int
 }
 
 // NamedAllocator of IDs for a specific resource
@@ -105,6 +106,14 @@ func (idAllocator *idAllocator) ForName(name string) NamedAllocator {
 		name:      name,
 		allocator: idAllocator,
 	}
+}
+
+func (idAllocator *idAllocator) GetID(name string) int {
+	v, ok := idAllocator.nameIdMap.Load(name)
+	if !ok {
+		return invalidID
+	}
+	return v
 }
 
 type namedAllocator struct {
