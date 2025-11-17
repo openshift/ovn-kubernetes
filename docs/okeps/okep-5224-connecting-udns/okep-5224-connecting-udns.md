@@ -335,11 +335,11 @@ spec:
     networkPrefix: 24 # 255 IPs per layer3 network = ~100 possible nodes in your cluster
   - cidr: "fd01::/64"
     networkPrefix: 96
-  connectivityEnabled:
+  connectivity:
     - PodNetwork
     - ClusterIPServiceNetwork
 ```
-* `connectivityEnabled` field will ensure we can add support for enabling
+* `connectivity` field will ensure we can add support for enabling
   more types of features for the connected UDNs granularly in the future.
   At least one of these options must be set and validations will be added
   for which combinations of these options could/should be set together
@@ -432,13 +432,13 @@ type ClusterNetworkConnectSpec struct {
     // +kubebuilder:validation:XValidation:rule="size(self) != 2 || !isCIDR(self[0].cidr) || !isCIDR(self[1].cidr) || cidr(self[0].cidr).ip().family() != cidr(self[1].cidr).ip().family()", message="When 2 CIDRs are set, they must be from different IP families"
     ConnectSubnets []ConnectSubnet `json:"connectSubnets"`
 
-    // connectivityEnabled specifies which connectivity types should be enabled for the connected networks.
+    // connectivity specifies which connectivity types should be enabled for the connected networks.
     //
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=2
-    // +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectivityEnabled cannot contain duplicate values"
-    ConnectivityEnabled []ConnectivityType `json:"connectivityEnabled"`
+    // +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectivity cannot contain duplicate values"
+    connectivity []ConnectivityType `json:"connectivity"`
 }
 
 // +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self) == cidr(self).masked()", message="CIDR must be a valid network address"
