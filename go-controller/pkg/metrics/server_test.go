@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
@@ -44,24 +46,16 @@ func TestNewMetricServerRunAndShutdown(t *testing.T) {
 	var kubeClient kubernetes.Interface = fake.NewSimpleClientset()
 
 	server := NewMetricServer(opts, ovsDBClient, kubeClient)
-	if server == nil {
-		t.Fatal("Server should not be nil")
-	}
-
-	// Test that server has required components
-	if server.mux == nil {
-		t.Fatal("Server mux should not be nil")
-	}
-
-	if server.ovnRegistry == nil {
-		t.Fatal("Server OVN registry should not be nil")
-	}
+	require.NotNil(t, server, "Server should not be nil")
+	require.NotNil(t, server.mux, "Server mux should not be nil")
+	require.NotNil(t, server.ovnRegistry, "Server OVN registry should not be nil")
 
 	// Start server in background
-	serverDone := make(chan error, 1)
+	serverDone := make(chan struct{})
 	go func() {
 		t.Log("Server starting...")
-		serverDone <- server.Run(ctx.Done())
+		server.Run(ctx.Done())
+		close(serverDone)
 	}()
 
 	// Give server time to start
@@ -74,14 +68,9 @@ func TestNewMetricServerRunAndShutdown(t *testing.T) {
 
 	// Wait for server to stop with timeout
 	select {
-	case err := <-serverDone:
+	case <-serverDone:
 		shutdownDuration := time.Since(shutdownStart)
 		t.Logf("Server stopped gracefully in %v", shutdownDuration)
-
-		// Validate shutdown was clean (no error or http.ErrServerClosed which is expected)
-		if err != nil && err != http.ErrServerClosed {
-			t.Errorf("Server returned unexpected error during shutdown: %v", err)
-		}
 
 		// Validate shutdown was reasonably fast (should be under 6 seconds, allowing for 5s grace period)
 		if shutdownDuration > 6*time.Second {
@@ -93,6 +82,58 @@ func TestNewMetricServerRunAndShutdown(t *testing.T) {
 	}
 
 	t.Logf("TestNewMetricServer completed successfully")
+}
+
+func TestNewMetricServerRunAndFailOnFatalError(t *testing.T) {
+	// Occupy the port first so that the metrics server will fail with "address already in use"
+	addr := "127.0.0.5:9410"
+	listener, err := net.Listen("tcp", addr)
+	require.NoError(t, err, "Failed to listen on %s", addr)
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := MetricServerOptions{
+		BindAddress:                addr,
+		OnFatalError:               cancel,
+		EnableOVSMetrics:           false,
+		EnableOVNDBMetrics:         false,
+		EnableOVNControllerMetrics: false,
+		EnableOVNNorthdMetrics:     false,
+	}
+
+	var ovsDBClient libovsdbclient.Client
+	var kubeClient kubernetes.Interface = fake.NewSimpleClientset()
+
+	server := NewMetricServer(opts, ovsDBClient, kubeClient)
+	require.NotNil(t, server, "Server should not be nil")
+	require.NotNil(t, server.mux, "Server mux should not be nil")
+	require.NotNil(t, server.ovnRegistry, "Server OVN registry should not be nil")
+
+	// Start server in background
+	serverDone := make(chan struct{})
+	go func() {
+		t.Log("Server starting...")
+		server.Run(ctx.Done())
+		close(serverDone)
+	}()
+
+	// Wait for OnFatalError to be called (context cancelled) or timeout
+	select {
+	case <-ctx.Done():
+		t.Log("OnFatalError was called as expected (context cancelled)")
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnFatalError was not called within timeout - server should have failed to bind")
+	}
+
+	// Wait for server goroutine to finish
+	select {
+	case <-serverDone:
+		t.Log("Server stopped as expected")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Server did not stop within timeout after OnFatalError was called")
+	}
 }
 
 func setupAppFs(t *testing.T) {
@@ -291,7 +332,7 @@ func TestHandleMetrics(t *testing.T) {
 
 	setupAppFs(t)
 
-	// commen OVS DB setup
+	// common OVS DB setup
 	ovsVersion := "2.17.0"
 
 	intf1 := vswitchd.Interface{Name: "porta", UUID: buildUUID()}

@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,10 @@ type MetricServerOptions struct {
 	EnableOVNDBMetrics         bool
 	EnableOVNControllerMetrics bool
 	EnableOVNNorthdMetrics     bool
+
+	// OnFatalError is called when an unrecoverable error occurs (e.g., failed to bind to address).
+	// If set, it allows the caller to trigger a graceful shutdown.
+	OnFatalError func()
 
 	// Kubernetes integration
 	K8sClient   kubernetes.Interface
@@ -212,7 +217,7 @@ func (s *MetricServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 // Run runs the metrics server and blocks until graceful shutdown
-func (s *MetricServer) Run(stopChan <-chan struct{}) error {
+func (s *MetricServer) Run(stopChan <-chan struct{}) {
 	utilwait.Until(func() {
 		s.server = &http.Server{
 			Addr:    s.opts.BindAddress,
@@ -238,11 +243,14 @@ func (s *MetricServer) Run(stopChan <-chan struct{}) error {
 			errCh <- listenAndServe()
 		}()
 
-		var err error
 		select {
-		case err = <-errCh:
-			err = fmt.Errorf("failed while running metrics server at address %q: %w", s.opts.BindAddress, err)
-			utilruntime.HandleError(err)
+		case err := <-errCh:
+			if !errors.Is(err, http.ErrServerClosed) {
+				utilruntime.HandleError(fmt.Errorf("failed while running metrics server at address %q: %w", s.opts.BindAddress, err))
+				if s.opts.OnFatalError != nil {
+					s.opts.OnFatalError()
+				}
+			}
 		case <-stopChan:
 			klog.Infof("Stopping metrics server at address %q", s.opts.BindAddress)
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -252,6 +260,4 @@ func (s *MetricServer) Run(stopChan <-chan struct{}) error {
 			}
 		}
 	}, 5*time.Second, stopChan)
-
-	return nil
 }
