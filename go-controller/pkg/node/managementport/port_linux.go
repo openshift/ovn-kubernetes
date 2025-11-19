@@ -190,13 +190,21 @@ func (mp *managementPortOVS) doReconcile() error {
 	return createPlatformManagementPort(types.K8sMgmtIntfName, mp.cfg, mp.routeManager)
 }
 
-func tearDownManagementPortConfig(link netlink.Link, nft knftables.Interface) error {
+func tearDownManagementPortConfig(link netlink.Link) error {
 	if err := util.LinkAddrFlush(link); err != nil {
 		return err
 	}
 
 	if err := util.LinkRoutesDel(link, nil); err != nil {
 		return err
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		return nil
+	}
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return fmt.Errorf("failed to get nftables: %v", err)
 	}
 
 	tx := nft.NewTransaction()
@@ -208,7 +216,7 @@ func tearDownManagementPortConfig(link netlink.Link, nft knftables.Interface) er
 	tx.Delete(&knftables.Chain{
 		Name: nftMgmtPortChain,
 	})
-	err := nft.Run(context.TODO(), tx)
+	err = nft.Run(context.TODO(), tx)
 	if err != nil && !knftables.IsNotFound(err) {
 		return fmt.Errorf("could not clear the nftables chain for management port: %v", err)
 	}
@@ -613,12 +621,7 @@ func unconfigureMgmtNetdevicePort(mgmtPortName string) error {
 	}
 
 	klog.Infof("Found existing management interface %s. Unconfiguring it", mgmtPortName)
-	nft, err := nodenft.GetNFTablesHelper()
-	if err != nil {
-		return fmt.Errorf("failed to get nftables: %v", err)
-	}
-
-	if err := tearDownManagementPortConfig(link, nft); err != nil {
+	if err = tearDownManagementPortConfig(link); err != nil {
 		return fmt.Errorf("teardown failed: %v", err)
 	}
 
