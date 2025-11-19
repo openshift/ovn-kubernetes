@@ -508,6 +508,8 @@ type output struct {
 func TestValidateAndGetEgressFirewallDestination(t *testing.T) {
 	clusterSubnetStr := "10.1.0.0/16"
 	_, clusterSubnet, _ := net.ParseCIDR(clusterSubnetStr)
+	extraClusterSubnetStr := "10.2.0.0/16"
+	_, extraClusterSubnet, _ := net.ParseCIDR(extraClusterSubnetStr)
 	udnClusterSubnetStr := "9.0.0.0/16"
 	_, udnClusterSubnet, _ := net.ParseCIDR(udnClusterSubnetStr)
 	validUDNName := "udn-test"
@@ -619,7 +621,7 @@ func TestValidateAndGetEgressFirewallDestination(t *testing.T) {
 			expectedErr: true,
 		},
 		{
-			name: "should correctly validate cidr selector and cluster subnet intersection",
+			name: "should correctly validate cidr selector and single cluster subnet intersection",
 			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
 				CIDRSelector: "10.1.1.1/24",
 			},
@@ -627,6 +629,17 @@ func TestValidateAndGetEgressFirewallDestination(t *testing.T) {
 			expectedOutput: output{
 				cidrSelector:              "10.1.1.1/24",
 				clusterSubnetIntersection: []*net.IPNet{clusterSubnet},
+			},
+		},
+		{
+			name: "should correctly validate cidr selector and multiple cluster subnets intersection",
+			egressFirewallDestination: egressfirewallapi.EgressFirewallDestination{
+				CIDRSelector: "0.0.0.0/0",
+			},
+			expectedErr: false,
+			expectedOutput: output{
+				cidrSelector:              "0.0.0.0/0",
+				clusterSubnetIntersection: []*net.IPNet{clusterSubnet, extraClusterSubnet},
 			},
 		},
 		{
@@ -683,7 +696,7 @@ func TestValidateAndGetEgressFirewallDestination(t *testing.T) {
 		t.Fatalf("failed to PrepareTestConfig: %v", err)
 	}
 
-	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: clusterSubnet}}
+	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: clusterSubnet}, {CIDR: extraClusterSubnet}}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 
