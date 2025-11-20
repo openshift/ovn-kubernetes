@@ -143,9 +143,9 @@ const (
 	// InvalidNodeID indicates an invalid node id
 	InvalidNodeID = -1
 
-	// ovnNetworkIDs is the constant string representing the ids allocated for the
+	// OvnNetworkIDs is the constant string representing the ids allocated for the
 	// default network and other layer3 secondary networks by cluster manager.
-	ovnNetworkIDs = "k8s.ovn.org/network-ids"
+	OvnNetworkIDs = "k8s.ovn.org/network-ids"
 
 	// ovnUDNLayer2NodeGRLRPTunnelIDs is the constant string representing the tunnel id allocated for the
 	// UDN L2 network for this node's GR LRP by cluster manager. This is used to create the remote tunnel
@@ -1225,17 +1225,17 @@ func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName
 	return idsStrMap, nil
 }
 
-// ParseNetworkIDAnnotation parses the 'ovnNetworkIDs' annotation for the specified
+// ParseNetworkIDAnnotation parses the 'OvnNetworkIDs' annotation for the specified
 // network in 'netName' and returns the network id.
 func ParseNetworkIDAnnotation(node *corev1.Node, netName string) (int, error) {
-	networkIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
+	networkIDsMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNetworkIDs)
 	if err != nil {
 		return types.InvalidID, err
 	}
 
 	networkID, ok := networkIDsMap[netName]
 	if !ok {
-		return types.InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
+		return types.InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, OvnNetworkIDs, netName)
 	}
 
 	return strconv.Atoi(networkID)
@@ -1244,7 +1244,7 @@ func ParseNetworkIDAnnotation(node *corev1.Node, netName string) (int, error) {
 // updateNetworkAnnotation updates the provided annotationName in the 'annotations' map
 // with the provided ID in 'annotationName's value.  If 'id' is InvalidID (-1)
 // it deletes the annotationName annotation from the map.
-// It is currently used for ovnNetworkIDs annotation updates
+// It is currently used for OvnNetworkIDs annotation updates
 func updateNetworkAnnotation(annotations map[string]string, netName string, id int, annotationName string) error {
 	var bytes []byte
 
@@ -1285,13 +1285,13 @@ func updateNetworkAnnotation(annotations map[string]string, netName string, id i
 	return nil
 }
 
-// UpdateNetworkIDAnnotation updates the ovnNetworkIDs annotation for the network name 'netName' with the network id 'networkID'.
+// UpdateNetworkIDAnnotation updates the OvnNetworkIDs annotation for the network name 'netName' with the network id 'networkID'.
 // If 'networkID' is invalid network ID (-1), then it deletes that network from the network ids annotation.
 func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, networkID int) (map[string]string, error) {
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	err := updateNetworkAnnotation(annotations, netName, networkID, ovnNetworkIDs)
+	err := updateNetworkAnnotation(annotations, netName, networkID, OvnNetworkIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1301,7 +1301,7 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 // GetNodeNetworkIDsAnnotationNetworkIDs parses the "k8s.ovn.org/network-ids" annotation
 // on a node and returns the map of network name and ids.
 func GetNodeNetworkIDsAnnotationNetworkIDs(node *corev1.Node) (map[string]int, error) {
-	networkIDsStrMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
+	networkIDsStrMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNetworkIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1317,7 +1317,7 @@ func GetNodeNetworkIDsAnnotationNetworkIDs(node *corev1.Node) (map[string]int, e
 	return networkIDsMap, nil
 }
 
-// NodeNetworkIDAnnotationChanged returns true if the ovnNetworkIDs annotation in the corev1.Nodes doesn't match
+// NodeNetworkIDAnnotationChanged returns true if the OvnNetworkIDs annotation in the corev1.Nodes doesn't match
 func NodeNetworkIDAnnotationChanged(oldNode, newNode *corev1.Node, netName string) bool {
 	oldNodeNetID, _ := ParseNetworkIDAnnotation(oldNode, netName)
 	newNodeNetID, _ := ParseNetworkIDAnnotation(newNode, netName)
