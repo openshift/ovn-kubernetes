@@ -1,8 +1,8 @@
 module github.com/ovn-org/ovn-kubernetes/go-controller
 
-go 1.25.0
+go 1.24.0
 
-toolchain go1.25.1
+toolchain go1.24.5
 
 require (
 	github.com/Microsoft/hcsshim v0.9.6
