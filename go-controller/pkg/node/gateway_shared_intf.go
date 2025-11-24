@@ -1491,12 +1491,12 @@ func newGateway(
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
 		klog.Info("Creating Gateway Openflow Manager")
-		err := gwBridge.SetOfPorts()
+		err := gwBridge.ConfigureBridgePorts()
 		if err != nil {
 			return err
 		}
 		if exGwBridge != nil {
-			err = exGwBridge.SetOfPorts()
+			err = exGwBridge.ConfigureBridgePorts()
 			if err != nil {
 				return err
 			}
