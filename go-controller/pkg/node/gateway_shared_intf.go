@@ -577,7 +577,7 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service,
 					etpSvcOpenFlowCookie),
 				// table 0, Matches on return traffic, i.e traffic coming from the host networked pod's port, and unDNATs.
 				// Use targetPortCookie, as the flow will be the same for each ExternalIP / LB status IP.
-				fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%d, actions=ct(commit,zone=%d nat,table=7)",
+				fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%d, actions=ct(zone=%d nat,table=7)",
 					targetPortCookie, flowProtocol, targetPort, config.Default.HostNodePortConntrackZone),
 				// table 7, Sends the reply packet back out eth0 to the external client. Note that the constant etp svc
 				// cookie is used since this would be same for all such services.

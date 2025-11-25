@@ -1519,7 +1519,7 @@ var _ = Describe("Node Operations", func() {
 						svcStatusIP, svcPort, v4localnetGatewayIP, epPortValue),
 					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
 					fmt.Sprintf("cookie=0xe352697d7a317b80, priority=110, in_port=LOCAL, tcp, tp_src=%d, "+
-						"actions=ct(commit,zone=64003 nat,table=7)", epPortValue),
+						"actions=ct(zone=64003 nat,table=7)", epPortValue),
 					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
 				}
 				expectedLBExternalIPFlows := []string{
@@ -1530,7 +1530,7 @@ var _ = Describe("Node Operations", func() {
 						externalIP, svcPort, v4localnetGatewayIP, epPortValue),
 					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
 					fmt.Sprintf("cookie=0xe352697d7a317b80, priority=110, in_port=LOCAL, tcp, tp_src=%d, "+
-						"actions=ct(commit,zone=64003 nat,table=7)", epPortValue),
+						"actions=ct(zone=64003 nat,table=7)", epPortValue),
 					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
 				}
 
