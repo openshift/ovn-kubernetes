@@ -10,6 +10,7 @@ import (
 	current "github.com/containernetworking/cni/pkg/types/100"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
@@ -311,9 +312,29 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 				return response, nil
 			}
 
-			// Delete the DPU connection-details annotation
-			_ = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: clientset.kclient}, clientset.podLister, nil)
 			netdevName = dpuCD.VfNetdevName
+			if pr.netName == types.DefaultNetworkName {
+				// if this is the default network name, remove the whole DPU connection-details annotation,
+				// including the primary UDN connection-details if any
+				updatePodAnnotationNoRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
+					delete(pod.Annotations, util.DPUConnectionDetailsAnnot)
+					return pod, nil, nil
+				}
+
+				err = util.UpdatePodWithRetryOrRollback(
+					clientset.podLister,
+					&kube.Kube{KClient: clientset.kclient},
+					pod,
+					updatePodAnnotationNoRollback,
+				)
+			} else {
+				// Delete the DPU connection-details annotation for this NAD
+				err = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: clientset.kclient}, clientset.podLister, nil)
+			}
+			// not an error if pod has already been deleted
+			if err != nil && !apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("failed to cleanup the DPU connection details annotation for NAD %s: %v", pr.nadName, err)
+			}
 		} else {
 			// Find the hostInterface name
 			condString := []string{"external-ids:sandbox=" + pr.SandboxID}
