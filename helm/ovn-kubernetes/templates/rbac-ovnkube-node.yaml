@@ -35,9 +35,9 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-    name: ovnkube-node-status-reader
+    name: ovnkube-node-reader
 roleRef:
-    name: ovnkube-node-status-reader
+    name: ovnkube-node-reader
     kind: ClusterRole
     apiGroup: rbac.authorization.k8s.io
 subjects:
@@ -114,12 +114,12 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-    name: ovnkube-node-status-reader
+    name: ovnkube-node-reader
 rules:
     - apiGroups: [""]
       resources:
-          - nodes/status
-      verbs: [ "get" ]
+          - nodes
+      verbs: [ "get", "list", "watch" ]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
