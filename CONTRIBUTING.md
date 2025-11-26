@@ -195,3 +195,6 @@ make test
 * All modular changes must be accompanied by new unit tests if they don't exist already.
 
 * All functional changes and new features must be accompanied by extensive end-to-end test coverage
+
+Just some random text.
+
