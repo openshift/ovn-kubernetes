@@ -534,7 +534,7 @@ build_dnsnameresolver_images() {
   rm -rf /tmp/coredns-ocp-dnsnameresolver
   git clone https://github.com/openshift/coredns-ocp-dnsnameresolver.git /tmp/coredns-ocp-dnsnameresolver
   pushd /tmp/coredns-ocp-dnsnameresolver
-  git checkout 850cb5757982d368195744d3565c1565a7f0d43a
+  git checkout release-4.21
   popd
  
   build_image /tmp/coredns-ocp-dnsnameresolver ${COREDNS_WITH_OCP_DNSNAMERESOLVER} Dockerfile.upstream
