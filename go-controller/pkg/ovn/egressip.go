@@ -120,6 +120,7 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 		}
 	}
 	// CASE 3: EIP object update
+	var errs []error
 	if old != nil && new != nil {
 		oldEIP := old
 		newEIP := new
@@ -198,7 +199,7 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 				}
 				if newNamespaceSelector.Matches(namespaceLabels) && !oldNamespaceSelector.Matches(namespaceLabels) {
 					if err := oc.addNamespaceEgressIPAssignments(newEIP.Name, newEIP.Status.Items, namespace, newEIP.Spec.PodSelector); err != nil {
-						return err
+						errs = append(errs, fmt.Errorf("failed to add namespace %s egress IP config: %v", namespace.Name, err))
 					}
 				}
 			}
@@ -223,12 +224,9 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 							return err
 						}
 					}
-					if util.PodCompleted(pod) {
-						continue
-					}
 					if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
 						if err := oc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, pod); err != nil {
-							return err
+							errs = append(errs, fmt.Errorf("failed to add pod %s/%s egress IP config: %v", pod.Namespace, pod.Name, err))
 						}
 					}
 				}
@@ -264,7 +262,7 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 						podLabels := labels.Set(pod.Labels)
 						if newPodSelector.Matches(podLabels) {
 							if err := oc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, pod); err != nil {
-								return err
+								errs = append(errs, fmt.Errorf("failed to add pod %s/%s egress IP config: %v", pod.Namespace, pod.Name, err))
 							}
 						}
 					}
@@ -283,12 +281,9 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 								return err
 							}
 						}
-						if util.PodCompleted(pod) {
-							continue
-						}
 						if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
 							if err := oc.addPodEgressIPAssignmentsWithLock(newEIP.Name, newEIP.Status.Items, pod); err != nil {
-								return err
+								errs = append(errs, fmt.Errorf("failed to add pod %s/%s egress IP config: %v", pod.Namespace, pod.Name, err))
 							}
 						}
 					}
@@ -296,7 +291,7 @@ func (oc *DefaultNetworkController) reconcileEgressIP(old, new *egressipv1.Egres
 			}
 		}
 	}
-	return nil
+	return utilerrors.Join(errs...)
 }
 
 // reconcileEgressIPNamespace reconciles the database configuration setup in nbdb
@@ -331,6 +326,7 @@ func (oc *DefaultNetworkController) reconcileEgressIPNamespace(old, new *v1.Name
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, egressIP := range egressIPs {
 		namespaceSelector, err := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
 		if err != nil {
@@ -343,11 +339,11 @@ func (oc *DefaultNetworkController) reconcileEgressIPNamespace(old, new *v1.Name
 		}
 		if !namespaceSelector.Matches(oldLabels) && namespaceSelector.Matches(newLabels) {
 			if err := oc.addNamespaceEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newNamespace, egressIP.Spec.PodSelector); err != nil {
-				return err
+				errs = append(errs, fmt.Errorf("failed to add namespace %s egress IP config %q: %v", newNamespace.Name, egressIP.Name, err))
 			}
 		}
 	}
-	return nil
+	return utilerrors.Join(errs...)
 }
 
 // reconcileEgressIPPod reconciles the database configuration setup in nbdb
@@ -401,6 +397,7 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, egressIP := range egressIPs {
 		namespaceSelector, err := metav1.LabelSelectorAsSelector(&egressIP.Spec.NamespaceSelector)
 		if err != nil {
@@ -445,7 +442,7 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 				// pod setup for every pod update as to make sure we process the
 				// pod IP assignment.
 				if err := oc.addPodEgressIPAssignmentsWithLock(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
-					return err
+					errs = append(errs, fmt.Errorf("failed to add pod %s/%s egress IP config %q: %v", newPod.Namespace, newPod.Name, egressIP.Name, err))
 				}
 				continue
 			}
@@ -460,11 +457,11 @@ func (oc *DefaultNetworkController) reconcileEgressIPPod(old, new *v1.Pod) (err 
 			}
 			// For all else, perform a setup for the pod
 			if err := oc.addPodEgressIPAssignmentsWithLock(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
-				return err
+				errs = append(errs, fmt.Errorf("failed to add pod %s/%s egress IP config %q: %v", newPod.Namespace, newPod.Name, egressIP.Name, err))
 			}
 		}
 	}
-	return nil
+	return utilerrors.Join(errs...)
 }
 
 // main reconcile functions end here and local zone controller functions begin
@@ -474,12 +471,13 @@ func (oc *DefaultNetworkController) addEgressIPAssignments(name string, statusAs
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, namespace := range namespaces {
 		if err := oc.addNamespaceEgressIPAssignments(name, statusAssignments, namespace, podSelector); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return utilerrors.Join(errs...)
 }
 
 func (oc *DefaultNetworkController) addNamespaceEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespace *kapi.Namespace, podSelector metav1.LabelSelector) error {
@@ -500,12 +498,13 @@ func (oc *DefaultNetworkController) addNamespaceEgressIPAssignments(name string,
 			return err
 		}
 	}
+	var errs []error
 	for _, pod := range pods {
 		if err := oc.addPodEgressIPAssignmentsWithLock(name, statusAssignments, pod); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return utilerrors.Join(errs...)
 }
 
 func (oc *DefaultNetworkController) addPodEgressIPAssignmentsWithLock(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
@@ -520,9 +519,9 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignmentsWithLock(name strin
 // match and perform the setup for the same pod and status multiple times over.
 func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
 	podKey := getPodKey(pod)
-	// If pod is already in succeeded or failed state, return it without proceeding further.
-	if util.PodCompleted(pod) {
-		klog.Infof("Pod %s is already in completed state, skipping egress ip assignment", podKey)
+	// Ignore completed pods, host networked pods, pods not scheduled
+	if !util.PodNeedsSNAT(pod) {
+		klog.Infof("Pod %s is not in desired state, skipping egress ip assignment", podKey)
 		return nil
 	}
 	// If statusAssignments is empty just return, not doing this will delete the
@@ -1230,7 +1229,7 @@ func (oc *DefaultNetworkController) generateCacheForEgressIP() (map[string]egres
 				continue
 			}
 			for _, pod := range pods {
-				if util.PodCompleted(pod) {
+				if !util.PodNeedsSNAT(pod) {
 					continue
 				}
 				if len(egressIPCache[egressIP.Name].egressLocalNodes) == 0 && !oc.isPodScheduledinLocalZone(pod) {
