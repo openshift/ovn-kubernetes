@@ -19,6 +19,8 @@ ARG ovnver=25.03
 # the corresponding Centos version when updating the OCP version.
 ARG ovsver_okd=3.5
 ARG ovnver_okd=25.03
+COPY ovn25.09-25.09.1-9.el9fdp.x86_64.rpm ovn25.09-central-25.09.1-9.el9fdp.x86_64.rpm ovn25.09-host-25.09.1-9.el9fdp.x86_64.rpm ovn25.09-vtep-25.09.1-9.el9fdp.x86_64.rpm ovn25.09-central-debuginfo-25.09.1-9.el9fdp.x86_64.rpm ovn25.09-debuginfo-25.09.1-9.el9fdp.x86_64.rpm ovn25.09-debugsource-25.09.1-9.el9fdp.x86_64.rpm /root/
+COPY openvswitch3.5-3.5.2-62.el9fdp.x86_64.rpm /root/
 
 RUN INSTALL_PKGS="iptables nftables" && \
     source /etc/os-release && \
@@ -26,8 +28,9 @@ RUN INSTALL_PKGS="iptables nftables" && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver" "ovn$ovnver-central" "ovn$ovnver-host" && \
+    rpm -Uhv --nodeps --force /root/*.rpm && \
 	dnf clean all && rm -rf /var/cache/* && \
-	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver-vtep%" > /more-pkgs
+	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
