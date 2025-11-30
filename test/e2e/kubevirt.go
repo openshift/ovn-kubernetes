@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	e2eframework "k8s.io/kubernetes/test/e2e/framework"
@@ -2359,4 +2360,174 @@ chpasswd: { expire: False }
 		)
 	})
 
+	Context("duplicate addresses validation", func() {
+		var (
+			cudn          *udnv1.ClusterUserDefinedNetwork
+			duplicateIPv4 = "10.128.0.200" // Static IP that will be used by both VMs
+			duplicateIPv6 = "2010:100:200::200"
+			cidrIPv4      = "10.128.0.0/24"
+			cidrIPv6      = "2010:100:200::0/60"
+		)
+
+		BeforeEach(func() {
+			if !isPreConfiguredUdnAddressesEnabled() {
+				Skip("ENABLE_PRE_CONF_UDN_ADDR not configured")
+			}
+
+			l := map[string]string{
+				"e2e-framework":           fr.BaseName,
+				RequiredUDNNamespaceLabel: "",
+			}
+			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, l)
+			Expect(err).NotTo(HaveOccurred())
+			fr.Namespace = ns
+			namespace = fr.Namespace.Name
+
+			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
+			cudn, _ = kubevirt.GenerateCUDN(namespace, "net1", udnv1.NetworkTopologyLayer2, udnv1.NetworkRolePrimary, dualCIDRs)
+			createCUDN(cudn)
+		})
+
+		createVMWithStaticIP := func(vmName string, staticIPs []string) *kubevirtv1.VirtualMachine {
+			annotations, err := kubevirt.GenerateAddressesAnnotations("net1", staticIPs)
+			Expect(err).NotTo(HaveOccurred())
+
+			vm := fedoraWithTestToolingVM(
+				nil,         // labels
+				annotations, // annotations with static IP
+				nil,         // nodeSelector
+				kubevirtv1.NetworkSource{
+					Pod: &kubevirtv1.PodNetwork{},
+				},
+				`#cloud-config
+password: fedora
+chpasswd: { expire: False }
+`,
+				`version: 2
+ethernets:
+  eth0:
+    dhcp4: true
+    dhcp6: true
+    ipv6-address-generation: eui64`,
+			)
+			vm.Name = vmName
+			vm.Namespace = namespace
+			vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+			vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
+			return vm
+		}
+
+		waitForVMReadinessAndVerifyIPs := func(vmName string, expectedIPs []string) {
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vmName,
+				},
+			}
+			waitVirtualMachineInstanceReadiness(vmi)
+			Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
+
+			expectedNumberOfAddresses := len(filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)}))
+			actualAddresses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			Expect(actualAddresses).To(ConsistOf(expectedIPs), fmt.Sprintf("VM %s should get the requested static IPs", vmName))
+		}
+
+		waitForVMIPodDuplicateIPFailure := func(vmName string) {
+			Eventually(func() []corev1.Event {
+				podList, err := fr.ClientSet.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+					LabelSelector: fmt.Sprintf("%s=%s", kubevirtv1.VirtualMachineNameLabel, vmName),
+				})
+				if err != nil || len(podList.Items) == 0 {
+					return nil
+				}
+
+				events, err := fr.ClientSet.CoreV1().Events(namespace).List(context.TODO(), metav1.ListOptions{
+					FieldSelector: fmt.Sprintf("involvedObject.name=%s", podList.Items[0].Name),
+				})
+				if err != nil {
+					return nil
+				}
+
+				return events.Items
+			}).
+				WithTimeout(60*time.Second).
+				WithPolling(2*time.Second).
+				Should(ContainElement(SatisfyAll(
+					HaveField("Type", Equal("Warning")),
+					HaveField("Message", ContainSubstring("provided IP is already allocated")),
+				)), fmt.Sprintf("VM %s should fail with IP allocation error", vmName))
+		}
+
+		It("should fail when creating second VM with duplicate static IP", func() {
+			staticIPs := filterIPs(fr.ClientSet, duplicateIPv4, duplicateIPv6)
+
+			By("Creating first VM with static IP")
+			vm1 := createVMWithStaticIP("test-vm-1", staticIPs)
+			createVirtualMachine(vm1)
+			waitForVMReadinessAndVerifyIPs(vm1.Name, staticIPs)
+
+			By("Creating second VM with duplicate static IP - should fail")
+			vm2 := createVMWithStaticIP("test-vm-2", staticIPs)
+			createVirtualMachine(vm2)
+
+			By("Verifying pod fails with duplicate IP allocation error")
+			waitForVMIPodDuplicateIPFailure(vm2.Name)
+
+			By("Verifying first VM is still running normally")
+			waitForVMReadinessAndVerifyIPs(vm1.Name, staticIPs)
+		})
+
+		newVMIWithPrimaryIfaceMAC := func(mac string) *kubevirtv1.VirtualMachineInstance {
+			vm := fedoraWithTestToolingVMI(nil, nil, nil, kubevirtv1.NetworkSource{Pod: &kubevirtv1.PodNetwork{}}, "#", "")
+			vm.Spec.Domain.Devices.Interfaces[0].Bridge = nil
+			vm.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
+			vm.Spec.Domain.Devices.Interfaces[0].MacAddress = mac
+			return vm
+		}
+
+		It("should fail when creating second VM with duplicate user requested MAC", func() {
+			const testMAC = "02:a1:b2:c3:d4:e5"
+			vmi1 := newVMIWithPrimaryIfaceMAC(testMAC)
+			vm1 := generateVM(vmi1)
+			createVirtualMachine(vm1)
+
+			By("Asserting VM with static MAC is running as expected")
+			Eventually(func(g Gomega) []kubevirtv1.VirtualMachineInstanceCondition {
+				g.Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vm1), vmi1)).To(Succeed())
+				return vmi1.Status.Conditions
+			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(ContainElement(SatisfyAll(
+				HaveField("Type", kubevirtv1.VirtualMachineInstanceAgentConnected),
+				HaveField("Status", corev1.ConditionTrue),
+			)))
+			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vm1), vmi1)).To(Succeed())
+			Expect(vmi1.Status.Interfaces[0].MAC).To(Equal(testMAC), "vmi status should report the requested mac")
+
+			By("Create second VM requesting the same MAC address")
+			vmi2 := newVMIWithPrimaryIfaceMAC(testMAC)
+			vm2 := generateVM(vmi2)
+			createVirtualMachine(vm2)
+
+			By("Asserting second VM pod has attached event reflecting MAC conflict error")
+			vm2Selector := fmt.Sprintf("%s=%s", kubevirtv1.VirtualMachineNameLabel, vm2.Name)
+			Eventually(func(g Gomega) []corev1.Event {
+				podList, err := fr.ClientSet.CoreV1().Pods(vm2.Namespace).List(context.Background(), metav1.ListOptions{LabelSelector: vm2Selector})
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(podList.Items).ToNot(BeEmpty())
+				events, err := fr.ClientSet.CoreV1().Events(vm2.Namespace).SearchWithContext(context.Background(), scheme.Scheme, &podList.Items[0])
+				g.Expect(err).ToNot(HaveOccurred())
+				return events.Items
+			}).WithTimeout(time.Minute * 1).WithPolling(time.Second * 3).Should(ContainElement(SatisfyAll(
+				HaveField("Type", "Warning"),
+				HaveField("Reason", "ErrorAllocatingPod"),
+				HaveField("Message", ContainSubstring("MAC address already in use")),
+			)))
+
+			By("Assert second VM not running")
+			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vm2), vmi2)).To(Succeed())
+			Expect(vmi2.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", kubevirtv1.VirtualMachineInstanceReady),
+				HaveField("Status", corev1.ConditionFalse),
+			)), "second VM should not be ready due to MAC conflict")
+		})
+	})
 })

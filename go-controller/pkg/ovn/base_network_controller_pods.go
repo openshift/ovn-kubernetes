@@ -1033,7 +1033,7 @@ func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
 func (bnc *BaseNetworkController) shouldReleaseDeletedPod(pod *corev1.Pod, switchName, nad string, podIfAddrs []*net.IPNet) (bool, error) {
 	var err error
 	if !bnc.IsUserDefinedNetwork() && kubevirt.IsPodLiveMigratable(pod) {
-		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(bnc.watchFactory, pod)
+		allVMPodsAreCompleted, err := kubevirt.AllVMPodsAreCompleted(bnc.watchFactory.PodCoreInformer().Lister(), pod)
 		if err != nil {
 			return false, err
 		}
