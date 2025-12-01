@@ -20,7 +20,7 @@ ARG ovnver=25.03
 ARG ovsver_okd=3.5
 ARG ovnver_okd=25.03
 COPY ovn25.09-25.09.1-FDP2757.11.el9fdp.x86_64.rpm ovn25.09-central-25.09.1-FDP2757.11.el9fdp.x86_64.rpm ovn25.09-host-25.09.1-FDP2757.11.el9fdp.x86_64.rpm ovn25.09-vtep-25.09.1-FDP2757.11.el9fdp.x86_64.rpm ovn25.09-central-debuginfo-25.09.1-FDP2757.11.el9fdp.x86_64.rpm ovn25.09-debuginfo-25.09.1-FDP2757.11.el9fdp.x86_64.rpm ovn25.09-debugsource-25.09.1-FDP2757.11.el9fdp.x86_64.rpm /root/
-COPY openvswitch3.5-3.5.2-62.el9fdp.x86_64.rpm /root/
+COPY *openvswitch3.5*rpm /root/
 
 RUN INSTALL_PKGS="iptables nftables" && \
     source /etc/os-release && \
@@ -28,7 +28,7 @@ RUN INSTALL_PKGS="iptables nftables" && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver" "ovn$ovnver-central" "ovn$ovnver-host" && \
-    rpm -Uhv --nodeps --force /root/*.rpm && \
+    rpm -Uhv --nodeps --force /root/ovn*.rpm && \
 	dnf clean all && rm -rf /var/cache/* && \
 	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec%" > /more-pkgs
 
@@ -48,6 +48,9 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 # ovndb-raft-functions.sh is a dependency of ovnkube.sh
 COPY dist/images/ovnkube.sh dist/images/ovndb-raft-functions.sh /root/
 
+RUN dnf install -y 'dnf-command(versionlock)'
+RUN dnf install -y /root/*openvswitch*.rpm
+RUN dnf versionlock add python3-openvswitch* openvswitch* ovn*
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
