@@ -19,7 +19,6 @@ var (
 	MirrorTypeGre         MirrorType   = "gre"
 	MirrorTypeErspan      MirrorType   = "erspan"
 	MirrorTypeLocal       MirrorType   = "local"
-	MirrorTypeLport       MirrorType   = "lport"
 )
 
 // Mirror defines an object in Mirror table

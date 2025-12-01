@@ -38,7 +38,6 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 		"Meter":                       &Meter{},
 		"Meter_Band":                  &MeterBand{},
 		"Mirror":                      &Mirror{},
-		"Mirror_Rule":                 &MirrorRule{},
 		"NAT":                         &NAT{},
 		"NB_Global":                   &NBGlobal{},
 		"Port_Group":                  &PortGroup{},
@@ -53,7 +52,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "7.12.0",
+  "version": "7.11.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -1769,17 +1768,6 @@ var schema = `{
         "index": {
           "type": "integer"
         },
-        "mirror_rules": {
-          "type": {
-            "key": {
-              "type": "uuid",
-              "refTable": "Mirror_Rule",
-              "refType": "strong"
-            },
-            "min": 0,
-            "max": "unlimited"
-          }
-        },
         "name": {
           "type": "string"
         },
@@ -1795,8 +1783,7 @@ var schema = `{
                 [
                   "gre",
                   "erspan",
-                  "local",
-                  "lport"
+                  "local"
                 ]
               ]
             }
@@ -1809,36 +1796,6 @@ var schema = `{
         ]
       ],
       "isRoot": true
-    },
-    "Mirror_Rule": {
-      "columns": {
-        "action": {
-          "type": {
-            "key": {
-              "type": "string",
-              "enum": [
-                "set",
-                [
-                  "mirror",
-                  "skip"
-                ]
-              ]
-            }
-          }
-        },
-        "match": {
-          "type": "string"
-        },
-        "priority": {
-          "type": {
-            "key": {
-              "type": "integer",
-              "minInteger": 0,
-              "maxInteger": 32767
-            }
-          }
-        }
-      }
     },
     "NAT": {
       "columns": {
