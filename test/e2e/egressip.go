@@ -36,6 +36,7 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	"k8s.io/kubernetes/test/e2e/framework/pod"
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -700,7 +701,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
-			framework.Failf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
+			e2eskipper.Skipf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
 		filterSupportedNetworkConfig(f.ClientSet, &netConfigParams)
 		if isSupported, reason := isNetworkSupported(nodes, netConfigParams); !isSupported {
