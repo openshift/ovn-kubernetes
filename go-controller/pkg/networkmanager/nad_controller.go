@@ -3,6 +3,7 @@ package networkmanager
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -76,6 +77,7 @@ type nadController struct {
 	// primaryNADs holds a mapping of namespace to NAD of primary UDNs
 	primaryNADs map[string]string
 
+	// networkIDAllocator used by cluster-manager to allocate new IDs, zone/node mode only uses as a cache
 	networkIDAllocator  id.Allocator
 	tunnelKeysAllocator *id.TunnelKeysAllocator
 	nadClient           nadclientset.Interface
@@ -108,14 +110,13 @@ func newController(
 		c.nadClient = ovnClient.NetworkAttchDefClient
 	}
 
-	// this is cluster network manager, so we allocate network IDs and tunnel keys
+	c.networkIDAllocator = id.NewIDAllocator("NetworkIDs", MaxNetworks)
+	// Reserve the ID of the default network
+	err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate default network ID: %w", err)
+	}
 	if zone == "" && node == "" {
-		c.networkIDAllocator = id.NewIDAllocator("NetworkIDs", MaxNetworks)
-		// Reserve the ID of the default network
-		err := c.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to allocate default network ID: %w", err)
-		}
 		// tunnelKeysAllocator must be passed for cluster manager
 		c.tunnelKeysAllocator = tunnelKeysAllocator
 	}
@@ -220,7 +221,7 @@ func (c *nadController) syncAll() (err error) {
 	nadsWithoutID := []*nettypes.NetworkAttachmentDefinition{}
 	for _, nad := range existingNADs {
 		// skip NADs that are not annotated with an ID
-		if c.networkIDAllocator != nil && nad.Annotations[types.OvnNetworkIDAnnotation] == "" {
+		if nad.Annotations[types.OvnNetworkIDAnnotation] == "" {
 			nadsWithoutID = append(nadsWithoutID, nad)
 			continue
 		}
@@ -234,28 +235,35 @@ func (c *nadController) syncAll() (err error) {
 		return nil
 	}
 
+	// preallocate all node IDs to avoid new NADs taking them post start up
 	// If we are missing IDs, get them from the nodes which is where we
 	// originally had them
-	klog.V(5).Infof("%s: %d NADs are missing the network ID annotation, fetching from nodes", c.name, len(nadsWithoutID))
-	nodes, err := c.nodeLister.List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("error listing nodes: %w", err)
-	}
-	for _, n := range nodes {
-		networkIdsMap, err := util.GetNodeNetworkIDsAnnotationNetworkIDs(n)
-		if err == nil {
-			for networkName, id := range networkIdsMap {
-				// Reserve the id for the network name. We can safely
-				// ignore any errors if there are duplicate ids or if
-				// two networks have the same id. We will assign network
-				// IDs anyway on sync.
-				_ = c.networkIDAllocator.ReserveID(networkName, id)
+	klog.Infof("%s: %d NADs are missing the network ID annotation, fetching from nodes", c.name, len(nadsWithoutID))
+	for _, nad := range nadsWithoutID {
+		nadNetwork, err := util.ParseNADInfo(nad)
+		if err != nil {
+			// in case the type for the NAD is not ovn-k we should not record the error event
+			if err.Error() != util.ErrorAttachDefNotOvnManaged.Error() {
+				klog.Errorf("%s: failed parsing NAD %s/%s: %v", c.name, nad.Namespace, nad.Name, err)
 			}
+			continue
+		}
+		netID, err := c.getNetworkIDFromNode(nadNetwork)
+		if err != nil {
+			return fmt.Errorf("%s: failed to fetch network ID from nodes for nad %s/%s: %v",
+				c.name, nad.Namespace, nad.Name, err)
+		}
+		if netID != types.InvalidID {
+			// Reserve the id for the network name. We can safely
+			// ignore any errors if there are duplicate ids or if
+			// two networks have the same id. We will assign network
+			// IDs anyway on sync.
+			_ = c.networkIDAllocator.ReserveID(nadNetwork.GetNetworkName(), netID)
 		}
 	}
 
 	// finally process the pending NADs
-	for _, nad := range existingNADs {
+	for _, nad := range nadsWithoutID {
 		err := syncNAD(nad)
 		if err != nil {
 			return err
@@ -608,12 +616,19 @@ func (c *nadController) handleNetworkAnnotations(old util.NetInfo, new util.Muta
 	}
 
 	id := types.InvalidID
-	// check what ID is currently annotated
-	if nad != nil && nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
-		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
-		id, err = strconv.Atoi(annotated)
-		if err != nil {
-			return fmt.Errorf("failed to parse annotated network ID: %w", err)
+
+	// check if in cache first
+	if new != nil {
+		id = c.networkIDAllocator.GetID(new.GetNetworkName())
+	}
+	if nad != nil && id == types.InvalidID {
+		// check what ID is currently annotated
+		if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
+			annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
+			id, err = strconv.Atoi(annotated)
+			if err != nil {
+				return fmt.Errorf("failed to parse annotated network ID: %w", err)
+			}
 		}
 	}
 
@@ -626,23 +641,15 @@ func (c *nadController) handleNetworkAnnotations(old util.NetInfo, new util.Muta
 		}
 	}
 
-	// this is not the cluster manager nad controller and we are not allocating
-	// so just return what we got from the annotation
-	if c.networkIDAllocator == nil {
-		if new != nil {
-			new.SetNetworkID(id)
-			new.SetTunnelKeys(tunnelKeys)
-		}
-		return nil
-	}
-
 	// release old ID if the network is being deleted
 	if old != nil && !old.IsDefault() && len(old.GetNADs()) == 0 {
 		c.networkIDAllocator.ReleaseID(old.GetNetworkName())
-		c.tunnelKeysAllocator.ReleaseKeys(old.GetNetworkName())
+		if c.isClusterManagerMode() {
+			c.tunnelKeysAllocator.ReleaseKeys(old.GetNetworkName())
+		}
 	}
 
-	// nothing to allocate
+	// nothing to allocate, delete case
 	if new == nil {
 		return nil
 	}
@@ -656,6 +663,15 @@ func (c *nadController) handleNetworkAnnotations(old util.NetInfo, new util.Muta
 			id = types.InvalidID
 		}
 	}
+
+	// this is not the cluster manager nad controller, and we are not allocating
+	// so just return what ids we already found
+	if !c.isClusterManagerMode() {
+		new.SetNetworkID(id)
+		new.SetTunnelKeys(tunnelKeys)
+		return nil
+	}
+
 	// tunnel key annotation doesn't need the same check ^ because it is initialized outside the
 	// nad controller and has already assured that all annotated tunnel keys are reserved.
 
@@ -749,6 +765,30 @@ func (c *nadController) handleNetworkAnnotations(old util.NetInfo, new util.Muta
 	return nil
 }
 
+func (c *nadController) getNetworkIDFromNode(nadNetwork util.NetInfo) (int, error) {
+	// check if the node has a legacy ID
+	nodes, err := c.nodeLister.List(labels.Everything())
+	if err != nil {
+		return types.InvalidID, fmt.Errorf("failed to list nodes: %w", err)
+	}
+	// sort to make retrieval semi-consistent across nodes
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].CreationTimestamp.Before(&nodes[j].CreationTimestamp)
+	})
+	netName := nadNetwork.GetNetworkName()
+	// Find from node annotations
+	for _, node := range nodes {
+		idMap, err := util.GetNodeNetworkIDsAnnotationNetworkIDs(node)
+		if err != nil {
+			continue
+		}
+		if v, ok := idMap[netName]; ok && v != types.InvalidID {
+			return v, nil
+		}
+	}
+	return types.InvalidID, nil
+}
+
 func (c *nadController) GetActiveNetwork(network string) util.NetInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -757,6 +797,10 @@ func (c *nadController) GetActiveNetwork(network string) util.NetInfo {
 		return nil
 	}
 	return state.controller
+}
+
+func (c *nadController) isClusterManagerMode() bool {
+	return c.tunnelKeysAllocator != nil
 }
 
 func getNumberOfTunnelKeys(netInfo util.NetInfo) int {

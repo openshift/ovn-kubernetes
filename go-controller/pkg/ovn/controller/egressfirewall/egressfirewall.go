@@ -558,7 +558,6 @@ func (oc *EFController) validateAndGetEgressFirewallDestination(namespace string
 		for _, clusterSubnet := range subnets {
 			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
 				clusterSubnetIntersection = append(clusterSubnetIntersection, clusterSubnet.CIDR)
-				break
 			}
 		}
 	} else {
