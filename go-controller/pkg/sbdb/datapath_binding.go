@@ -7,23 +7,12 @@ import "github.com/ovn-kubernetes/libovsdb/model"
 
 const DatapathBindingTable = "Datapath_Binding"
 
-type (
-	DatapathBindingType = string
-)
-
-var (
-	DatapathBindingTypeLogicalSwitch DatapathBindingType = "logical-switch"
-	DatapathBindingTypeLogicalRouter DatapathBindingType = "logical-router"
-)
-
 // DatapathBinding defines an object in Datapath_Binding table
 type DatapathBinding struct {
-	UUID          string               `ovsdb:"_uuid"`
-	ExternalIDs   map[string]string    `ovsdb:"external_ids"`
-	LoadBalancers []string             `ovsdb:"load_balancers"`
-	NbUUID        *string              `ovsdb:"nb_uuid"`
-	TunnelKey     int                  `ovsdb:"tunnel_key"`
-	Type          *DatapathBindingType `ovsdb:"type"`
+	UUID          string            `ovsdb:"_uuid"`
+	ExternalIDs   map[string]string `ovsdb:"external_ids"`
+	LoadBalancers []string          `ovsdb:"load_balancers"`
+	TunnelKey     int               `ovsdb:"tunnel_key"`
 }
 
 func (a *DatapathBinding) GetUUID() string {
@@ -88,60 +77,14 @@ func equalDatapathBindingLoadBalancers(a, b []string) bool {
 	return true
 }
 
-func (a *DatapathBinding) GetNbUUID() *string {
-	return a.NbUUID
-}
-
-func copyDatapathBindingNbUUID(a *string) *string {
-	if a == nil {
-		return nil
-	}
-	b := *a
-	return &b
-}
-
-func equalDatapathBindingNbUUID(a, b *string) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if a == b {
-		return true
-	}
-	return *a == *b
-}
-
 func (a *DatapathBinding) GetTunnelKey() int {
 	return a.TunnelKey
-}
-
-func (a *DatapathBinding) GetType() *DatapathBindingType {
-	return a.Type
-}
-
-func copyDatapathBindingType(a *DatapathBindingType) *DatapathBindingType {
-	if a == nil {
-		return nil
-	}
-	b := *a
-	return &b
-}
-
-func equalDatapathBindingType(a, b *DatapathBindingType) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if a == b {
-		return true
-	}
-	return *a == *b
 }
 
 func (a *DatapathBinding) DeepCopyInto(b *DatapathBinding) {
 	*b = *a
 	b.ExternalIDs = copyDatapathBindingExternalIDs(a.ExternalIDs)
 	b.LoadBalancers = copyDatapathBindingLoadBalancers(a.LoadBalancers)
-	b.NbUUID = copyDatapathBindingNbUUID(a.NbUUID)
-	b.Type = copyDatapathBindingType(a.Type)
 }
 
 func (a *DatapathBinding) DeepCopy() *DatapathBinding {
@@ -163,9 +106,7 @@ func (a *DatapathBinding) Equals(b *DatapathBinding) bool {
 	return a.UUID == b.UUID &&
 		equalDatapathBindingExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		equalDatapathBindingLoadBalancers(a.LoadBalancers, b.LoadBalancers) &&
-		equalDatapathBindingNbUUID(a.NbUUID, b.NbUUID) &&
-		a.TunnelKey == b.TunnelKey &&
-		equalDatapathBindingType(a.Type, b.Type)
+		a.TunnelKey == b.TunnelKey
 }
 
 func (a *DatapathBinding) EqualsModel(b model.Model) bool {
