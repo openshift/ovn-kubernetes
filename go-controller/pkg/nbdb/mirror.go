@@ -19,7 +19,6 @@ var (
 	MirrorTypeGre         MirrorType   = "gre"
 	MirrorTypeErspan      MirrorType   = "erspan"
 	MirrorTypeLocal       MirrorType   = "local"
-	MirrorTypeLport       MirrorType   = "lport"
 )
 
 // Mirror defines an object in Mirror table
@@ -28,7 +27,6 @@ type Mirror struct {
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Filter      MirrorFilter      `ovsdb:"filter"`
 	Index       int               `ovsdb:"index"`
-	MirrorRules []string          `ovsdb:"mirror_rules"`
 	Name        string            `ovsdb:"name"`
 	Sink        string            `ovsdb:"sink"`
 	Type        MirrorType        `ovsdb:"type"`
@@ -76,34 +74,6 @@ func (a *Mirror) GetIndex() int {
 	return a.Index
 }
 
-func (a *Mirror) GetMirrorRules() []string {
-	return a.MirrorRules
-}
-
-func copyMirrorMirrorRules(a []string) []string {
-	if a == nil {
-		return nil
-	}
-	b := make([]string, len(a))
-	copy(b, a)
-	return b
-}
-
-func equalMirrorMirrorRules(a, b []string) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for i, v := range a {
-		if b[i] != v {
-			return false
-		}
-	}
-	return true
-}
-
 func (a *Mirror) GetName() string {
 	return a.Name
 }
@@ -119,7 +89,6 @@ func (a *Mirror) GetType() MirrorType {
 func (a *Mirror) DeepCopyInto(b *Mirror) {
 	*b = *a
 	b.ExternalIDs = copyMirrorExternalIDs(a.ExternalIDs)
-	b.MirrorRules = copyMirrorMirrorRules(a.MirrorRules)
 }
 
 func (a *Mirror) DeepCopy() *Mirror {
@@ -142,7 +111,6 @@ func (a *Mirror) Equals(b *Mirror) bool {
 		equalMirrorExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		a.Filter == b.Filter &&
 		a.Index == b.Index &&
-		equalMirrorMirrorRules(a.MirrorRules, b.MirrorRules) &&
 		a.Name == b.Name &&
 		a.Sink == b.Sink &&
 		a.Type == b.Type

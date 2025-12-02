@@ -56,7 +56,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Southbound",
-  "version": "21.5.0",
+  "version": "20.41.0",
   "tables": {
     "ACL_ID": {
       "columns": {
@@ -634,15 +634,6 @@ var schema = `{
             "max": "unlimited"
           }
         },
-        "nb_uuid": {
-          "type": {
-            "key": {
-              "type": "uuid"
-            },
-            "min": 0,
-            "max": 1
-          }
-        },
         "tunnel_key": {
           "type": {
             "key": {
@@ -650,22 +641,6 @@ var schema = `{
               "minInteger": 1,
               "maxInteger": 16777215
             }
-          }
-        },
-        "type": {
-          "type": {
-            "key": {
-              "type": "string",
-              "enum": [
-                "set",
-                [
-                  "logical-switch",
-                  "logical-router"
-                ]
-              ]
-            },
-            "min": 0,
-            "max": 1
           }
         }
       },
@@ -755,6 +730,7 @@ var schema = `{
                 "set",
                 [
                   "geneve",
+                  "stt",
                   "vxlan"
                 ]
               ]
@@ -1498,8 +1474,7 @@ var schema = `{
                 [
                   "gre",
                   "erspan",
-                  "local",
-                  "lport"
+                  "local"
                 ]
               ]
             }
@@ -1657,15 +1632,6 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
-          }
-        },
-        "mirror_port": {
-          "type": {
-            "key": {
-              "type": "string"
-            },
-            "min": 0,
-            "max": 1
           }
         },
         "mirror_rules": {
@@ -1975,9 +1941,6 @@ var schema = `{
             "max": "unlimited"
           }
         },
-        "ic_learned": {
-          "type": "boolean"
-        },
         "ip": {
           "type": "string"
         },
@@ -2020,9 +1983,6 @@ var schema = `{
             "min": 0,
             "max": 1
           }
-        },
-        "remote": {
-          "type": "boolean"
         },
         "src_ip": {
           "type": "string"

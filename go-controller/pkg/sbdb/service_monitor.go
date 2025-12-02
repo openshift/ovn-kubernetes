@@ -25,13 +25,11 @@ type ServiceMonitor struct {
 	UUID        string                  `ovsdb:"_uuid"`
 	ChassisName string                  `ovsdb:"chassis_name"`
 	ExternalIDs map[string]string       `ovsdb:"external_ids"`
-	IcLearned   bool                    `ovsdb:"ic_learned"`
 	IP          string                  `ovsdb:"ip"`
 	LogicalPort string                  `ovsdb:"logical_port"`
 	Options     map[string]string       `ovsdb:"options"`
 	Port        int                     `ovsdb:"port"`
 	Protocol    *ServiceMonitorProtocol `ovsdb:"protocol"`
-	Remote      bool                    `ovsdb:"remote"`
 	SrcIP       string                  `ovsdb:"src_ip"`
 	SrcMAC      string                  `ovsdb:"src_mac"`
 	Status      *ServiceMonitorStatus   `ovsdb:"status"`
@@ -73,10 +71,6 @@ func equalServiceMonitorExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
-}
-
-func (a *ServiceMonitor) GetIcLearned() bool {
-	return a.IcLearned
 }
 
 func (a *ServiceMonitor) GetIP() string {
@@ -143,10 +137,6 @@ func equalServiceMonitorProtocol(a, b *ServiceMonitorProtocol) bool {
 	return *a == *b
 }
 
-func (a *ServiceMonitor) GetRemote() bool {
-	return a.Remote
-}
-
 func (a *ServiceMonitor) GetSrcIP() string {
 	return a.SrcIP
 }
@@ -204,13 +194,11 @@ func (a *ServiceMonitor) Equals(b *ServiceMonitor) bool {
 	return a.UUID == b.UUID &&
 		a.ChassisName == b.ChassisName &&
 		equalServiceMonitorExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
-		a.IcLearned == b.IcLearned &&
 		a.IP == b.IP &&
 		a.LogicalPort == b.LogicalPort &&
 		equalServiceMonitorOptions(a.Options, b.Options) &&
 		a.Port == b.Port &&
 		equalServiceMonitorProtocol(a.Protocol, b.Protocol) &&
-		a.Remote == b.Remote &&
 		a.SrcIP == b.SrcIP &&
 		a.SrcMAC == b.SrcMAC &&
 		equalServiceMonitorStatus(a.Status, b.Status)
