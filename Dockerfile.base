@@ -19,7 +19,7 @@ ARG ovnver=25.03
 # the corresponding Centos version when updating the OCP version.
 ARG ovsver_okd=3.5
 ARG ovnver_okd=25.03
-COPY ovn25.09-25.09.1-FDP2757.12.el9fdp.x86_64.rpm ovn25.09-debuginfo-25.09.1-FDP2757.12.el9fdp.x86_64.rpm ovn25.09-host-debuginfo-25.09.1-FDP2757.12.el9fdp.x86_64.rpm ovn25.09-central-25.09.1-FDP2757.12.el9fdp.x86_64.rpm ovn25.09-debugsource-25.09.1-FDP2757.12.el9fdp.x86_64.rpm  ovn25.09-vtep-25.09.1-FDP2757.12.el9fdp.x86_64.rpm ovn25.09-central-debuginfo-25.09.1-FDP2757.12.el9fdp.x86_64.rpm  ovn25.09-host-25.09.1-FDP2757.12.el9fdp.x86_64.rpm /root/
+COPY ovn25.09*rpm /root/
 COPY *openvswitch3.5*rpm /root/
 
 RUN INSTALL_PKGS="iptables nftables" && \
