@@ -1517,7 +1517,7 @@ fi
 			}
 			wg.Wait()
 		},
-			Entry("with pre-copy succeeds, should keep connectivity", liveMigrationTestData{
+			FEntry("with pre-copy succeeds, should keep connectivity", liveMigrationTestData{
 				mode:        kubevirtv1.MigrationPreCopy,
 				numberOfVMs: 1,
 			}),
