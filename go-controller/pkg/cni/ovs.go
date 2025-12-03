@@ -43,7 +43,7 @@ func ovsExec(args ...string) (string, error) {
 		return "", fmt.Errorf("OVS exec runner not initialized")
 	}
 
-	args = append([]string{"--timeout=30"}, args...)
+	args = append([]string{"--timeout=120"}, args...)
 	output, err := runner.Command(vsctlPath, args...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
