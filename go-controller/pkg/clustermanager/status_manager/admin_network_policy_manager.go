@@ -2,6 +2,7 @@ package status_manager
 
 import (
 	"context"
+	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -61,8 +62,7 @@ func (m *anpZoneDeleteCleanupManager) GetBANPs() ([]*anpapi.BaselineAdminNetwork
 func (m *anpZoneDeleteCleanupManager) removeZoneStatusFromAllANPs(existingANPs []*anpapi.AdminNetworkPolicy, existingBANPs []*anpapi.BaselineAdminNetworkPolicy, zone string) {
 	klog.Infof("Deleting status for zone %s from existing admin network policies", zone)
 	for _, existingANP := range existingANPs {
-		applyObj := anpapiapply.AdminNetworkPolicy(existingANP.Name).
-			WithStatus(anpapiapply.AdminNetworkPolicyStatus())
+		applyObj := anpapiapply.AdminNetworkPolicy(existingANP.Name)
 		_, err := m.client.PolicyV1alpha1().AdminNetworkPolicies().
 			ApplyStatus(context.TODO(), applyObj, metav1.ApplyOptions{FieldManager: zone, Force: true})
 		if err != nil {
@@ -70,8 +70,7 @@ func (m *anpZoneDeleteCleanupManager) removeZoneStatusFromAllANPs(existingANPs [
 		}
 	}
 	for _, existingBANP := range existingBANPs {
-		applyObj := anpapiapply.BaselineAdminNetworkPolicy(existingBANP.Name).
-			WithStatus(anpapiapply.BaselineAdminNetworkPolicyStatus())
+		applyObj := anpapiapply.BaselineAdminNetworkPolicy(existingBANP.Name)
 		_, err := m.client.PolicyV1alpha1().BaselineAdminNetworkPolicies().
 			ApplyStatus(context.TODO(), applyObj, metav1.ApplyOptions{FieldManager: zone, Force: true})
 		if err != nil {
@@ -97,4 +96,52 @@ func (m *anpZoneDeleteCleanupManager) cleanupDeletedZoneStatuses(deletedZones se
 			m.removeZoneStatusFromAllANPs(existingANPs, existingBANPs, zone)
 		}
 	}
+}
+
+// doStartupCleanup performs a one-time cleanup of stale ANP/BANP managedFields at startup.
+// This is similar to the cleanup done in cleanupDeletedZoneStatuses when zones are deleted at runtime.
+// It detects stale zones by checking for managedFields from zones that no longer exist.
+func (m *anpZoneDeleteCleanupManager) doStartupCleanup(currentZones sets.Set[string]) error {
+	klog.Infof("StatusManager: performing one-time startup cleanup for ANP/BANP managedFields")
+
+	existingANPs, err := m.GetANPs()
+	if err != nil {
+		return fmt.Errorf("failed to fetch ANPs for startup cleanup: %w", err)
+	}
+	existingBANPs, err := m.GetBANPs()
+	if err != nil {
+		return fmt.Errorf("failed to fetch BANPs for startup cleanup: %w", err)
+	}
+
+	if len(existingANPs) == 0 && len(existingBANPs) == 0 {
+		klog.V(5).Infof("StatusManager: no ANPs or BANPs found, skipping startup cleanup")
+		return nil
+	}
+
+	// Find stale zones by checking managedFields on ANPs/BANPs
+	staleZones := sets.New[string]()
+	for _, anp := range existingANPs {
+		for _, mf := range anp.ManagedFields {
+			if mf.Subresource == "status" && !currentZones.Has(mf.Manager) && isEmptyStatusManagedField(mf) {
+				staleZones.Insert(mf.Manager)
+			}
+		}
+	}
+	for _, banp := range existingBANPs {
+		for _, mf := range banp.ManagedFields {
+			if mf.Subresource == "status" && !currentZones.Has(mf.Manager) && isEmptyStatusManagedField(mf) {
+				staleZones.Insert(mf.Manager)
+			}
+		}
+	}
+
+	if len(staleZones) > 0 {
+		klog.Infof("StatusManager: found stale zones in ANP/BANP managedFields: %v", staleZones.UnsortedList())
+		for _, zone := range staleZones.UnsortedList() {
+			m.removeZoneStatusFromAllANPs(existingANPs, existingBANPs, zone)
+		}
+	}
+
+	klog.Infof("StatusManager: ANP/BANP startup cleanup complete")
+	return nil
 }
