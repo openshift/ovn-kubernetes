@@ -13,7 +13,7 @@ SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
 olddir="${PWD}"
 builddir="$(mktemp -d)"
 cd "${builddir}"
-GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.4
+GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
 BINS=(
     deepcopy-gen
     applyconfiguration-gen
@@ -21,7 +21,7 @@ BINS=(
     informer-gen
     lister-gen
 )
-GO111MODULE=on go install $(printf "k8s.io/code-generator/cmd/%s@v0.32.3 " "${BINS[@]}")
+GO111MODULE=on go install $(printf "k8s.io/code-generator/cmd/%s@v0.34.1 " "${BINS[@]}")
 cd "${olddir}"
 if [[ "${builddir}" == /tmp/* ]]; then #paranoia
     rm -rf "${builddir}"
@@ -137,3 +137,5 @@ echo "Copying clusteruserdefinednetworks CRD"
 cp _output/crds/k8s.ovn.org_clusteruserdefinednetworks.yaml ../dist/templates/k8s.ovn.org_clusteruserdefinednetworks.yaml.j2
 echo "Copying routeAdvertisements CRD"
 cp _output/crds/k8s.ovn.org_routeadvertisements.yaml ../dist/templates/k8s.ovn.org_routeadvertisements.yaml.j2
+echo "Copying clusterNetworkConnect CRD"
+cp _output/crds/k8s.ovn.org_clusternetworkconnects.yaml ../dist/templates/k8s.ovn.org_clusternetworkconnects.yaml.j2
