@@ -247,7 +247,7 @@ type zoneClusterControllerEventHandler struct {
 	nodeSyncFailed sync.Map
 }
 
-func (h *zoneClusterControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *zoneClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
 	return false
 }
 
