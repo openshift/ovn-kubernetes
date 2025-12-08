@@ -47,21 +47,23 @@ const (
 	ClusterNetworkConnectOwnerType ownerType = "ClusterNetworkConnect"
 
 	// owner extra IDs, make sure to define only 1 ExternalIDKey for every string value
-	PriorityKey           ExternalIDKey = "priority"
-	PolicyDirectionKey    ExternalIDKey = "direction"
-	GressIdxKey           ExternalIDKey = "gress-index"
-	IPFamilyKey           ExternalIDKey = "ip-family"
-	NetworkKey            ExternalIDKey = "network"
-	NetworkIDKey          ExternalIDKey = "network-id"
-	NodeIDKey             ExternalIDKey = "node-id"
-	TypeKey               ExternalIDKey = "type"
-	IpKey                 ExternalIDKey = "ip"
-	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
-	IpBlockIndexKey       ExternalIDKey = "ip-block-index"
-	RuleIndex             ExternalIDKey = "rule-index"
-	CIDRKey               ExternalIDKey = types.OvnK8sPrefix + "/cidr"
-	PortPolicyProtocolKey ExternalIDKey = "port-policy-protocol"
-	RouterNameKey         ExternalIDKey = "router-name"
+	PriorityKey             ExternalIDKey = "priority"
+	PolicyDirectionKey      ExternalIDKey = "direction"
+	GressIdxKey             ExternalIDKey = "gress-index"
+	IPFamilyKey             ExternalIDKey = "ip-family"
+	NetworkKey              ExternalIDKey = "network"
+	NetworkIDKey            ExternalIDKey = "network-id"
+	SourceNetworkIDKey      ExternalIDKey = "source-network-id"
+	DestinationNetworkIDKey ExternalIDKey = "destination-network-id"
+	NodeIDKey               ExternalIDKey = "node-id"
+	TypeKey                 ExternalIDKey = "type"
+	IpKey                   ExternalIDKey = "ip"
+	PortPolicyIndexKey      ExternalIDKey = "port-policy-index"
+	IpBlockIndexKey         ExternalIDKey = "ip-block-index"
+	RuleIndex               ExternalIDKey = "rule-index"
+	CIDRKey                 ExternalIDKey = types.OvnK8sPrefix + "/cidr"
+	PortPolicyProtocolKey   ExternalIDKey = "port-policy-protocol"
+	RouterNameKey           ExternalIDKey = "router-name"
 )
 
 // ObjectIDsTypes should only be created here
@@ -398,5 +400,31 @@ var LogicalRouterPortClusterNetworkConnect = newObjectIDsType(logicalRouterPort,
 	// network deletion, CNC cleanup, etc. It's because our database doesn't
 	// know the relationship between the port and the router and we always need
 	// to provide the router name when deleting the port.
+	RouterNameKey,
+})
+
+var LogicalRouterPolicyClusterNetworkConnect = newObjectIDsType(logicalRouterPolicy, ClusterNetworkConnectOwnerType, []ExternalIDKey{
+	// CNC name
+	ObjectNameKey,
+	// source network ID
+	// value in k8s.ovn.org/network-id annotation set on the NAD
+	// of the source network whose router contains this policy.
+	SourceNetworkIDKey,
+	// destination network ID
+	// value in k8s.ovn.org/network-id annotation set on the NAD
+	// of the destination network that this policy routes to.
+	DestinationNetworkIDKey,
+	// In future when we support more than one pod subnet from same
+	// family for the same destination network, we should update the
+	// the matches of the policies, so in the end its just total of two
+	// policies, 1 per family each having a match of all subnets belonging
+	// to that network.
+	IPFamilyKey,
+	// router name - stores the name of the router this policy belongs to
+	// This allows cleanup without maintaining a cache of router names
+	// This is used as a back reference to map the policy to the router during
+	// network deletion, CNC cleanup, etc. It's because our database doesn't
+	// know the relationship between the policy and the router and we always need
+	// to provide the router name when deleting the policy.
 	RouterNameKey,
 })
