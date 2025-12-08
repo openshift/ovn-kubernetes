@@ -13,6 +13,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	networkconnectv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -117,6 +118,8 @@ func parseOwnerKey(owner string) (topologyType string, networkID int, err error)
 // using IPs from the network subnet CNC annotation.
 // STEP3: If PodNetworkConnect is enabled, create the logical router policies on network router's
 // to steer traffic to the connect router for other connected networks.
+// STEP4: If PodNetworkConnect is enabled, add static routes to connect router towards
+// each of the connected networks.
 func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetworkConnect, allocatedSubnets map[string][]*net.IPNet) error {
 	cncName := cnc.Name
 	cncState, exists := c.cncCache[cncName]
@@ -157,11 +160,11 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 
 	var errs []error
 
-	// Ensure ports, routing policies, for ALL desired networks.
+	// Ensure ports, routing policies and static routes for ALL desired networks.
 	// All operations are idempotent (CreateOrUpdate), so we reconcile them on every sync.
 	// This handles:
-	// - New networks: creates ports, policies
-	// - New nodes added to existing networks: creates ports
+	// - New networks: creates ports, policies, and static routes
+	// - New nodes added to existing networks: creates ports and static routes
 	// - Existing networks needing policies to newly added networks
 	// - Node annotation changes (new subnets becoming available)
 	// Each network is transacted separately to keep transaction sizes bounded.
@@ -191,7 +194,7 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 			continue
 		}
 
-		klog.V(5).Infof("CNC %s: ensuring ports, policies for network %s (new=%v)", cncName, netInfo.GetNetworkName(), isNewNetwork)
+		klog.V(5).Infof("CNC %s: ensuring ports, policies and routes for network %s (new=%v)", cncName, netInfo.GetNetworkName(), isNewNetwork)
 
 		// Build ops per network to keep transaction sizes bounded
 		var createOps []ovsdb.Operation
@@ -212,6 +215,13 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 			continue
 		}
 
+		// Ensure static routes on the connect router
+		createOps, err = c.ensureStaticRoutesOps(createOps, cnc, netInfo, subnets, allNodes)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CNC %s: failed to ensure static routes for network %s: %w", cncName, netInfo.GetNetworkName(), err))
+			continue
+		}
+
 		// Transact per network to keep transaction sizes bounded
 		if len(createOps) > 0 {
 			if _, err := libovsdbops.TransactAndCheck(c.nbClient, createOps); err != nil {
@@ -229,8 +239,7 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 
 	connectRouterName := getConnectRouterName(cncName)
 
-	// Cleanup ports for nodes that no longer exist.
-	// Delete connect router ports for nodes that no longer exist - transact separately
+	// Cleanup ports and routes for nodes that no longer exist. - transact separately
 	var nodeDeleteOps []ovsdb.Operation
 	nodeDeleteOps, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, nodeDeleteOps, connectRouterName,
 		func(item *nbdb.LogicalRouterPort) bool {
@@ -248,6 +257,25 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 		})
 	if err != nil {
 		errs = append(errs, fmt.Errorf("CNC %s: failed to cleanup ports for deleted nodes: %w", cncName, err))
+	}
+
+	// Delete static routes for nodes that no longer exist
+	nodeDeleteOps, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, nodeDeleteOps, connectRouterName,
+		func(item *nbdb.LogicalRouterStaticRoute) bool {
+			// Only delete routes owned by this CNC
+			if item.ExternalIDs[libovsdbops.ObjectNameKey.String()] != cncName {
+				return false
+			}
+			nodeIDStr := item.ExternalIDs[libovsdbops.NodeIDKey.String()]
+			// nodeID 0 is used for Layer2 networks which don't have per-node routes
+			if nodeIDStr == "" || nodeIDStr == "0" {
+				return false
+			}
+			// Delete if nodeID is not in current nodes
+			return !currentNodeIDs.Has(nodeIDStr)
+		})
+	if err != nil {
+		errs = append(errs, fmt.Errorf("CNC %s: failed to cleanup routes for deleted nodes: %w", cncName, err))
 	}
 
 	if len(nodeDeleteOps) > 0 {
@@ -343,6 +371,19 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 				errs = append(errs, fmt.Errorf("CNC %s: failed to delete routing policies from router %s for network %s: %w", cncName, routerName, owner, err))
 				// Don't continue here - we still want to try other cleanups
 			}
+		}
+
+		// Delete static routes from the connect router for this network
+		// Note: Static routes don't have RouterNameKey in ExternalIDs, but we're deleting from connectRouterName
+		// so matching by ObjectNameKey and NetworkIDKey is sufficient
+		deleteOps, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, deleteOps, connectRouterName,
+			func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.ExternalIDs[libovsdbops.ObjectNameKey.String()] == cncName &&
+					item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == strconv.Itoa(networkID)
+			})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CNC %s: failed to delete static routes for network %s: %w", cncName, owner, err))
+			continue
 		}
 
 		// Transact per network to keep transaction sizes bounded
@@ -760,4 +801,138 @@ func (c *Controller) createRoutingPoliciesOps(ops []ovsdb.Operation, dstNetworkI
 	}
 
 	return ops, nil
+}
+
+// ensureStaticRoutesOps returns ops to create static routes on the connect router for reaching network subnets.
+func (c *Controller) ensureStaticRoutesOps(ops []ovsdb.Operation, cnc *networkconnectv1.ClusterNetworkConnect,
+	netInfo util.NetInfo, subnets []*net.IPNet, nodes []*corev1.Node) ([]ovsdb.Operation, error) {
+	cncName := cnc.Name
+	networkName := netInfo.GetNetworkName()
+	connectRouterName := getConnectRouterName(cncName)
+
+	networkID := netInfo.GetNetworkID()
+
+	// Get the network's pod subnets
+	podSubnets := netInfo.Subnets()
+
+	if netInfo.TopologyType() == ovntypes.Layer3Topology {
+		// For Layer3, create routes to each node's subnet slice
+		for _, node := range nodes {
+			nodeID, err := util.GetNodeID(node)
+			if err != nil {
+				continue
+			}
+
+			// Get the node's subnet from the network
+			nodeSubnets, err := c.getNodeSubnet(netInfo, node.Name)
+			if err != nil {
+				klog.V(4).Infof("Could not get node subnet for %s on network %s: %v", node.Name, networkName, err)
+				continue
+			}
+
+			// Calculate nexthop (second IP of the P2P subnet on network router side)
+			portPairInfo, err := GetP2PAddresses(subnets, nodeID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to calculate P2P IP addresses for node %s and Layer3 network %s: %v", node.Name, networkName, err)
+			}
+			nexthops := util.IPNetsToIPs(portPairInfo.networkPortIPs)
+
+			// Create route for this node's subnets
+			ops, err = c.createStaticRoutesOps(ops, networkID, connectRouterName, nodeSubnets, nexthops, cncName, nodeID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create static route ops for node %s: %v", node.Name, err)
+			}
+		}
+	}
+	if netInfo.TopologyType() == ovntypes.Layer2Topology {
+		// For Layer2, create a single route to the network's subnets
+		portPairInfo, err := GetP2PAddresses(subnets, 0)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate P2P IP addresses for Layer2 network %s: %v", networkName, err)
+		}
+		nexthops := util.IPNetsToIPs(portPairInfo.networkPortIPs)
+
+		var podSubnetIPNets []*net.IPNet
+		for _, entry := range podSubnets {
+			podSubnetIPNets = append(podSubnetIPNets, entry.CIDR)
+		}
+
+		ops, err = c.createStaticRoutesOps(ops, networkID, connectRouterName, podSubnetIPNets, nexthops, cncName, 0)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create static route ops for Layer2 network %s: %v", networkName, err)
+		}
+	}
+
+	return ops, nil
+}
+
+// createStaticRoutesOps returns ops to create logical router static routes.
+func (c *Controller) createStaticRoutesOps(ops []ovsdb.Operation, networkID int, routerName string, dstSubnets []*net.IPNet,
+	nexthops []net.IP, cncName string, nodeID int) ([]ovsdb.Operation, error) {
+	for _, dstSubnet := range dstSubnets {
+		// Find matching nexthop (same IP family)
+		var nexthop string
+		isIPv4Subnet := utilnet.IsIPv4(dstSubnet.IP)
+		for _, nh := range nexthops {
+			isIPv4Nexthop := utilnet.IsIPv4(nh)
+			if isIPv4Subnet == isIPv4Nexthop {
+				nexthop = nh.String()
+				break
+			}
+		}
+		if nexthop == "" {
+			continue
+		}
+
+		ipFamily := "v4"
+		if !isIPv4Subnet {
+			ipFamily = "v6"
+		}
+
+		dbIndexes := libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterStaticRouteClusterNetworkConnect, controllerName,
+			map[libovsdbops.ExternalIDKey]string{
+				libovsdbops.NetworkIDKey:  strconv.Itoa(networkID),
+				libovsdbops.NodeIDKey:     strconv.Itoa(nodeID),
+				libovsdbops.IPFamilyKey:   ipFamily,
+				libovsdbops.ObjectNameKey: cncName, // CNC name
+			})
+		route := &nbdb.LogicalRouterStaticRoute{
+			IPPrefix:    dstSubnet.String(),
+			Nexthop:     nexthop,
+			ExternalIDs: dbIndexes.GetExternalIDs(),
+		}
+
+		var err error
+		// Don't limit fields to update - when node subnets change, IPPrefix and Nexthop need to be updated too
+		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, routerName, route,
+			libovsdbops.GetPredicate[*nbdb.LogicalRouterStaticRoute](dbIndexes, nil))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create static route ops on %s: %v", routerName, err)
+		}
+
+		klog.V(5).Infof("Created/updated static route ops on %s: %s via %s", routerName, dstSubnet.String(), nexthop)
+	}
+
+	return ops, nil
+}
+
+// getNodeSubnet gets the subnet allocated to a specific node for a network.
+func (c *Controller) getNodeSubnet(netInfo util.NetInfo, nodeName string) ([]*net.IPNet, error) {
+	// For Layer3 networks, each node gets a subnet slice
+	// Get node info to find its allocated subnet
+	node, err := c.nodeLister.Get(nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s: %v", nodeName, err)
+	}
+
+	// Parse the subnet for this network
+	nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, netInfo.GetNetworkName())
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// we must continue setting up the next network, the node update event will trigger the reconciliation again.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to parse node subnet for network %s: %v", netInfo.GetNetworkName(), err)
+	}
+	return nodeSubnets, nil
 }
