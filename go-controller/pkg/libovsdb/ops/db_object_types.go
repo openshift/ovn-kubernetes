@@ -11,6 +11,7 @@ const (
 	qos
 	nat
 	logicalRouterPort
+	logicalRouterStaticRoute
 )
 
 const (
@@ -414,6 +415,7 @@ var LogicalRouterPolicyClusterNetworkConnect = newObjectIDsType(logicalRouterPol
 	// value in k8s.ovn.org/network-id annotation set on the NAD
 	// of the destination network that this policy routes to.
 	DestinationNetworkIDKey,
+	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
 	// In future when we support more than one pod subnet from same
 	// family for the same destination network, we should update the
 	// the matches of the policies, so in the end its just total of two
@@ -427,4 +429,17 @@ var LogicalRouterPolicyClusterNetworkConnect = newObjectIDsType(logicalRouterPol
 	// know the relationship between the policy and the router and we always need
 	// to provide the router name when deleting the policy.
 	RouterNameKey,
+})
+
+var LogicalRouterStaticRouteClusterNetworkConnect = newObjectIDsType(logicalRouterStaticRoute, ClusterNetworkConnectOwnerType, []ExternalIDKey{
+	// CNC name
+	ObjectNameKey,
+	// connected network's network ID
+	// value in k8s.ovn.org/network-id annotation set on the NAD
+	// of the connected network that this static route routes to.
+	NetworkIDKey,
+	// destination node ID
+	NodeIDKey,
+	// the IP Family for this static route, ip4 or ip6 or ip(dualstack)
+	IPFamilyKey,
 })
