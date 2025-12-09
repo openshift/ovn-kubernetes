@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	ovnkconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -31,8 +32,10 @@ func (o openshift) StartNode(nodeName string) error {
 	panic("not implemented")
 }
 
-func (o openshift) GetDefaultTimeoutContext() *framework.TimeoutContext {
-	panic("not implemented")
+func (m openshift) GetDefaultTimeoutContext() *framework.TimeoutContext {
+	timeouts := framework.NewTimeoutContext()
+	timeouts.PodStart = 10 * time.Minute
+	return timeouts
 }
 
 func IsProvider(config *rest.Config) (bool, error) {
