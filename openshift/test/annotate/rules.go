@@ -73,6 +73,8 @@ var (
 			`allow ingress traffic to one pod from a particular namespace`,
 			// private image in upstream test & need privs for tcpdump
 			`e2e NetworkQoS validation`,
+			// ClusterNetworkConnect CR is not in downstream yet
+			`ClusterNetworkConnect: API validations`,
 			// unknown rc 7 code
 			`Network Segmentation: API validations`,
 			// 'Network allocation failed for at least one node'
