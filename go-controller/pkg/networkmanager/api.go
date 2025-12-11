@@ -91,8 +91,13 @@ type Interface interface {
 	// Reconcile allows for a manually invoked reconciliation of a network manager
 	Reconcile(key string)
 
-	// ForceReconcile reconciles as usual, but tags the network as it should be forced to reconcile
-	ForceReconcile(key, networkName string, active, local bool)
+	// UpdateNADState sets a NAD as active or inactive, and then Reconciles the NAD again
+	UpdateNADState(key string, active bool)
+
+	// NotifyNetworkRefChange allows a controller manager to signal that a node’s
+	// reference to a given network became active/inactive so the running network
+	// controller can enqueue reconciliation work (e.g., via its retry framework).
+	NotifyNetworkRefChange(networkName, node string, active bool)
 }
 
 // Controller handles the runtime of the package
@@ -237,6 +242,7 @@ type BaseNetworkController interface {
 type NetworkController interface {
 	BaseNetworkController
 	Cleanup() error
+	HandleNetworkRefChange(node string, active bool)
 }
 
 // defaultNetworkManager assumes the default network is
@@ -303,8 +309,10 @@ func (nm defaultNetworkManager) GetNetworkByID(id int) util.NetInfo {
 	return &util.DefaultNetInfo{}
 }
 
-func (nm defaultNetworkManager) ForceReconcile(_, _ string, _, _ bool) {}
+func (nm defaultNetworkManager) UpdateNADState(_ string, _ bool) {}
 
 func (nm defaultNetworkManager) Reconcile(_ string) {}
+
+func (nm defaultNetworkManager) NotifyNetworkRefChange(_, _ string, _ bool) {}
 
 var def Controller = &defaultNetworkManager{}
