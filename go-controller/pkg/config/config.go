@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"net"
@@ -437,6 +438,7 @@ type KubernetesConfig struct {
 	CertDuration            time.Duration `gcfg:"cert-duration"`
 	Kubeconfig              string        `gcfg:"kubeconfig"`
 	CACert                  string        `gcfg:"cacert"`
+	CACertData              string        `gcfg:"cacert-data"`
 	CAData                  []byte
 	APIServer               string `gcfg:"apiserver"`
 	Token                   string `gcfg:"token"`
@@ -818,6 +820,7 @@ func PrepareTestConfig() error {
 	// Don't pick up defaults from the environment
 	os.Unsetenv("KUBECONFIG")
 	os.Unsetenv("K8S_CACERT")
+	os.Unsetenv("K8S_CACERT_DATA")
 	os.Unsetenv("K8S_APISERVER")
 	os.Unsetenv("K8S_TOKEN")
 	os.Unsetenv("K8S_TOKEN_FILE")
@@ -1379,6 +1382,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "k8s-cacert",
 		Usage:       "the absolute path to the Kubernetes API CA certificate (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.CACert,
+	},
+	&cli.StringFlag{
+		Name:        "k8s-cacert-data",
+		Usage:       "the Base64 encoded Kubernetes API CA certificate data (not required if --k8s-kubeconfig is given)",
+		Destination: &cliConfig.Kubernetes.CACertData,
 	},
 	&cli.StringFlag{
 		Name:        "k8s-token",
@@ -1946,8 +1954,46 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 	return nil
 }
 
+// reconcileKubernetesAuthFields ensures that if a config stage provides Token/TokenFile
+// or CACert/CACertData, stale value for any of these set by previous stage is cleared.
+// This is required since any combination of these fields could be set by any stage
+// and might get overwritten only partially.
+func reconcileKubernetesAuthFields(k *KubernetesConfig, override *KubernetesConfig) {
+	// If this stage provided either Token or TokenFile, clear the other field
+	// not provided by this stage.
+	overrideHasToken := override.Token != ""
+	overrideHasTokenFile := override.TokenFile != ""
+
+	if overrideHasToken || overrideHasTokenFile {
+		if !overrideHasToken {
+			k.Token = ""
+		}
+		if !overrideHasTokenFile {
+			k.TokenFile = ""
+		}
+	}
+
+	// If this stage provided either CACert or CACertData, clear the other field
+	// not provided by this stage.
+	overrideHasCACert := override.CACert != ""
+	overrideHasCACertData := override.CACertData != ""
+
+	if overrideHasCACert || overrideHasCACertData {
+		if !overrideHasCACert {
+			k.CACert = ""
+		}
+		if !overrideHasCACertData {
+			k.CACertData = ""
+		}
+	}
+}
+
 func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
-	// token adn ca.crt may be from files mounted in container.
+	// values for token, cacert, kubeconfig, api-server may be found in several places.
+	// Priority order (highest first): OVS config, command line options, config file,
+	// environment variables, service account files
+
+	// token and ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
 	if data, err := os.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
@@ -1961,16 +2007,13 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return err
 	}
 
-	// values for token, cacert, kubeconfig, api-server may be found in several places.
-	// Priority order (highest first): OVS config, command line options, config file,
-	// environment variables, service account files
-
 	envConfig := savedKubernetes
 	envVarsMap := map[string]string{
 		"Kubeconfig":           "KUBECONFIG",
 		"BootstrapKubeconfig":  "BOOTSTRAP_KUBECONFIG",
 		"CertDir":              "CERT_DIR",
 		"CACert":               "K8S_CACERT",
+		"CACertData":           "K8S_CACERT_DATA",
 		"APIServer":            "K8S_APISERVER",
 		"Token":                "K8S_TOKEN",
 		"TokenFile":            "K8S_TOKEN_FILE",
@@ -1985,16 +2028,19 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if err := overrideFields(&Kubernetes, &envConfig, &savedKubernetes); err != nil {
 		return err
 	}
+	reconcileKubernetesAuthFields(&Kubernetes, &envConfig)
 
 	// Copy config file values over default values
 	if err := overrideFields(&Kubernetes, &file.Kubernetes, &savedKubernetes); err != nil {
 		return err
 	}
+	reconcileKubernetesAuthFields(&Kubernetes, &file.Kubernetes)
 
 	// And CLI overrides over config file and default values
 	if err := overrideFields(&Kubernetes, &cli.Kubernetes, &savedKubernetes); err != nil {
 		return err
 	}
+	reconcileKubernetesAuthFields(&Kubernetes, &cli.Kubernetes)
 
 	// Grab default values from OVS external IDs
 	if defaults.K8sAPIServer {
@@ -2015,8 +2061,15 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes kubeconfig file %q not found", Kubernetes.Kubeconfig)
 	}
 
-	if Kubernetes.CACert != "" {
-		bytes, err := os.ReadFile(Kubernetes.CACert)
+	if Kubernetes.CACert != "" || Kubernetes.CACertData != "" {
+		var bytes []byte
+		var err error
+		if Kubernetes.CACert != "" {
+			bytes, err = os.ReadFile(Kubernetes.CACert)
+		} else {
+			bytes, err = base64.StdEncoding.DecodeString(Kubernetes.CACertData)
+		}
+
 		if err != nil {
 			return err
 		}
@@ -2612,6 +2665,7 @@ func stripTokenFromK8sConfig() KubernetesConfig {
 	// Token and CAData are sensitive fields so stripping
 	// them while logging.
 	k8sConf.Token = ""
+	k8sConf.CACertData = ""
 	k8sConf.CAData = []byte{}
 	return k8sConf
 }
