@@ -69,7 +69,7 @@ OVN_EGRESSFIREWALL_ENABLE=
 OVN_EGRESSQOS_ENABLE=
 OVN_EGRESSSERVICE_ENABLE=
 OVN_MULTI_NETWORK_ENABLE=
-OVN_NETWORK_SEGMENTATION_ENABLE=
+OVN_NETWORK_SEGMENTATION_ENABLE="false"
 OVN_NETWORK_CONNECT_ENABLE=
 OVN_PRE_CONF_UDN_ADDR_ENABLE=
 OVN_DYNAMIC_UDN_ALLOCATION=
@@ -94,6 +94,7 @@ OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=""
 OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
+OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
 OVNKUBE_METRICS_SCALE_ENABLE=
 OVN_STATELESS_NETPOL_ENABLE="false"
@@ -356,6 +357,9 @@ while [ "$1" != "" ]; do
   --ovnkube-node-mgmt-port-dp-resource-name)
     OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME=$VALUE
     ;;
+  --mgmt-port-vfs-count)
+    MGMT_PORT_VFS_COUNT=$VALUE
+    ;;
   --ovnkube-config-duration-enable)
     OVNKUBE_CONFIG_DURATION_ENABLE=$VALUE
     ;;
@@ -584,6 +588,10 @@ ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
 echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
 echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
+ovnkube_node_mgmt_port_dp_resource_name=${OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME}
+echo "ovnkube_node_mgmt_port_dp_resource_name: ${ovnkube_node_mgmt_port_dp_resource_name}"
+mgmt_port_vfs_count=${MGMT_PORT_VFS_COUNT:-1}
+echo "mgmt_port_vfs_count: ${mgmt_port_vfs_count}"
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
@@ -795,10 +803,14 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovnkube_node_mgmt_port_dp_resource_name=${ovnkube_node_mgmt_port_dp_resource_name} \
+  mgmt_port_vfs_count=${mgmt_port_vfs_count} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_network_qos_enable=${ovn_network_qos_enable} \
   metrics_ip=${metrics_ip} \
   ovn_no_overlay_enable=${ovn_no_overlay_enable} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
