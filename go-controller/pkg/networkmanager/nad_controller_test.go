@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -20,14 +21,144 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
+
+func TestNADNeedsUpdate_NotifiesReconcilersOnNoopUpdate(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	keyCh := make(chan string, 1)
+	r := controller.NewReconciler("test-nad-reconciler", &controller.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile: func(key string) error {
+			keyCh <- key
+			return nil
+		},
+		Threadiness: 1,
+		MaxAttempts: controller.InfiniteAttempts,
+	})
+	g.Expect(controller.Start(r)).To(gomega.Succeed())
+	t.Cleanup(func() { controller.Stop(r) })
+
+	c := &nadController{name: "test-nad-controller"}
+	_, err := c.RegisterNADReconciler(r)
+	g.Expect(err).To(gomega.Succeed())
+
+	oldNAD := &nettypes.NetworkAttachmentDefinition{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "nad", ResourceVersion: "1"},
+		Spec:       nettypes.NetworkAttachmentDefinitionSpec{Config: `{"cniVersion":"0.3.1"}`},
+	}
+	newNAD := oldNAD.DeepCopy()
+	newNAD.ResourceVersion = "2"
+
+	needsUpdate := c.nadNeedsUpdate(oldNAD, newNAD)
+	g.Expect(needsUpdate).To(gomega.BeFalse())
+
+	g.Eventually(keyCh, time.Second).Should(gomega.Receive(gomega.Equal("ns/nad")))
+}
+
+func TestNADNeedsUpdate_DoesNotNotifyReconcilersOnRelevantUpdate(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	keyCh := make(chan string, 1)
+	r := controller.NewReconciler("test-nad-reconciler", &controller.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile: func(key string) error {
+			keyCh <- key
+			return nil
+		},
+		Threadiness: 1,
+		MaxAttempts: controller.InfiniteAttempts,
+	})
+	g.Expect(controller.Start(r)).To(gomega.Succeed())
+	t.Cleanup(func() { controller.Stop(r) })
+
+	c := &nadController{name: "test-nad-controller"}
+	_, err := c.RegisterNADReconciler(r)
+	g.Expect(err).To(gomega.Succeed())
+
+	oldNAD := &nettypes.NetworkAttachmentDefinition{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "nad", ResourceVersion: "1"},
+		Spec:       nettypes.NetworkAttachmentDefinitionSpec{Config: `{"cniVersion":"0.3.1"}`},
+	}
+	newNAD := oldNAD.DeepCopy()
+	newNAD.ResourceVersion = "2"
+	newNAD.Spec.Config = `{"cniVersion":"0.3.1","name":"changed"}`
+
+	needsUpdate := c.nadNeedsUpdate(oldNAD, newNAD)
+	g.Expect(needsUpdate).To(gomega.BeTrue())
+
+	g.Consistently(keyCh, 200*time.Millisecond).ShouldNot(gomega.Receive())
+}
+
+func TestSyncNAD_NotifiesReconcilers(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+
+	keyCh := make(chan string, 1)
+	r := controller.NewReconciler("test-nad-reconciler-sync", &controller.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile: func(key string) error {
+			keyCh <- key
+			return nil
+		},
+		Threadiness: 1,
+		MaxAttempts: controller.InfiniteAttempts,
+	})
+	g.Expect(controller.Start(r)).To(gomega.Succeed())
+	t.Cleanup(func() { controller.Stop(r) })
+
+	nc := &networkController{
+		networks:           map[string]util.MutableNetInfo{},
+		networkControllers: map[string]*networkControllerState{},
+	}
+	netIDAlloc := id.NewIDAllocator("NetworkIDs", MaxNetworks)
+	g.Expect(netIDAlloc.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)).To(gomega.Succeed())
+
+	c := &nadController{
+		name:               "test-nad-controller",
+		networkController:  nc,
+		nads:               map[string]string{},
+		primaryNADs:        map[string]string{},
+		networkIDAllocator: netIDAlloc,
+	}
+	_, err := c.RegisterNADReconciler(r)
+	g.Expect(err).To(gomega.Succeed())
+
+	nadNS := "ns"
+	nadName := "nad"
+	nadKey := nadNS + "/" + nadName
+	networkAPrimary := &ovncnitypes.NetConf{
+		Topology: types.Layer2Topology,
+		NetConf: cnitypes.NetConf{
+			Name: "networkAPrimary",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Subnets: "10.1.130.0/24",
+		Role:    types.NetworkRolePrimary,
+		MTU:     1400,
+		NADName: nadKey,
+	}
+	nad, err := buildNAD(nadName, nadNS, networkAPrimary)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	// The NAD has no network ID annotation so syncNAD will not ensure the network,
+	// but it should still notify all reconcilers.
+	g.Expect(c.syncNAD(nadKey, nad)).To(gomega.Succeed())
+	g.Eventually(keyCh, time.Second).Should(gomega.Receive(gomega.Equal(nadKey)))
+}
 
 type testNetworkController struct {
 	util.ReconcilableNetInfo
