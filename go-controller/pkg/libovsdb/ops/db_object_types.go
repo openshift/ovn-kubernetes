@@ -10,6 +10,7 @@ const (
 	logicalRouterPolicy
 	qos
 	nat
+	logicalRouterPort
 )
 
 const (
@@ -51,6 +52,8 @@ const (
 	GressIdxKey           ExternalIDKey = "gress-index"
 	IPFamilyKey           ExternalIDKey = "ip-family"
 	NetworkKey            ExternalIDKey = "network"
+	NetworkIDKey          ExternalIDKey = "network-id"
+	NodeIDKey             ExternalIDKey = "node-id"
 	TypeKey               ExternalIDKey = "type"
 	IpKey                 ExternalIDKey = "ip"
 	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
@@ -58,6 +61,7 @@ const (
 	RuleIndex             ExternalIDKey = "rule-index"
 	CIDRKey               ExternalIDKey = types.OvnK8sPrefix + "/cidr"
 	PortPolicyProtocolKey ExternalIDKey = "port-policy-protocol"
+	RouterNameKey         ExternalIDKey = "router-name"
 )
 
 // ObjectIDsTypes should only be created here
@@ -374,4 +378,25 @@ var NetworkQoS = newObjectIDsType(qos, NetworkQoSOwnerType, []ExternalIDKey{
 	ObjectNameKey,
 	// rule index
 	RuleIndex,
+})
+
+var LogicalRouterPortClusterNetworkConnect = newObjectIDsType(logicalRouterPort, ClusterNetworkConnectOwnerType, []ExternalIDKey{
+	// CNC name
+	ObjectNameKey,
+	// connected network's network ID
+	// value in k8s.ovn.org/network-id annotation set on the NAD
+	NetworkIDKey,
+	// node ID
+	// for layer2 network type ports, the node ID is 0 since there is only one port per network.
+	// for layer3 network type ports, the node ID is the node ID of the node that the port is connected to.
+	NodeIDKey,
+	// router name - stores the name of the router this port belongs to
+	// This is required for uniqueness since there are two ports per network -
+	// one on the network router and one on the connect router.
+	// This also allows cleanup without maintaining a cache of router names
+	// This is used as a back reference to map the port to the router during
+	// network deletion, CNC cleanup, etc. It's because our database doesn't
+	// know the relationship between the port and the router and we always need
+	// to provide the router name when deleting the port.
+	RouterNameKey,
 })
