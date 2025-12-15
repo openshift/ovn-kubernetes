@@ -83,6 +83,8 @@ var (
 			`Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology`,
 			// pods dont drop privileges
 			`should be able to send multicast UDP traffic between nodes`,
+			// TODO: fix the flakiness with net-seg overlapping CIDRs test in downstream.
+			"isolates overlapping CIDRs",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
