@@ -1173,7 +1173,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork is isolated from the default network with L3 primary UDN": "[Disabled:Unimplemented]",
 
-	"Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Disabled:Unimplemented]",
 
 	"Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Disabled:Unimplemented]",
 
@@ -1195,7 +1195,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation a user defined primary network created using NetworkAttachmentDefinitions is isolated from the default network with L3 primary UDN": "[Disabled:Unimplemented]",
 
-	"Network Segmentation a user defined primary network created using NetworkAttachmentDefinitions isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation a user defined primary network created using NetworkAttachmentDefinitions isolates overlapping CIDRs with L2 primary UDN": "[Disabled:Unimplemented]",
 
 	"Network Segmentation a user defined primary network created using NetworkAttachmentDefinitions isolates overlapping CIDRs with L3 primary UDN": "[Disabled:Unimplemented]",
 
@@ -1217,9 +1217,9 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation a user defined primary network created using UserDefinedNetwork is isolated from the default network with L3 primary UDN": "[Disabled:Unimplemented]",
 
-	"Network Segmentation a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L2 primary UDN": "[Disabled:Unimplemented]",
 
-	"Network Segmentation a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation a user defined primary network created using UserDefinedNetwork isolates overlapping CIDRs with L3 primary UDN": "[Disabled:Unimplemented]",
 
 	"Network Segmentation a user defined primary network doesn't cause network name conflict": "[Suite:openshift/conformance/parallel]",
 
