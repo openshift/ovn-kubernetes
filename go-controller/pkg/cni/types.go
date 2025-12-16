@@ -61,6 +61,9 @@ type PodInterfaceInfo struct {
 	NetName string `json:"netName"`
 	// NADKey, for default network, it is "default", otherwise, in the form of net-attach-def's <Namespace>/<Name>{/index}
 	NADKey string `json:"nadKey"`
+	// pod interface names of the same NAD, in plumbing order.
+	// Only set for when there are more than one pod interface with the same UDN
+	PodIfNamesOfSameNAD []string `json:"pod-if-names"`
 }
 
 // Explicit type for CNI commands the server handles

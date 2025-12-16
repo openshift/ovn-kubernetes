@@ -237,6 +237,11 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(
 	if err != nil {
 		return nil, err
 	}
+	// get all the Pod interface names of the same nadName. See if this is a pod with multiple secondary UDN of nadName
+	podIfNamesOfSameNAD, _ := GetPodIfNamesForNAD(pod, pr.nadName)
+	if len(podIfNamesOfSameNAD) > 1 {
+		podInterfaceInfo.PodIfNamesOfSameNAD = podIfNamesOfSameNAD
+	}
 
 	podInterfaceInfo.SkipIPConfig = kubevirt.IsPodLiveMigratable(pod)
 
