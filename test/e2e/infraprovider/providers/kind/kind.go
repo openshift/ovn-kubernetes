@@ -133,6 +133,10 @@ func (k *kind) GetK8HostPort() uint16 {
 	return k.hostPort.Allocate()
 }
 
+func (k *kind) GetDefaultTimeoutContext() *framework.TimeoutContext {
+	return framework.NewTimeoutContext()
+}
+
 // getContainerState returns the state of a container by name
 // Returns empty string if container doesn't exist
 func getContainerState(containerName string) (string, error) {

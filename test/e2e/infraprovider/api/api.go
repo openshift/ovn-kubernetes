@@ -42,6 +42,9 @@ type Provider interface {
 	ShutdownNode(nodeName string) error
 	// StartNode starts the specified node
 	StartNode(nodeName string) error
+
+	// Get platform specific timeout values
+	GetDefaultTimeoutContext() *framework.TimeoutContext
 }
 
 // Underlay represents the configuration for an underlay network.

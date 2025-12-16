@@ -38,6 +38,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
@@ -2446,14 +2447,12 @@ func runUDNPod(cs clientset.Interface, namespace string, serverPodConfig podConf
 	Expect(serverPod).NotTo(BeNil())
 
 	By(fmt.Sprintf("asserting the UDN pod %s reaches the `Ready` state", serverPodConfig.name))
-	var updatedPod *v1.Pod
-	Eventually(func() v1.PodPhase {
-		updatedPod, err = cs.CoreV1().Pods(namespace).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
-		if err != nil {
-			return v1.PodFailed
-		}
-		return updatedPod.Status.Phase
-	}, 2*time.Minute, 6*time.Second).Should(Equal(v1.PodRunning))
+	// Retrieve and use pod start timeout value from deployment config.
+	err = e2epod.WaitTimeoutForPodRunningInNamespace(context.Background(), cs, serverPod.GetName(), namespace,
+		infraprovider.Get().GetDefaultTimeoutContext().PodStart)
+	Expect(err).NotTo(HaveOccurred())
+	updatedPod, err := cs.CoreV1().Pods(namespace).Get(context.Background(), serverPod.GetName(), metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
 	return updatedPod
 }
 
