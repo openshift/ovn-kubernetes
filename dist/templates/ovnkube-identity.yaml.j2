@@ -52,7 +52,7 @@ spec:
           - mountPath: /etc/webhook-cert/
             name: webhook-cert
         env:
-          {%- if (enable_coredumps | default("false")) == "true" %}
+          {% if (enable_coredumps | default("false")) == "true" -%}
           - name: GOTRACEBACK
             value: "crash"
           {% endif -%}
