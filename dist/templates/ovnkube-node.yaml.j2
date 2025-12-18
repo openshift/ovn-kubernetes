@@ -117,7 +117,7 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
-        {%- if (enable_coredumps | default("false")) == "true" %}
+        {% if (enable_coredumps | default("false")) == "true" -%}
         - name: GOTRACEBACK
           value: "crash"
         {% endif -%}
