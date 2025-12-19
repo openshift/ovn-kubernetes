@@ -71,6 +71,10 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
+        {{ if .Values.global.enableCoredumps -}}
+        - name: GOTRACEBACK
+          value: "crash"
+        {{ end -}}
         - name: OVN_DAEMONSET_VERSION
           value: "1.1.0"
         - name: OVNKUBE_LOGLEVEL
@@ -126,6 +130,8 @@ spec:
           value: {{ hasKey .Values.global "enableMultiNetwork" | ternary .Values.global.enableMultiNetwork false | quote }}
         - name: OVN_NETWORK_SEGMENTATION_ENABLE
           value: {{ default "" .Values.global.enableNetworkSegmentation | quote }}
+        - name: OVN_NETWORK_CONNECT_ENABLE
+          value: {{ default "" .Values.global.enableNetworkConnect | quote }}
         - name: OVN_PRE_CONF_UDN_ADDR_ENABLE
           value: {{ default "" .Values.global.enablePreconfiguredUDNAddresses | quote }}
         - name: OVN_ADVERTISED_UDN_ISOLATION_MODE

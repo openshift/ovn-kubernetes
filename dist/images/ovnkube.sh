@@ -263,12 +263,12 @@ ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
 #OVN_EGRESSSERVICE_ENABLE - enable egress Service for ovn-kubernetes
 ovn_egressservice_enable=${OVN_EGRESSSERVICE_ENABLE:-false}
-#OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
-ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_NETWORK_SEGMENTATION_ENABLE - enable user defined primary networks for ovn-kubernetes
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
+#OVN_NETWORK_CONNECT_ENABLE - enable network connect for ovn-kubernetes
+ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
 #OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
 #OVN_NROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
@@ -769,6 +769,16 @@ ovs-server() {
   if [ ${ovs_user_id:-XX} != "XX" ]; then
     USER_ARGS="--ovs-user=${ovs_user_id}"
   fi
+
+  # OVN-K marks NIC port as transient on startup when plugging it into ovs
+  # bridge. This is done so that on ovsdb-server resrtart, the NIC interface is
+  # detached from the bridge, which is necessary to restore connectivity
+  # through the NIC and make the node healthy. Marking the port as transient
+  # works only when we also start ovsdb-server with --delete-transient-ports.
+  #
+  # Note: once ovnkube is started, it will rewire the NIC port back into the
+  # bridge, and move IP configuration as necessary.
+  ovs_options="${ovs_options} --delete-transient-ports"
 
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
@@ -1601,6 +1611,12 @@ ovnkube-controller() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  network_connect_enabled_flag=
+  if [[ ${ovn_network_connect_enable} == "true" ]]; then
+	  network_connect_enabled_flag="--enable-network-connect"
+  fi
+  echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1733,6 +1749,7 @@ ovnkube-controller() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${advertised_udn_isolation_flag} \
@@ -1939,6 +1956,12 @@ ovnkube-controller-with-node() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  network_connect_enabled_flag=
+  if [[ ${ovn_network_connect_enable} == "true" ]]; then
+	  network_connect_enabled_flag="--enable-network-connect"
+  fi
+  echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1962,11 +1985,6 @@ ovnkube-controller-with-node() {
 	  egressservice_enabled_flag="--enable-egress-service"
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
-
-  disable_ovn_iface_id_ver_flag=
-  if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
-      disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
-  fi
 
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
@@ -2196,7 +2214,6 @@ ovnkube-controller-with-node() {
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${disable_forwarding_flag} \
-    ${disable_ovn_iface_id_ver_flag} \
     ${disable_pkt_mtu_check_flag} \
     ${disable_snat_multiple_gws_flag} \
     ${egressfirewall_enabled_flag} \
@@ -2217,6 +2234,7 @@ ovnkube-controller-with-node() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${advertised_udn_isolation_flag} \
@@ -2386,6 +2404,12 @@ ovn-cluster-manager() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  network_connect_enabled_flag=
+  if [[ ${ovn_network_connect_enable} == "true" ]]; then
+	  network_connect_enabled_flag="--enable-network-connect"
+  fi
+  echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -2464,6 +2488,7 @@ ovn-cluster-manager() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${advertised_udn_isolation_flag} \
@@ -2628,11 +2653,6 @@ ovn-node() {
 	  egressservice_enabled_flag="--enable-egress-service"
   fi
 
-  disable_ovn_iface_id_ver_flag=
-  if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
-      disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
-  fi
-
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
 	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
@@ -2642,6 +2662,12 @@ ovn-node() {
   if [[ ${ovn_network_segmentation_enable} == "true" ]]; then
 	  network_segmentation_enabled_flag="--enable-multi-network --enable-network-segmentation"
   fi
+
+  network_connect_enabled_flag=
+  if [[ ${ovn_network_connect_enable} == "true" ]]; then
+	  network_connect_enabled_flag="--enable-network-connect"
+  fi
+  echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
@@ -2871,7 +2897,6 @@ ovn-node() {
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
         ${disable_forwarding_flag} \
-        ${disable_ovn_iface_id_ver_flag} \
         ${disable_pkt_mtu_check_flag} \
         ${disable_snat_multiple_gws_flag} \
         ${egress_interface} \
@@ -2888,6 +2913,7 @@ ovn-node() {
         ${multicast_enabled_flag} \
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
+        ${network_connect_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
         ${advertised_udn_isolation_flag} \
