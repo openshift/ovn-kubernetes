@@ -267,7 +267,7 @@ spec:
         - name: OVN_GATEWAY_MODE
           value: {{ default "shared" .Values.global.gatewayMode }}
         - name: OVN_GATEWAY_OPTS
-          value: {{ default "" .Values.global.gatewayOps | quote }}
+          value: {{ default "" .Values.global.gatewayOpts | quote }}
         - name: OVN_MULTICAST_ENABLE
           value: {{ default "" .Values.global.enableMulticast | quote }}
         - name: OVN_ACL_LOGGING_RATE_LIMIT
