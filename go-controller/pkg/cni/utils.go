@@ -81,6 +81,12 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 	namespace, name, nadName string, annotCond podAnnotWaitCond) (*corev1.Pod, map[string]string, *util.PodAnnotation, error) {
 	var notFoundCount uint
 
+	// Adaptive polling: start fast, gradually slow down
+	// This dramatically reduces latency for fast pod creation while still
+	// handling slow pods gracefully
+	waitTime := 10 * time.Millisecond  // Start with 10ms for fast operations
+	const maxWaitTime = 200 * time.Millisecond
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -110,8 +116,12 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 				}
 			}
 
-			// try again later
-			time.Sleep(200 * time.Millisecond)
+			// Adaptive backoff: double wait time each iteration, up to max
+			time.Sleep(waitTime)
+			waitTime *= 2
+			if waitTime > maxWaitTime {
+				waitTime = maxWaitTime
+			}
 		}
 	}
 }

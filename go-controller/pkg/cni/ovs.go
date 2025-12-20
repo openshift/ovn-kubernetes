@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -22,6 +23,14 @@ var runner kexec.Interface
 var vsctlPath string
 var ofctlPath string
 
+const (
+	// OVS retry configuration for handling database connection failures
+	ovsMaxRetries      = 5                  // Maximum retry attempts for OVS operations
+	ovsInitialDelay    = 10 * time.Millisecond  // Initial retry delay
+	ovsMaxDelay        = 500 * time.Millisecond // Maximum retry delay
+	ovsBackoffMultiplier = 2                 // Exponential backoff multiplier
+)
+
 func SetExec(r kexec.Interface) error {
 	runner = r
 	var err error
@@ -38,18 +47,74 @@ func ResetRunner() {
 	runner = nil
 }
 
+// isOVSRetryableError checks if an OVS error should be retried
+func isOVSRetryableError(output string) bool {
+	retryableErrors := []string{
+		"database connection failed",
+		"Protocol error",
+		"Connection refused",
+		"I/O error",
+		"Broken pipe",
+		"ovs-vsctl: transaction error",
+	}
+	for _, errStr := range retryableErrors {
+		if strings.Contains(output, errStr) {
+			return true
+		}
+	}
+	return false
+}
+
 func ovsExec(args ...string) (string, error) {
 	if runner == nil {
 		return "", fmt.Errorf("OVS exec runner not initialized")
 	}
 
-	args = append([]string{"--timeout=30"}, args...)
-	output, err := runner.Command(vsctlPath, args...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
+	args = append([]string{"--timeout=60"}, args...)
+
+	var output []byte
+	var err error
+	var lastOutput string
+
+	// Retry logic with exponential backoff for connection failures
+	delay := ovsInitialDelay
+	for attempt := 0; attempt <= ovsMaxRetries; attempt++ {
+		output, err = runner.Command(vsctlPath, args...).CombinedOutput()
+		lastOutput = string(output)
+
+		if err == nil {
+			// Success
+			return strings.TrimSuffix(lastOutput, "\n"), nil
+		}
+
+		// Check if error is retryable
+		if !isOVSRetryableError(lastOutput) {
+			// Non-retryable error, fail immediately
+			break
+		}
+
+		// Don't retry on last attempt
+		if attempt == ovsMaxRetries {
+			break
+		}
+
+		// Log retry attempt
+		klog.V(5).Infof("OVS operation failed (attempt %d/%d), retrying after %v: %s",
+			attempt+1, ovsMaxRetries+1, delay, lastOutput)
+
+		// Add jitter to prevent thundering herd
+		jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+		time.Sleep(delay + jitter)
+
+		// Exponential backoff
+		delay *= ovsBackoffMultiplier
+		if delay > ovsMaxDelay {
+			delay = ovsMaxDelay
+		}
 	}
 
-	return strings.TrimSuffix(string(output), "\n"), nil
+	// All retries exhausted or non-retryable error
+	return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, lastOutput)
 }
 
 // ovsGetMultiOutput allows running get command with multiple columns
@@ -133,29 +198,65 @@ func ofctlExec(args ...string) (string, error) {
 	}
 
 	args = append([]string{"--timeout=10", "--no-stats", "--strict"}, args...)
-	var stdout, stderr bytes.Buffer
-	cmd := runner.Command(ofctlPath, args...)
-	cmd.SetStdout(&stdout)
-	cmd.SetStderr(&stderr)
-
 	cmdStr := strings.Join(args, " ")
-	klog.V(5).Infof("Exec: %s %s", ofctlPath, cmdStr)
 
-	err := cmd.Run()
-	if err != nil {
-		stderrStr := stderr.String()
-		klog.Errorf("Exec: %s %s : stderr: %q", ofctlPath, cmdStr, stderrStr)
-		return "", fmt.Errorf("failed to run '%s %s': %v\n  %q", ofctlPath, cmdStr, err, stderrStr)
-	}
-	stdoutStr := stdout.String()
-	klog.V(5).Infof("Exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
+	var stdoutStr, stderrStr string
+	var err error
 
-	trimmed := strings.TrimSpace(stdoutStr)
-	// If output is a single line, strip the trailing newline
-	if strings.Count(trimmed, "\n") == 0 {
-		stdoutStr = trimmed
+	// Retry logic with exponential backoff for connection failures
+	delay := ovsInitialDelay
+	for attempt := 0; attempt <= ovsMaxRetries; attempt++ {
+		var stdout, stderr bytes.Buffer
+		cmd := runner.Command(ofctlPath, args...)
+		cmd.SetStdout(&stdout)
+		cmd.SetStderr(&stderr)
+
+		klog.V(5).Infof("Exec: %s %s (attempt %d/%d)", ofctlPath, cmdStr, attempt+1, ovsMaxRetries+1)
+
+		err = cmd.Run()
+		stdoutStr = stdout.String()
+		stderrStr = stderr.String()
+
+		if err == nil {
+			// Success
+			klog.V(5).Infof("Exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
+			trimmed := strings.TrimSpace(stdoutStr)
+			// If output is a single line, strip the trailing newline
+			if strings.Count(trimmed, "\n") == 0 {
+				stdoutStr = trimmed
+			}
+			return stdoutStr, nil
+		}
+
+		// Check if error is retryable
+		if !isOVSRetryableError(stderrStr) && !isOVSRetryableError(stdoutStr) {
+			// Non-retryable error, fail immediately
+			break
+		}
+
+		// Don't retry on last attempt
+		if attempt == ovsMaxRetries {
+			break
+		}
+
+		// Log retry attempt
+		klog.V(5).Infof("OpenFlow operation failed (attempt %d/%d), retrying after %v: stderr=%q",
+			attempt+1, ovsMaxRetries+1, delay, stderrStr)
+
+		// Add jitter to prevent thundering herd
+		jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+		time.Sleep(delay + jitter)
+
+		// Exponential backoff
+		delay *= ovsBackoffMultiplier
+		if delay > ovsMaxDelay {
+			delay = ovsMaxDelay
+		}
 	}
-	return stdoutStr, nil
+
+	// All retries exhausted or non-retryable error
+	klog.Errorf("Exec: %s %s : stderr: %q", ofctlPath, cmdStr, stderrStr)
+	return "", fmt.Errorf("failed to run '%s %s': %v\n  %q", ofctlPath, cmdStr, err, stderrStr)
 }
 
 // getIfaceOFPort returns the of port number for an interface
@@ -290,6 +391,13 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 
 	mac := ifInfo.MAC.String()
 	ifAddrs := ifInfo.IPs
+
+	// Adaptive polling: start fast, gradually slow down
+	// This dramatically reduces latency for fast OVS operations while still
+	// handling slow operations gracefully
+	waitTime := 10 * time.Millisecond  // Start with 10ms for fast operations
+	const maxWaitTime = 200 * time.Millisecond
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -328,10 +436,13 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
 			}
 
-			// try again later
-			waitTime := 200 * time.Millisecond
+			// Adaptive backoff: double wait time each iteration, up to max
 			time.Sleep(waitTime)
 			metrics.MetricOvsInterfaceUpWait.Add(waitTime.Seconds())
+			waitTime *= 2
+			if waitTime > maxWaitTime {
+				waitTime = maxWaitTime
+			}
 		}
 	}
 }
