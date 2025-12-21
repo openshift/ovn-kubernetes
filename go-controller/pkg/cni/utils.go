@@ -82,10 +82,11 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 	var notFoundCount uint
 
 	// Adaptive polling: start fast, gradually slow down
-	// This dramatically reduces latency for fast pod creation while still
-	// handling slow pods gracefully
+	// Max wait time set to 50ms to avoid missing OVS port ready state
+	// OVS port binding typically completes in 50-300ms, so 200ms interval
+	// was causing timeouts by missing the ready window
 	waitTime := 10 * time.Millisecond  // Start with 10ms for fast operations
-	const maxWaitTime = 200 * time.Millisecond
+	const maxWaitTime = 50 * time.Millisecond  // Max 50ms to avoid timeouts
 
 	for {
 		select {

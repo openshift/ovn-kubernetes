@@ -241,6 +241,21 @@ var MetricOvsInterfaceUpWait = prometheus.NewCounter(prometheus.CounterOpts{
 		"Open vSwitch interface until its available",
 })
 
+// OVS database connection retry metrics
+var MetricOVSDBConnectionRetries = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
+	Name:      "db_connection_retries_total",
+	Help:      "Total number of successful retries for OVS database connection failures",
+})
+
+var MetricOVSDBConnectionFailuresAfterRetries = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
+	Name:      "db_connection_failures_after_retries_total",
+	Help:      "Total number of OVS database connection failures that occurred even after all retry attempts",
+})
+
 // ovs memory metrics
 var metricOvsHandlersTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: types.MetricOvsNamespace,
@@ -890,6 +905,9 @@ func registerOvsMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval
 		registry.MustRegister(metricOvsInterfaceCollisionsTotal)
 		registry.MustRegister(metricOvsInterfaceTotal)
 		registry.MustRegister(MetricOvsInterfaceUpWait)
+		// Register OVS database connection retry metrics
+		registry.MustRegister(MetricOVSDBConnectionRetries)
+		registry.MustRegister(MetricOVSDBConnectionFailuresAfterRetries)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)

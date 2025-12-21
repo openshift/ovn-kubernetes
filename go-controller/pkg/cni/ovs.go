@@ -78,28 +78,39 @@ func ovsExec(args ...string) (string, error) {
 
 	// Retry logic with exponential backoff for connection failures
 	delay := ovsInitialDelay
+	retryCount := 0
 	for attempt := 0; attempt <= ovsMaxRetries; attempt++ {
 		output, err = runner.Command(vsctlPath, args...).CombinedOutput()
 		lastOutput = string(output)
 
 		if err == nil {
-			// Success
+			// Success - log retry statistics if any retries occurred
+			if retryCount > 0 {
+				klog.Infof("[OVS-RETRY-METRICS] Command succeeded after %d retries: ovs-vsctl %s",
+					retryCount, strings.Join(args, " "))
+				metrics.MetricOVSDBConnectionRetries.Add(float64(retryCount))
+			}
 			return strings.TrimSuffix(lastOutput, "\n"), nil
 		}
 
 		// Check if error is retryable
 		if !isOVSRetryableError(lastOutput) {
 			// Non-retryable error, fail immediately
+			klog.V(5).Infof("[OVS-RETRY-METRICS] Non-retryable error, failing immediately: %s", lastOutput)
 			break
 		}
 
 		// Don't retry on last attempt
 		if attempt == ovsMaxRetries {
+			klog.Warningf("[OVS-RETRY-METRICS] All %d retries exhausted for: ovs-vsctl %s, error: %s",
+				ovsMaxRetries, strings.Join(args, " "), lastOutput)
+			metrics.MetricOVSDBConnectionFailuresAfterRetries.Inc()
 			break
 		}
 
 		// Log retry attempt
-		klog.V(5).Infof("OVS operation failed (attempt %d/%d), retrying after %v: %s",
+		retryCount++
+		klog.V(5).Infof("[OVS-RETRY] Attempt %d/%d failed, retrying after %v: %s",
 			attempt+1, ovsMaxRetries+1, delay, lastOutput)
 
 		// Add jitter to prevent thundering herd
@@ -393,10 +404,11 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 	ifAddrs := ifInfo.IPs
 
 	// Adaptive polling: start fast, gradually slow down
-	// This dramatically reduces latency for fast OVS operations while still
-	// handling slow operations gracefully
+	// Max wait time set to 50ms to avoid missing OVS port ready state
+	// OVS port binding typically completes in 50-300ms, so 200ms interval
+	// was causing timeouts by missing the ready window
 	waitTime := 10 * time.Millisecond  // Start with 10ms for fast operations
-	const maxWaitTime = 200 * time.Millisecond
+	const maxWaitTime = 50 * time.Millisecond  // Max 50ms to avoid timeouts
 
 	for {
 		select {
