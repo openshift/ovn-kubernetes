@@ -96,7 +96,6 @@ func ovsExec(args ...string) (string, error) {
 		// Check if error is retryable
 		if !isOVSRetryableError(lastOutput) {
 			// Non-retryable error, fail immediately
-			klog.V(5).Infof("[OVS-RETRY-METRICS] Non-retryable error, failing immediately: %s", lastOutput)
 			break
 		}
 
@@ -108,10 +107,8 @@ func ovsExec(args ...string) (string, error) {
 			break
 		}
 
-		// Log retry attempt
+		// Track retry count (log only on final success/failure to reduce overhead)
 		retryCount++
-		klog.V(5).Infof("[OVS-RETRY] Attempt %d/%d failed, retrying after %v: %s",
-			attempt+1, ovsMaxRetries+1, delay, lastOutput)
 
 		// Add jitter to prevent thundering herd
 		jitter := time.Duration(rand.Int63n(int64(delay / 4)))
@@ -250,9 +247,7 @@ func ofctlExec(args ...string) (string, error) {
 			break
 		}
 
-		// Log retry attempt
-		klog.V(5).Infof("OpenFlow operation failed (attempt %d/%d), retrying after %v: stderr=%q",
-			attempt+1, ovsMaxRetries+1, delay, stderrStr)
+		// Track retry (log only on final outcome to reduce overhead)
 
 		// Add jitter to prevent thundering herd
 		jitter := time.Duration(rand.Int63n(int64(delay / 4)))
@@ -433,10 +428,8 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			}
 			if checkExternalIDs {
 				if err == nil && len(output) == 2 && output[1] == "true" {
-					klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
 					return nil
 				}
-				klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
 			} else {
 				if doPodFlowsExist(mac, ifAddrs, ofPort) {
 					// success
