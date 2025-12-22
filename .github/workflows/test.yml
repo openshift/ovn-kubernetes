@@ -341,9 +341,6 @@ jobs:
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
-    - name: Check out code into the Go module directory - from PR branch
-      uses: actions/checkout@v4
-
     - name: Free up disk space
       uses: ./.github/actions/free-disk-space
 
@@ -366,6 +363,9 @@ jobs:
       run: |
         export OVN_IMAGE="ovn-daemonset-fedora:dev"
         make -C test install-kind
+
+    - name: Check out code into the Go module directory - from PR branch
+      uses: actions/checkout@v4
 
     - name: Export kind logs
       if: always()
