@@ -495,7 +495,7 @@ type networkClusterControllerEventHandler struct {
 	nodeSyncFailed sync.Map
 }
 
-func (h *networkClusterControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *networkClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
 	return false
 }
 
