@@ -80,7 +80,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: {{ default "-vconsole:info -vfile:info" .Values.northdLogLevel | quote }}
         - name: K8S_APISERVER
@@ -180,7 +180,7 @@ spec:
           value: "crash"
         {{ end -}}
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.logLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
