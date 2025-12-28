@@ -33,6 +33,13 @@ var (
 	minRsrc           = resource.MustParse("1k")
 	maxRsrc           = resource.MustParse("1P")
 	BandwidthNotFound = &notFoundError{}
+
+	// cniSemaphore limits concurrent CNI ADD operations to prevent ovsdb-server
+	// connection queue overflow. ovsdb-server uses listen(10) which limits the
+	// connection queue depth to 10. Setting semaphore to 10 ensures we never
+	// exceed this limit, preventing "database connection failed (Protocol error)".
+	// This is critical for high pod density scenarios (250+ pods/node).
+	cniSemaphore = make(chan struct{}, 10)
 )
 
 type direction int
@@ -113,6 +120,15 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *corev1.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, networkManager networkmanager.Interface, ovsClient client.Client) (*Response, error) {
+	// Acquire semaphore to limit concurrent CNI operations and prevent ovsdb-server queue overflow
+	// This prevents "database connection failed (Protocol error)" errors under high pod density
+	select {
+	case cniSemaphore <- struct{}{}:
+		defer func() { <-cniSemaphore }()
+	case <-pr.ctx.Done():
+		return nil, fmt.Errorf("CNI ADD operation canceled while waiting for semaphore: %v", pr.ctx.Err())
+	}
+
 	return pr.cmdAddWithGetCNIResultFunc(kubeAuth, clientset, getCNIResult, networkManager, ovsClient)
 }
 
