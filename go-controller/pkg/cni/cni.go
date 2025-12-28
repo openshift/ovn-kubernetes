@@ -36,10 +36,10 @@ var (
 
 	// cniSemaphore limits concurrent CNI ADD operations to prevent ovsdb-server
 	// connection queue overflow. ovsdb-server uses listen(10) which limits the
-	// connection queue depth to 10. Setting semaphore to 10 ensures we never
+	// connection queue depth to 20. Setting semaphore to 20 ensures we never
 	// exceed this limit, preventing "database connection failed (Protocol error)".
 	// This is critical for high pod density scenarios (250+ pods/node).
-	cniSemaphore = make(chan struct{}, 10)
+	cniSemaphore = make(chan struct{}, 20)
 )
 
 type direction int
