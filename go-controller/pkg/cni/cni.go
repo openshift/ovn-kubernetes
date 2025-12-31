@@ -39,7 +39,7 @@ var (
 	// connection queue depth to 10. Setting semaphore to 20 allows higher throughput
 	// while relying on natural timing staggering to avoid exceeding the queue limit.
 	// This is critical for high pod density scenarios (250+ pods/node).
-	cniSemaphore = make(chan struct{}, 100)
+	cniSemaphore = make(chan struct{}, 120)
 )
 
 type direction int
