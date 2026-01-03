@@ -461,6 +461,7 @@ type OVNKubernetesFeatureConfig struct {
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
+	EnableNetworkConnect            bool `gcfg:"enable-network-connect"`
 	EnablePreconfiguredUDNAddresses bool `gcfg:"enable-preconfigured-udn-addresses"`
 	EnableRouteAdvertisements       bool `gcfg:"enable-route-advertisements"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
@@ -673,8 +674,6 @@ var (
 	initGateways bool
 	// legacy gateway-local CLI option
 	gatewayLocal bool
-	// legacy disable-ovn-iface-id-ver CLI option
-	disableOVNIfaceIDVer bool
 )
 
 func init() {
@@ -1152,6 +1151,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Use network segmentation feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkSegmentation,
 		Value:       OVNKubernetesFeature.EnableNetworkSegmentation,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-network-connect",
+		Usage:       "Configure to use network connect feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkConnect,
+		Value:       OVNKubernetesFeature.EnableNetworkConnect,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-preconfigured-udn-addresses",
@@ -1723,11 +1728,6 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortDPResourceName,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
-	},
-	&cli.BoolFlag{
-		Name:        "disable-ovn-iface-id-ver",
-		Usage:       "Deprecated; iface-id-ver is always enabled",
-		Destination: &disableOVNIfaceIDVer,
 	},
 }
 

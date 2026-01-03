@@ -286,6 +286,10 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
+        {% if (enable_coredumps | default("false")) == "true" -%}
+        - name: GOTRACEBACK
+          value: "crash"
+        {% endif -%}
         - name: OVN_DAEMONSET_VERSION
           value: "1.1.0"
         - name: OVNKUBE_LOGLEVEL
@@ -345,6 +349,8 @@ spec:
           value: "{{ ovn_multi_network_enable }}"
         - name: OVN_NETWORK_SEGMENTATION_ENABLE
           value: "{{ ovn_network_segmentation_enable }}"
+        - name: OVN_NETWORK_CONNECT_ENABLE
+          value: "{{ ovn_network_connect_enable }}"
         - name: OVN_PRE_CONF_UDN_ADDR_ENABLE
           value: "{{ ovn_pre_conf_udn_addr_enable }}"
         - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE

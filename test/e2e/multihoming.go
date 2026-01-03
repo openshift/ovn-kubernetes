@@ -92,7 +92,7 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 			By("creating the attachment configuration")
 			_, err := nadClient.NetworkAttachmentDefinitions(netConfig.namespace).Create(
 				context.Background(),
-				generateNAD(netConfig, f.ClientSet),
+				generateNetAttachDef(netConfig.namespace, netConfig.name, generateNADSpec(netConfig)),
 				metav1.CreateOptions{},
 			)
 			Expect(err).NotTo(HaveOccurred())

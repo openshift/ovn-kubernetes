@@ -14,7 +14,7 @@ env:
   REPOSITORY: ovn-kubernetes
   FEDORA_IMAGE_NAME: ovn-kube-fedora
   UBUNTU_IMAGE_NAME: ovn-kube-ubuntu
-
+  BUILDER_IMAGE: quay.io/lib/golang:1.24
 jobs:
   build:
     name: Build Images
@@ -84,9 +84,11 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         builder: ${{ steps.buildx.outputs.name }}
-        context: ./dist/images
+        context: .
         file: ./dist/images/Dockerfile.fedora
         push: true
+        build-args: |
+          BUILDER_IMAGE=${{ env.BUILDER_IMAGE }}
         platforms: linux/amd64,linux/arm64
         tags: ${{ steps.meta-fedora.outputs.tags }}
         labels: ${{ steps.meta-fedora.outputs.labels }}
