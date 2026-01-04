@@ -42,7 +42,7 @@ var (
 func init() {
 	addSemaphoreSize := config.CNI.AddSemaphore
 	if addSemaphoreSize <= 0 {
-		addSemaphoreSize = 20 // Conservative default to prevent OVS connection queue overflow
+		addSemaphoreSize = 64 // Conservative default to prevent OVS connection queue overflow
 	}
 
 	cniAddSemaphore = make(chan struct{}, addSemaphoreSize)
