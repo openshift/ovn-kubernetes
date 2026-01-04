@@ -52,7 +52,7 @@ func init() {
 
 	delSemaphoreSize := config.CNI.DelSemaphore
 	if delSemaphoreSize <= 0 {
-		delSemaphoreSize = 400 // Conservative default for podPidsLimit=8192
+		delSemaphoreSize = 100 // Conservative default for podPidsLimit=8192
 	}
 
 	cniAddSemaphore = make(chan struct{}, addSemaphoreSize)
