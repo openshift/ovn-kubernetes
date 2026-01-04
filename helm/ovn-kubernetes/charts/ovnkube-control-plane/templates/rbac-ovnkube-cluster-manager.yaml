@@ -76,7 +76,6 @@ rules:
           - networkqoses
           - userdefinednetworks
           - clusteruserdefinednetworks
-          - routeadvertisements
           - vteps
           - clusternetworkconnects
       verbs: [ "get", "list", "watch" ]
@@ -90,7 +89,6 @@ rules:
           - clusteruserdefinednetworks
           - clusteruserdefinednetworks/status
           - clusteruserdefinednetworks/finalizers
-          - routeadvertisements/status
           - clusternetworkconnects
           - clusternetworkconnects/status
       verbs: [ "patch", "update" ]
@@ -134,6 +132,14 @@ rules:
       verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
     {{- end }}
     {{- if eq (hasKey .Values.global "enableRouteAdvertisements" | ternary .Values.global.enableRouteAdvertisements false) true }}
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - routeadvertisements
+      verbs: [ "get", "list", "watch", "create", "delete", "patch", "update" ]
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - routeadvertisements/status
+      verbs: [ "patch", "update" ]
     - apiGroups: ["frrk8s.metallb.io"]
       resources:
           - frrconfigurations
