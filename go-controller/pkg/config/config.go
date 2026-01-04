@@ -397,6 +397,10 @@ type CNIConfig struct {
 	ConfDir string `gcfg:"conf-dir"`
 	// Plugin specifies the name of the CNI plugin
 	Plugin string `gcfg:"plugin"`
+	// AddSemaphore limits concurrent CNI ADD operations to prevent ovsdb-server queue overflow
+	AddSemaphore int `gcfg:"add-semaphore"`
+	// DelSemaphore limits concurrent CNI DEL operations to prevent process exhaustion during bulk deletion
+	DelSemaphore int `gcfg:"del-semaphore"`
 }
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides

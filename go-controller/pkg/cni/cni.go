@@ -34,13 +34,32 @@ var (
 	maxRsrc           = resource.MustParse("1P")
 	BandwidthNotFound = &notFoundError{}
 
-	// cniSemaphore limits concurrent CNI ADD operations to prevent ovsdb-server
-	// connection queue overflow. ovsdb-server uses listen(10) which limits the
-	// connection queue depth to 10. Setting semaphore to 20 allows higher throughput
-	// while relying on natural timing staggering to avoid exceeding the queue limit.
-	// This is critical for high pod density scenarios (250+ pods/node).
-	cniSemaphore = make(chan struct{}, 120)
+	// cniAddSemaphore limits concurrent CNI ADD operations to prevent ovsdb-server
+	// connection queue overflow. This is critical for high pod density scenarios.
+	cniAddSemaphore chan struct{}
+
+	// cniDelSemaphore limits concurrent CNI DEL operations to prevent process/thread
+	// exhaustion during bulk pod deletion (e.g., node drain, test completion).
+	// Separate from ADD semaphore to avoid lock contention between creation and deletion.
+	cniDelSemaphore chan struct{}
 )
+
+func init() {
+	addSemaphoreSize := config.CNI.AddSemaphore
+	if addSemaphoreSize <= 0 {
+		addSemaphoreSize = 40 // Conservative default to prevent OVS connection queue overflow
+	}
+
+	delSemaphoreSize := config.CNI.DelSemaphore
+	if delSemaphoreSize <= 0 {
+		delSemaphoreSize = 400 // Conservative default for podPidsLimit=8192
+	}
+
+	cniAddSemaphore = make(chan struct{}, addSemaphoreSize)
+	cniDelSemaphore = make(chan struct{}, delSemaphoreSize)
+
+	klog.Infof("CNI semaphores initialized: ADD=%d, DEL=%d", addSemaphoreSize, delSemaphoreSize)
+}
 
 type direction int
 
@@ -120,11 +139,12 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *corev1.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, networkManager networkmanager.Interface, ovsClient client.Client) (*Response, error) {
-	// Acquire semaphore to limit concurrent CNI operations and prevent ovsdb-server queue overflow
-	// This prevents "database connection failed (Protocol error)" errors under high pod density
+	// Acquire ADD semaphore to limit concurrent CNI ADD operations and prevent
+	// ovsdb-server connection queue overflow. This prevents "database connection
+	// failed (Protocol error)" errors under high pod density.
 	select {
-	case cniSemaphore <- struct{}{}:
-		defer func() { <-cniSemaphore }()
+	case cniAddSemaphore <- struct{}{}:
+		defer func() { <-cniAddSemaphore }()
 	case <-pr.ctx.Done():
 		return nil, fmt.Errorf("CNI ADD operation canceled while waiting for semaphore: %v", pr.ctx.Err())
 	}
@@ -295,6 +315,17 @@ func primaryUDNCmdAddGetCNIResultFunc(result *current.Result, getCNIResultFn get
 }
 
 func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
+	// Acquire DEL semaphore to prevent process/thread exhaustion during bulk pod
+	// deletion (e.g., node drain with 1500+ pods). Uses separate semaphore from ADD
+	// to avoid lock contention. Higher limit than ADD since DEL operations are lighter
+	// and don't stress ovsdb-server.
+	select {
+	case cniDelSemaphore <- struct{}{}:
+		defer func() { <-cniDelSemaphore }()
+	case <-pr.ctx.Done():
+		return nil, fmt.Errorf("CNI DEL operation canceled while waiting for semaphore: %v", pr.ctx.Err())
+	}
+
 	// assume success case, return an empty Result
 	response := &Response{}
 	response.Result = &current.Result{}
