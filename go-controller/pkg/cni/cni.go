@@ -37,28 +37,17 @@ var (
 	// cniAddSemaphore limits concurrent CNI ADD operations to prevent ovsdb-server
 	// connection queue overflow. This is critical for high pod density scenarios.
 	cniAddSemaphore chan struct{}
-
-	// cniDelSemaphore limits concurrent CNI DEL operations to prevent process/thread
-	// exhaustion during bulk pod deletion (e.g., node drain, test completion).
-	// Separate from ADD semaphore to avoid lock contention between creation and deletion.
-	cniDelSemaphore chan struct{}
 )
 
 func init() {
 	addSemaphoreSize := config.CNI.AddSemaphore
 	if addSemaphoreSize <= 0 {
-		addSemaphoreSize = 40 // Conservative default to prevent OVS connection queue overflow
-	}
-
-	delSemaphoreSize := config.CNI.DelSemaphore
-	if delSemaphoreSize <= 0 {
-		delSemaphoreSize = 100 // Conservative default for podPidsLimit=8192
+		addSemaphoreSize = 20 // Conservative default to prevent OVS connection queue overflow
 	}
 
 	cniAddSemaphore = make(chan struct{}, addSemaphoreSize)
-	cniDelSemaphore = make(chan struct{}, delSemaphoreSize)
 
-	klog.Infof("CNI semaphores initialized: ADD=%d, DEL=%d", addSemaphoreSize, delSemaphoreSize)
+	klog.Infof("CNI ADD semaphore initialized with size %d", addSemaphoreSize)
 }
 
 type direction int
@@ -315,17 +304,6 @@ func primaryUDNCmdAddGetCNIResultFunc(result *current.Result, getCNIResultFn get
 }
 
 func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
-	// Acquire DEL semaphore to prevent process/thread exhaustion during bulk pod
-	// deletion (e.g., node drain with 1500+ pods). Uses separate semaphore from ADD
-	// to avoid lock contention. Higher limit than ADD since DEL operations are lighter
-	// and don't stress ovsdb-server.
-	select {
-	case cniDelSemaphore <- struct{}{}:
-		defer func() { <-cniDelSemaphore }()
-	case <-pr.ctx.Done():
-		return nil, fmt.Errorf("CNI DEL operation canceled while waiting for semaphore: %v", pr.ctx.Err())
-	}
-
 	// assume success case, return an empty Result
 	response := &Response{}
 	response.Result = &current.Result{}
