@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -36,18 +37,24 @@ var (
 
 	// cniAddSemaphore limits concurrent CNI ADD operations to prevent ovsdb-server
 	// connection queue overflow. This is critical for high pod density scenarios.
-	cniAddSemaphore chan struct{}
+	// Initialized lazily on first use to respect config file settings.
+	cniAddSemaphore     chan struct{}
+	cniAddSemaphoreOnce sync.Once
 )
 
-func init() {
-	addSemaphoreSize := config.CNI.AddSemaphore
-	if addSemaphoreSize <= 0 {
-		addSemaphoreSize = 60 // Conservative default to prevent OVS connection queue overflow
-	}
+// ensureSemaphoreInitialized initializes the CNI ADD semaphore on first call.
+// Uses sync.Once to ensure thread-safe single initialization after config is loaded.
+func ensureSemaphoreInitialized() {
+	cniAddSemaphoreOnce.Do(func() {
+		addSemaphoreSize := config.CNI.AddSemaphore
+		if addSemaphoreSize <= 0 {
+			addSemaphoreSize = 60 // Conservative default to prevent OVS connection queue overflow
+		}
 
-	cniAddSemaphore = make(chan struct{}, addSemaphoreSize)
+		cniAddSemaphore = make(chan struct{}, addSemaphoreSize)
 
-	klog.Infof("CNI ADD semaphore initialized with size %d", addSemaphoreSize)
+		klog.Infof("CNI ADD semaphore initialized with size %d", addSemaphoreSize)
+	})
 }
 
 type direction int
@@ -128,6 +135,10 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *corev1.Pod) error {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, networkManager networkmanager.Interface, ovsClient client.Client) (*Response, error) {
+	// Ensure semaphore is initialized with config file settings.
+	// This happens exactly once, thread-safe via sync.Once.
+	ensureSemaphoreInitialized()
+
 	// Acquire ADD semaphore to limit concurrent CNI ADD operations and prevent
 	// ovsdb-server connection queue overflow. This prevents "database connection
 	// failed (Protocol error)" errors under high pod density.
