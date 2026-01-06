@@ -178,7 +178,7 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, 
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode)
-		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
+		nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, h.oc.GetNetworkName(), h.oc.nodeAnnotationCache, nil, nil)
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -627,12 +627,8 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 	start := time.Now()
 
 	// WatchNamespaces() should be started first because it has no other
-	// dependencies, and WatchNodes() depends on it
+	// dependencies.
 	if err := oc.WatchNamespaces(); err != nil {
-		return err
-	}
-
-	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
 
@@ -1213,6 +1209,9 @@ func (oc *Layer3UserDefinedNetworkController) gatewayOptions() []GatewayOption {
 	}
 	if resolver := oc.getNetworkNameForNADKeyFunc(); resolver != nil {
 		opts = append(opts, WithNetworkNameForNADKeyResolver(resolver))
+	}
+	if oc.nodeAnnotationCache != nil {
+		opts = append(opts, WithNodeAnnotationCache(oc.nodeAnnotationCache))
 	}
 	return opts
 }
