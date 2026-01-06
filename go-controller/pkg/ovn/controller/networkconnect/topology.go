@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -99,20 +98,6 @@ func (c *Controller) deleteConnectRouter(cncName string) error {
 	return nil
 }
 
-// parseOwnerKey parses an owner key like "layer3_1" into topology type and network ID.
-func parseOwnerKey(owner string) (topologyType string, networkID int, err error) {
-	if strings.HasPrefix(owner, ovntypes.Layer3Topology+"_") {
-		topologyType = ovntypes.Layer3Topology
-		_, err = fmt.Sscanf(owner, ovntypes.Layer3Topology+"_%d", &networkID)
-	} else if strings.HasPrefix(owner, ovntypes.Layer2Topology+"_") {
-		topologyType = ovntypes.Layer2Topology
-		_, err = fmt.Sscanf(owner, ovntypes.Layer2Topology+"_%d", &networkID)
-	} else {
-		err = fmt.Errorf("unknown owner format: %s", owner)
-	}
-	return
-}
-
 // syncNetworkConnections syncs all network connections for a CNC.
 // STEP2: Create the patch ports connecting network router's to the connect router
 // using IPs from the network subnet CNC annotation.
@@ -170,7 +155,7 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 	// Each network is transacted separately to keep transaction sizes bounded.
 	for owner, subnets := range allocatedSubnets {
 		isNewNetwork := networksToCreate.Has(owner)
-		_, networkID, err := parseOwnerKey(owner)
+		_, networkID, err := util.ParseNetworkOwner(owner)
 		if err != nil {
 			klog.Warningf("Failed to parse owner key %s: %v", owner, err)
 			continue
@@ -289,7 +274,7 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 	// Cleanup networks that are no longer connected - transact per network
 	for owner := range networksToDelete {
 		klog.V(5).Infof("CNC %s: cleaning up network owner=%s", cncName, owner)
-		_, networkID, err := parseOwnerKey(owner)
+		_, networkID, err := util.ParseNetworkOwner(owner)
 		if err != nil {
 			klog.Warningf("Failed to parse owner key %s: %v", owner, err)
 			continue
@@ -661,7 +646,7 @@ func (c *Controller) ensureRoutingPoliciesOps(ops []ovsdb.Operation, cncName str
 
 	// Get the source network's connect subnets - these determine the nexthop for routing policies
 	// The nexthop is the connect-router's port IP that connects to the source network
-	srcOwnerKey := fmt.Sprintf("%s_%d", srcNetwork.TopologyType(), srcNetwork.GetNetworkID())
+	srcOwnerKey := util.ComputeNetworkOwner(srcNetwork.TopologyType(), srcNetwork.GetNetworkID())
 	srcConnectSubnets, found := allocatedSubnets[srcOwnerKey]
 	if !found || len(srcConnectSubnets) == 0 {
 		return nil, fmt.Errorf("source network %s connect subnets not found in allocated subnets", srcNetwork.GetNetworkName())
@@ -715,7 +700,7 @@ func (c *Controller) ensureRoutingPoliciesOps(ops []ovsdb.Operation, cncName str
 	// for a full mesh connectivity between N networks.
 	// This is typically fine since number of networks that are expected to be connected by a CNC is small, eg. 10.
 	for owner := range allocatedSubnets {
-		_, dstNetworkID, err := parseOwnerKey(owner)
+		_, dstNetworkID, err := util.ParseNetworkOwner(owner)
 		if err != nil {
 			continue
 		}
