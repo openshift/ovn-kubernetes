@@ -63,6 +63,11 @@ spec:
         - mountPath: /ovn-cert
           name: host-ovn-cert
           readOnly: true
+        {%- if ovn_no_overlay_enable == "true" %}
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+        {%- endif %}
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /var/run/openvswitch/
@@ -74,7 +79,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
         - name: OVN_NORTHD_BACKOFF_INTERVAL
@@ -137,6 +142,11 @@ spec:
         - mountPath: /ovn-cert
           name: host-ovn-cert
           readOnly: true
+        {%- if ovn_no_overlay_enable == "true" %}
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+        {%- endif %}
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /var/run/openvswitch/
@@ -148,7 +158,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
@@ -215,7 +225,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
@@ -306,6 +316,11 @@ spec:
         - mountPath: /var/run/k8s.cni.cncf.io/devinfo/dp
           name: host-devinfo-dp
           readOnly: true
+        {%- if ovn_no_overlay_enable == "true" %}
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+        {%- endif %}
 
         resources:
           requests:
@@ -319,7 +334,7 @@ spec:
         - name: OVN_EGRESSSERVICE_ENABLE
           value: "{{ ovn_egress_service_enable }}"
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_node_loglevel }}"
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -450,6 +465,8 @@ spec:
           value: "{{ ovn_route_advertisements_enable }}"
         - name: OVN_ADVERTISED_UDN_ISOLATION_MODE
           value: "{{ ovn_advertised_udn_isolation_mode }}"
+        - name: OVN_NO_OVERLAY_ENABLE
+          value: "{{ ovn_no_overlay_enable }}"
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
           value: "{{ ovnkube_node_mgmt_port_netdev }}"
         - name: OVN_EMPTY_LB_EVENTS
@@ -521,7 +538,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVN_LOGLEVEL_CONTROLLER
           value: "{{ ovn_loglevel_controller }}"
         - name: K8S_APISERVER
@@ -577,7 +594,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: K8S_NODE_IP
           valueFrom:
             fieldRef:
@@ -639,6 +656,11 @@ spec:
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      {%- if ovn_no_overlay_enable == "true" %}
+      - name: ovnkube-config
+        configMap:
+          name: ovnkube-config
+      {%- endif %}
       - name: host-etc-ovs
         hostPath:
           path: /etc/openvswitch

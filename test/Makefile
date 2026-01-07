@@ -12,7 +12,7 @@ DUALSTACK_CONVERSION?=false
 COREDUMP_DIR?=/tmp/kind/logs/coredumps
 # Processes to skip when checking for coredumps (pipe-separated for grep)
 # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5782
-SKIPPED_COREDUMPS?=zebra|bgpd|mgmtd
+SKIPPED_COREDUMPS?=zebra|bgpd|mgmtd|bfdd
 
 # Check for coredumps and fail if any are found (excluding skipped processes)
 # Usage: $(call check-coredumps)

@@ -1143,7 +1143,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		coredumpDir := "/tmp/kind/logs/coredumps"
 		dbLocation := "/var/lib/openvswitch"
 		// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5782
-		skippedCoredumps := []string{"zebra", "bgpd", "mgmtd"}
+		skippedCoredumps := []string{"zebra", "bgpd", "mgmtd", "bfdd"}
 
 		// Check for coredumps on host
 		var coredumpFiles []string
@@ -2016,4 +2016,26 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		}
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
+}
+
+func isNoOverlayEnabled() bool {
+	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+	val := getTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_NO_OVERLAY_ENABLE")
+	return val == "true"
+}
+
+func isOutboundSNATEnabled() bool {
+	if !isNoOverlayEnabled() {
+		return false
+	}
+	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+	args := []string{"get", "configmap", "ovnkube-config", "-o=jsonpath={.data.ovnkube\\.conf}"}
+	conf := e2ekubectl.RunKubectlOrDie(ovnKubeNamespace, args...)
+
+	// Simplistic check for outbound-snat = enable
+	if strings.Contains(conf, "outbound-snat = enable") || strings.Contains(conf, "outbound-snat=enable") {
+		framework.Logf("Outbound SNAT is enabled in ovnkube-config")
+		return true
+	}
+	return false
 }
