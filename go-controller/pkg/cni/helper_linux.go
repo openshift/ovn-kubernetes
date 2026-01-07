@@ -221,29 +221,9 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	var links []netlink.Link
 	var iptableNum int
 
-	if len(ifInfo.PodIfNamesOfSameNAD) != 0 && len(ifInfo.Routes) != 0 {
-		// needs ip table for each Pod interface of the same secondary UDN, table number start from 100
-		iptableNum = 100 + link.Attrs().Index
-
-		links = make([]netlink.Link, 0, len(ifInfo.PodIfNamesOfSameNAD))
-		// this is a pod with multiple interfaces of the same secondary UDN, also, ECMP routes are needed
-		//
-		// get all the Pod interface names of the same nadName
-		// up to the current link name. This is used for configuring ECMP routes via multiple pod interfaces
-		for _, ifName := range ifInfo.PodIfNamesOfSameNAD {
-			if ifName == link.Attrs().Name {
-				// loop all pod interfaces of the same secondary UDN until the current pod interface
-				links = append(links, link)
-				break
-			}
-			ifLink, err := util.GetNetLinkOps().LinkByName(ifName)
-			if err != nil {
-				return fmt.Errorf("failed to lookup pod interface %s when setup route for link %s: %v", ifName, link.Attrs().Name, err)
-			}
-			links = append(links, ifLink)
-		}
-
-		// for ECMP routes, need to configure the following sysctl configuration, stop ARP flux and stop RP filter drop from happening
+	if len(ifInfo.PodIfNamesOfSameNAD) != 0 {
+		// this is a pod with multiple interfaces of the same non-primary UDN, we need to configure the following sysctl configuration
+		// stop ARP flux and stop RP filter drop from happening
 		//   sysctl -w net.ipv4.conf.<linkName>.arp_ignore=1 # only reply to ARP requests if its sent to the IP on this interface
 		//   sysctl -w net.ipv4.conf.<linkName>.arp_announce=2 # when sending ARP use the IP that belongs to this interface
 		//   sysctl -w net.ipv4.conf.<linkName>.rp_filter=2 # allow reverse path filter check to pass if there is any route to the source
@@ -258,25 +238,47 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 			return fmt.Errorf("failed to set rp_filter for %s: %v", linkName, err)
 		}
 
-		// ip rules are needed to force traffic from an ip to egress the correct interface via a route table for that interface:
-		//   ip rule add from <IP_on_this_interface> table <iptableNum>
-		for _, ip := range ifInfo.IPs {
-			rule := netlink.NewRule()
-			rule.Src = util.GetIPNetFullMaskFromIP(ip.IP)
-			rule.Table = iptableNum
-			if err := util.GetNetLinkOps().RuleAdd(rule); err != nil {
-				return fmt.Errorf("failed to add IP rule for %s to table %d: %v", ip.IP, iptableNum, err)
+		if len(ifInfo.Routes) != 0 {
+			// needs ip table for each Pod interface of the same secondary UDN, table number start from 100
+			iptableNum = 100 + link.Attrs().Index
+
+			// ECMP routes are needed
+			// get all the Pod interface names of the same nadName
+			// up to the current link name. This is used for configuring ECMP routes via multiple pod interfaces
+			links = make([]netlink.Link, 0, len(ifInfo.PodIfNamesOfSameNAD))
+			for _, ifName := range ifInfo.PodIfNamesOfSameNAD {
+				if ifName == link.Attrs().Name {
+					// loop all pod interfaces of the same secondary UDN until the current pod interface
+					links = append(links, link)
+					break
+				}
+				ifLink, err := util.GetNetLinkOps().LinkByName(ifName)
+				if err != nil {
+					return fmt.Errorf("failed to lookup pod interface %s when setup route for link %s: %v", ifName, link.Attrs().Name, err)
+				}
+				links = append(links, ifLink)
 			}
 
-			// add scope link route to the specific table
-			route := &netlink.Route{
-				LinkIndex: link.Attrs().Index,
-				Scope:     netlink.SCOPE_LINK,
-				Dst:       util.IPsToNetworkIPs(ip)[0],
-				Table:     iptableNum,
-			}
-			if err := util.GetNetLinkOps().RouteAdd(route); err != nil {
-				return fmt.Errorf("failed to add link scope route to %v via %v to table %v: %v", ip, linkName, iptableNum, err)
+			// ip rules are needed to force traffic from an ip to egress the correct interface via a route table for that interface:
+			//   ip rule add from <IP_on_this_interface> table <iptableNum>
+			for _, ip := range ifInfo.IPs {
+				rule := netlink.NewRule()
+				rule.Src = util.GetIPNetFullMaskFromIP(ip.IP)
+				rule.Table = iptableNum
+				if err := util.GetNetLinkOps().RuleAdd(rule); err != nil {
+					return fmt.Errorf("failed to add IP rule for %s to table %d: %v", ip.IP, iptableNum, err)
+				}
+
+				// add scope link route to the specific table
+				route := &netlink.Route{
+					LinkIndex: link.Attrs().Index,
+					Scope:     netlink.SCOPE_LINK,
+					Dst:       util.IPsToNetworkIPs(ip)[0],
+					Table:     iptableNum,
+				}
+				if err := util.GetNetLinkOps().RouteAdd(route); err != nil {
+					return fmt.Errorf("failed to add link scope route to %v via %v to table %v: %v", ip, linkName, iptableNum, err)
+				}
 			}
 		}
 	}
