@@ -992,10 +992,12 @@ func (oc *Layer2UserDefinedNetworkController) cleanupRouterSetupForRemoteNodeGR(
 
 func (oc *Layer2UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node) error {
 	if _, local := oc.localZoneNodes.Load(node.Name); local {
-		if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
-			return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+		if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+			if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
+				return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+			}
+			oc.gatewayManagers.Delete(node.Name)
 		}
-		oc.gatewayManagers.Delete(node.Name)
 	} else {
 		if config.Layer2UsesTransitRouter {
 			// this is a no-op for local nodes
