@@ -253,7 +253,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 								fakeOvn,
 								[]testPod{podInfo},
 								expectationOptions...,
-							).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...)))
+							).expectedLogicalSwitchesAndPorts()...)))
 
 				return nil
 			}
@@ -841,10 +841,6 @@ func makeCUDNOwnerRef(name string) metav1.OwnerReference {
 	}
 }
 
-func (sni *userDefinedNetInfo) getNetworkRole() string {
-	return util.GetUserDefinedNetworkRole(sni.isPrimary)
-}
-
 func getNetworkRole(netInfo util.NetInfo) string {
 	return util.GetUserDefinedNetworkRole(netInfo.IsPrimaryNetwork())
 }
@@ -855,10 +851,7 @@ func (sni *userDefinedNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSet
 		return err
 	}
 
-	externalIDs := map[string]string{
-		types.NetworkExternalID:     sni.netName,
-		types.NetworkRoleExternalID: sni.getNetworkRole(),
-	}
+	externalIDs := util.GenerateExternalIDsForSwitchOrRouter(netInfo)
 	switch sni.topology {
 	case types.Layer2Topology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
