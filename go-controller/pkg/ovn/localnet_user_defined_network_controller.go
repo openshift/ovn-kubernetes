@@ -264,6 +264,7 @@ func (oc *LocalnetUserDefinedNetworkController) Start(_ context.Context) error {
 	if err := oc.init(); err != nil {
 		return err
 	}
+	oc.RegisterNodeHandler()
 
 	return oc.run()
 }
