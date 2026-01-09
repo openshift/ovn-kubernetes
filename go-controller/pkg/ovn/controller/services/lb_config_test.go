@@ -4455,8 +4455,26 @@ func Test_GetEndpointsForService(t *testing.T) {
 }
 
 func Test_makeNodeSwitchTargetIPs(t *testing.T) {
+	// OCP HACK BEGIN
+	name := "foo"
+	namespace := "testns"
+
+	defaultService := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
+		},
+	}
+
+	addFallbackAnnotationToService := func(s *corev1.Service) *corev1.Service {
+		s.Annotations = map[string]string{localWithFallbackAnnotation: ""}
+		return s
+	}
+	// OCP HACK END
+
 	tc := []struct {
 		name                string
+		service             *corev1.Service
 		config              *lbConfig
 		node                string
 		expectedTargetIPsV4 []string
@@ -4465,7 +4483,8 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 		expectedV6Changed   bool
 	}{
 		{
-			name: "cluster ip service", //ETP=cluster by default on all services
+			name:    "cluster ip service", //ETP=cluster by default on all services
+			service: defaultService,
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: corev1.ProtocolTCP,
@@ -4490,7 +4509,8 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			expectedV6Changed:   false,
 		},
 		{
-			name: "service with ETP=local, endpoint count changes",
+			name:    "LB service with ETP=local, endpoint count changes",
+			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: corev1.ProtocolTCP,
@@ -4517,7 +4537,8 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			expectedV6Changed:   true,
 		},
 		{
-			name: "service with ETP=local, endpoint count is the same",
+			name:    "LB service with ETP=local, endpoint count is the same",
+			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: corev1.ProtocolTCP,
@@ -4543,7 +4564,8 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			expectedV4Changed:   false,
 		},
 		{
-			name: "service with ETP=local, no local endpoints left",
+			name:    "LB service with ETP=local, no local endpoints left",
+			service: getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp),
 			config: &lbConfig{
 				vips:     []string{"1.2.3.4", "fe10::1"},
 				protocol: corev1.ProtocolTCP,
@@ -4562,10 +4584,33 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 			expectedV4Changed:   true,
 			expectedV6Changed:   true,
 		},
+		// OCP HACK BEGIN
+		{
+			name:    "LB service with ETP=local, no local endpoints left, localWithFallback annotation",
+			service: addFallbackAnnotationToService(getSampleServiceWithOnePortAndETPLocal("tcp-example", 80, tcp)),
+			config: &lbConfig{
+				vips:     []string{"1.2.3.4", "fe10::1"},
+				protocol: corev1.ProtocolTCP,
+				inport:   80,
+				clusterEndpoints: util.LBEndpoints{
+					V4IPs: []string{"192.168.1.1"},     // on nodeB
+					V6IPs: []string{"fe00:0:0:0:2::2"}, // on nodeB
+					Port:  8080,
+				},
+				// nothing on nodeA
+				externalTrafficLocal: true,
+			},
+			node:                nodeA,
+			expectedTargetIPsV4: []string{"192.168.1.1"},     // fallback to cluster endpoints
+			expectedTargetIPsV6: []string{"fe00:0:0:0:2::2"}, // fallback to cluster endpoints
+			expectedV4Changed:   false,
+			expectedV6Changed:   false,
+		},
+		// OCP HACK END
 	}
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
-			actualTargetIPsV4, actualTargetIPsV6, actualV4Changed, actualV6Changed := makeNodeSwitchTargetIPs(tt.node, tt.config)
+			actualTargetIPsV4, actualTargetIPsV6, actualV4Changed, actualV6Changed := makeNodeSwitchTargetIPs(tt.service, tt.node, tt.config)
 			assert.Equal(t, tt.expectedTargetIPsV4, actualTargetIPsV4)
 			assert.Equal(t, tt.expectedTargetIPsV6, actualTargetIPsV6)
 			assert.Equal(t, tt.expectedV4Changed, actualV4Changed)

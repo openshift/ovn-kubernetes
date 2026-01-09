@@ -403,7 +403,7 @@ func addNodeLogicalFlowsHelper(testData []libovsdbtest.TestData, expectedOVNClus
 /* FIXME for updated local gw
 
 func populatePortAddresses(nodeName, lsp, mac, ips string, ovnClient goovn.Client) {
-	cmd, err := ovnClient.LSPAdd(nodeName, lsp)
+	cmd, err := ovnClient.LSPAdd(nodeName, "", lsp)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = cmd.Execute()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())

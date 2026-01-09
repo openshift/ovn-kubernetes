@@ -530,6 +530,14 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				"OVN-KUBE-ITP": []string{},
 			},
 		}
+		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+		expectedMCSRules := []string{
+			"-p tcp -m tcp --dport 22624 --syn -j REJECT",
+			"-p tcp -m tcp --dport 22623 --syn -j REJECT",
+		}
+		expectedTables["filter"]["FORWARD"] = append(expectedMCSRules, expectedTables["filter"]["FORWARD"]...)
+		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
+		// END OCP HACK
 		f4 := iptV4.(*util.FakeIPTables)
 		err = f4.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -1432,6 +1440,24 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				},
 				"OVN-KUBE-ITP": []string{},
 			},
+		}
+		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+		expectedMCSRules := []string{
+			"-p tcp -m tcp --dport 22624 --syn -j REJECT",
+			"-p tcp -m tcp --dport 22623 --syn -j REJECT",
+		}
+		expectedTables["filter"]["FORWARD"] = append(expectedMCSRules, expectedTables["filter"]["FORWARD"]...)
+		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
+		// END OCP HACK
+		if util.IsNetworkSegmentationSupportEnabled() {
+			expectedTables["nat"]["POSTROUTING"] = append(expectedTables["nat"]["POSTROUTING"],
+				"-j OVN-KUBE-UDN-MASQUERADE",
+			)
+			expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"] = append(expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"],
+				"-s 169.254.169.0/29 -j RETURN",     // this guarantees we don't SNAT default network masqueradeIPs
+				"-d 172.16.1.0/24 -j RETURN",        // this guarantees we don't SNAT service traffic
+				"-s 169.254.169.0/24 -j MASQUERADE", // this guarantees we SNAT all UDN MasqueradeIPs traffic leaving the node
+			)
 		}
 		f4 := iptV4.(*util.FakeIPTables)
 		err = f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
