@@ -185,8 +185,8 @@ svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
 routable_mtu=${OVN_ROUTABLE_MTU:-}
 
-# set metrics endpoint bind to K8S_NODE_IP.
-metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
+# set metrics endpoint to METRICS_IP. if METRICS_IP not set K8S_NODE_IP or default to 0.0.0.0
+metrics_endpoint_ip="${METRICS_IP:-${K8S_NODE_IP:-0.0.0.0}}"
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 
 # set metrics master port
@@ -1319,7 +1319,6 @@ ovn-master() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
