@@ -85,6 +85,11 @@ var (
 			`should be able to send multicast UDP traffic between nodes`,
 			// TODO: fix the flakiness with net-seg overlapping CIDRs test in downstream.
 			"isolates overlapping CIDRs",
+			// tied to only kind cluster
+			"Node Shutdown and Startup",
+			// TODO: Fix flakiness in this test. Pod connectivity checks may need
+			// to be wrapped in an Eventually block.
+			"perform east/west traffic between nodes following OVN Kube node pod restart",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},

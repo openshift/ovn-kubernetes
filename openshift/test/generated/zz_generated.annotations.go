@@ -1133,11 +1133,11 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation EndpointSlices mirroring a user defined primary network created using UserDefinedNetwork mirrors EndpointSlices managed by the default controller for namespaces with user defined primary networks L3 primary UDN, host-networked pods": "[Disabled:Unimplemented]",
 
-	"Network Segmentation Sync perform east/west traffic between nodes following OVN Kube node pod restart L2 with custom network": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation Sync perform east/west traffic between nodes following OVN Kube node pod restart L2 with custom network": "[Disabled:Unimplemented]",
 
-	"Network Segmentation Sync perform east/west traffic between nodes following OVN Kube node pod restart L2": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation Sync perform east/west traffic between nodes following OVN Kube node pod restart L2": "[Disabled:Unimplemented]",
 
-	"Network Segmentation Sync perform east/west traffic between nodes following OVN Kube node pod restart L3": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation Sync perform east/west traffic between nodes following OVN Kube node pod restart L3": "[Disabled:Unimplemented]",
 
 	"Network Segmentation UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Disabled:Unimplemented]",
 
@@ -1347,7 +1347,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Node IP and MAC address migration when when MAC address changes when a nodeport service is configured Ensures flows are updated when MAC address changes": "[Disabled:Unimplemented]",
 
-	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Suite:openshift/conformance/parallel]",
+	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Disabled:Unimplemented]",
 
 	"OVS CPU affinity pinning can be enabled on specific nodes by creating enable_dynamic_cpu_affinity file": "[Disabled:Unimplemented]",
 
