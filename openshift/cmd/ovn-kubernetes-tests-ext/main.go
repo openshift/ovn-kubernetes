@@ -49,7 +49,7 @@ func main() {
 		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
 	})
 
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite()
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
 	if err != nil {
 		panic(err)
 	}

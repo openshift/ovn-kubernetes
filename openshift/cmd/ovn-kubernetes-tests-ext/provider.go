@@ -87,10 +87,10 @@ func initializeTestFramework(provider string) error {
 	ocpInfra, err := ocpinfraprovider.New(cfg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(ocpInfra).NotTo(gomega.BeNil())
-	infraprovider.Provider = ocpInfra
+	infraprovider.Set(ocpInfra)
 	ocpDeployment := ocpdeploymentconfig.New()
 	gomega.Expect(ocpDeployment).NotTo(gomega.BeNil())
-	deploymentconfig.Deployment = ocpDeployment
+	deploymentconfig.Set(ocpDeployment)
 	return nil
 }
 
