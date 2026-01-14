@@ -3,7 +3,7 @@ package main
 import (
 	"sort"
 
-	"k8s.io/apimachinery/pkg/util/sets"
+	"github.com/openshift-eng/openshift-tests-extension/pkg/util/sets"
 )
 
 // getTestExtensionLabels returns labels that should be applied to all tests in this extension
