@@ -122,6 +122,7 @@ func Run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.
 			if !isFeatureEnabled {
 				continue
 			}
+			timeStart := time.Now()
 			cpus, err := getNonPinnedCPUs(ctx, podResCli)
 			if err != nil {
 				klog.Warningf("Error while trying to get system non pinned CPUs: %v", err)
@@ -137,6 +138,8 @@ func Run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.
 			if err != nil {
 				klog.Warningf("Error while aligning ovsdb-server CPUs to current process: %v", err)
 			}
+			timeEnd := time.Now()
+			klog.Infof("Time taken to set ovs affinity: %v", timeEnd.Sub(timeStart))
 		}
 	}
 }
@@ -348,12 +351,14 @@ func getNonPinnedCPUs(ctx context.Context, podResCli podresourcesapi.PodResource
 	}
 
 	usedCPUs := cpuset.New()
+	timeStart := time.Now()
 	for _, pod := range listResp.PodResources {
 		for _, container := range pod.Containers {
 			usedCPUs = usedCPUs.Union(cpuset.New(convertInt64ToInt(container.CpuIds)...))
 		}
 	}
-
+	timeEnd := time.Now()
+	klog.Infof("time taken to list pod resources: %v", timeEnd.Sub(timeStart))
 	// Calculate the difference
 	availableCPUs := allocatableCPUs.Difference(usedCPUs)
 	return availableCPUs, nil
