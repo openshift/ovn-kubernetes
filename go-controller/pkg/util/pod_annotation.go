@@ -318,10 +318,10 @@ func UnmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[strin
 	return podNetworks, nil
 }
 
-// GetPodCIDRsWithFullMask returns the pod's IP addresses in a CIDR with FullMask format
-// Internally it calls GetPodIPsOfNetwork
-func GetPodCIDRsWithFullMask(pod *corev1.Pod, nInfo NetInfo) ([]*net.IPNet, error) {
-	podIPs, err := GetPodIPsOfNetwork(pod, nInfo)
+// GetPodCIDRsWithFullMask returns the pod's IP addresses in a CIDR with FullMask format.
+// Internally it calls GetPodIPsOfNetwork.
+func GetPodCIDRsWithFullMask(pod *corev1.Pod, nInfo NetInfo, getNetworkNameForNADKey func(nadKey string) string) ([]*net.IPNet, error) {
+	podIPs, err := GetPodIPsOfNetwork(pod, nInfo, getNetworkNameForNADKey)
 	if err != nil {
 		return nil, err
 	}
@@ -339,9 +339,13 @@ func GetPodCIDRsWithFullMask(pod *corev1.Pod, nInfo NetInfo) ([]*net.IPNet, erro
 // GetPodIPsOfNetwork returns the pod's IP addresses, first from the OVN annotation
 // and then falling back to the Pod Status IPs. This function is intended to
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
-func GetPodIPsOfNetwork(pod *corev1.Pod, nInfo NetInfo) ([]net.IP, error) {
+// getNetworkNameForNADKey is required for user defined networks.
+func GetPodIPsOfNetwork(pod *corev1.Pod, nInfo NetInfo, getNetworkNameForNADKey func(nadKey string) string) ([]net.IP, error) {
 	if nInfo.IsUserDefinedNetwork() {
-		return SecondaryNetworkPodIPs(pod, nInfo)
+		if getNetworkNameForNADKey == nil {
+			return nil, fmt.Errorf("missing NAD resolver for network %q", nInfo.GetNetworkName())
+		}
+		return SecondaryNetworkPodIPs(pod, nInfo, getNetworkNameForNADKey)
 	}
 	return DefaultNetworkPodIPs(pod)
 }
@@ -392,27 +396,30 @@ func DefaultNetworkPodIPs(pod *corev1.Pod) ([]net.IP, error) {
 	return []net.IP{ip}, nil
 }
 
-func SecondaryNetworkPodIPs(pod *corev1.Pod, networkInfo NetInfo) ([]net.IP, error) {
+func SecondaryNetworkPodIPs(pod *corev1.Pod, networkInfo NetInfo, getNetworkNameForNADKey func(nadKey string) string) ([]net.IP, error) {
 	ips := []net.IP{}
-	podNadKeys, err := PodNadKeys(pod, networkInfo)
+	if getNetworkNameForNADKey == nil {
+		return nil, fmt.Errorf("missing NAD resolver for network %q", networkInfo.GetNetworkName())
+	}
+	podNADKeys, err := PodNADKeys(pod, networkInfo, getNetworkNameForNADKey)
 	if err != nil {
 		return nil, err
 	}
-	for _, nadKey := range podNadKeys {
+	for _, nadKey := range podNADKeys {
 		ips = append(ips, getAnnotatedPodIPs(pod, nadKey)...)
 	}
 	return ips, nil
 }
 
-// PodNadKeys returns pod's NAD keys associated with given network specified by netconf.
+// PodNADKeys returns pod's NAD keys associated with given network specified by netconf.
 // If netinfo belongs to user defined primary network, then retrieve NAD names from
 // netinfo.GetNADs() which is serving pod's namespace.
-// For all other cases, retrieve NAD names for the pod based on NetworkSelectionElement.
-func PodNadKeys(pod *corev1.Pod, netinfo NetInfo) ([]string, error) {
+// For secondary UDNs, retrieve NAD names for the pod based on NetworkSelectionElement.
+func PodNADKeys(pod *corev1.Pod, netinfo NetInfo, getNetworkNameForNADKey func(nadKey string) string) ([]string, error) {
 	if netinfo.IsPrimaryNetwork() {
 		return GetPrimaryNetworkNADNamesForNamespaceFromNetInfo(pod.Namespace, netinfo)
 	}
-	on, networkMap, err := GetPodNADToNetworkMapping(pod, netinfo)
+	on, networkMap, err := GetPodNADToNetworkMappingWithActiveNetwork(pod, netinfo, nil, getNetworkNameForNADKey)
 	// skip pods that are not on this network
 	if err != nil {
 		return nil, err

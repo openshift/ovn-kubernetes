@@ -196,6 +196,9 @@ func (o *FakeOVN) shutdown() {
 	o.egressQoSWg.Wait()
 	o.egressSVCWg.Wait()
 	o.anpWg.Wait()
+	if o.networkManager != nil {
+		o.networkManager.Stop()
+	}
 	o.nbsbCleanup.Cleanup()
 	for _, ocInfo := range o.userDefinedNetworkControllers {
 		close(ocInfo.bnc.stopChan)
@@ -274,6 +277,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	}
 
 	err = o.watcher.Start()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	err = o.networkManager.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	err = o.eIPController.SyncLocalNodeZonesCache()

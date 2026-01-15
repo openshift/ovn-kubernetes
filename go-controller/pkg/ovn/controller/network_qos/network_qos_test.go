@@ -1217,6 +1217,7 @@ func initNetworkQoSController(netInfo util.NetInfo, addrsetFactory addressset.Ad
 		watchFactory.PodCoreInformer(),
 		watchFactory.NodeCoreInformer(),
 		watchFactory.NADInformer(),
+		nil,
 		addrsetFactory,
 		func(pod *corev1.Pod) bool {
 			return pod.Spec.NodeName == "node1" || !enableInterconnect

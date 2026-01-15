@@ -78,6 +78,9 @@ type Interface interface {
 	// GetNetInfoForNADKey returns a copy of the  cached network info for the given NAD key, or nil if unknown.
 	// This is a cheap lookup that does not parse the NAD object; it relies on NAD controller state.
 	GetNetInfoForNADKey(nadKey string) util.NetInfo
+	// GetNetworkNameForNADKey returns the network name mapped to the NAD key, or empty if unknown.
+	// This uses NAD controller state and does not parse the NAD object.
+	GetNetworkNameForNADKey(nadKey string) string
 	// RegisterNADReconciler registers a reconciler to be notified of NAD changes.
 	RegisterNADReconciler(r NADReconciler) (uint64, error)
 	// DeRegisterNADReconciler removes a previously registered reconciler.
@@ -87,9 +90,10 @@ type Interface interface {
 	// This is an O(1) lookup using an internal index.
 	GetNetworkByID(id int) util.NetInfo
 
-	// NodeHasNAD returns true if the given node has at least one pod/egress IP using the NAD with Dynamic UDN.
+	// NodeHasNetwork returns true if the given node has at least one pod/egress IP using any NAD
+	// for the specified network with Dynamic UDN.
 	// If Dynamic UDN is disabled, it always returns true.
-	NodeHasNAD(node, nad string) bool
+	NodeHasNetwork(node, networkName string) bool
 }
 
 // Controller handles the runtime of the package
@@ -281,6 +285,8 @@ func (nm defaultNetworkManager) GetActiveNetwork(network string) util.NetInfo {
 
 func (nm defaultNetworkManager) GetNetInfoForNADKey(_ string) util.NetInfo { return nil }
 
+func (nm defaultNetworkManager) GetNetworkNameForNADKey(_ string) string { return "" }
+
 func (nm defaultNetworkManager) RegisterNADReconciler(_ NADReconciler) (uint64, error) {
 	return 0, nil
 }
@@ -294,7 +300,7 @@ func (nm defaultNetworkManager) GetNetworkByID(id int) util.NetInfo {
 	return &util.DefaultNetInfo{}
 }
 
-func (nm defaultNetworkManager) NodeHasNAD(_ string, _ string) bool {
+func (nm defaultNetworkManager) NodeHasNetwork(_ string, _ string) bool {
 	// default network is never filtered
 	return true
 }

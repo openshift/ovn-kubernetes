@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
 	ipamclaimsfactory "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions"
@@ -544,13 +545,13 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 					},
 				},
 				nads: []*nadapi.NetworkAttachmentDefinition{
-					ovntest.GenerateNAD("surya", "nad", "namespace",
+					ovntest.GenerateNAD("nad", "nad", "namespace",
 						types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary),
 				},
 			},
 			role:         types.NetworkRolePrimary,
-			expectError:  "failed to get NAD to network mapping: unexpected primary network \"\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}",
-			expectEvents: []string{"Warning ErrorAllocatingPod unexpected primary network \"\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}"},
+			expectError:  "failed to get NAD to network mapping: unexpected primary network \"nad\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}",
+			expectEvents: []string{"Warning ErrorAllocatingPod unexpected primary network \"nad\" specified with a NetworkSelectionElement &{Name:nad Namespace:namespace IPRequest:[] MacRequest: InfinibandGUIDRequest: InterfaceRequest: PortMappingsRequest:[] BandwidthRequest:<nil> CNIArgs:<nil> GatewayRequest:[] IPAMClaimReference:}"},
 		},
 		{
 			name: "Pod on network with exhausted ip pool, expect event and error",
@@ -673,7 +674,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 					network: &nadapi.NetworkSelectionElement{Namespace: "namespace", Name: "nad", MacRequest: "0a:0a:0a:0a:0a:0a"},
 				},
 			},
-			expectError:     `failed to release pod "namespace/pod" mac "0a:0a:0a:0a:0a:0a": failed to release MAC address "0a:0a:0a:0a:0a:0a" for owner "namespace/pod" on network "": test release failure`,
+			expectError:     `failed to release pod "namespace/pod" mac "0a:0a:0a:0a:0a:0a": failed to release MAC address "0a:0a:0a:0a:0a:0a" for owner "namespace/pod" on network "nad": test release failure`,
 			expectIPRelease: true,
 		},
 		{
@@ -827,6 +828,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			nodeListerMock.On("Get", mock.AnythingOfType("string")).Return(&corev1.Node{}, nil)
 
 			netConf := &ovncnitypes.NetConf{
+				NetConf:            cnitypes.NetConf{Name: "nad"},
 				Topology:           types.Layer2Topology,
 				AllowPersistentIPs: tt.ipam && tt.args.ipamClaim != nil,
 			}
@@ -880,6 +882,11 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			for _, nad := range tt.args.nads {
 				if nad.Namespace == testNs {
 					nadNetwork, _ := util.ParseNADInfo(nad)
+					if nadNetwork != nil {
+						mutableNADNetInfo := util.NewMutableNetInfo(nadNetwork)
+						mutableNADNetInfo.AddNADs(util.GetNADName(nad.Namespace, nad.Name))
+						nadNetwork = mutableNADNetInfo
+					}
 					if nadNetwork.IsPrimaryNetwork() {
 						if _, ok := nadNetworks[testNs]; !ok {
 							nadNetworks[testNs] = nadNetwork
@@ -887,8 +894,12 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 					}
 				}
 			}
-
 			fakeNetworkManager := &networkmanager.FakeNetworkManager{PrimaryNetworks: nadNetworks}
+			if !netInfo.IsPrimaryNetwork() {
+				fakeNetworkManager.NADNetworks = map[string]util.NetInfo{
+					"namespace/nad": netInfo,
+				}
+			}
 
 			fakeRecorder := record.NewFakeRecorder(10)
 

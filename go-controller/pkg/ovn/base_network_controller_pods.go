@@ -295,7 +295,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *corev1.Pod, portInfo
 // findPodWithIPAddresses finds any pods with the same IPs in a running state on the cluster
 // If nodeName is provided, pods only belonging to the same node will be checked, unless this pod has
 // potentially live migrated.
-func findPodWithIPAddresses(watchFactory *factory.WatchFactory, netInfo util.NetInfo, needleIPs []net.IP, nodeName string) (*corev1.Pod, error) {
+func findPodWithIPAddresses(watchFactory *factory.WatchFactory, netInfo util.NetInfo, needleIPs []net.IP, nodeName string, getNetworkNameForNADKey func(nadKey string) string) (*corev1.Pod, error) {
 	allPods, err := watchFactory.GetAllPods()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get pods: %w", err)
@@ -317,7 +317,7 @@ func findPodWithIPAddresses(watchFactory *factory.WatchFactory, netInfo util.Net
 		}
 
 		// check if the pod addresses match in the OVN annotation
-		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, netInfo)
+		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, netInfo, getNetworkNameForNADKey)
 		if err != nil {
 			continue
 		}
@@ -341,7 +341,7 @@ func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet, node
 		needleIPs = append(needleIPs, podIPNet.IP)
 	}
 
-	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.GetNetInfo(), needleIPs, nodeName)
+	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.GetNetInfo(), needleIPs, nodeName, bnc.getNetworkNameForNADKeyFunc())
 	if err != nil {
 		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
 

@@ -1004,7 +1004,19 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 				},
 			}
 
-			isAttachmentRequested, networkMap, err := GetPodNADToNetworkMapping(pod, netInfo)
+			var resolver func(string) string
+			if netInfo.IsUserDefinedNetwork() {
+				resolver = func(nadKey string) string {
+					for _, nad := range netInfo.GetNADs() {
+						if nad == nadKey {
+							return netInfo.GetNetworkName()
+						}
+					}
+					return ""
+				}
+			}
+
+			isAttachmentRequested, networkMap, err := getPodNADToNetworkMapping(pod, netInfo, resolver)
 			if test.expectedError != nil {
 				g.Expect(err).To(gomega.HaveOccurred())
 				g.Expect(err).To(gomega.MatchError(test.expectedError))
@@ -1503,10 +1515,20 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 				pod.Namespace = test.inputNamespace
 			}
 
+			resolver := func(nadKey string) string {
+				for _, nad := range netInfo.GetNADs() {
+					if nad == nadKey {
+						return netInfo.GetNetworkName()
+					}
+				}
+				return ""
+			}
+
 			isAttachmentRequested, networkSelectionElements, err := GetPodNADToNetworkMappingWithActiveNetwork(
 				pod,
 				netInfo,
 				primaryUDNNetInfo,
+				resolver,
 			)
 
 			if test.expectedError != nil {

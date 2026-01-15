@@ -56,8 +56,10 @@ type FakeNetworkManager struct {
 	// namespace -> netInfo
 	// if netInfo is nil, it represents a namespace which contains the required UDN label but with no valid network. It will return invalid network error.
 	PrimaryNetworks map[string]util.NetInfo
-	Reconcilers     []reconcilerRegistration
-	nextID          uint64
+	// nad key -> netInfo for non-primary lookups
+	NADNetworks map[string]util.NetInfo
+	Reconcilers []reconcilerRegistration
+	nextID      uint64
 	// UDNNamespaces are a list of namespaces that require UDN for primary network
 	UDNNamespaces sets.Set[string]
 }
@@ -153,6 +155,9 @@ func (fnm *FakeNetworkManager) GetActiveNetwork(networkName string) util.NetInfo
 func (fnm *FakeNetworkManager) GetNetInfoForNADKey(nadKey string) util.NetInfo {
 	fnm.Lock()
 	defer fnm.Unlock()
+	if netInfo, ok := fnm.NADNetworks[nadKey]; ok {
+		return netInfo
+	}
 	for _, ni := range fnm.PrimaryNetworks {
 		for _, n := range ni.GetNADs() {
 			if n == nadKey {
@@ -161,6 +166,22 @@ func (fnm *FakeNetworkManager) GetNetInfoForNADKey(nadKey string) util.NetInfo {
 		}
 	}
 	return nil
+}
+
+func (fnm *FakeNetworkManager) GetNetworkNameForNADKey(nadKey string) string {
+	fnm.Lock()
+	defer fnm.Unlock()
+	if netInfo, ok := fnm.NADNetworks[nadKey]; ok {
+		return netInfo.GetNetworkName()
+	}
+	for _, ni := range fnm.PrimaryNetworks {
+		for _, n := range ni.GetNADs() {
+			if n == nadKey {
+				return ni.GetNetworkName()
+			}
+		}
+	}
+	return ""
 }
 
 func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
@@ -196,6 +217,6 @@ func (fnm *FakeNetworkManager) GetNetworkByID(id int) util.NetInfo {
 	return nil
 }
 
-func (fnm *FakeNetworkManager) NodeHasNAD(_, _ string) bool {
+func (fnm *FakeNetworkManager) NodeHasNetwork(_, _ string) bool {
 	return !config.OVNKubernetesFeature.EnableDynamicUDNAllocation
 }
