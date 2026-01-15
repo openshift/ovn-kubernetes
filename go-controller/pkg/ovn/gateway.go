@@ -34,16 +34,17 @@ import (
 )
 
 type GatewayManager struct {
-	nodeName          string
-	clusterRouterName string
-	gwRouterName      string
-	extSwitchName     string
-	joinSwitchName    string
-	coppUUID          string
-	kube              kube.InterfaceOVN
-	nbClient          libovsdbclient.Client
-	netInfo           util.NetInfo
-	watchFactory      *factory.WatchFactory
+	nodeName                string
+	clusterRouterName       string
+	gwRouterName            string
+	extSwitchName           string
+	joinSwitchName          string
+	coppUUID                string
+	kube                    kube.InterfaceOVN
+	nbClient                libovsdbclient.Client
+	netInfo                 util.NetInfo
+	watchFactory            *factory.WatchFactory
+	getNetworkNameForNADKey func(nadKey string) string
 	// Cluster wide Load_Balancer_Group UUID.
 	// Includes all node switches and node gateway routers.
 	clusterLoadBalancerGroupUUID string
@@ -148,6 +149,12 @@ func WithLoadBalancerGroups(routerLBGroup, clusterLBGroup, switchLBGroup string)
 	}
 }
 
+func WithNetworkNameForNADKeyResolver(getNetworkNameForNADKey func(nadKey string) string) GatewayOption {
+	return func(manager *GatewayManager) {
+		manager.getNetworkNameForNADKey = getNetworkNameForNADKey
+	}
+}
+
 // cleanupStalePodSNATs removes pod SNATs against nodeIP for the given node if
 // the SNAT.logicalIP isn't an active podIP, or disableSNATMultipleGWs=false.
 // We don't have to worry about
@@ -179,7 +186,7 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 				continue
 			}
 			if util.PodCompleted(&pod) {
-				collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
+				collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "", nil) //even if a pod is completed we should still delete the nat if the ip is not in use anymore
 				if err != nil {
 					return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
 				}
@@ -187,7 +194,7 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 					continue
 				}
 			}
-			podIPs, err := util.GetPodIPsOfNetwork(&pod, gw.netInfo)
+			podIPs, err := util.GetPodIPsOfNetwork(&pod, gw.netInfo, gw.getNetworkNameForNADKey)
 			if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
 				// It is possible that the pod is scheduled during this time, but the LSP add or
 				// IP Allocation has not happened and it is waiting for the WatchPods to start

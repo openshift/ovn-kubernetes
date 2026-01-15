@@ -2712,7 +2712,7 @@ func (e *EgressIPController) addExternalGWPodSNATOps(ni util.NetInfo, ops []ovsd
 			if err != nil {
 				return nil, err
 			}
-			podIPs, err := util.GetPodCIDRsWithFullMask(pod, &util.DefaultNetInfo{})
+			podIPs, err := util.GetPodCIDRsWithFullMask(pod, &util.DefaultNetInfo{}, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -3770,7 +3770,7 @@ func (e *EgressIPController) getPodIPs(ni util.NetInfo, pod *corev1.Pod, nadKey 
 		podIPs = getIPFromIPNetFn(logicalPort.ips)
 	} else { // means this is egress node's local master
 		if ni.IsDefault() {
-			podIPNets, err := util.GetPodCIDRsWithFullMask(pod, ni)
+			podIPNets, err := util.GetPodCIDRsWithFullMask(pod, ni, nil)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get pod %s/%s IP: %v", pod.Namespace, pod.Name, err)
 			}
