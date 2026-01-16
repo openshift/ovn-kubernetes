@@ -42,8 +42,6 @@ var (
 			`Pod to external server PMTUD`,
 			`Pod to pod TCP with low MTU`,
 			`blocking ICMP needs frag`,
-			// UDN test requires egress
-			`pod2Egress on a user defined primary network`,
 			`is isolated from the default network`,
 			// requires host net port collision avoidance
 			`EndpointSlices mirroring`,
@@ -81,6 +79,7 @@ var (
 			`Network Segmentation UserDefinedNetwork CRD Controller should correctly report subsystem error on node subnet allocation`,
 			// requires implementation of overlay method (provider API)
 			`Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology`,
+			`should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart`,
 			// pods dont drop privileges
 			`should be able to send multicast UDP traffic between nodes`,
 			// TODO: fix the flakiness with net-seg overlapping CIDRs test in downstream.
