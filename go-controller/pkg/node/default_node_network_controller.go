@@ -1196,9 +1196,15 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 		return fmt.Errorf("cannot reconcile conntrack: %v", err)
 	}
 	svc, err := nc.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-	if err != nil && !kerrors.IsNotFound(err) {
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			klog.V(5).Infof("Service %s/%s not found (might have been deleted) when reconciling conntrack for endpointslice %s",
+				namespacedName.Namespace, namespacedName.Name, oldEndpointSlice.Name)
+			// service is not found, likely deleted, flushing service conntrack entries will be handled at service reconciliation. No-op here.
+			return nil
+		}
 		return fmt.Errorf("error while retrieving service for endpointslice %s/%s when reconciling conntrack: %v",
-			newEndpointSlice.Namespace, newEndpointSlice.Name, err)
+			oldEndpointSlice.Namespace, oldEndpointSlice.Name, err)
 	}
 	for _, oldPort := range oldEndpointSlice.Ports {
 		if *oldPort.Protocol != kapi.ProtocolUDP { // flush conntrack only for UDP
@@ -1212,10 +1218,21 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 				if newEndpointSlice != nil && util.DoesEndpointSliceContainEligibleEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
 					continue
 				}
+				portName := ""
+				if oldPort.Name != nil {
+					portName = *oldPort.Name
+				}
+				servicePort, err := util.FindServicePortForEndpointSlicePort(svc, portName, *oldPort.Protocol)
+				if err != nil {
+					klog.Errorf("Failed to get service port for endpoint %s: %v", oldIPStr, err)
+					continue
+				}
 				// upon update and delete events, flush conntrack only for UDP
-				if err := util.DeleteConntrackServicePort(oldIPStr, *oldPort.Port, *oldPort.Protocol,
+				klog.V(5).Infof("Deleting conntrack entry for endpoint %s, port %d, protocol %s", oldIPStr, servicePort.Port, *oldPort.Protocol)
+				if err := util.DeleteConntrackServicePort(oldIPStr, servicePort.Port, *oldPort.Protocol,
 					netlink.ConntrackReplyAnyIP, nil); err != nil {
-					klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
+					klog.Errorf("Failed to delete conntrack entry for %s port %d: %v", oldIPStr, servicePort.Port, err)
+					errors = append(errors, err)
 				}
 			}
 		}
