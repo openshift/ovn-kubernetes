@@ -698,48 +698,22 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		if len(oldNetwork.GetNADs()) == 0 {
 			c.networkController.DeleteNetwork(oldNetworkName)
 		} else {
-			networkShouldExist := true
-			if c.filterNADsOnNode != "" {
-				// We don't want to create/update NADs that map to UDNs not on our node
-				// Need to check remaining nads and see if we have a pod/egress IP on them
-				networkShouldExist = false
-				for _, nadNamespacedName := range oldNetwork.GetNADs() {
-					nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(nadNamespacedName)
-					if err != nil {
-						return fmt.Errorf("%s: failed splitting key %s: %v", c.name, nadNamespacedName, err)
-					}
-					n, err := c.nadLister.NetworkAttachmentDefinitions(nadNamespace).Get(nadName)
-					if err != nil {
-						if !apierrors.IsNotFound(err) {
-							return err
-						} else {
-							// NAD not doesn't exist, shouldn't render anyway
-							continue
-						}
-					}
-					shouldFilter, err := c.filter(n)
-					if err != nil {
-						return fmt.Errorf("%s: failed filtering NAD %s: %w", c.name, key, err)
-					}
-					if !shouldFilter {
-						networkShouldExist = true
-						break
-					}
-				}
-			}
-			if networkShouldExist {
-				c.networkController.EnsureNetwork(oldNetwork)
-			} else {
-				klog.V(4).Infof("%s: Network is filtered and will not be rendered: %s", c.name, oldNetwork.GetNetworkName())
-			}
+			c.networkController.EnsureNetwork(oldNetwork)
 		}
 		if !dynamicDelete && c.primaryNADs[namespace] == key {
 			delete(c.primaryNADs, namespace)
 		}
 	}
 
-	if err := c.handleNetworkAnnotations(oldNetwork, ensureNetwork, nad); err != nil {
-		return err
+	// handleNetworkAnnotations prevents duplicated IDs from being allocated, so we call it even
+	// if the NAD/network is filtered by Dynamic UDN while we are ensuring the network.
+	// handleNetworkAnnotations also handles deletion and releasing based on NAD cache state
+	// IDs are not released during dynamicDeletes (going inactive) and are only released on a true
+	// NAD/network delete
+	if !dynamicDelete {
+		if err := c.handleNetworkAnnotations(ensureNetwork, nad, key, previousNetworkName); err != nil {
+			return err
+		}
 	}
 
 	// this was a nad delete
@@ -757,24 +731,6 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 			if networkName != "" {
 				c.deleteNADFromNetworkLocked(networkName, key)
 			}
-			if networkName != "" && networkName != types.DefaultNetworkName {
-				stillReferenced := false
-				for _, existing := range c.nads {
-					if existing == networkName {
-						stillReferenced = true
-						break
-					}
-				}
-				// handleNetworkAnnotations will only release IDs if oldNetwork existed in network controller cache.
-				// The entry won't be present in the network controller cache if the network was filtered.
-				// Check the nads cache to see if the network exists, otherwise release its IDs.
-				if !stillReferenced {
-					c.networkIDAllocator.ReleaseID(networkName)
-					if c.isClusterManagerMode() {
-						c.tunnelKeysAllocator.ReleaseKeys(networkName)
-					}
-				}
-			}
 		}
 		return err
 	}
@@ -791,8 +747,6 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 	klog.V(5).Infof("%s: ensuring NAD %q reference for network %q with id %d",
 		c.name, key, ensureNetwork.GetNetworkName(), ensureNetwork.GetNetworkID())
 
-	// ensure the network is associated with the NAD
-	ensureNetwork.AddNADs(key)
 	networkName := ensureNetwork.GetNetworkName()
 	if previousNetworkName != "" && previousNetworkName != networkName {
 		c.deleteNADFromNetworkLocked(previousNetworkName, key)
@@ -820,6 +774,8 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		}
 	}
 	if shouldNetworkExist {
+		// ensure the network is associated with the NAD
+		ensureNetwork.AddNADs(key)
 		// reconcile the network
 		c.networkController.EnsureNetwork(ensureNetwork)
 	} else {
@@ -1098,7 +1054,23 @@ func (c *nadController) DoWithLock(f func(network util.NetInfo) error) error {
 // If this is the NAD controller running in cluster manager then a new ID
 // is allocated and annotated on the NAD. The NAD controller running in
 // cluster manager also releases here the network ID of a network that is being deleted.
-func (c *nadController) handleNetworkAnnotations(old util.NetInfo, new util.MutableNetInfo, nad *nettypes.NetworkAttachmentDefinition) (err error) {
+func (c *nadController) handleNetworkAnnotations(new util.MutableNetInfo, nad *nettypes.NetworkAttachmentDefinition, nadKey, previousNetworkName string) (err error) {
+	newNetworkName := ""
+	if new != nil {
+		newNetworkName = new.GetNetworkName()
+	}
+	if previousNetworkName != "" && previousNetworkName != types.DefaultNetworkName &&
+		(new == nil || previousNetworkName != newNetworkName) {
+		if c.networkReferencedLocked(previousNetworkName, nadKey) {
+			klog.V(5).Infof("%s: NADs still reference network %s; skipping ID release", c.name, previousNetworkName)
+		} else {
+			c.networkIDAllocator.ReleaseID(previousNetworkName)
+			if c.isClusterManagerMode() {
+				c.tunnelKeysAllocator.ReleaseKeys(previousNetworkName)
+			}
+		}
+	}
+
 	if new != nil && new.IsDefault() {
 		return nil
 	}
@@ -1130,14 +1102,6 @@ func (c *nadController) handleNetworkAnnotations(old util.NetInfo, new util.Muta
 		tunnelKeys, err = util.ParseTunnelKeysAnnotation(nad.Annotations[types.OvnNetworkTunnelKeysAnnotation])
 		if err != nil {
 			return fmt.Errorf("failed to parse annotated tunnel keys: %w", err)
-		}
-	}
-
-	// release old ID if the network is being deleted
-	if old != nil && !old.IsDefault() && len(old.GetNADs()) == 0 {
-		c.networkIDAllocator.ReleaseID(old.GetNetworkName())
-		if c.isClusterManagerMode() {
-			c.tunnelKeysAllocator.ReleaseKeys(old.GetNetworkName())
 		}
 	}
 
@@ -1255,6 +1219,26 @@ func (c *nadController) handleNetworkAnnotations(old util.NetInfo, new util.Muta
 	new.SetTunnelKeys(tunnelKeys)
 
 	return nil
+}
+
+// networkReferencedLocked reports whether any NADs still reference a network.
+// When excludeNAD is set, it is ignored in the reference check.
+// Must be called with nadController locked.
+func (c *nadController) networkReferencedLocked(networkName, excludeNAD string) bool {
+	if networkName == "" || networkName == types.DefaultNetworkName {
+		return false
+	}
+	nadSet := c.nadsByNetwork[networkName]
+	if len(nadSet) == 0 {
+		return false
+	}
+	if excludeNAD == "" {
+		return len(nadSet) > 0
+	}
+	if nadSet.Has(excludeNAD) {
+		return len(nadSet) > 1
+	}
+	return len(nadSet) > 0
 }
 
 func (c *nadController) getNetworkIDFromNode(nadNetwork util.NetInfo) (int, error) {
