@@ -21,7 +21,7 @@ jobs:
     name: Build Fedora (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
         - platform: linux/amd64
@@ -163,7 +163,7 @@ jobs:
     name: Build Ubuntu (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
         - platform: linux/amd64
