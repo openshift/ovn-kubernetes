@@ -19,13 +19,15 @@ jobs:
   # Build Fedora image for each platform
   build-fedora:
     name: Build Fedora (${{ matrix.platform }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
+        include:
+        - platform: linux/amd64
+          runner: ubuntu-latest
+        - platform: linux/arm64
+          runner: ubuntu-24.04-arm
     steps:
     - name: Prepare
       run: |
@@ -76,11 +78,6 @@ jobs:
         pushd dist/images
           echo "ref: ${BRANCH}  commit: ${COMMIT}" > git_info
         popd 
-
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: all
 
     - name: Set up Docker Buildx
       id: buildx
@@ -164,13 +161,15 @@ jobs:
   # Build Ubuntu image for each platform
   build-ubuntu:
     name: Build Ubuntu (${{ matrix.platform }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
+        include:
+        - platform: linux/amd64
+          runner: ubuntu-latest
+        - platform: linux/arm64
+          runner: ubuntu-24.04-arm
     steps:
     - name: Prepare
       run: |
@@ -221,11 +220,6 @@ jobs:
         pushd dist/images
           echo "ref: ${BRANCH}  commit: ${COMMIT}" > git_info
         popd 
-
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: all
 
     - name: Set up Docker Buildx
       id: buildx
