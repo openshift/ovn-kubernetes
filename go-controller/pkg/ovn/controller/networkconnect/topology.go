@@ -167,16 +167,19 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 			klog.V(4).Infof("Network with ID %d not found, skipping", networkID)
 			continue
 		}
+		localActive := localNode != nil && c.networkManager.NodeHasNetwork(localNode.Name, netInfo.GetNetworkName())
 
 		// Check if the network router exists before trying to create ports on it.
 		// The network might be registered in the network manager but not yet created in OVN NB.
 		// If the router doesn't exist, skip this network and retry later.
-		networkRouterName := netInfo.GetNetworkScopedClusterRouterName()
-		_, err = libovsdbops.GetLogicalRouter(c.nbClient, &nbdb.LogicalRouter{Name: networkRouterName})
-		if err != nil {
-			klog.V(4).Infof("Network router %s for network %s does not exist yet, will retry: %v", networkRouterName, netInfo.GetNetworkName(), err)
-			errs = append(errs, fmt.Errorf("network router %s for network %s does not exist yet: %w", networkRouterName, netInfo.GetNetworkName(), err))
-			continue
+		if localActive {
+			networkRouterName := netInfo.GetNetworkScopedClusterRouterName()
+			_, err = libovsdbops.GetLogicalRouter(c.nbClient, &nbdb.LogicalRouter{Name: networkRouterName})
+			if err != nil {
+				klog.V(4).Infof("Network router %s for network %s does not exist yet, will retry: %v", networkRouterName, netInfo.GetNetworkName(), err)
+				errs = append(errs, fmt.Errorf("network router %s for network %s does not exist yet: %w", networkRouterName, netInfo.GetNetworkName(), err))
+				continue
+			}
 		}
 
 		klog.V(5).Infof("CNC %s: ensuring ports, policies and routes for network %s (new=%v)", cncName, netInfo.GetNetworkName(), isNewNetwork)
@@ -187,24 +190,28 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 		// Create/update ports connecting the connect router and network router
 		// Local node: full port pair with peer; Remote nodes: connect-router port only
 		// This is idempotent - existing ports are unchanged, new node ports are created
-		createOps, err = c.ensureConnectPortsOps(createOps, cnc, netInfo, subnets, allNodes)
+		createOps, err = c.ensureConnectPortsOps(createOps, cnc, netInfo, subnets, allNodes, localActive)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("CNC %s: failed to ensure connect ports for network %s: %w", cncName, netInfo.GetNetworkName(), err))
 			continue
 		}
 
-		// Ensure routing policies on the network router
-		createOps, err = c.ensureRoutingPoliciesOps(createOps, cncName, netInfo, allocatedSubnets, localNode)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("CNC %s: failed to ensure routing policies for network %s: %w", cncName, netInfo.GetNetworkName(), err))
-			continue
+		// Ensure routing policies on the network router (local-active networks only)
+		if localActive {
+			createOps, err = c.ensureRoutingPoliciesOps(createOps, cncName, netInfo, allocatedSubnets, localNode)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("CNC %s: failed to ensure routing policies for network %s: %w", cncName, netInfo.GetNetworkName(), err))
+				continue
+			}
 		}
 
-		// Ensure static routes on the connect router
-		createOps, err = c.ensureStaticRoutesOps(createOps, cnc, netInfo, subnets, allNodes)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("CNC %s: failed to ensure static routes for network %s: %w", cncName, netInfo.GetNetworkName(), err))
-			continue
+		// Ensure static routes on the connect router. For Layer2, skip when the local network is inactive.
+		if netInfo.TopologyType() != ovntypes.Layer2Topology || localActive {
+			createOps, err = c.ensureStaticRoutesOps(createOps, cnc, netInfo, subnets, allNodes)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("CNC %s: failed to ensure static routes for network %s: %w", cncName, netInfo.GetNetworkName(), err))
+				continue
+			}
 		}
 
 		// Transact per network to keep transaction sizes bounded
@@ -479,7 +486,7 @@ func (c *Controller) cleanupNetworkConnections(cncName string) error {
 //
 // For Layer2: creates a single port pair (transit router is distributed)
 func (c *Controller) ensureConnectPortsOps(ops []ovsdb.Operation, cnc *networkconnectv1.ClusterNetworkConnect, netInfo util.NetInfo,
-	subnets []*net.IPNet, nodes []*corev1.Node) ([]ovsdb.Operation, error) {
+	subnets []*net.IPNet, nodes []*corev1.Node, localActive bool) ([]ovsdb.Operation, error) {
 	cncName := cnc.Name
 	networkName := netInfo.GetNetworkName()
 	connectRouterName := getConnectRouterName(cncName)
@@ -519,6 +526,23 @@ func (c *Controller) ensureConnectPortsOps(ops []ovsdb.Operation, cnc *networkco
 			isLocalNode := util.GetNodeZone(node) == c.zone
 
 			if isLocalNode {
+				if !localActive {
+					ops, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, ops, connectRouterName,
+						func(item *nbdb.LogicalRouterPort) bool {
+							return item.Name == connectPortName
+						})
+					if err != nil {
+						return nil, fmt.Errorf("failed to delete connect router port ops %s: %v", connectPortName, err)
+					}
+					ops, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, ops, networkRouterName,
+						func(item *nbdb.LogicalRouterPort) bool {
+							return item.Name == networkPortName
+						})
+					if err != nil {
+						return nil, fmt.Errorf("failed to delete network router port ops %s: %v", networkPortName, err)
+					}
+					continue
+				}
 				// Local node: create both ports with peer relationship
 				ops, err = c.createRouterPortOps(ops, connectRouterName, connectPortName, portPairInfo.connectPortIPs,
 					networkPortName, cncName, networkID, nodeID, tunnelKey, "")
@@ -564,6 +588,24 @@ func (c *Controller) ensureConnectPortsOps(ops []ovsdb.Operation, cnc *networkco
 
 		connectPortName := getConnectRouterToNetworkRouterPortName(cncName, networkName, "")
 		networkPortName := getNetworkRouterToConnectRouterPortName(networkName, "", cncName)
+
+		if !localActive {
+			ops, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, ops, connectRouterName,
+				func(item *nbdb.LogicalRouterPort) bool {
+					return item.Name == connectPortName
+				})
+			if err != nil {
+				return nil, fmt.Errorf("failed to delete connect router port ops %s: %v", connectPortName, err)
+			}
+			ops, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, ops, networkRouterName,
+				func(item *nbdb.LogicalRouterPort) bool {
+					return item.Name == networkPortName
+				})
+			if err != nil {
+				return nil, fmt.Errorf("failed to delete network router port ops %s: %v", networkPortName, err)
+			}
+			return ops, nil
+		}
 
 		// Create the port on the connect router (with peer set)
 		ops, err = c.createRouterPortOps(ops, connectRouterName, connectPortName, portPairInfo.connectPortIPs,
