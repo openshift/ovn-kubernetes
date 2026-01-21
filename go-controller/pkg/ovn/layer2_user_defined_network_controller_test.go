@@ -20,6 +20,7 @@ import (
 
 	ovnkcnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
@@ -765,6 +766,82 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			Eventually(fakeOvn.nbClient).WithTimeout(3 * time.Second).Should(
 				libovsdbtest.HaveDataSubset([]libovsdbtest.TestData{expectedLRP, expectedLSP}),
 			)
+		})
+
+		It("does not filter pods from other namespaces of the same primary UDN", func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+			config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+			config.OVNKubernetesFeature.EnableInterconnect = true
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.Default.Zone = testICZone
+
+			netInfo := dummyLayer2PrimaryUserDefinedNetwork("100.200.0.0/16")
+			nsA := "namespace-a"
+			nsB := "namespace-b"
+			nsAObj := newUDNNamespace(nsA)
+			nsBObj := newUDNNamespace(nsB)
+
+			netInfoA := netInfo
+			netInfoA.nadName = namespacedName(nsA, nadName)
+			netInfoB := netInfo
+			netInfoB.nadName = namespacedName(nsB, nadName)
+
+			nadA, err := newNetworkAttachmentDefinition(nsA, nadName, *netInfoA.netconf())
+			Expect(err).NotTo(HaveOccurred())
+			nadB, err := newNetworkAttachmentDefinition(nsB, nadName, *netInfoB.netconf())
+			Expect(err).NotTo(HaveOccurred())
+
+			parsedNetInfoA, err := util.NewNetInfo(netInfoA.netconf())
+			Expect(err).NotTo(HaveOccurred())
+			mutableA := util.NewMutableNetInfo(parsedNetInfoA)
+			mutableA.SetNADs(namespacedName(nsA, nadName))
+
+			parsedNetInfoB, err := util.NewNetInfo(netInfoB.netconf())
+			Expect(err).NotTo(HaveOccurred())
+			mutableB := util.NewMutableNetInfo(parsedNetInfoB)
+			mutableB.SetNADs(namespacedName(nsB, nadName))
+
+			fakeOvn.networkManager = &testnm.FakeNetworkManager{
+				PrimaryNetworks: map[string]util.NetInfo{
+					nsA: mutableA,
+					nsB: mutableB,
+				},
+			}
+
+			localNode, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24", netInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*nsAObj, *nsBObj}},
+				&corev1.NodeList{Items: []corev1.Node{*localNode}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nadA, *nadB}},
+			)
+
+			Expect(fakeOvn.NewUserDefinedNetworkController(nadB)).To(Succeed())
+			l2Controller, ok := fakeOvn.fullL2UDNControllers[netInfo.netName]
+			Expect(ok).To(BeTrue())
+			mutableNetInfo := util.NewMutableNetInfo(l2Controller.GetNetInfo())
+			mutableNetInfo.SetNADs(namespacedName(nsB, nadName))
+			err = util.ReconcileNetInfo(l2Controller.ReconcilableNetInfo, mutableNetInfo)
+			Expect(err).NotTo(HaveOccurred())
+			By("confirming the controller only tracks the local namespace NAD")
+			Expect(l2Controller.GetNetInfo().HasNAD(namespacedName(nsA, nadName))).To(BeFalse())
+			Expect(l2Controller.GetNetInfo().HasNAD(namespacedName(nsB, nadName))).To(BeTrue())
+
+			remotePod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "remote-pod",
+					Namespace: nsA,
+				},
+				Spec: corev1.PodSpec{
+					NodeName:   localNode.Name,
+					Containers: []corev1.Container{{Name: "c", Image: "scratch"}},
+				},
+			}
+
+			By("ensuring the pod is not filtered out by the UDN controller")
+			Expect(l2Controller.FilterOutResource(factory.PodType, remotePod)).To(BeFalse())
 		})
 	})
 })
