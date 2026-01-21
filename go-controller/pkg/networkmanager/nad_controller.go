@@ -1276,7 +1276,41 @@ func (c *nadController) GetActiveNetwork(network string) util.NetInfo {
 }
 
 func (c *nadController) GetNetworkByID(id int) util.NetInfo {
-	return c.networkController.GetNetworkByID(id)
+	if id == types.InvalidID {
+		return nil
+	}
+	netInfo := c.networkController.GetNetworkByID(id)
+	if netInfo != nil {
+		return netInfo
+	}
+	c.RLock()
+	nadKeys := make([]string, 0, len(c.nads))
+	for key := range c.nads {
+		nadKeys = append(nadKeys, key)
+	}
+	c.RUnlock()
+	// Handles the case where there is a cache miss. This is needed for filtered networks with
+	// Dynamic UDN as there will be no network manager cache entry.
+	// TODO (trozet): this is slow. We should optimize this by potentially storing the cache
+	// of netInfos even for filtered entries.
+	for _, key := range nadKeys {
+		namespace, name, err := cache.SplitMetaNamespaceKey(key)
+		if err != nil {
+			continue
+		}
+		nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
+		if err != nil {
+			continue
+		}
+		nadNetwork, err := util.ParseNADInfo(nad)
+		if err != nil || nadNetwork == nil {
+			continue
+		}
+		if nadNetwork.GetNetworkID() == id {
+			return nadNetwork
+		}
+	}
+	return nil
 }
 
 func (c *nadController) isClusterManagerMode() bool {
