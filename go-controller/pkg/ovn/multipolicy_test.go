@@ -571,7 +571,6 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					if remote {
 						config.OVNKubernetesFeature.EnableInterconnect = true
 						node.Annotations["k8s.ovn.org/zone-name"] = "remote"
-						node.Annotations["k8s.ovn.org/remote-zone-migrated"] = "remote"
 						node.Annotations, err = util.UpdateNetworkIDAnnotation(node.Annotations, ovntypes.DefaultNetworkName, 0)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						if topology != ovntypes.LocalnetTopology {

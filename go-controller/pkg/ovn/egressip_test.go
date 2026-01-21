@@ -163,9 +163,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s\"}", ni.transitPortIP), // used only for ic=true test
 				"k8s.ovn.org/zone-name":                       ni.zone,
 			}
-			if ni.zone != "global" {
-				annotations["k8s.ovn.org/remote-zone-migrated"] = ""
-			}
 			nodes = append(nodes, getNodeObj(fmt.Sprintf("node%d", nodeSuffix), annotations, map[string]string{}))
 			nodeSuffix = nodeSuffix + 1
 		}
@@ -194,9 +191,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				util.OVNNodeHostCIDRs:                         hostCIDRs,
 				"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv6\":\"%s\"}", ni.transitPortIP), // used only for ic=true test
 				"k8s.ovn.org/zone-name":                       ni.zone,
-			}
-			if ni.zone != "global" {
-				annotations["k8s.ovn.org/remote-zone-migrated"] = ""
 			}
 			nodes = append(nodes, getNodeObj(fmt.Sprintf("node%d", nodeSuffix), annotations, map[string]string{}))
 			nodeSuffix = nodeSuffix + 1
@@ -1816,12 +1810,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/egress-assignable": "",
 					}
 					node2 := nodes[1]
-					if node1Zone != "global" {
-						node1.Annotations["k8s.ovn.org/remote-zone-migrated"] = node1Zone // used only for ic=true test
-					}
-					if node2Zone != "global" {
-						node2.Annotations["k8s.ovn.org/remote-zone-migrated"] = node2Zone // used only for ic=true test
-					}
+
 					egressPod := *newPodWithLabels(eipNamespace, podName, node1Name, podV4IP, egressPodLabel)
 					egressNamespace := newNamespace(eipNamespace)
 
@@ -2623,9 +2612,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/zone-name":                       node1Zone,
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4),
 					}
-					if node1Zone != "global" {
-						annotations["k8s.ovn.org/remote-zone-migrated"] = node1Zone // used only for ic=true test
-					}
 					labels := map[string]string{
 						"k8s.ovn.org/egress-assignable": "",
 					}
@@ -2636,9 +2622,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.3/16\"}", // used only for ic=true test
 						"k8s.ovn.org/zone-name":                       node2Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4),
-					}
-					if node2Zone != "global" {
-						annotations["k8s.ovn.org/remote-zone-migrated"] = node2Zone // used only for ic=true test
 					}
 					labels = map[string]string{}
 					node2 := getNodeObj(node2Name, annotations, labels)
@@ -3430,7 +3413,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\"}", v4Node1Subnet, v6Node1Subnet),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.2/16\", \"ipv6\": \"fd97::2/64\"}",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", nodeIPv4),
-					"k8s.ovn.org/zone-name":                       node1Name,
+					"k8s.ovn.org/zone-name":                       "global",
 				}
 				node := getNodeObj(node1Name, annotations, map[string]string{}) // add node to avoid errori-ing out on transit switch IP fetch
 				fakeOvn.startWithDBSetup(
@@ -3619,7 +3602,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					}
 					if !isnode1Local {
 						annotations["k8s.ovn.org/zone-name"] = "remote"
-						annotations["k8s.ovn.org/remote-zone-migrated"] = "remote" // used only for ic=true test
 					}
 					node1 := getNodeObj(node1Name, annotations, map[string]string{}) // add node to avoid errori-ing out on transit switch IP fetch
 
@@ -3636,7 +3618,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 					if !isnode2Local {
 						annotations["k8s.ovn.org/zone-name"] = "remote"
-						annotations["k8s.ovn.org/remote-zone-migrated"] = "remote" // used only for ic=true test
 					}
 					node2 := getNodeObj(node2Name, annotations, map[string]string{}) // add node to avoid errori-ing out on transit switch IP fetch
 					dynamicNeighRouters := "true"
@@ -4777,9 +4758,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					// pod lives on node 1, therefore set the zone
 					node1 := newNodeGlobalZoneNotEgressableV6Only(node1Name, "0:0:0:0:0:feff:c0a8:8e0c/64")
 					node1.Annotations["k8s.ovn.org/zone-name"] = podZone
-					if podZone != "global" {
-						node1.Annotations["k8s.ovn.org/remote-zone-migrated"] = podZone // used only for ic=true test
-					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
 					dynamicNeighRouters := "true"
@@ -5015,9 +4993,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					// pod is host by node 1 therefore we set its zone
 					node1 := newNodeGlobalZoneNotEgressableV6Only(node1Name, "0:0:0:0:0:fedf:c0a8:8e0c/64")
 					node1.Annotations["k8s.ovn.org/zone-name"] = podZone
-					if podZone != "global" {
-						node1.Annotations["k8s.ovn.org/remote-zone-migrated"] = podZone // used only for ic=true test
-					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
 					dynamicNeighRouters := "true"
@@ -5272,9 +5247,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					// pod is hosted by node 1 therefore we set its zone
 					node1 := newNodeGlobalZoneNotEgressableV6Only(node1Name, "0:0:0:0:0:feff:c0a8:8e0c/64")
 					node1.Annotations["k8s.ovn.org/zone-name"] = podZone
-					if podZone != "global" {
-						node1.Annotations["k8s.ovn.org/remote-zone-migrated"] = podZone // used only for ic=true test
-					}
 					_, node1Subnet, _ := net.ParseCIDR(v6Node1Subnet)
 					_, node2Subnet, _ := net.ParseCIDR(v6Node2Subnet)
 					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets(nil, types.DefaultNetworkName, DefaultNetworkControllerName)
@@ -5602,9 +5574,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 						util.OvnNodeID:                                "2",
 					}
-					if node1Zone != "global" {
-						annotations["k8s.ovn.org/remote-zone-migrated"] = node1Zone // used only for ic=true test
-					}
 					labels := map[string]string{
 						"k8s.ovn.org/egress-assignable": "",
 					}
@@ -5616,9 +5585,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/zone-name":                       node2Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 						util.OvnNodeID:                                "3",
-					}
-					if node2Zone != "global" {
-						annotations["k8s.ovn.org/remote-zone-migrated"] = node2Zone // used only for ic=true test
 					}
 					node2 := getNodeObj(node2Name, annotations, labels)
 					_, node2Subnet, _ := net.ParseCIDR(v4Node2Subnet)
@@ -7534,9 +7500,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/zone-name":                       node1Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					}
-					if node1Zone != "global" {
-						annotations["k8s.ovn.org/remote-zone-migrated"] = node1Zone // used only for ic=true test
-					}
 					labels := map[string]string{
 						"k8s.ovn.org/egress-assignable": "",
 					}
@@ -7549,9 +7512,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						"k8s.ovn.org/node-transit-switch-port-ifaddr": "{\"ipv4\":\"100.88.0.3/16\"}", // used only for ic=true test
 						"k8s.ovn.org/zone-name":                       node2Zone,                      // used only for ic=true test
 						util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
-					}
-					if node2Zone != "global" {
-						annotations["k8s.ovn.org/remote-zone-migrated"] = node2Zone // used only for ic=true test
 					}
 					node2 := getNodeObj(node2Name, annotations, map[string]string{})
 					eIP1 := egressipv1.EgressIP{
@@ -11676,7 +11636,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					}
 					if isPodRemote {
 						annotations["k8s.ovn.org/zone-name"] = "remote"
-						annotations["k8s.ovn.org/remote-zone-migrated"] = "remote"
 					}
 					node2 := getNodeObj(node2Name, annotations, map[string]string{})
 
