@@ -1,15 +1,22 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
+	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
+	vtepclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	utilnet "k8s.io/utils/net"
 )
@@ -753,4 +760,64 @@ func setupIPVRFAgnhost(ictx infraapi.Context, vid int, vrfName string, ipFamilie
 
 	framework.Logf("IP-VRF agnhost setup complete: %s (IPs: %v, network: %s, VRF: %s)", containerName, info.agnhostIPs, networkName, vrfName)
 	return info.agnhostIPs, nil
+}
+
+// =============================================================================
+// VTEP Utilities
+// =============================================================================
+
+// createVTEP creates a VTEP (VXLAN Tunnel Endpoint) custom resource for EVPN.
+// The VTEP CR defines the IP range from which VTEP IPs are allocated for EVPN VXLAN tunnels.
+//
+// Parameters:
+//   - f: Test framework (used to get client config)
+//   - ictx: Infrastructure context for cleanup registration
+//   - name: Name of the VTEP CR
+//   - cidrs: CIDR ranges for VTEP IP allocation (supports dual-stack with 2 CIDRs)
+//   - mode: VTEP mode - "Managed" (OVN-K allocates IPs) or "Unmanaged" (external provider)
+func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidrs []string, mode vtepv1.VTEPMode) error {
+	client, err := vtepclientset.NewForConfig(f.ClientConfig())
+	if err != nil {
+		return fmt.Errorf("failed to create VTEP client: %w", err)
+	}
+
+	// Convert string CIDRs to vtepv1.CIDR type
+	vtepCIDRs := make(vtepv1.DualStackCIDRs, len(cidrs))
+	for i, cidr := range cidrs {
+		vtepCIDRs[i] = vtepv1.CIDR(cidr)
+	}
+
+	vtep := &vtepv1.VTEP{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: vtepv1.VTEPSpec{
+			CIDRs: vtepCIDRs,
+			Mode:  mode,
+		},
+	}
+
+	_, err = client.K8sV1().VTEPs().Create(context.Background(), vtep, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create VTEP %s: %w", name, err)
+	}
+
+	// Register cleanup: delete VTEP and wait until it's fully removed
+	ictx.AddCleanUpFn(func() error {
+		err := client.K8sV1().VTEPs().Delete(context.Background(), name, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+			_, err := client.K8sV1().VTEPs().Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		})
+	})
+
+	// TODO: Add status check once VTEP controller implements status conditions
+	framework.Logf("VTEP created: %s (CIDRs: %v, Mode: %s)", name, cidrs, mode)
+	return nil
 }
