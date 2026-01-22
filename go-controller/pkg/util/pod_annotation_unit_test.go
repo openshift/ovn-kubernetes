@@ -371,8 +371,9 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			var resolver func(nadKey string) string
 			if tc.networkInfo.IsUserDefinedNetwork() {
+				expectedNADKey := GetNADName(namespace, secondaryNetworkName)
 				resolver = func(nadKey string) string {
-					if tc.networkInfo.HasNAD(nadKey) {
+					if nadKey == expectedNADKey {
 						return tc.networkInfo.GetNetworkName()
 					}
 					return ""

@@ -142,6 +142,10 @@ func NewController(
 	isPodScheduledinLocalZone func(*corev1.Pod) bool,
 	zone string) (*Controller, error) {
 
+	if netInfo.IsUserDefinedNetwork() && networkManager == nil {
+		return nil, fmt.Errorf("network manager is required for network %q", netInfo.GetNetworkName())
+	}
+
 	c := &Controller{
 		controllerName:            controllerName,
 		NetInfo:                   netInfo,
@@ -509,15 +513,7 @@ func (c *Controller) podNetworkResolver() func(nadKey string) string {
 	if !c.NetInfo.IsUserDefinedNetwork() {
 		return nil
 	}
-	if c.networkManager != nil {
-		return c.networkManager.GetNetworkNameForNADKey
-	}
-	return func(nadKey string) string {
-		if c.NetInfo.HasNAD(nadKey) {
-			return c.NetInfo.GetNetworkName()
-		}
-		return ""
-	}
+	return c.networkManager.GetNetworkNameForNADKey
 }
 
 // onNQOSPodDelete queues the pod for processing.

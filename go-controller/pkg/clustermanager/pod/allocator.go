@@ -206,7 +206,8 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 			return err
 		}
 		for nadKey := range podNetworks {
-			if a.netInfo.HasNADKey(nadKey) {
+			networkName := a.networkManager.GetNetworkNameForNADKey(nadKey)
+			if networkName != "" && networkName == a.netInfo.GetNetworkName() {
 				activeNetwork = a.netInfo
 				break
 			}
@@ -222,6 +223,7 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 		a.netInfo,
 		activeNetwork,
 		a.networkManager.GetNetworkNameForNADKey,
+		a.networkManager.GetPrimaryNADForNamespace,
 	)
 	if err != nil {
 		a.recordPodErrorEvent(pod, err)

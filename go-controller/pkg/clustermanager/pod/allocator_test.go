@@ -879,14 +879,21 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 
 			testNs := "namespace"
 			nadNetworks := map[string]util.NetInfo{}
+			nadKeyToNetInfo := map[string]util.NetInfo{}
 			for _, nad := range tt.args.nads {
 				if nad.Namespace == testNs {
-					nadNetwork, _ := util.ParseNADInfo(nad)
-					if nadNetwork != nil {
-						mutableNADNetInfo := util.NewMutableNetInfo(nadNetwork)
-						mutableNADNetInfo.AddNADs(util.GetNADName(nad.Namespace, nad.Name))
-						nadNetwork = mutableNADNetInfo
+					nadNetwork, err := util.ParseNADInfo(nad)
+					if err != nil {
+						t.Fatalf("ParseNADInfo failed for %s: %v", util.GetNADName(nad.Namespace, nad.Name), err)
 					}
+					if nadNetwork == nil {
+						t.Fatalf("ParseNADInfo returned nil for %s", util.GetNADName(nad.Namespace, nad.Name))
+					}
+					mutableNADNetInfo := util.NewMutableNetInfo(nadNetwork)
+					nadKey := util.GetNADName(nad.Namespace, nad.Name)
+					mutableNADNetInfo.AddNADs(nadKey)
+					nadNetwork = mutableNADNetInfo
+					nadKeyToNetInfo[nadKey] = nadNetwork
 					if nadNetwork.IsPrimaryNetwork() {
 						if _, ok := nadNetworks[testNs]; !ok {
 							nadNetworks[testNs] = nadNetwork
@@ -894,11 +901,16 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 					}
 				}
 			}
-			fakeNetworkManager := &networkmanager.FakeNetworkManager{PrimaryNetworks: nadNetworks}
-			if !netInfo.IsPrimaryNetwork() {
-				fakeNetworkManager.NADNetworks = map[string]util.NetInfo{
-					"namespace/nad": netInfo,
-				}
+			fakeNetworkManager := &networkmanager.FakeNetworkManager{
+				PrimaryNetworks: nadNetworks,
+				NADNetworks:     nadKeyToNetInfo,
+			}
+			// Ensure resolver can map the test NAD key used by pod annotations.
+			if _, ok := fakeNetworkManager.NADNetworks["namespace/nad"]; !ok {
+				fakeNetworkManager.NADNetworks["namespace/nad"] = netInfo
+			}
+			if netInfo.IsPrimaryNetwork() && fakeNetworkManager.PrimaryNetworks["namespace"] == nil {
+				fakeNetworkManager.PrimaryNetworks["namespace"] = netInfo
 			}
 
 			fakeRecorder := record.NewFakeRecorder(10)

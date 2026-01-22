@@ -115,6 +115,8 @@ type networkController struct {
 	networks           map[string]util.MutableNetInfo
 	networksByID       map[int]string // reverse index: network ID -> network name for O(1) lookup
 	networkControllers map[string]*networkControllerState
+	// getNADKeysForNetwork returns NAD keys associated with a network name.
+	getNADKeysForNetwork func(networkName string) []string
 
 	// networkRefLock is used to protect pendingNetworkRefNodes and networkRefStates access
 	networkRefLock sync.Mutex
@@ -518,9 +520,12 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo) error
 	if !c.hasRouteAdvertisements() {
 		return nil
 	}
+	if c.getNADKeysForNetwork == nil {
+		return fmt.Errorf("missing NAD resolver for network %q", network.GetNetworkName())
+	}
 
 	raNames := sets.New[string]()
-	for _, nadNamespacedName := range network.GetNADs() {
+	for _, nadNamespacedName := range c.getNADKeysForNetwork(network.GetNetworkName()) {
 		namespace, name, err := cache.SplitMetaNamespaceKey(nadNamespacedName)
 		if err != nil {
 			return err

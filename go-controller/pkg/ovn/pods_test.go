@@ -442,15 +442,18 @@ func getDefaultNetExpectedPodsAndSwitches(pods []testPod, nodes []string) []libo
 	return getDefaultNetExpectedDataPodsSwitchesPortGroup(pods, nodes, "")
 }
 
-func getExpectedPodsAndSwitches(netInfo util.NetInfo, pods []testPod, nodes []string) []libovsdbtest.TestData {
-	return getExpectedDataPodsSwitchesPortGroup(netInfo, pods, nodes, "")
+func getExpectedPodsAndSwitches(netInfo util.NetInfo, pods []testPod, nodes []string, nadKey string) []libovsdbtest.TestData {
+	return getExpectedDataPodsSwitchesPortGroup(netInfo, pods, nodes, "", nadKey)
 }
 
 func getDefaultNetExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namespacedPortGroup string) []libovsdbtest.TestData {
-	return getExpectedDataPodsSwitchesPortGroup(&util.DefaultNetInfo{}, pods, nodes, namespacedPortGroup)
+	return getExpectedDataPodsSwitchesPortGroup(&util.DefaultNetInfo{}, pods, nodes, namespacedPortGroup, "")
 }
 
-func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, nodes []string, namespacedPortGroup string) []libovsdbtest.TestData {
+func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, nodes []string, namespacedPortGroup string, nadKey string) []libovsdbtest.TestData {
+	if !netInfo.IsDefault() && nadKey == "" {
+		panic("missing NAD key for non-default network")
+	}
 	nodeslsps := make(map[string][]string)
 	var logicalSwitchPorts []*nbdb.LogicalSwitchPort
 	for _, pod := range pods {
@@ -458,7 +461,7 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 		if netInfo.IsDefault() {
 			portName = util.GetLogicalPortName(pod.namespace, pod.podName)
 		} else {
-			portName = util.GetUserDefinedNetworkLogicalPortName(pod.namespace, pod.podName, netInfo.GetNADs()[0])
+			portName = util.GetUserDefinedNetworkLogicalPortName(pod.namespace, pod.podName, nadKey)
 		}
 		var lspUUID string
 		if len(pod.portUUID) == 0 {
@@ -486,7 +489,7 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 		}
 		if !netInfo.IsDefault() {
 			lsp.ExternalIDs["k8s.ovn.org/network"] = netInfo.GetNetworkName()
-			lsp.ExternalIDs["k8s.ovn.org/nad"] = netInfo.GetNADs()[0]
+			lsp.ExternalIDs["k8s.ovn.org/nad"] = nadKey
 			lsp.ExternalIDs["k8s.ovn.org/topology"] = netInfo.TopologyType()
 		}
 		logicalSwitchPorts = append(logicalSwitchPorts, lsp)
