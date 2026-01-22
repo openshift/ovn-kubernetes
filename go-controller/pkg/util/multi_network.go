@@ -1658,6 +1658,10 @@ func IsRouteAdvertisementsEnabled() bool {
 	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableRouteAdvertisements
 }
 
+func IsEVPNEnabled() bool {
+	return IsRouteAdvertisementsEnabled() && config.OVNKubernetesFeature.EnableEVPN
+}
+
 // IsPreconfiguredUDNAddressesEnabled indicates if user defined IPs / MAC
 // addresses can be set in primary UDNs
 func IsPreconfiguredUDNAddressesEnabled() bool {

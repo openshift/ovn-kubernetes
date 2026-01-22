@@ -73,6 +73,7 @@ OVN_NETWORK_SEGMENTATION_ENABLE=
 OVN_NETWORK_CONNECT_ENABLE=
 OVN_PRE_CONF_UDN_ADDR_ENABLE=
 OVN_ROUTE_ADVERTISEMENTS_ENABLE=
+OVN_EVPN_ENABLE=
 OVN_ADVERTISE_DEFAULT_NETWORK=
 OVN_ADVERTISED_UDN_ISOLATION_MODE=
 OVN_V4_JOIN_SUBNET=""
@@ -282,6 +283,9 @@ while [ "$1" != "" ]; do
   --route-advertisements-enable)
     OVN_ROUTE_ADVERTISEMENTS_ENABLE=$VALUE
     ;;
+  --evpn-enable)
+    OVN_EVPN_ENABLE=$VALUE
+    ;;
   --advertise-default-network)
     OVN_ADVERTISE_DEFAULT_NETWORK=$VALUE
     ;;
@@ -484,6 +488,8 @@ ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE}
 echo "ovn_pre_conf_udn_addr_enable: ${ovn_pre_conf_udn_addr_enable}"
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE}
 echo "ovn_route_advertisements_enable: ${ovn_route_advertisements_enable}"
+ovn_evpn_enable=${OVN_EVPN_ENABLE}
+echo "ovn_evpn_enable: ${ovn_evpn_enable}"
 ovn_advertise_default_network=${OVN_ADVERTISE_DEFAULT_NETWORK}
 echo "ovn_advertise_default_network: ${ovn_advertise_default_network}"
 ovn_advertised_udn_isolation_mode=${OVN_ADVERTISED_UDN_ISOLATION_MODE}
@@ -634,6 +640,7 @@ ovn_image=${ovnkube_image} \
   ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
+  ovn_evpn_enable=${ovn_evpn_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -690,6 +697,7 @@ ovn_image=${ovnkube_image} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
   ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
+  ovn_evpn_enable=${ovn_evpn_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -790,6 +798,7 @@ ovn_image=${ovnkube_image} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
   ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
+  ovn_evpn_enable=${ovn_evpn_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -843,6 +852,7 @@ ovn_image=${ovnkube_image} \
   ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
+  ovn_evpn_enable=${ovn_evpn_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -928,6 +938,7 @@ ovn_image=${ovnkube_image} \
   ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
+  ovn_evpn_enable=${ovn_evpn_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -998,6 +1009,7 @@ ovn_image=${ovnkube_image} \
   ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
+  ovn_evpn_enable=${ovn_evpn_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -1098,6 +1110,7 @@ ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
 ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
 ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
+ovn_evpn_enable=${ovn_evpn_enable} \
 ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   jinjanate ../templates/rbac-ovnkube-cluster-manager.yaml.j2 -o ${output_dir}/rbac-ovnkube-cluster-manager.yaml
 
