@@ -222,7 +222,7 @@ func (c *Controller) ReconcileNetwork(_ string, old, new util.NetInfo) {
 	}
 	if new != nil && !newNamespaces.Equal(oldNamespaces) {
 		// we use one of the NADs of the network to reconcile it
-		nads := new.GetNADs()
+		nads := c.nm.GetNADKeysForNetwork(new.GetNetworkName())
 		if len(nads) > 0 {
 			c.nadController.Reconcile(nads[0])
 		}

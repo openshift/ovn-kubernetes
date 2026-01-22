@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/yaml"
 
@@ -412,14 +411,30 @@ func SecondaryNetworkPodIPs(pod *corev1.Pod, networkInfo NetInfo, getNetworkName
 }
 
 // PodNADKeys returns pod's NAD keys associated with given network specified by netconf.
-// If netinfo belongs to user defined primary network, then retrieve NAD names from
-// netinfo.GetNADs() which is serving pod's namespace.
+// For primary UDNs, retrieve NAD names for the pod based on its OVN annotations.
 // For secondary UDNs, retrieve NAD names for the pod based on NetworkSelectionElement.
 func PodNADKeys(pod *corev1.Pod, netinfo NetInfo, getNetworkNameForNADKey func(nadKey string) string) ([]string, error) {
-	if netinfo.IsPrimaryNetwork() {
-		return GetPrimaryNetworkNADNamesForNamespaceFromNetInfo(pod.Namespace, netinfo)
+	if netinfo.IsUserDefinedNetwork() && getNetworkNameForNADKey == nil {
+		return nil, fmt.Errorf("missing NAD resolver for network %q", netinfo.GetNetworkName())
 	}
-	on, networkMap, err := GetPodNADToNetworkMappingWithActiveNetwork(pod, netinfo, nil, getNetworkNameForNADKey)
+
+	if netinfo.IsPrimaryNetwork() {
+		podNetworks, err := UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+		if err != nil {
+			return nil, err
+		}
+		nadKeys := make([]string, 0, len(podNetworks))
+		for nadKey := range podNetworks {
+			networkName := getNetworkNameForNADKey(nadKey)
+			if networkName == "" || networkName != netinfo.GetNetworkName() {
+				continue
+			}
+			nadKeys = append(nadKeys, nadKey)
+		}
+		return nadKeys, nil
+	}
+
+	on, networkMap, err := getPodNADToNetworkMapping(pod, netinfo, getNetworkNameForNADKey)
 	// skip pods that are not on this network
 	if err != nil {
 		return nil, err
@@ -431,20 +446,6 @@ func PodNADKeys(pod *corev1.Pod, netinfo NetInfo, getNetworkNameForNADKey func(n
 		nadKeys = append(nadKeys, nadKey)
 	}
 	return nadKeys, nil
-}
-
-func GetPrimaryNetworkNADNamesForNamespaceFromNetInfo(namespace string, netinfo NetInfo) ([]string, error) {
-	for _, nadName := range netinfo.GetNADs() {
-		ns, _, err := cache.SplitMetaNamespaceKey(nadName)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing nad name %s from network %s: %v", nadName, netinfo.GetNetworkName(), err)
-		}
-		if ns != namespace {
-			continue
-		}
-		return []string{nadName}, nil
-	}
-	return []string{}, nil
 }
 
 func getAnnotatedPodIPs(pod *corev1.Pod, nadKey string) []net.IP {

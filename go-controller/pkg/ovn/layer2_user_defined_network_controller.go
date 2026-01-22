@@ -417,7 +417,12 @@ func NewLayer2UserDefinedNetworkController(
 		if err != nil {
 			return nil, fmt.Errorf("unable to create new service controller while creating new layer2 network controller: %w", err)
 		}
-		oc.defaultGatewayReconciler = kubevirt.NewDefaultGatewayReconciler(oc.watchFactory, oc.GetNetInfo(), util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID())))
+		oc.defaultGatewayReconciler = kubevirt.NewDefaultGatewayReconciler(
+			oc.watchFactory,
+			oc.GetNetInfo(),
+			util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID())),
+			oc.networkManager.GetNetworkNameForNADKey,
+		)
 	}
 
 	if oc.allocatesPodAnnotation() {

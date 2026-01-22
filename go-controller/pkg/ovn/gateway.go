@@ -167,6 +167,9 @@ func WithNetworkNameForNADKeyResolver(getNetworkNameForNADKey func(nadKey string
 // pod->nodeSNATs which won't get cleared up unless explicitly deleted.
 // NOTE2: egressIP SNATs are synced in EIP controller.
 func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.IPNet, gwLRPIPs []net.IP) error {
+	if gw.netInfo.IsUserDefinedNetwork() && gw.getNetworkNameForNADKey == nil {
+		return fmt.Errorf("missing NAD resolver for network %q", gw.netInfo.GetNetworkName())
+	}
 	// collect all the pod IPs for which we should be doing the SNAT;
 	// if DisableSNATMultipleGWs==false we consider all
 	// the SNATs stale
@@ -186,7 +189,7 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 				continue
 			}
 			if util.PodCompleted(&pod) {
-				collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "", nil) //even if a pod is completed we should still delete the nat if the ip is not in use anymore
+				collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "", gw.getNetworkNameForNADKey) //even if a pod is completed we should still delete the nat if the ip is not in use anymore
 				if err != nil {
 					return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
 				}

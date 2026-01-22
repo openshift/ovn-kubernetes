@@ -18,8 +18,8 @@ import (
 	"golang.org/x/exp/maps"
 
 	corev1 "k8s.io/api/core/v1"
-	k8sapitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	knet "k8s.io/utils/net"
 
@@ -66,10 +66,7 @@ type NetInfo interface {
 	GetNodeManagementIP(hostSubnet *net.IPNet) *net.IPNet
 
 	// dynamic information, can change over time
-	GetNADs() []string
-	EqualNADs(nads ...string) bool
-	HasNADKey(nadKey string) bool
-	HasNAD(nadName string) bool
+
 	// GetPodNetworkAdvertisedVRFs returns the target VRFs where the pod network
 	// is advertised per node, through a map of node names to slice of VRFs.
 	GetPodNetworkAdvertisedVRFs() map[string][]string
@@ -401,43 +398,6 @@ func (nInfo *mutableNetInfo) GetEgressIPAdvertisedNodes() []string {
 	nInfo.RLock()
 	defer nInfo.RUnlock()
 	return maps.Keys(nInfo.eipAdvertisements)
-}
-
-// GetNADs returns all the NADs associated with this network
-func (nInfo *mutableNetInfo) GetNADs() []string {
-	nInfo.RLock()
-	defer nInfo.RUnlock()
-	return nInfo.getNads().UnsortedList()
-}
-
-// EqualNADs checks if the NADs associated with nInfo are the same as the ones
-// passed in the nads slice.
-func (nInfo *mutableNetInfo) EqualNADs(nads ...string) bool {
-	nInfo.RLock()
-	defer nInfo.RUnlock()
-	if nInfo.getNads().Len() != len(nads) {
-		return false
-	}
-	return nInfo.getNads().HasAll(nads...)
-}
-
-// HasNADKey returns true if the given NADKey (perhaps with index) exists, used
-// to check if the network needs to be plumbed over
-func (nInfo *mutableNetInfo) HasNADKey(nadKey string) bool {
-	nadName, _, err := GetNadFromIndexedNADKey(nadKey)
-	if err != nil {
-		return false
-	}
-
-	return nInfo.HasNAD(nadName)
-}
-
-// HasNAD returns true if the given NAD exists, used
-// to check if the network needs to be plumbed over
-func (nInfo *mutableNetInfo) HasNAD(nadName string) bool {
-	nInfo.RLock()
-	defer nInfo.RUnlock()
-	return nInfo.getNads().Has(nadName)
 }
 
 // SetNADs replaces the NADs associated with the network
@@ -1653,6 +1613,9 @@ func SubnetOverlapCheck(netconf *ovncnitypes.NetConf) (*net.IPNet, *net.IPNet, e
 //	        additional attachments of the same NAD on the same pod. Note multiple NADs of the same
 //	        network are allowed on one pod. They can be of different NAD Name or the same NAD Name.
 //		error:  error in case of failure
+//
+// getNetworkNameForNADKey may be nil only for default-network lookups.
+// For UDN lookups, it must be provided to validate NAD keys.
 func getPodNADToNetworkMapping(
 	pod *corev1.Pod,
 	nInfo NetInfo,
@@ -1684,6 +1647,19 @@ func getPodNADToNetworkMapping(
 		networkName := getNetworkNameForNADKey(nadName)
 		return networkName != "" && networkName == nInfo.GetNetworkName()
 	})
+}
+
+// GetUDNPodNADToNetworkMapping returns pod network selections for the specified UDN,
+// validating NAD keys via the provided resolver.
+func GetUDNPodNADToNetworkMapping(
+	pod *corev1.Pod,
+	nInfo NetInfo,
+	getNetworkNameForNADKey func(nadKey string) string,
+) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+	if getNetworkNameForNADKey == nil {
+		return false, nil, fmt.Errorf("UDN mapping requires a network resolver")
+	}
+	return getPodNADToNetworkMapping(pod, nInfo, getNetworkNameForNADKey)
 }
 
 // GetDefaultPodNADToNetworkMapping returns default-network selections for a pod.
@@ -1752,14 +1728,15 @@ func overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE *nettypes.NetworkSele
 	return nil
 }
 
-// GetPodNADToNetworkMappingWithActiveNetwork will call `GetPodNADToNetworkMapping` passing "nInfo" which correspond
-// to the NetInfo representing the NAD, the resulting NetworkSelectingElements will be decorated with the ones
-// from found active network
+// GetPodNADToNetworkMappingWithActiveNetwork resolves the pod's NAD attachments using nInfo (the NAD's NetInfo).
+// If activeNetwork is provided and matches nInfo's network, it adds the namespace's active primary NAD selection
+// (and any requested default-network IP/MAC details) to the returned mapping.
 func GetPodNADToNetworkMappingWithActiveNetwork(
 	pod *corev1.Pod,
 	nInfo NetInfo,
 	activeNetwork NetInfo,
 	getNetworkNameForNADKey func(nadKey string) string,
+	getPrimaryNADForNamespace func(namespace string) (string, error),
 ) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	// scan network selection elements using the resolver to validate attachments
 	on, networkSelections, err := getPodNADToNetworkMapping(pod, nInfo, getNetworkNameForNADKey)
@@ -1777,15 +1754,24 @@ func GetPodNADToNetworkMappingWithActiveNetwork(
 		return on, networkSelections, nil
 	}
 
-	// Add the active network to the NSE map if it is configured
-	activeNetworkNADs := activeNetwork.GetNADs()
-	if len(activeNetworkNADs) < 1 {
-		return false, nil, fmt.Errorf("missing NADs at active network %q for namespace %q", activeNetwork.GetNetworkName(), pod.Namespace)
+	if getPrimaryNADForNamespace == nil {
+		return false, nil, fmt.Errorf("missing primary NAD resolver for network %q", nInfo.GetNetworkName())
 	}
 
-	activeNADKey := getNADWithNamespace(activeNetworkNADs, pod.Namespace)
-	if activeNADKey == nil {
-		return false, nil, fmt.Errorf("no active NAD found for namespace %q", pod.Namespace)
+	primaryNADKey, err := getPrimaryNADForNamespace(pod.Namespace)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to get primary NAD for namespace %q: %w", pod.Namespace, err)
+	}
+	if primaryNADKey == types.DefaultNetworkName {
+		return false, nil, fmt.Errorf("no primary NAD found for namespace %q", pod.Namespace)
+	}
+	if networkName := getNetworkNameForNADKey(primaryNADKey); networkName == "" || networkName != nInfo.GetNetworkName() {
+		return false, nil, fmt.Errorf("primary NAD %q does not match network %q for namespace %q", primaryNADKey, nInfo.GetNetworkName(), pod.Namespace)
+	}
+
+	nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(primaryNADKey)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to split NAD key %q: %w", primaryNADKey, err)
 	}
 
 	if len(networkSelections) == 0 {
@@ -1793,8 +1779,8 @@ func GetPodNADToNetworkMappingWithActiveNetwork(
 	}
 
 	activeNSE := &nettypes.NetworkSelectionElement{
-		Namespace: activeNADKey.Namespace,
-		Name:      activeNADKey.Name,
+		Namespace: nadNamespace,
+		Name:      nadName,
 	}
 
 	isPersistentIPsPrimaryNetwork := nInfo.IsPrimaryNetwork() && AllowsPersistentIPs(nInfo)
@@ -1832,24 +1818,8 @@ func GetPodNADToNetworkMappingWithActiveNetwork(
 		}
 	}
 
-	networkSelections[activeNADKey.String()] = activeNSE
+	networkSelections[primaryNADKey] = activeNSE
 	return true, networkSelections, nil
-}
-
-// getNADWithNamespace returns the first occurrence of NAD key with the given namespace name.
-func getNADWithNamespace(nads []string, targetNamespace string) *k8sapitypes.NamespacedName {
-	for _, nad := range nads {
-		nsName := strings.Split(nad, "/")
-		if len(nsName) != 2 {
-			continue
-		}
-		ns, name := nsName[0], nsName[1]
-		if ns != targetNamespace {
-			continue
-		}
-		return &k8sapitypes.NamespacedName{Namespace: ns, Name: name}
-	}
-	return nil
 }
 
 func IsMultiNetworkPoliciesSupportEnabled() bool {
@@ -2023,9 +1993,6 @@ func GetNetworkRole(
 			}
 			return types.NetworkRoleNone, nil
 		}
-		if controllerNetInfo.HasNAD(primaryNAD) {
-			return types.NetworkRolePrimary, nil
-		}
 
 		// this is a primary network controller, and it does not have the pod's primary NAD
 		return types.NetworkRoleNone, nil
@@ -2044,10 +2011,6 @@ func GetNetworkRole(
 		nadKey := GetNADName(nadNamespace, network.Name)
 		networkName := getNetworkNameForNADKey(nadKey)
 		if networkName == "" {
-			// fallback if cache miss
-			if controllerNetInfo.HasNAD(nadKey) {
-				return types.NetworkRoleSecondary, nil
-			}
 			continue
 		}
 		if networkName == controllerNetInfo.GetNetworkName() {

@@ -807,6 +807,10 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 					nsA: mutableA,
 					nsB: mutableB,
 				},
+				NADNetworks: map[string]util.NetInfo{
+					namespacedName(nsA, nadName): mutableA,
+					namespacedName(nsB, nadName): mutableB,
+				},
 			}
 
 			localNode, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24", netInfo)
@@ -826,8 +830,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			err = util.ReconcileNetInfo(l2Controller.ReconcilableNetInfo, mutableNetInfo)
 			Expect(err).NotTo(HaveOccurred())
 			By("confirming the controller only tracks the local namespace NAD")
-			Expect(l2Controller.GetNetInfo().HasNAD(namespacedName(nsA, nadName))).To(BeFalse())
-			Expect(l2Controller.GetNetInfo().HasNAD(namespacedName(nsB, nadName))).To(BeTrue())
+			Expect(l2Controller.GetNetInfo().GetNADNamespaces()).To(ConsistOf(nsB))
 
 			remotePod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{

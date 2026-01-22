@@ -11,6 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -1006,11 +1007,13 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 
 			var resolver func(string) string
 			if netInfo.IsUserDefinedNetwork() {
+				expectedNADKey := test.inputNetConf.NADName
+				if expectedNADKey == "" {
+					t.Fatalf("missing NAD name for user-defined network %q", netInfo.GetNetworkName())
+				}
 				resolver = func(nadKey string) string {
-					for _, nad := range netInfo.GetNADs() {
-						if nad == nadKey {
-							return netInfo.GetNetworkName()
-						}
+					if nadKey == expectedNADKey {
+						return netInfo.GetNetworkName()
 					}
 					return ""
 				}
@@ -1371,7 +1374,7 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 		{
 			desc:           "should fail when no nad of the active network found on the pod namespace",
 			inputNamespace: "non-existent-ns",
-			expectedError:  fmt.Errorf(`no active NAD found for namespace "non-existent-ns"`),
+			expectedError:  fmt.Errorf(`failed to get primary NAD for namespace "non-existent-ns": no active NAD found for namespace "non-existent-ns"`),
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: networkName},
 				NADName:  GetNADName(namespaceName, attachmentName),
@@ -1515,11 +1518,32 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 				pod.Namespace = test.inputNamespace
 			}
 
-			resolver := func(nadKey string) string {
-				for _, nad := range netInfo.GetNADs() {
-					if nad == nadKey {
-						return netInfo.GetNetworkName()
+			expectedNADKey := test.inputNetConf.NADName
+			if expectedNADKey == "" {
+				t.Fatalf("missing NAD name for user-defined network %q", netInfo.GetNetworkName())
+			}
+			nadNetworkNames := map[string]string{
+				expectedNADKey: netInfo.GetNetworkName(),
+			}
+			primaryNADByNamespace := map[string]string{}
+			if primaryUDNNetInfo != nil {
+				primaryNADKeys := make([]string, 0, 1+len(test.injectPrimaryUDNNADs))
+				if test.inputPrimaryUDNConfig != nil && test.inputPrimaryUDNConfig.NADName != "" {
+					primaryNADKeys = append(primaryNADKeys, test.inputPrimaryUDNConfig.NADName)
+				}
+				primaryNADKeys = append(primaryNADKeys, test.injectPrimaryUDNNADs...)
+				for _, nadKey := range primaryNADKeys {
+					nadNamespace, _, err := cache.SplitMetaNamespaceKey(nadKey)
+					if err != nil {
+						t.Fatalf("failed to split NAD key %q: %v", nadKey, err)
 					}
+					primaryNADByNamespace[nadNamespace] = nadKey
+					nadNetworkNames[nadKey] = primaryUDNNetInfo.GetNetworkName()
+				}
+			}
+			resolver := func(nadKey string) string {
+				if networkName, ok := nadNetworkNames[nadKey]; ok {
+					return networkName
 				}
 				return ""
 			}
@@ -1529,11 +1553,20 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 				netInfo,
 				primaryUDNNetInfo,
 				resolver,
+				func(namespace string) (string, error) {
+					if primaryUDNNetInfo == nil {
+						return ovntypes.DefaultNetworkName, nil
+					}
+					if nadKey, ok := primaryNADByNamespace[namespace]; ok {
+						return nadKey, nil
+					}
+					return "", fmt.Errorf("no active NAD found for namespace %q", namespace)
+				},
 			)
 
 			if test.expectedError != nil {
 				g.Expect(err).To(gomega.HaveOccurred(), "unexpected success operation, epecting error")
-				g.Expect(err).To(gomega.MatchError(test.expectedError))
+				g.Expect(err.Error()).To(gomega.Equal(test.expectedError.Error()))
 			} else {
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				g.Expect(isAttachmentRequested).To(gomega.Equal(test.expectedIsAttachmentRequested))

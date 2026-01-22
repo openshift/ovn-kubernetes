@@ -13,6 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -86,6 +87,9 @@ type networkClusterController struct {
 	dynamicUDNNodeRefsLock sync.Mutex
 	dynamicUDNNodeRefs     map[string]bool
 	dynamicUDNNodeCount    int
+
+	nadKeysLock sync.Mutex
+	lastNADKeys sets.Set[string]
 
 	util.ReconcilableNetInfo
 }
@@ -558,7 +562,8 @@ func (ncc *networkClusterController) Cleanup() error {
 }
 
 func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
-	reconcilePendingPods := !ncc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
+	nadKeys := ncc.networkManager.GetNADKeysForNetwork(netInfo.GetNetworkName())
+	reconcilePendingPods := ncc.updateNADKeysChanged(nadKeys)
 	// update network information, point of no return
 	err := util.ReconcileNetInfo(ncc.ReconcilableNetInfo, netInfo)
 	if err != nil {
@@ -570,6 +575,16 @@ func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
 		}
 	}
 	return nil
+}
+
+func (ncc *networkClusterController) updateNADKeysChanged(nadKeys []string) bool {
+	ncc.nadKeysLock.Lock()
+	defer ncc.nadKeysLock.Unlock()
+
+	next := sets.New(nadKeys...)
+	changed := ncc.lastNADKeys == nil || !next.Equal(ncc.lastNADKeys)
+	ncc.lastNADKeys = next
+	return changed
 }
 
 // networkClusterControllerEventHandler object handles the events

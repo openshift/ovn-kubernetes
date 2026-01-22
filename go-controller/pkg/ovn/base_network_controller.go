@@ -90,6 +90,8 @@ type BaseNetworkController struct {
 
 	// network information
 	util.ReconcilableNetInfo
+	nadKeysLock sync.Mutex
+	lastNADKeys sets.Set[string]
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
@@ -205,7 +207,8 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 		return true
 	})
 	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
-	reconcilePendingPods := !oc.IsDefault() && !oc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
+	nadKeys := oc.networkManager.GetNADKeysForNetwork(netInfo.GetNetworkName())
+	reconcilePendingPods := !oc.IsDefault() && oc.updateNADKeysChanged(nadKeys)
 	reconcileNamespaces := sets.NewString()
 	if oc.IsPrimaryNetwork() {
 		// since CanServeNamespace filters out namespace events for namespaces unknown
@@ -223,6 +226,16 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 	oc.doReconcile(reconcileRoutes, reconcilePendingPods, reconcileNodes, setNodeFailed, reconcileNamespaces.List())
 
 	return nil
+}
+
+func (oc *BaseNetworkController) updateNADKeysChanged(nadKeys []string) bool {
+	oc.nadKeysLock.Lock()
+	defer oc.nadKeysLock.Unlock()
+
+	next := sets.New(nadKeys...)
+	changed := oc.lastNADKeys == nil || !next.Equal(oc.lastNADKeys)
+	oc.lastNADKeys = next
+	return changed
 }
 
 // doReconcile performs the reconciliation after the controller NetInfo has already being

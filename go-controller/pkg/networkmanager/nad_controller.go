@@ -104,19 +104,21 @@ func newController(
 	tunnelKeysAllocator *id.TunnelKeysAllocator,
 	filterNADsOnNode string,
 ) (*nadController, error) {
+	networkController := newNetworkController(name, zone, node, cm, wf)
 	c := &nadController{
 		name:              fmt.Sprintf("[%s NAD controller]", name),
 		stopChan:          make(chan struct{}),
 		recorder:          recorder,
 		nadLister:         wf.NADInformer().Lister(),
 		nodeLister:        wf.NodeCoreInformer().Lister(),
-		networkController: newNetworkController(name, zone, node, cm, wf),
+		networkController: networkController,
 		reconcilers:       map[uint64]reconcilerRegistration{},
 		nads:              map[string]string{},
 		nadsByNetwork:     map[string]sets.Set[string]{},
 		primaryNADs:       map[string]string{},
 		markedForRemoval:  map[string]time.Time{},
 	}
+	networkController.getNADKeysForNetwork = c.GetNADKeysForNetwork
 
 	if cm != nil && config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
 		c.podTracker = NewPodTrackerController("pod-tracker", wf, c.OnNetworkRefChange, c.GetPrimaryNADForNamespace)
@@ -672,7 +674,10 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		// the NAD refers to an existing compatible network, ensure that
 		// existing network holds a reference to this NAD
 		ensureNetwork = currentNetwork
-	case sets.New(key).HasAll(currentNetwork.GetNADs()...):
+	case func() bool {
+		nadSet := c.nadsByNetwork[nadNetworkName]
+		return len(nadSet) == 1 && nadSet.Has(key)
+	}():
 		// the NAD is the only NAD referring to an existing incompatible
 		// network, remove the reference from the old network and ensure that
 		// existing network holds a reference to this NAD
@@ -695,7 +700,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		klog.V(5).Infof("%s: removing NAD %q reference for network %q", c.name, key, oldNetwork.GetNetworkName())
 		oldNetworkName := oldNetwork.GetNetworkName()
 		oldNetwork.DeleteNADs(key)
-		if len(oldNetwork.GetNADs()) == 0 {
+		if !c.networkReferencedLocked(oldNetworkName, key) {
 			c.networkController.DeleteNetwork(oldNetworkName)
 		} else {
 			c.networkController.EnsureNetwork(oldNetwork)
@@ -986,6 +991,19 @@ func (c *nadController) GetNetworkNameForNADKey(nadKey string) string {
 	c.RLock()
 	defer c.RUnlock()
 	return c.nads[nadKey]
+}
+
+func (c *nadController) GetNADKeysForNetwork(networkName string) []string {
+	if networkName == "" {
+		return nil
+	}
+	c.RLock()
+	defer c.RUnlock()
+	nadSet := c.nadsByNetwork[networkName]
+	if len(nadSet) == 0 {
+		return nil
+	}
+	return nadSet.UnsortedList()
 }
 
 func (c *nadController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {

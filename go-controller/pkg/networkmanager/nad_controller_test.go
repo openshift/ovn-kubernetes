@@ -889,7 +889,8 @@ func TestNADController(t *testing.T) {
 						g.Expect(netController.networks).To(gomega.HaveKey(name))
 						g.Expect(util.AreNetworksCompatible(netController.networks[name], netInfo)).To(gomega.BeTrue(),
 							fmt.Sprintf("matching network config for network %s", name))
-						g.Expect(netController.networks[name].GetNADs()).To(gomega.ConsistOf(expected.nads),
+						nadKeys := nadController.GetNADKeysForNetwork(name)
+						g.Expect(nadKeys).To(gomega.ConsistOf(expected.nads),
 							fmt.Sprintf("matching NADs for network %s", name))
 						id, err := nadController.networkIDAllocator.AllocateID(name)
 						g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -904,8 +905,6 @@ func TestNADController(t *testing.T) {
 							g.Expect(tcm.controllers).To(gomega.HaveKey(testNetworkKey))
 							g.Expect(util.AreNetworksCompatible(tcm.controllers[testNetworkKey], netInfo)).To(gomega.BeTrue(),
 								fmt.Sprintf("matching network config for network %s", name))
-							g.Expect(tcm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
-								fmt.Sprintf("matching NADs for network %s", name))
 							g.Expect(tcm.controllers[testNetworkKey].GetNetworkID()).To(gomega.Equal(id))
 							expectRunning = append(expectRunning, testNetworkKey)
 						}
@@ -917,7 +916,8 @@ func TestNADController(t *testing.T) {
 						netInfoFound, err := nadController.GetActiveNetworkForNamespace(namespace)
 						g.Expect(err).ToNot(gomega.HaveOccurred())
 						g.Expect(util.AreNetworksCompatible(netInfoFound, netInfo)).To(gomega.BeTrue())
-						g.Expect(netInfoFound.GetNADs()).To(gomega.ConsistOf(expected.nads))
+						nadKeys := nadController.GetNADKeysForNetwork(netInfoFound.GetNetworkName())
+						g.Expect(nadKeys).To(gomega.ConsistOf(expected.nads))
 					}
 				}
 				tcm.Lock()
@@ -1619,7 +1619,8 @@ func TestSyncAll(t *testing.T) {
 				g.Expect(info.GetNetworkID()).To(gomega.Equal(1))
 
 				// Both NADs should now be part of the same network
-				g.Expect(info.GetNADs()).To(gomega.HaveLen(2))
+				nadKeys := controller.Interface().GetNADKeysForNetwork(info.GetNetworkName())
+				g.Expect(nadKeys).To(gomega.HaveLen(2))
 
 				// NAD2 should now have the inherited ID
 				nad2, _ := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().

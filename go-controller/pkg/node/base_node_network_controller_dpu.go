@@ -141,6 +141,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 					bnnc.GetNetInfo(),
 					activeNetwork,
 					bnnc.networkManager.GetNetworkNameForNADKey,
+					bnnc.networkManager.GetPrimaryNADForNamespace,
 				)
 				if err != nil || !on {
 					if err != nil {

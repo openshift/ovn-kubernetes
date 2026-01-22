@@ -81,6 +81,9 @@ type Interface interface {
 	// GetNetworkNameForNADKey returns the network name mapped to the NAD key, or empty if unknown.
 	// This uses NAD controller state and does not parse the NAD object.
 	GetNetworkNameForNADKey(nadKey string) string
+	// GetNADKeysForNetwork returns NAD keys mapped to the network name, or empty if unknown.
+	// This uses NAD controller state and does not parse the NAD object.
+	GetNADKeysForNetwork(networkName string) []string
 	// RegisterNADReconciler registers a reconciler to be notified of NAD changes.
 	RegisterNADReconciler(r NADReconciler) (uint64, error)
 	// DeRegisterNADReconciler removes a previously registered reconciler.
@@ -286,6 +289,8 @@ func (nm defaultNetworkManager) GetActiveNetwork(network string) util.NetInfo {
 func (nm defaultNetworkManager) GetNetInfoForNADKey(_ string) util.NetInfo { return nil }
 
 func (nm defaultNetworkManager) GetNetworkNameForNADKey(_ string) string { return "" }
+
+func (nm defaultNetworkManager) GetNADKeysForNetwork(_ string) []string { return nil }
 
 func (nm defaultNetworkManager) RegisterNADReconciler(_ NADReconciler) (uint64, error) {
 	return 0, nil

@@ -210,6 +210,13 @@ func TestSetAdvertisements(t *testing.T) {
 			mutableNetInfo := util.NewMutableNetInfo(netInfo)
 			mutableNetInfo.AddNADs(testNADName)
 
+			nm.getNADKeysForNetwork = func(networkName string) []string {
+				if networkName == mutableNetInfo.GetNetworkName() {
+					return []string{testNADName}
+				}
+				return nil
+			}
+
 			nm.EnsureNetwork(mutableNetInfo)
 
 			meetsExpectations := func(g gomega.Gomega) {

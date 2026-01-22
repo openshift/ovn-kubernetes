@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -118,11 +119,26 @@ func (fnm *FakeNetworkManager) GetPrimaryNADForNamespace(namespace string) (stri
 		if primaryNetwork == nil {
 			return "", util.NewInvalidPrimaryNetworkError(namespace)
 		}
-		nads := primaryNetwork.GetNADs()
-		if len(nads) == 0 {
+		var matches []string
+		for nadKey, netInfo := range fnm.NADNetworks {
+			if netInfo == nil || !netInfo.IsPrimaryNetwork() {
+				continue
+			}
+			nadNamespace, _, err := cache.SplitMetaNamespaceKey(nadKey)
+			if err != nil {
+				continue
+			}
+			if nadNamespace == namespace {
+				matches = append(matches, nadKey)
+			}
+		}
+		if len(matches) == 0 {
 			return "", util.NewInvalidPrimaryNetworkError(namespace)
 		}
-		return nads[0], nil
+		if len(matches) > 1 {
+			return "", fmt.Errorf("multiple primary NADs found for namespace %q", namespace)
+		}
+		return matches[0], nil
 	}
 	return types.DefaultNetworkName, nil
 }
@@ -158,13 +174,6 @@ func (fnm *FakeNetworkManager) GetNetInfoForNADKey(nadKey string) util.NetInfo {
 	if netInfo, ok := fnm.NADNetworks[nadKey]; ok {
 		return netInfo
 	}
-	for _, ni := range fnm.PrimaryNetworks {
-		for _, n := range ni.GetNADs() {
-			if n == nadKey {
-				return ni
-			}
-		}
-	}
 	return nil
 }
 
@@ -174,21 +183,25 @@ func (fnm *FakeNetworkManager) GetNetworkNameForNADKey(nadKey string) string {
 	if netInfo, ok := fnm.NADNetworks[nadKey]; ok {
 		return netInfo.GetNetworkName()
 	}
-	for _, ni := range fnm.PrimaryNetworks {
-		for _, n := range ni.GetNADs() {
-			if n == nadKey {
-				return ni.GetNetworkName()
-			}
+	return ""
+}
+
+func (fnm *FakeNetworkManager) GetNADKeysForNetwork(networkName string) []string {
+	fnm.Lock()
+	defer fnm.Unlock()
+	nadKeys := sets.New[string]()
+	for nadKey, netInfo := range fnm.NADNetworks {
+		if netInfo != nil && netInfo.GetNetworkName() == networkName {
+			nadKeys.Insert(nadKey)
 		}
 	}
-	return ""
+	return nadKeys.UnsortedList()
 }
 
 func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
 	namespaces := make([]string, 0)
 	for namespaceName, primaryNAD := range fnm.PrimaryNetworks {
-		nadNetworkName := primaryNAD.GetNADs()[0]
-		if nadNetworkName != networkName {
+		if primaryNAD == nil || primaryNAD.GetNetworkName() != networkName {
 			continue
 		}
 		namespaces = append(namespaces, namespaceName)

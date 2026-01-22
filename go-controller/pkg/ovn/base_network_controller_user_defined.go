@@ -283,6 +283,7 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 		bsnc.GetNetInfo(),
 		activeNetwork,
 		bsnc.networkManager.GetNetworkNameForNADKey,
+		bsnc.networkManager.GetPrimaryNADForNamespace,
 	)
 	if err != nil {
 		bsnc.recordPodErrorEvent(pod, err)
@@ -466,7 +467,8 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 
 	var alreadyProcessed bool
 	for nadKey, podAnnotation := range podNetworks {
-		if !bsnc.HasNADKey(nadKey) {
+		networkName := bsnc.networkManager.GetNetworkNameForNADKey(nadKey)
+		if networkName == "" || networkName != bsnc.GetNetworkName() {
 			continue
 		}
 
@@ -567,10 +569,9 @@ func (bsnc *BaseUserDefinedNetworkController) hasIPAMClaim(pod *corev1.Pod, nadK
 		}
 	} else {
 		// secondary network the IPAM claim reference is on the network selection element
-		on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(
+		on, networkMap, err := util.GetUDNPodNADToNetworkMapping(
 			pod,
 			bsnc.GetNetInfo(),
-			nil,
 			bsnc.networkManager.GetNetworkNameForNADKey,
 		)
 		if err != nil {
@@ -653,6 +654,7 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 			bsnc.GetNetInfo(),
 			activeNetwork,
 			bsnc.networkManager.GetNetworkNameForNADKey,
+			bsnc.networkManager.GetPrimaryNADForNamespace,
 		)
 		if err != nil || !on {
 			if err != nil {
