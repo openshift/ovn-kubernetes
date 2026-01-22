@@ -170,3 +170,41 @@ func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridg
 	framework.Logf("EVPN bridge setup complete on %s (%s + %s with local IP %s)", externalFRRContainerName, bridgeName, vxlanName, frrVTEPIPAddress)
 	return nil
 }
+
+// setupMACVRFOnExternalFRR configures MAC-VRF (Layer 2 EVPN) on the external FRR container.
+// This adds the VLAN/VNI mapping to extend the L2 domain via EVPN Type-2/Type-3 routes.
+//
+// Requires: setupEVPNBridgeOnExternalFRR must be called first to create bridgeName and vxlanName.
+//
+// No explicit cleanup is registered here: deleting the bridge (done by setupEVPNBridgeOnExternalFRR's
+// cleanup) removes all associated bridge VLAN and VNI entries automatically.
+//
+// Parameters:
+//   - vni: VXLAN Network Identifier (e.g., 10100)
+//   - vid: VLAN ID for local bridging (e.g., 100)
+//   - bridgeName: name of the bridge device (e.g., "brevpn7a3f")
+//   - vxlanName: name of the VXLAN device (e.g., "vxevpn7a3f")
+func setupMACVRFOnExternalFRR(vni, vid int, bridgeName, vxlanName string) error {
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
+	vidStr := fmt.Sprintf("%d", vid)
+	vniStr := fmt.Sprintf("%d", vni)
+
+	commands := [][]string{
+		// Add VLAN to bridge
+		{"bridge", "vlan", "add", "dev", bridgeName, "vid", vidStr, "self"},
+		// Add VLAN to vxlan device
+		{"bridge", "vlan", "add", "dev", vxlanName, "vid", vidStr},
+		// Add VNI to vxlan device
+		{"bridge", "vni", "add", "dev", vxlanName, "vni", vniStr},
+		// Map VLAN to VNI (tunnel_info)
+		{"bridge", "vlan", "add", "dev", vxlanName, "vid", vidStr, "tunnel_info", "id", vniStr},
+	}
+	for _, cmd := range commands {
+		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, cmd); err != nil {
+			return fmt.Errorf("failed to setup MAC-VRF (VNI %d, VID %d): %w", vni, vid, err)
+		}
+	}
+
+	framework.Logf("MAC-VRF setup complete on %s (VNI %d, VID %d)", externalFRRContainerName, vni, vid)
+	return nil
+}
