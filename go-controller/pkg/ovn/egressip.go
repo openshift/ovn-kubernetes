@@ -790,13 +790,9 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		return nil
 	}
 	var remainingAssignments, staleAssignments []egressipv1.EgressIPStatusItem
-	nadKey := ni.GetNetworkName()
-	if ni.IsUserDefinedNetwork() {
-		nadNames := ni.GetNADs()
-		if len(nadNames) == 0 {
-			return fmt.Errorf("expected at least one NAD name for Namespace %s", pod.Namespace)
-		}
-		nadKey = nadNames[0] // there should only be one active network
+	nadKey, err := e.getPodNADKeyForNetwork(ni, pod)
+	if err != nil {
+		return err
 	}
 	podIPNets, err := e.getPodIPs(ni, pod, nadKey)
 	if err != nil {
@@ -2085,21 +2081,17 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 				egressLocalPods:  map[string]sets.Set[string]{},
 				egressRemotePods: map[string]sets.Set[string]{},
 			}
-			nadKey := types.DefaultNetworkName
-			if ni.IsUserDefinedNetwork() {
-				nadNames := ni.GetNADs()
-				if len(nadNames) == 0 {
-					klog.Errorf("Network %s: error build egress IP sync cache, expected at least one NAD name for Namespace %s", ni.GetNetworkName(), namespace.Name)
-					continue
-				}
-				nadKey = nadNames[0] // there should only be one active network
-			}
 			for _, pod := range pods {
 				if !util.PodNeedsSNAT(pod) {
 					continue
 				}
 				if egressLocalNodesCache.Len() == 0 && !e.isPodScheduledinLocalZone(pod) {
 					continue // don't process anything on master's that have nothing to do with the pod
+				}
+				nadKey, err := e.getPodNADKeyForNetwork(ni, pod)
+				if err != nil {
+					klog.Errorf("Network %s: failed to resolve NAD for pod %s/%s: %v", ni.GetNetworkName(), pod.Namespace, pod.Name, err)
+					continue
 				}
 				podIPs, err := e.getPodIPs(ni, pod, nadKey)
 				if err != nil {
@@ -2424,13 +2416,9 @@ func (e *EgressIPController) addStandByEgressIPAssignment(ni util.NetInfo, podKe
 		return nil
 	}
 	// get IPs
-	nadKey := ni.GetNetworkName()
-	if ni.IsUserDefinedNetwork() {
-		nadNames := ni.GetNADs()
-		if len(nadNames) == 0 {
-			return fmt.Errorf("expected at least one NAD name for Namespace %s", pod.Namespace)
-		}
-		nadKey = nadNames[0] // there should only be one active network
+	nadKey, err := e.getPodNADKeyForNetwork(ni, pod)
+	if err != nil {
+		return err
 	}
 	podIPNets, err := e.getPodIPs(ni, pod, nadKey)
 	if err != nil {
@@ -2712,7 +2700,7 @@ func (e *EgressIPController) addExternalGWPodSNATOps(ni util.NetInfo, ops []ovsd
 			if err != nil {
 				return nil, err
 			}
-			podIPs, err := util.GetPodCIDRsWithFullMask(pod, &util.DefaultNetInfo{})
+			podIPs, err := util.GetPodCIDRsWithFullMask(pod, &util.DefaultNetInfo{}, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -3736,6 +3724,23 @@ func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 	return nil
 }
 
+func (e *EgressIPController) getPodNADKeyForNetwork(ni util.NetInfo, pod *corev1.Pod) (string, error) {
+	if !ni.IsUserDefinedNetwork() {
+		return ni.GetNetworkName(), nil
+	}
+	nadKeys, err := util.PodNADKeys(pod, ni, e.networkManager.GetNetworkNameForNADKey)
+	if err != nil {
+		return "", err
+	}
+	if len(nadKeys) == 0 {
+		return "", fmt.Errorf("expected at least one NAD key for pod %s/%s on network %s", pod.Namespace, pod.Name, ni.GetNetworkName())
+	}
+	if len(nadKeys) > 1 {
+		return "", fmt.Errorf("expected one NAD key for pod %s/%s on network %s, got %d", pod.Namespace, pod.Name, ni.GetNetworkName(), len(nadKeys))
+	}
+	return nadKeys[0], nil
+}
+
 func (e *EgressIPController) getPodIPs(ni util.NetInfo, pod *corev1.Pod, nadKey string) ([]*net.IPNet, error) {
 	podIPs := make([]*net.IPNet, 0)
 	getIPFromIPNetFn := func(podIPNets []*net.IPNet) []*net.IPNet {
@@ -3770,7 +3775,7 @@ func (e *EgressIPController) getPodIPs(ni util.NetInfo, pod *corev1.Pod, nadKey 
 		podIPs = getIPFromIPNetFn(logicalPort.ips)
 	} else { // means this is egress node's local master
 		if ni.IsDefault() {
-			podIPNets, err := util.GetPodCIDRsWithFullMask(pod, ni)
+			podIPNets, err := util.GetPodCIDRsWithFullMask(pod, ni, nil)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get pod %s/%s IP: %v", pod.Namespace, pod.Name, err)
 			}

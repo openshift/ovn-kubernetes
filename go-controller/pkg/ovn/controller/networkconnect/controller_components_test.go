@@ -2,10 +2,13 @@ package networkconnect
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
 
@@ -20,6 +23,7 @@ import (
 	networkconnectv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -487,4 +491,127 @@ func TestController_reconcileNode(t *testing.T) {
 		defer reconciledMutex.Unlock()
 		return reconciledCNCs.UnsortedList()
 	}).Should(gomega.ConsistOf("cnc1", "cnc2"))
+}
+
+// TestController_syncNAD tests that syncNAD requeues CNCs matching the NAD network ID.
+func TestController_syncNAD(t *testing.T) {
+	g := gomega.NewWithT(t)
+	err := config.PrepareTestConfig()
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableNetworkConnect = true
+
+	fakeClientset := util.GetOVNClientset().GetOVNKubeControllerClientset()
+
+	networkID := 7
+	ownerKey := fmt.Sprintf("layer3_%d", networkID)
+	cnc := &networkconnectv1.ClusterNetworkConnect{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cnc1",
+			Annotations: map[string]string{
+				"k8s.ovn.org/network-connect-subnet": fmt.Sprintf("{\"%s\":{\"ipv4\":\"192.168.0.0/24\"}}", ownerKey),
+			},
+		},
+	}
+	_, err = fakeClientset.NetworkConnectClient.K8sV1().ClusterNetworkConnects().Create(
+		context.Background(), cnc, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	nadConfig := `{"cniVersion":"0.4.0","name":"net1","type":"ovn-k8s-cni-overlay","topology":"layer3","role":"primary","netAttachDefName":"ns1/nad1"}`
+	nad := &nettypes.NetworkAttachmentDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "ns1",
+			Name:      "nad1",
+			Annotations: map[string]string{
+				"k8s.ovn.org/network-id": strconv.Itoa(networkID),
+			},
+		},
+		Spec: nettypes.NetworkAttachmentDefinitionSpec{
+			Config: nadConfig,
+		},
+	}
+	_, err = fakeClientset.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Create(
+		context.Background(), nad, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	nadKey := util.GetNADName(nad.Namespace, nad.Name)
+	netInfo, err := util.ParseNADInfo(nad)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.AddNADs(nadKey)
+	mutableNetInfo.SetNetworkID(networkID)
+
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	err = wf.Start()
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	defer wf.Shutdown()
+
+	// Wait for informer caches to sync
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer syncCancel()
+	synced := cache.WaitForCacheSync(
+		syncCtx.Done(),
+		wf.ClusterNetworkConnectInformer().Informer().HasSynced,
+		wf.NADInformer().Informer().HasSynced,
+	)
+	g.Expect(synced).To(gomega.BeTrue(), "informer caches should sync")
+
+	// Track reconciled CNCs
+	reconciledCNCs := sets.New[string]()
+	reconciledMutex := sync.Mutex{}
+
+	// Create controller with listers from watch factory
+	c := &Controller{
+		cncLister: wf.ClusterNetworkConnectInformer().Lister(),
+		nadLister: wf.NADInformer().Lister(),
+		networkManager: &networkmanager.FakeNetworkManager{
+			NADNetworks: map[string]util.NetInfo{
+				nadKey: mutableNetInfo,
+			},
+		},
+	}
+
+	// Create CNC controller with custom reconcile function that tracks calls
+	cncCfg := &controllerutil.ControllerConfig[networkconnectv1.ClusterNetworkConnect]{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Informer:    wf.ClusterNetworkConnectInformer().Informer(),
+		Lister:      wf.ClusterNetworkConnectInformer().Lister().List,
+		Reconcile: func(key string) error {
+			reconciledMutex.Lock()
+			defer reconciledMutex.Unlock()
+			reconciledCNCs.Insert(key)
+			return nil
+		},
+		ObjNeedsUpdate: cncNeedsUpdate,
+		Threadiness:    1,
+	}
+	c.cncController = controllerutil.NewController("test-cnc-controller", cncCfg)
+
+	err = controllerutil.Start(c.cncController)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	defer controllerutil.Stop(c.cncController)
+
+	// Wait for initial sync, then clear recorded reconciliations
+	g.Eventually(func() int {
+		reconciledMutex.Lock()
+		defer reconciledMutex.Unlock()
+		return reconciledCNCs.Len()
+	}).Should(gomega.BeNumerically(">=", 1))
+	reconciledMutex.Lock()
+	reconciledCNCs = sets.New[string]()
+	reconciledMutex.Unlock()
+
+	err = c.syncNAD("ns1/nad1")
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	// Verify CNC was requeued
+	g.Eventually(func() []string {
+		reconciledMutex.Lock()
+		defer reconciledMutex.Unlock()
+		return reconciledCNCs.UnsortedList()
+	}).Should(gomega.ConsistOf("cnc1"))
 }

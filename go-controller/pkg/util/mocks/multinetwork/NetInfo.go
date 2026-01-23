@@ -124,30 +124,6 @@ func (_m *NetInfo) EVPNVTEPName() string {
 	return r0
 }
 
-// EqualNADs provides a mock function with given fields: nads
-func (_m *NetInfo) EqualNADs(nads ...string) bool {
-	_va := make([]interface{}, len(nads))
-	for _i := range nads {
-		_va[_i] = nads[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	if len(ret) == 0 {
-		panic("no return value specified for EqualNADs")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(...string) bool); ok {
-		r0 = rf(nads...)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
 // ExcludeSubnets provides a mock function with no fields
 func (_m *NetInfo) ExcludeSubnets() []*net.IPNet {
 	ret := _m.Called()
@@ -234,26 +210,6 @@ func (_m *NetInfo) GetNADNamespaces() []string {
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetNADNamespaces")
-	}
-
-	var r0 []string
-	if rf, ok := ret.Get(0).(func() []string); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
-		}
-	}
-
-	return r0
-}
-
-// GetNADs provides a mock function with no fields
-func (_m *NetInfo) GetNADs() []string {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetNADs")
 	}
 
 	var r0 []string
@@ -635,42 +591,6 @@ func (_m *NetInfo) GetTunnelKeys() []int {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]int)
 		}
-	}
-
-	return r0
-}
-
-// HasNADKey provides a mock function with given fields: nadKey
-func (_m *NetInfo) HasNADKey(nadKey string) bool {
-	ret := _m.Called(nadKey)
-
-	if len(ret) == 0 {
-		panic("no return value specified for HasNADKey")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(nadKey)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// HasNAD provides a mock function with given fields: nadName
-func (_m *NetInfo) HasNAD(nadName string) bool {
-	ret := _m.Called(nadName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for HasNAD")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(nadName)
-	} else {
-		r0 = ret.Get(0).(bool)
 	}
 
 	return r0

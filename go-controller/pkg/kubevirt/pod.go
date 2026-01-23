@@ -35,16 +35,19 @@ type DefaultGatewayReconciler struct {
 	watchFactory  *factory.WatchFactory
 	netInfo       util.NetInfo
 	interfaceName string
+	// getNetworkNameForNADKey resolves NAD keys to network names for UDNs.
+	getNetworkNameForNADKey func(nadKey string) string
 }
 
 // NewDefaultGatewayReconciler creates a new instance of DefaultGatewayReconciler.
 // It takes a WatchFactory for managing resource watches, a NetInfo object for network information,
 // and the name of the network interface to send ARPs or RAs as parameters.
-func NewDefaultGatewayReconciler(watchFactory *factory.WatchFactory, netInfo util.NetInfo, interfaceName string) *DefaultGatewayReconciler {
+func NewDefaultGatewayReconciler(watchFactory *factory.WatchFactory, netInfo util.NetInfo, interfaceName string, getNetworkNameForNADKey func(nadKey string) string) *DefaultGatewayReconciler {
 	return &DefaultGatewayReconciler{
-		watchFactory:  watchFactory,
-		netInfo:       netInfo,
-		interfaceName: interfaceName,
+		watchFactory:            watchFactory,
+		netInfo:                 netInfo,
+		interfaceName:           interfaceName,
+		getNetworkNameForNADKey: getNetworkNameForNADKey,
 	}
 }
 
@@ -577,11 +580,15 @@ func (r *DefaultGatewayReconciler) ReconcileIPv6AfterLiveMigration(liveMigration
 	}
 
 	targetPod := liveMigration.TargetPod
-	if len(r.netInfo.GetNADs()) != 1 {
-		return fmt.Errorf("expected only one nad for network %q, got %d", r.netInfo.GetNetworkName(), len(r.netInfo.GetNADs()))
+	nadKeys, err := util.PodNADKeys(targetPod, r.netInfo, r.getNetworkNameForNADKey)
+	if err != nil {
+		return err
+	}
+	if len(nadKeys) != 1 {
+		return fmt.Errorf("expected only one NAD key for network %q, got %d", r.netInfo.GetNetworkName(), len(nadKeys))
 	}
 
-	targetPodAnnotation, err := util.UnmarshalPodAnnotation(targetPod.Annotations, r.netInfo.GetNADs()[0])
+	targetPodAnnotation, err := util.UnmarshalPodAnnotation(targetPod.Annotations, nadKeys[0])
 	if err != nil {
 		return ovntypes.NewSuppressedError(fmt.Errorf("failed parsing ovn pod annotation for pod '%s/%s' and network %q: %w", targetPod.Namespace, targetPod.Name, r.netInfo.GetNetworkName(), err))
 	}

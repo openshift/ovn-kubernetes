@@ -217,7 +217,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 
 func (oc *DefaultNetworkController) ensureRemotePodIP(oldPod, pod *corev1.Pod, addPort bool) error {
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
-		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
+		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo(), nil)
 		if err != nil {
 			// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
 			return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
@@ -348,7 +348,7 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *corev1.Pod) error {
 		}
 
 		if allVMPodsAreCompleted {
-			ips, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo())
+			ips, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo(), nil)
 			if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 				return fmt.Errorf("failed to get pod ips for the pod %s/%s: %w", pod.Namespace, pod.Name, err)
 			}

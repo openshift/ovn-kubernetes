@@ -51,37 +51,34 @@ func getPrimaryNADForNamespace(networkMgr networkmanager.Interface, namespaceNam
 		// No primary UDN in this namespace
 		return "", nil, nil
 	}
-	// Get the NAD key for the primary network in this namespace.
-	// Since this is for namespace-scoped UDNs, we expect exactly one NAD per network.
-	// Today we don't support multiple primary NADs for a namespace, so this is safe.
-	// Also note if the user misconfigures and ends up with CUDN and UDN for the same namespace,
-	// and if the CUDN was created first - which means the UDN won't be created successfully,
-	// then the user uses the P-UDN selector, the CUDN's NAD will be chosen here for this selector
-	// but that's a design flaw in the user's configuration, and expectation is for users to use
-	// the selectors correctly.
-	primaryNADs := namespacePrimaryNetwork.GetNADs()
-	if len(primaryNADs) != 1 {
-		return "", nil, fmt.Errorf("expected exactly one primary NAD for namespace %s, got %d", namespaceName, len(primaryNADs))
-	}
-	// There is a race condition where NAD is already deleted from kapi
-	// but network manager is too slow to update the network manager cache.
-	// In this case, GetNADs() will return the NADs even though they are deleted.
-	// So let's fetch the NAD again from the kapi to double confirm it exists
-	// before returning it.
-	nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(primaryNADs[0])
+	primaryNADKey, err := networkMgr.GetPrimaryNADForNamespace(namespaceName)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to split NAD key %s: %w", primaryNADs[0], err)
-	}
-	_, err = nadLister.NetworkAttachmentDefinitions(nadNamespace).Get(nadName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			klog.Warningf("NAD %s not found in kapi, returning empty network info even if network manager cache says it exists", primaryNADs[0])
+		if util.IsInvalidPrimaryNetworkError(err) || util.IsUnprocessedActiveNetworkError(err) {
 			return "", nil, nil
 		}
 		return "", nil, err
 	}
-	// GetNADs() returns NADs in "namespace/name" format, so use directly
-	return primaryNADs[0], namespacePrimaryNetwork, nil
+	if primaryNADKey == ovntypes.DefaultNetworkName {
+		return "", nil, nil
+	}
+	// There is a race condition where NAD is already deleted from kapi
+	// but network manager is too slow to update the network manager cache.
+	// In this case, the primary NAD key may still be cached even though it is deleted.
+	// So let's fetch the NAD again from the kapi to double confirm it exists
+	// before returning it.
+	nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(primaryNADKey)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to split NAD key %s: %w", primaryNADKey, err)
+	}
+	_, err = nadLister.NetworkAttachmentDefinitions(nadNamespace).Get(nadName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			klog.Warningf("NAD %s not found in kapi, returning empty network info even if network manager cache says it exists", primaryNADKey)
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+	return primaryNADKey, namespacePrimaryNetwork, nil
 }
 
 func (c *Controller) reconcileClusterNetworkConnect(key string) error {

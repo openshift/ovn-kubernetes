@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -22,6 +24,7 @@ import (
 	networkconnectlisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/listers/clusternetworkconnect/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -48,6 +51,7 @@ type Controller struct {
 	// listers
 	cncLister  networkconnectlisters.ClusterNetworkConnectLister
 	nodeLister corev1listers.NodeLister
+	nadLister  nadlisters.NetworkAttachmentDefinitionLister
 
 	// networkManager provides access to network information
 	networkManager networkmanager.Interface
@@ -57,6 +61,10 @@ type Controller struct {
 
 	// nodeController handles Node events (for updating routes when nodes change)
 	nodeController controllerutil.Controller
+
+	// nadReconciler handles NAD-triggered CNC requeues
+	nadReconciler   networkmanager.NADReconciler
+	nadReconcilerID uint64
 
 	// Single global lock protecting all controller state
 	sync.RWMutex
@@ -85,6 +93,7 @@ func NewController(
 ) *Controller {
 	cncLister := wf.ClusterNetworkConnectInformer().Lister()
 	nodeLister := wf.NodeCoreInformer().Lister()
+	nadLister := wf.NADInformer().Lister()
 
 	c := &Controller{
 		zone:           zone,
@@ -92,6 +101,7 @@ func NewController(
 		wf:             wf,
 		cncLister:      cncLister,
 		nodeLister:     nodeLister,
+		nadLister:      nadLister,
 		networkManager: networkManager,
 		cncCache:       make(map[string]*networkConnectState),
 	}
@@ -122,25 +132,105 @@ func NewController(
 		nodeCfg,
 	)
 
+	// this controller does not feed from an informer, nads are added
+	// to the queue by NAD Controller
+	nadReconcilerConfig := &controllerutil.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile:   c.syncNAD,
+		Threadiness: 1,
+		MaxAttempts: controllerutil.InfiniteAttempts,
+	}
+	c.nadReconciler = controllerutil.NewReconciler(
+		"ovnkube-network-connect-nad",
+		nadReconcilerConfig,
+	)
+
 	return c
 }
 
 // Start starts the controller.
 func (c *Controller) Start() error {
 	klog.Infof("Starting ovnkube network connect controller for zone %s", c.zone)
+	if c.nadReconciler == nil {
+		return controllerutil.Start(
+			c.cncController,
+			c.nodeController,
+		)
+	}
+	id, err := c.networkManager.RegisterNADReconciler(c.nadReconciler)
+	if err != nil {
+		return err
+	}
+	c.nadReconcilerID = id
 	return controllerutil.Start(
 		c.cncController,
 		c.nodeController,
+		c.nadReconciler,
 	)
 }
 
 // Stop stops the controller.
 func (c *Controller) Stop() {
-	controllerutil.Stop(
-		c.cncController,
-		c.nodeController,
-	)
+	if c.nadReconcilerID != 0 {
+		if err := c.networkManager.DeRegisterNADReconciler(c.nadReconcilerID); err != nil {
+			klog.Warningf("Failed to deregister CNC NAD reconciler: %v", err)
+		}
+	}
+	if c.nadReconciler != nil {
+		controllerutil.Stop(
+			c.cncController,
+			c.nodeController,
+			c.nadReconciler,
+		)
+	} else {
+		controllerutil.Stop(
+			c.cncController,
+			c.nodeController,
+		)
+	}
+	c.nadReconciler = nil
+	c.nadReconcilerID = 0
 	klog.Infof("Stopped ovnkube network connect controller for zone %s", c.zone)
+}
+
+func (c *Controller) syncNAD(key string) error {
+	if c.nadLister == nil || c.networkManager == nil {
+		return nil
+	}
+	nadNetwork := c.networkManager.GetNetInfoForNADKey(key)
+	if nadNetwork == nil {
+		return nil
+	}
+	networkID := nadNetwork.GetNetworkID()
+	if networkID == types.InvalidID {
+		return nil
+	}
+	cncs, err := c.cncLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	for _, cnc := range cncs {
+		subnets, err := util.ParseNetworkConnectSubnetAnnotation(cnc)
+		if err != nil {
+			klog.Warningf("Failed parsing CNC %s subnet annotation: %v", cnc.Name, err)
+			continue
+		}
+		shouldReconcile := false
+		for owner := range subnets {
+			_, ownerNetworkID, err := util.ParseNetworkOwner(owner)
+			if err != nil {
+				continue
+			}
+			if ownerNetworkID == networkID {
+				shouldReconcile = true
+				break
+			}
+		}
+		if shouldReconcile {
+			c.cncController.Reconcile(cnc.Name)
+		}
+	}
+	return nil
 }
 
 // cncNeedsUpdate determines if a CNC update requires reconciliation.
@@ -238,6 +328,7 @@ func (c *Controller) reconcileNode(key string) error {
 	// Requeue all CNCs to update routes for this node.
 	// We process ALL nodes (not just our zone) because the connect-router
 	// needs static routes to all node subnets across all zones.
+	// TODO (trozet): we should check what changed in the node and only reconcile affected CNCs
 	return c.requeueAllCNCs()
 }
 
