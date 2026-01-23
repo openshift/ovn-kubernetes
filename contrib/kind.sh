@@ -47,13 +47,14 @@ usage() {
     echo "                 [-dd |--dns-domain |"
     echo "                 [-ric | --run-in-container |"
     echo "                 [-cn | --cluster-name |"
-    echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
+    echo "                 [-ehp|--egress-ip-healthcheck-port <num>] [-mip|--metrics-ip <ip>]"
     echo "                 [-is | --ipsec]"
     echo "                 [-cm | --compact-mode]"
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [-nce | --network-connect-enable]"
     echo "                 [-uae | --preconfigured-udn-addresses-enable]"
-    echo "                 [-rae | --enable-route-advertisements]"
+    echo "                 [-rae | --route-advertisements-enable]"
+    echo "                 [-evpn | --evpn-enable]"
     echo "                 [-rud | --routed-udn-isolation-disable]"
     echo "                 [-adv | --advertise-default-network]"
     echo "                 [-nqe | --network-qos-enable]"
@@ -90,6 +91,8 @@ echo "-n4  | --no-ipv4                              Disable IPv4. DEFAULT: IPv4 
 echo "-i6  | --ipv6                                 Enable IPv6. DEFAULT: IPv6 Disabled."
 echo "-wk  | --num-workers                          Number of worker nodes. DEFAULT: HA - 2 worker"
 echo "                                              nodes and no HA - 0 worker nodes."
+echo "-inf | --num-infra                            Number of infra nodes. DEFAULT: 0"
+echo "-prom| --install-prometheus                   Install Prometheus on infra nodes"
 echo "-sw  | --allow-system-writes                  Allow script to update system. Intended to allow"
 echo "                                              github CI to be updated with IPv6 settings."
 echo "                                              DEFAULT: Don't allow."
@@ -113,6 +116,7 @@ echo "-dd  | --dns-domain                           Configure a custom dnsDomain
 echo "-cn  | --cluster-name                         Configure the kind cluster's name"
 echo "-ric | --run-in-container                     Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane"
 echo "-ehp | --egress-ip-healthcheck-port           TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
+echo "-mip | --metrics-ip                           IP address to bind metrics endpoints. DEFAULT: K8S_NODE_IP or 0.0.0.0"
 echo "-is  | --ipsec                                Enable IPsec encryption (spawns ovn-ipsec pods)"
 echo "-sm  | --scale-metrics                        Enable scale metrics"
 echo "-cm  | --compact-mode                         Enable compact mode, ovnkube master and node run in the same process."
@@ -129,7 +133,8 @@ echo "--add-nodes                                   Adds nodes to an existing cl
 echo "-dns | --enable-dnsnameresolver               Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
 echo "-obs | --observability                        Enable OVN Observability feature."
 echo "-uae | --preconfigured-udn-addresses-enable   Enable connecting workloads with preconfigured network to user-defined networks"
-echo "-rae | --enable-route-advertisements          Enable route advertisements"
+echo "-rae | --route-advertisements-enable          Enable route advertisements"
+echo "-evpn | --evpn-enable                         Enable EVPN"
 echo "-adv | --advertise-default-network            Applies a RouteAdvertisements configuration to advertise the default network on all nodes"
 echo "-rud | --routed-udn-isolation-disable         Disable isolation across BGP-advertised UDNs (sets advertised-udn-isolation-mode=loose). DEFAULT: strict."
 echo "-mps | --multi-pod-subnet                     Use multiple subnets for the default cluster network"
@@ -212,6 +217,16 @@ parse_args() {
                                                     exit 1
                                                 fi
                                                 KIND_NUM_WORKER=$1
+                                                ;;
+            -inf | --num-infra )                shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid num-infra: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_NUM_INFRA=$1
+                                                ;;
+            -prom | --install-prometheus )      KIND_INSTALL_PROMETHEUS=true
                                                 ;;
             -npz | --nodes-per-zone )           shift
                                                 if ! [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -306,6 +321,9 @@ parse_args() {
                                                 fi
                                                 OVN_EGRESSIP_HEALTHCHECK_PORT=$1
                                                 ;;
+            -mip | --metrics-ip ) 		shift
+                                                METRICS_IP="$1"
+                                                ;;
            -sm  | --scale-metrics )             OVN_METRICS_SCALE_ENABLE=true
                                                 ;;
            -cm  | --compact-mode )              OVN_COMPACT_MODE=true
@@ -323,6 +341,8 @@ parse_args() {
             -uae | --preconfigured-udn-addresses-enable) ENABLE_PRE_CONF_UDN_ADDR=true
                                                   ;;
             -rae | --route-advertisements-enable) ENABLE_ROUTE_ADVERTISEMENTS=true
+                                                  ;;
+            -evpn | --evpn-enable)              ENABLE_EVPN=true
                                                   ;;
             -adv | --advertise-default-network) ADVERTISE_DEFAULT_NETWORK=true
                                                   ;;
@@ -426,6 +446,7 @@ print_params() {
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
+     echo "METRICS_IP = $METRICS_IP"
      echo "OVN_DEPLOY_PODS = $OVN_DEPLOY_PODS"
      echo "OVN_METRICS_SCALE_ENABLE = $OVN_METRICS_SCALE_ENABLE"
      echo "OVN_ISOLATED = $OVN_ISOLATED"
@@ -433,6 +454,7 @@ print_params() {
      echo "ENABLE_NETWORK_SEGMENTATION= $ENABLE_NETWORK_SEGMENTATION"
      echo "ENABLE_NETWORK_CONNECT = $ENABLE_NETWORK_CONNECT"
      echo "ENABLE_ROUTE_ADVERTISEMENTS= $ENABLE_ROUTE_ADVERTISEMENTS"
+     echo "ENABLE_EVPN= $ENABLE_EVPN"
      echo "ADVERTISED_UDN_ISOLATION_MODE= $ADVERTISED_UDN_ISOLATION_MODE"
      echo "ADVERTISE_DEFAULT_NETWORK = $ADVERTISE_DEFAULT_NETWORK"
      echo "ENABLE_PRE_CONF_UDN_ADDR = $ENABLE_PRE_CONF_UDN_ADDR"
@@ -447,6 +469,8 @@ print_params() {
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "OVN_NETWORK_QOS_ENABLE = $OVN_NETWORK_QOS_ENABLE"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "KIND_NUM_INFRA = $KIND_NUM_INFRA"
+     echo "KIND_INSTALL_PROMETHEUS = $KIND_INSTALL_PROMETHEUS"
      echo "OVN_MTU= $OVN_MTU"
      echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
      echo "MULTI_POD_SUBNET= $MULTI_POD_SUBNET"
@@ -636,6 +660,9 @@ set_default_params() {
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
 
+  KIND_NUM_INFRA=${KIND_NUM_INFRA:-0}
+  KIND_INSTALL_PROMETHEUS=${KIND_INSTALL_PROMETHEUS:-false}
+
   if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
     KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
 
@@ -648,6 +675,7 @@ set_default_params() {
 
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
+  METRICS_IP=${METRICS_IP:-""}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
   OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-identity ovnkube-zone-controller ovnkube-control-plane ovnkube-master ovnkube-node"}
   OVN_METRICS_SCALE_ENABLE=${OVN_METRICS_SCALE_ENABLE:-false}
@@ -674,6 +702,12 @@ set_default_params() {
   fi
   if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != true ]; then
     echo "Route advertisements requires interconnect to be enabled (-ic)"
+    exit 1
+  fi
+
+  ENABLE_EVPN=${ENABLE_EVPN:-false}
+  if [ "$ENABLE_EVPN" == true ] && [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
+    echo "EVPN requires Route advertisements to be enabled (-rae)"
     exit 1
   fi
 
@@ -836,6 +870,7 @@ create_kind_cluster() {
   dns_domain=${KIND_DNS_DOMAIN} \
   ovn_num_master=${KIND_NUM_MASTER} \
   ovn_num_worker=${KIND_NUM_WORKER} \
+  kind_num_infra=${KIND_NUM_INFRA} \
   cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
   kind_local_registry_port=${KIND_LOCAL_REGISTRY_PORT} \
   kind_local_registry_name=${KIND_LOCAL_REGISTRY_NAME} \
@@ -955,9 +990,11 @@ create_ovn_kube_manifests() {
     --network-connect-enable="${ENABLE_NETWORK_CONNECT}" \
     --preconfigured-udn-addresses-enable="${ENABLE_PRE_CONF_UDN_ADDR}" \
     --route-advertisements-enable="${ENABLE_ROUTE_ADVERTISEMENTS}" \
+    --evpn-enable="${ENABLE_EVPN}" \
     --advertise-default-network="${ADVERTISE_DEFAULT_NETWORK}" \
     --advertised-udn-isolation-mode="${ADVERTISED_UDN_ISOLATION_MODE}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
+    --metrics-ip="${METRICS_IP}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --enable-multi-external-gateway=true \
@@ -1055,6 +1092,7 @@ install_ovn() {
   if [ "$ENABLE_NETWORK_CONNECT" == true ]; then
     run_kubectl apply -f k8s.ovn.org_clusternetworkconnects.yaml
   fi
+  run_kubectl apply -f k8s.ovn.org_vteps.yaml
   # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
