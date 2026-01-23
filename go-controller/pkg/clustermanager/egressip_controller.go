@@ -1201,6 +1201,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 	defer eIPC.nodeAllocator.Unlock()
 	assignments := []egressipv1.EgressIPStatusItem{}
 	assignableNodes, existingAllocations := eIPC.getSortedEgressData()
+	assignableNodes = filterEgressNodesForEgressIP(assignableNodes, name, eIPC.watchFactory) // OCP HACK: EgressIP node selector
 	if len(assignableNodes) == 0 {
 		eIPRef := corev1.ObjectReference{
 			Kind: "EgressIP",
