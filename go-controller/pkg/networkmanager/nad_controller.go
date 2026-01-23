@@ -46,9 +46,6 @@ type watchFactory interface {
 	NodeCoreInformer() coreinformers.NodeInformer
 }
 
-// handlerFunc used as a callback that can be registered with nadController
-type handlerFunc func(nadName string, info util.NetInfo, removed bool)
-
 // nadController handles namespaced scoped NAD events and
 // manages cluster scoped networks defined in those NADs. NADs are mostly
 // referenced from pods to give them access to the network. Different NADs can
@@ -57,6 +54,9 @@ type handlerFunc func(nadName string, info util.NetInfo, removed bool)
 // administration can lead to undefined behavior if referenced by running pods.
 type nadController struct {
 	sync.RWMutex
+	// reconcilers keyed by registration ID.
+	reconcilers      map[uint64]reconcilerRegistration
+	nextReconcilerID uint64
 
 	name            string
 	nadLister       nadlisters.NetworkAttachmentDefinitionLister
@@ -81,8 +81,11 @@ type nadController struct {
 	networkIDAllocator  id.Allocator
 	tunnelKeysAllocator *id.TunnelKeysAllocator
 	nadClient           nadclientset.Interface
-	// handlerFuncs is a list of registered callbacks that is called during events
-	handlerFuncs []handlerFunc
+}
+
+type reconcilerRegistration struct {
+	id uint64
+	r  NADReconciler
 }
 
 func newController(
@@ -101,9 +104,9 @@ func newController(
 		nadLister:         wf.NADInformer().Lister(),
 		nodeLister:        wf.NodeCoreInformer().Lister(),
 		networkController: newNetworkController(name, zone, node, cm, wf),
+		reconcilers:       map[uint64]reconcilerRegistration{},
 		nads:              map[string]string{},
 		primaryNADs:       map[string]string{},
-		handlerFuncs:      []handlerFunc{},
 	}
 
 	if ovnClient != nil {
@@ -180,19 +183,35 @@ func (c *nadController) Stop() {
 	c.networkController.Stop()
 }
 
-// RegisterNADHandler adds functions to be executed during NAD delete/update/add calls
-// usage of this function should be restricted to lightweight, non-blocking operations
-func (c *nadController) RegisterNADHandler(handler handlerFunc) error {
+// RegisterNADReconciler registers a reconciler to receive NAD keys for reconciliation.
+func (c *nadController) RegisterNADReconciler(r NADReconciler) (uint64, error) {
 	c.Lock()
 	defer c.Unlock()
-	c.handlerFuncs = append(c.handlerFuncs, handler)
+	if c.reconcilers == nil {
+		c.reconcilers = map[uint64]reconcilerRegistration{}
+	}
+	c.nextReconcilerID++
+	id := c.nextReconcilerID
+	c.reconcilers[id] = reconcilerRegistration{id: id, r: r}
+	return id, nil
+}
+
+// DeRegisterNADReconciler removes a previously registered reconciler by ID.
+func (c *nadController) DeRegisterNADReconciler(id uint64) error {
+	c.Lock()
+	defer c.Unlock()
+	if _, ok := c.reconcilers[id]; !ok {
+		return fmt.Errorf("reconciler id %d not found", id)
+	}
+	delete(c.reconcilers, id)
 	return nil
 }
 
-// executeHandlers should always be done under lock
-func (c *nadController) executeHandlers(nadName string, info util.NetInfo, removed bool) {
-	for _, handler := range c.handlerFuncs {
-		handler(nadName, info, removed)
+// notifyReconcilers enqueues the NAD key to all registered reconcilers
+// Must be called with nadController Mutex locked
+func (c *nadController) notifyReconcilers(key string) {
+	for _, entry := range c.reconcilers {
+		entry.r.Reconcile(key)
 	}
 }
 
@@ -206,6 +225,7 @@ func (c *nadController) syncAll() (err error) {
 		key, err := cache.MetaNamespaceKeyFunc(nad)
 		if err != nil {
 			klog.Errorf("%s: failed to sync %v: %v", c.name, nad, err)
+			return nil
 		}
 		err = c.syncNAD(key, nad)
 		if err != nil {
@@ -325,6 +345,10 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 
 	c.Lock()
 	defer c.Unlock()
+	defer func() {
+		c.notifyReconcilers(key) // notify reconcilers after the sync runs with the latest information
+	}()
+
 	// We can only have one primary NAD per namespace
 	primaryNAD := c.primaryNADs[namespace]
 	if nadNetwork != nil && nadNetwork.IsPrimaryNetwork() && primaryNAD != "" && primaryNAD != key {
@@ -380,7 +404,6 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		} else {
 			c.networkController.EnsureNetwork(oldNetwork)
 		}
-		c.executeHandlers(key, oldNetwork, true)
 	}
 
 	if err := c.handleNetworkAnnotations(oldNetwork, ensureNetwork, nad); err != nil {
@@ -419,7 +442,6 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 
 	// reconcile the network
 	c.networkController.EnsureNetwork(ensureNetwork)
-	c.executeHandlers(key, ensureNetwork, false)
 	return nil
 }
 
@@ -429,7 +451,7 @@ func isOwnUpdate(manager string, managedFields []metav1.ManagedFieldsEntry) bool
 	return util.IsLastUpdatedByManager(manager, managedFields)
 }
 
-func (c *nadController) nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) bool {
+func (c *nadController) nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmentDefinition) (needsUpdate bool) {
 	if oldNAD == nil || newNAD == nil {
 		return true
 	}
@@ -443,6 +465,28 @@ func (c *nadController) nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmen
 	if isOwnUpdate(c.name, newNAD.ManagedFields) {
 		return false
 	}
+
+	// notifyReconcilers during sync happens after netInfo is updated, so controllers receive the latest info,
+	// and it is safe to ignore own updates
+	defer func() {
+		if !needsUpdate { // ensure we send the NAD event to registered handlers anyway
+			var key string
+			var err error
+			if newNAD != nil {
+				key, err = cache.MetaNamespaceKeyFunc(newNAD)
+				if err != nil && oldNAD != nil {
+					key, err = cache.MetaNamespaceKeyFunc(oldNAD)
+				}
+			}
+			if err != nil || len(key) == 0 {
+				klog.Errorf("Failed to parse nad key during update, error: %v", err)
+			} else {
+				c.Lock()
+				defer c.Unlock()
+				c.notifyReconcilers(key)
+			}
+		}
+	}()
 
 	// also reconcile the network in case its route advertisements changed
 	return !reflect.DeepEqual(oldNAD.Spec, newNAD.Spec) ||
@@ -550,6 +594,24 @@ func (c *nadController) GetNetwork(name string) util.NetInfo {
 		return &util.DefaultNetInfo{}
 	}
 	return network
+}
+
+func (c *nadController) GetNetInfoForNADKey(nadKey string) util.NetInfo {
+	c.RLock()
+	networkName := c.nads[nadKey]
+	c.RUnlock()
+	if networkName == "" {
+		return nil
+	}
+	network := c.networkController.getNetwork(networkName)
+	if network == nil && networkName == types.DefaultNetworkName {
+		return &util.DefaultNetInfo{}
+	}
+	if network == nil {
+		return nil
+	}
+	// Return a copy so callers can safely read fields without depending on controller locks.
+	return util.NewMutableNetInfo(network)
 }
 
 func (c *nadController) GetActiveNetworkNamespaces(networkName string) ([]string, error) {

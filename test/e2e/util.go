@@ -1143,7 +1143,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		coredumpDir := "/tmp/kind/logs/coredumps"
 		dbLocation := "/var/lib/openvswitch"
 		// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5782
-		skippedCoredumps := []string{"zebra", "bgpd", "mgmtd"}
+		skippedCoredumps := []string{"zebra", "bgpd", "mgmtd", "bfdd"}
 
 		// Check for coredumps on host
 		var coredumpFiles []string

@@ -116,7 +116,7 @@ echo "-ehp | --egress-ip-healthcheck-port           TCP port used for gRPC sessi
 echo "-is  | --ipsec                                Enable IPsec encryption (spawns ovn-ipsec pods)"
 echo "-sm  | --scale-metrics                        Enable scale metrics"
 echo "-cm  | --compact-mode                         Enable compact mode, ovnkube master and node run in the same process."
-echo "-ce  | --enable-central                       Deploy with OVN Central (Legacy Architecture)"
+echo "-ce  | --enable-central                       [DEPRECATED] Deploy with OVN Central (Legacy Architecture)"
 echo "-nqe | --network-qos-enable                   Enable network QoS. DEFAULT: Disabled."
 echo "--disable-ovnkube-identity                    Disable per-node cert and ovnkube-identity webhook"
 echo "-npz | --nodes-per-zone                       If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
@@ -328,7 +328,8 @@ parse_args() {
                                                   ;;
             -rud | --routed-udn-isolation-disable) ADVERTISED_UDN_ISOLATION_MODE=loose
                                                   ;;
-            -ce | --enable-central )              OVN_ENABLE_INTERCONNECT=false
+            -ce | --enable-central )              echo "WARNING: --enable-central is deprecated. OVN Central (Legacy Architecture) will be removed in a future release." >&2
+                                                  OVN_ENABLE_INTERCONNECT=false
                                                   CENTRAL_ARG_PROVIDED=true
                                                   ;;
             -ic | --enable-interconnect )         OVN_ENABLE_INTERCONNECT=true
