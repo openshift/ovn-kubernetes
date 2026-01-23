@@ -311,7 +311,7 @@ func SyncConntrackForExternalGateways(gwIPsToKeep sets.Set[string], isPodInLocal
 			}
 		}
 
-		podIPs, err := GetPodIPsOfNetwork(pod, &DefaultNetInfo{})
+		podIPs, err := GetPodIPsOfNetwork(pod, &DefaultNetInfo{}, nil)
 		if err != nil && !errors.Is(err, ErrNoPodIPFound) {
 			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}

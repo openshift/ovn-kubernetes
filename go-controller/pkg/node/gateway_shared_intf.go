@@ -892,6 +892,9 @@ func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 
 	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 	if err != nil {
+		if util.IsInvalidPrimaryNetworkError(err) {
+			return nil
+		}
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
 	}
 
@@ -974,6 +977,9 @@ func (npw *nodePortWatcher) UpdateService(old, new *corev1.Service) error {
 
 		netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(new.Namespace)
 		if err != nil {
+			if util.IsInvalidPrimaryNetworkError(err) {
+				return utilerrors.Join(errors...)
+			}
 			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", new.Name, new.Namespace, err)
 		}
 
@@ -1405,11 +1411,6 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	}
 	localEndpoints := npw.GetLocalEligibleEndpointAddresses(epSlices, svc)
 	if svcConfig, exists := npw.updateServiceInfo(*namespacedName, nil, &hasLocalHostNetworkEp, localEndpoints); exists {
-		netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(namespacedName.Namespace)
-		if err != nil {
-			return fmt.Errorf("error getting active network for service %s/%s: %w", namespacedName.Namespace, namespacedName.Name, err)
-		}
-
 		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
 		// we have to do this because deleting and adding iptables rules is slow.
 		npw.serviceInfoLock.Lock()
@@ -1418,6 +1419,28 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 		if err = delServiceRules(svcConfig.service, svcConfig.localEndpoints, npw); err != nil {
 			errors = append(errors, err)
 		}
+
+		// Get network info after deleting old rules, before adding new ones.
+		// This ensures old rules are cleaned up even if namespace/network is deleted,
+		// and allows graceful handling of deletion race conditions.
+		netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(namespacedName.Namespace)
+		if err != nil {
+			// If the namespace was deleted, skip adding new service rules
+			if apierrors.IsNotFound(err) {
+				klog.V(5).Infof("Namespace not found for service %s/%s during endpoint slice delete, skipping adding service rules",
+					namespacedName.Namespace, namespacedName.Name)
+				return utilerrors.Join(errors...)
+			}
+			// If the UDN was deleted, skip adding new service rules
+			if util.IsInvalidPrimaryNetworkError(err) {
+				klog.V(5).Infof("Skipping addServiceRules for %s/%s during endpoint slice delete: primary network invalid: %v",
+					namespacedName.Namespace, namespacedName.Name, err)
+				return utilerrors.Join(errors...)
+			}
+			errors = append(errors, fmt.Errorf("error getting active network for service %s/%s: %w", namespacedName.Namespace, namespacedName.Name, err))
+			return utilerrors.Join(errors...)
+		}
+
 		if err = addServiceRules(svcConfig.service, netInfo, localEndpoints, hasLocalHostNetworkEp, npw); err != nil {
 			errors = append(errors, err)
 		}
@@ -1543,6 +1566,9 @@ func (npwipt *nodePortWatcherIptables) AddService(service *corev1.Service) error
 
 	netInfo, err := npwipt.networkManager.GetActiveNetworkForNamespace(service.Namespace)
 	if err != nil {
+		if util.IsInvalidPrimaryNetworkError(err) {
+			return nil
+		}
 		return fmt.Errorf("error getting active network for service %s in namespace %s: %w", service.Name, service.Namespace, err)
 	}
 
@@ -1571,6 +1597,9 @@ func (npwipt *nodePortWatcherIptables) UpdateService(old, new *corev1.Service) e
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
 		netInfo, err := npwipt.networkManager.GetActiveNetworkForNamespace(new.Namespace)
 		if err != nil {
+			if util.IsInvalidPrimaryNetworkError(err) {
+				return utilerrors.Join(errors...)
+			}
 			return fmt.Errorf("error getting active network for service %s in namespace %s: %w", new.Name, new.Namespace, err)
 		}
 
