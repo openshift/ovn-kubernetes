@@ -107,15 +107,6 @@ func showMachine(machineName string) (*Machine, error) {
 	return vm, nil
 }
 
-func removeMachine(machineName string) error {
-	cmd := exec.Command("kcli", "remove", "-y", "vm", machineName)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to delete libvirt machine: %s, output: %s, err: %w", machineName, string(output), err)
-	}
-	return nil
-}
-
 func (m *Machine) attachNetwork(networkName string) error {
 	cmd := exec.Command("kcli", "add", "nic", m.Name, "-n", networkName)
 	output, err := cmd.CombinedOutput()
