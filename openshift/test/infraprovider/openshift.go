@@ -42,6 +42,12 @@ type machine struct {
 	active        bool
 }
 
+func (m *machine) hasNetwork(name string) bool {
+	_, ok4 := m.ipv4Addresses[name]
+	_, ok6 := m.ipv6Addresses[name]
+	return ok4 || ok6
+}
+
 func (m *machine) getAnyIP() (string, error) {
 	for _, ipv4 := range m.ipv4Addresses {
 		return ipv4, nil
@@ -70,23 +76,49 @@ func (m *machine) addContainer(container api.ExternalContainer) (api.ExternalCon
 	if m.isHostingContainer() {
 		return container, fmt.Errorf("unable to add container to a machine which already hosts a container")
 	}
-	testMachine, err := showMachine(m.name)
-	if err != nil {
-		return container, fmt.Errorf("failed retrieving test machine: %w", err)
+	network := container.Network.Name()
+	var (
+		nwIface api.NetworkInterface
+		err     error
+	)
+	if nwIface, err = m.attachNetwork(network); err != nil {
+		return container, err
 	}
-	hostNetwork := container.Network.Name()
-	if err := testMachine.attachNetwork(hostNetwork); err != nil {
-		return container, fmt.Errorf("failed attaching network %q to machine %q: %w", hostNetwork, testMachine.Name, err)
-	}
+	container.IPv4 = nwIface.IPv4
+	container.IPv6 = nwIface.IPv6
 	cmd := buildDaemonContainerCmd(container.Name, container.Image, container.CmdArgs)
 	cmd = addElevatedPrivileges(cmd)
-	if _, err := m.execCmd("", cmd); err != nil {
+	if _, err := m.execCmd(cmd); err != nil {
+		// Rollback: detach the network if container startup failed
+		_ = m.detachNetwork(network) // Best effort cleanup
 		return container, fmt.Errorf("failed to execute command on machine %s: %w", m.name, err)
 	}
+	m.container = &container
+	m.active = true
+	return container, nil
+}
 
-	network, err := getOpenshiftNetwork(hostNetwork)
+func (m *machine) attachNetwork(name string) (api.NetworkInterface, error) {
+	nwIface := api.NetworkInterface{}
+	testMachine, err := showMachine(m.name)
 	if err != nil {
-		return container, fmt.Errorf("failed to retrieve network %s, err: %w", hostNetwork, err)
+		return nwIface, fmt.Errorf("failed retrieving test machine: %w", err)
+	}
+	if err := testMachine.attachNetwork(name); err != nil {
+		return nwIface, fmt.Errorf("failed attaching network %q to machine %q: %w", name, testMachine.Name, err)
+	}
+	network, err := getNetwork(name)
+	if err != nil {
+		// Rollback: detach the network
+		if updated, showErr := showMachine(m.name); showErr == nil {
+			for _, net := range updated.Nets {
+				if net.Net == name {
+					_ = updated.detachNetwork(name, net.Device) // Best effort cleanup
+					break
+				}
+			}
+		}
+		return nwIface, fmt.Errorf("failed to retrieve network %s, err: %w", name, err)
 	}
 
 	// Poll for IPs with timeout - wait for machine to get IPs in the container network
@@ -97,7 +129,14 @@ func (m *machine) addContainer(container api.ExternalContainer) (api.ExternalCon
 			return false, nil
 		}
 
-		// Find and assign IPs from the container network
+		// Find and assign MAC, Device and IPs from the container network
+		for _, net := range updatedMachine.Nets {
+			if net.Net == name {
+				nwIface.MAC = net.Mac
+				nwIface.InfName = net.Device
+				break
+			}
+		}
 		foundIP := false
 		for _, ip := range updatedMachine.IPs {
 			in, err := ipInCIDR(ip, network.CIDR)
@@ -106,28 +145,58 @@ func (m *machine) addContainer(container api.ExternalContainer) (api.ExternalCon
 				return false, nil
 			}
 			if in && utilnet.IsIPv4String(ip) {
-				container.IPv4 = ip
-				m.ipv4Addresses[hostNetwork] = ip
+				m.ipv4Addresses[name] = ip
+				nwIface.IPv4 = ip
 				foundIP = true
 			} else if in {
-				container.IPv6 = ip
-				m.ipv6Addresses[hostNetwork] = ip
+				m.ipv6Addresses[name] = ip
+				nwIface.IPv6 = ip
 				foundIP = true
 			}
 		}
 		if !foundIP {
-			ginkgo.GinkgoLogr.Info("Machine IPs not yet populated in network, retrying", "machine", m.name, "network", hostNetwork)
+			ginkgo.GinkgoLogr.Info("Machine IPs not yet populated in network, retrying", "machine", m.name, "network", name)
 			return false, nil
 		}
 		return true, nil
 	})
 	if err != nil {
-		return container, fmt.Errorf("timeout waiting for machine %s to get IPs in network %s: %w", m.name, hostNetwork, err)
+		// Rollback: detach the network
+		if updated, showErr := showMachine(m.name); showErr == nil {
+			for _, net := range updated.Nets {
+				if net.Net == name {
+					_ = updated.detachNetwork(name, net.Device) // Best effort cleanup
+					break
+				}
+			}
+		}
+		return nwIface, fmt.Errorf("timeout waiting for machine %s to get IPs in network %s: %w", m.name, name, err)
 	}
+	return nwIface, nil
+}
 
-	m.container = &container
-	m.active = true
-	return container, nil
+func (m *machine) detachNetwork(name string) error {
+	testMachine, err := showMachine(m.name)
+	if err != nil {
+		return fmt.Errorf("failed retrieving test machine: %w", err)
+	}
+	var interfaceName string
+	for _, net := range testMachine.Nets {
+		if net.Net == name {
+			interfaceName = net.Device
+			break
+		}
+	}
+	if interfaceName == "" {
+		return fmt.Errorf("failed to find interface from machine %s for network %s", m.name, name)
+	}
+	if err := testMachine.detachNetwork(name, interfaceName); err != nil {
+		return err
+	}
+	// Clean up IP addresses after successful detach
+	delete(m.ipv4Addresses, name)
+	delete(m.ipv6Addresses, name)
+	return nil
 }
 
 func (m *machine) deleteContainer(container api.ExternalContainer) error {
@@ -139,18 +208,22 @@ func (m *machine) deleteContainer(container api.ExternalContainer) error {
 		return fmt.Errorf("failed to check if container is running: %v", err)
 	}
 	if !isRunning {
+		// Container already stopped, just clean up state
+		m.ipv4Addresses = map[string]string{}
+		m.ipv6Addresses = map[string]string{}
+		m.container = nil
 		m.active = false
 		return nil
 	}
 	// remove the container
-	hostNetwork := container.Network.Name()
 	cmd := buildRemoveContainerCmd(container.Name)
 	cmd = addElevatedPrivileges(cmd)
-	if _, err := m.execCmd(hostNetwork, cmd); err != nil {
+	if _, err := m.execCmd(cmd); err != nil {
 		return fmt.Errorf("failed to execute command on machine %s: %w", m.name, err)
 	}
-	delete(m.ipv4Addresses, hostNetwork)
-	delete(m.ipv6Addresses, hostNetwork)
+	// Clear all IP addresses when deleting the container
+	m.ipv4Addresses = map[string]string{}
+	m.ipv6Addresses = map[string]string{}
 	m.container = nil
 	m.active = false
 	return nil
@@ -166,14 +239,14 @@ func (m *machine) getContainerLogs(container api.ExternalContainer) (string, err
 	}
 	logsCmd := buildContainerLogsCmd(container.Name)
 	logsCmd = addElevatedPrivileges(logsCmd)
-	res, err := m.execCmd(container.Network.Name(), logsCmd)
+	res, err := m.execCmd(logsCmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to execute command (%s) within machine %s: err: %v", logsCmd, m.name, err)
 	}
 	return res.stdout, nil
 }
 
-func (m *machine) execCmd(network, cmd string) (result, error) {
+func (m *machine) execCmd(cmd string) (result, error) {
 	ginkgo.By("Running command on test machine: " + cmd)
 	var r result
 	signer, err := getSigner()
@@ -183,11 +256,7 @@ func (m *machine) execCmd(network, cmd string) (result, error) {
 	var ip string
 	// When network string is empty, then retrieve any available IP address
 	// from the machine.
-	if network == "" {
-		ip, err = m.getAnyIP()
-	} else {
-		ip, err = m.getIP(network)
-	}
+	ip, err = m.getAnyIP()
 	if err != nil {
 		return r, fmt.Errorf("failed to get valid IP: %w", err)
 	}
@@ -202,14 +271,14 @@ func (m *machine) execCmd(network, cmd string) (result, error) {
 func (m *machine) execContainerCmd(container api.ExternalContainer, cmd []string) (result, error) {
 	containerCmd := buildContainerCmd(container.Name, cmd)
 	containerCmd = addElevatedPrivileges(containerCmd)
-	return m.execCmd(container.Network.Name(), containerCmd)
+	return m.execCmd(containerCmd)
 }
 
 func (m *machine) isContainerRunning(container api.ExternalContainer) (bool, error) {
 	// check to see if the container is running before attempting to delete it
 	isPresentCmd := buildContainerCheckCmd(container.Name)
 	isPresentCmd = addElevatedPrivileges(isPresentCmd)
-	r, err := m.execCmd(container.Network.Name(), isPresentCmd)
+	r, err := m.execCmd(isPresentCmd)
 	if err != nil {
 		return false, fmt.Errorf("failed to execute command on machine %s: %s", m.name, r)
 	}
@@ -290,12 +359,18 @@ func (o openshift) Name() string {
 }
 
 func (o openshift) PrimaryNetwork() (api.Network, error) {
-	networkName := os.Getenv("BAREMETAL_NETWORK_NAME")
-	if networkName == "" {
-		ginkgo.GinkgoLogr.Info("Network name env is not set, using default network name")
-		networkName = defaultNetworkName
+	var networkName string
+	if o.platform == configv1.BareMetalPlatformType {
+		networkName = os.Getenv("BAREMETAL_NETWORK_NAME")
+		if networkName == "" {
+			ginkgo.GinkgoLogr.Info("Network name env is not set for baremetal cluster, using default network name")
+			networkName = defaultNetworkName
+		}
 	}
-	return getOpenshiftNetwork(networkName)
+	if networkName == "" {
+		return nil, fmt.Errorf("failed to find primary network for the cluster")
+	}
+	return getNetwork(networkName)
 }
 
 func (o openshift) ExternalContainerPrimaryInterfaceName() string {
@@ -382,7 +457,7 @@ func (o *openshift) execMachine(container api.ExternalContainer, cmd []string) (
 	if err != nil {
 		return "", err
 	}
-	r, err := m.execCmd(container.Network.Name(), strings.Join(cmd, " "))
+	r, err := m.execCmd(strings.Join(cmd, " "))
 	if err != nil {
 		return "", fmt.Errorf("failed to execute command on remote machine: %v - result: %q", err, r)
 	}
@@ -419,8 +494,8 @@ func (c *contextOpenshift) GetAllowedExternalContainerPort() int {
 }
 
 func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	if c.platform != configv1.BareMetalPlatformType {
-		ginkgo.Skip(fmt.Sprintf("creation of external container is unsupported with platform %s", c.platform))
+	if !isKcliInstalled() {
+		ginkgo.Skip("kcli is not installed, so creation of external container is unsupported with this cluster")
 	}
 	if valid, err := container.IsValidPreCreateContainer(); !valid {
 		return container, fmt.Errorf("failed to create external container: %w", err)
@@ -467,11 +542,39 @@ func (c *contextOpenshift) GetExternalContainerLogs(container api.ExternalContai
 }
 
 func (c contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	panic("not implemented")
+	if len(subnets) != 1 {
+		return nil, fmt.Errorf("network must be provided with one subnet")
+	}
+	c.sharedMachines.mu.Lock()
+	defer c.sharedMachines.mu.Unlock()
+	networks, err := listNetworks()
+	if err != nil {
+		return nil, err
+	}
+	if net, ok := networks[name]; ok {
+		return &net, nil
+	}
+	return createNetwork(name, subnets[0])
 }
 
 func (c contextOpenshift) DeleteNetwork(network api.Network) error {
-	panic("not implemented")
+	name := network.Name()
+	_, err := getNetwork(name)
+	if err != nil {
+		return err
+	}
+	c.sharedMachines.mu.Lock()
+	defer c.sharedMachines.mu.Unlock()
+	for _, m := range c.sharedMachines.list {
+		if !m.active {
+			continue
+		}
+		if m.hasNetwork(name) {
+			return fmt.Errorf("container %s is still attached with network %s, can't delete it",
+				m.container.Name, name)
+		}
+	}
+	return deleteNetwork(name)
 }
 
 func (c *contextOpenshift) GetAttachedNetworks() (api.Networks, error) {
@@ -483,11 +586,73 @@ func (c *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Un
 }
 
 func (c contextOpenshift) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
-	panic("not implemented")
+	name := network.Name()
+	_, err := getNetwork(name)
+	if err != nil {
+		return api.NetworkInterface{}, err
+	}
+	c.sharedMachines.mu.Lock()
+	defer c.sharedMachines.mu.Unlock()
+	var (
+		machine   *machine
+		container *api.ExternalContainer
+		attached  bool
+	)
+	for _, m := range c.sharedMachines.list {
+		if !m.active {
+			continue
+		}
+		if m.container.Name == instance {
+			if m.hasNetwork(name) {
+				attached = true
+			}
+			machine = m
+			container = m.container
+			break
+		}
+	}
+	if container == nil {
+		return api.NetworkInterface{}, fmt.Errorf("container %s not found", instance)
+	}
+	if attached {
+		return api.NetworkInterface{}, fmt.Errorf("network %s is already attached with container %s", name, instance)
+	}
+	return machine.attachNetwork(name)
 }
 
 func (c contextOpenshift) DetachNetwork(network api.Network, instance string) error {
-	panic("not implemented")
+	name := network.Name()
+	_, err := getNetwork(name)
+	if err != nil {
+		return err
+	}
+	c.sharedMachines.mu.Lock()
+	defer c.sharedMachines.mu.Unlock()
+	var (
+		machine   *machine
+		container *api.ExternalContainer
+		attached  bool
+	)
+	for _, m := range c.sharedMachines.list {
+		if !m.active {
+			continue
+		}
+		if m.container.Name == instance {
+			if m.hasNetwork(name) {
+				attached = true
+			}
+			machine = m
+			container = m.container
+			break
+		}
+	}
+	if container == nil {
+		return fmt.Errorf("container %s not found", instance)
+	}
+	if !attached {
+		return fmt.Errorf("network %s is not attached with container %s", name, instance)
+	}
+	return machine.detachNetwork(name)
 }
 
 func (c *contextOpenshift) AddCleanUpFn(cleanUpFn func() error) {

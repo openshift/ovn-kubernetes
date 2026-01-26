@@ -72,7 +72,7 @@ func ensureTestMachine(machineName string) (*machine, error) {
 		ipv6Addresses: map[string]string{},
 	}
 	for _, net := range testMachine.Nets {
-		network, err := getOpenshiftNetwork(net.Net)
+		network, err := getNetwork(net.Net)
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve network %s, err: %w", net.Net, err)
 		}
@@ -130,6 +130,20 @@ func (m *Machine) attachNetwork(networkName string) error {
 	return nil
 }
 
+func (m *Machine) detachNetwork(networkName, interfaceName string) error {
+	cmd := exec.Command("kcli", "remove", "nic", "-y", m.Name, "-n", networkName, "-i", interfaceName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf(
+			"failed to detach network %s from machine %s, output: %s, err: %w",
+			networkName,
+			m.Name,
+			string(output),
+			err)
+	}
+	return nil
+}
+
 func ipInCIDR(ipStr, cidrStr string) (bool, error) {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
@@ -140,4 +154,9 @@ func ipInCIDR(ipStr, cidrStr string) (bool, error) {
 		return false, err
 	}
 	return ipNet.Contains(ip), nil
+}
+
+func isKcliInstalled() bool {
+	_, err := exec.LookPath("kcli")
+	return err == nil
 }

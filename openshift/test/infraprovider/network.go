@@ -13,10 +13,10 @@ const (
 	defaultNetworkName = "ostestbm"
 )
 
-// openshiftNetwork implements the api.Network interface for OpenShift test provider.
+// hostNetwork implements the api.Network interface for OpenShift test provider.
 // Contains the raw kcli network JSON fields from 'kcli show network' command.
-type openshiftNetwork struct {
-	name string
+type hostNetwork struct {
+	Net    string `json:"-"`
 	CIDR   string `json:"cidr"`
 	Dhcp   bool   `json:"dhcp"`
 	Domain string `json:"domain"`
@@ -25,11 +25,11 @@ type openshiftNetwork struct {
 	Plan   string `json:"plan"`
 }
 
-func (n openshiftNetwork) Name() string {
-	return n.name
+func (n hostNetwork) Name() string {
+	return n.Net
 }
 
-func (n openshiftNetwork) IPv4IPv6Subnets() (string, string, error) {
+func (n hostNetwork) IPv4IPv6Subnets() (string, string, error) {
 	if n.CIDR == "" {
 		return "", "", fmt.Errorf("network %s has no CIDR configured", n.Name())
 	}
@@ -45,36 +45,71 @@ func (n openshiftNetwork) IPv4IPv6Subnets() (string, string, error) {
 	return v4, v6, nil
 }
 
-func (n openshiftNetwork) Equal(candidate api.Network) bool {
-	if n.name != candidate.Name() {
+func (n hostNetwork) Equal(candidate api.Network) bool {
+	if n.Net != candidate.Name() {
 		return false
 	}
 	return true
 }
 
-func (n openshiftNetwork) String() string {
-	return n.name
+func (n hostNetwork) String() string {
+	return n.Net
 }
 
-func getOpenshiftNetwork(networkName string) (openshiftNetwork, error) {
-	cmd := exec.Command("kcli", "show", "network", networkName, "-o", "json")
+func listNetworks() (map[string]hostNetwork, error) {
+	cmd := exec.Command("kcli", "list", "net", "-o", "json")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return openshiftNetwork{}, fmt.Errorf("failed to retrieve network %s, output: %s, err: %w", networkName, string(output), err)
+		return nil, fmt.Errorf("failed to list networks, output: %s, err: %w", string(output), err)
+	}
+	var networks map[string]hostNetwork
+	if err := json.Unmarshal(output, &networks); err != nil {
+		return nil, fmt.Errorf("failed to parse networks, output: %s, err: %w", string(output), err)
+	}
+	for name, network := range networks {
+		network.Net = name
+		networks[name] = network
+	}
+	return networks, nil
+}
+
+func getNetwork(name string) (*hostNetwork, error) {
+	cmd := exec.Command("kcli", "show", "network", name, "-o", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve network %s, output: %s, err: %w", name, string(output), err)
 	}
 
-	network := openshiftNetwork{name: networkName}
-	if err := json.Unmarshal(output, &network); err != nil {
-		return network, fmt.Errorf("failed to unmarshal network %s output: %v, err: %w", networkName, string(output), err)
+	network := &hostNetwork{Net: name}
+	if err := json.Unmarshal(output, network); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal network %s output: %v, err: %w", name, string(output), err)
 	}
 
 	if network.CIDR == "" {
-		return network, fmt.Errorf("network %s has no CIDR configured", networkName)
+		return nil, fmt.Errorf("network %s has no CIDR configured", name)
 	}
 
 	if !utilnet.IsIPv4CIDRString(network.CIDR) && !utilnet.IsIPv6CIDRString(network.CIDR) {
-		return network, fmt.Errorf("network %s CIDR %s is neither valid IPv4 nor IPv6", networkName, network.CIDR)
+		return nil, fmt.Errorf("network %s CIDR %s is neither valid IPv4 nor IPv6", name, network.CIDR)
 	}
 
 	return network, nil
+}
+
+func createNetwork(name, cidr string) (*hostNetwork, error) {
+	cmd := exec.Command("kcli", "create", "network", name, "-c", cidr, "-i")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create network %s, output: %s, err: %w", name, string(output), err)
+	}
+	return getNetwork(name)
+}
+
+func deleteNetwork(name string) error {
+	cmd := exec.Command("kcli", "remove", "network", name, "-y")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to delete network %s, output: %s, err: %w", name, string(output), err)
+	}
+	return nil
 }
