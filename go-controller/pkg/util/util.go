@@ -536,3 +536,20 @@ func GetDefaultEndpointSlicesEventHandler(handlerFuncs cache.ResourceEventHandle
 	}
 	return eventHandler
 }
+
+// FindServicePortForEndpointSlicePort returns the ServicePort that corresponds to an EndpointSlice port
+// by matching the port name and protocol. This is the canonical way to map EndpointSlice ports to
+// Service ports, as Kubernetes guarantees that ServicePort.Name matches EndpointPort.Name.
+func FindServicePortForEndpointSlicePort(service *v1.Service, endpointslicePortName string, endpointslicePortProtocol v1.Protocol) (*v1.ServicePort, error) {
+	if service == nil {
+		return nil, fmt.Errorf("unable to resolve port for endpointslice %q/%q: service is nil",
+			endpointslicePortName, endpointslicePortProtocol)
+	}
+	for _, servicePort := range service.Spec.Ports {
+		if servicePort.Name == endpointslicePortName && servicePort.Protocol == endpointslicePortProtocol {
+			return &servicePort, nil
+		}
+	}
+	return nil, fmt.Errorf("service %s/%s has no port with name %q and protocol %s",
+		service.Namespace, service.Name, endpointslicePortName, endpointslicePortProtocol)
+}
