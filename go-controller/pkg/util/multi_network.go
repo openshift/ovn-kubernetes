@@ -461,6 +461,8 @@ func (nInfo *mutableNetInfo) getNamespaces() sets.Set[string] {
 }
 
 func (nInfo *mutableNetInfo) GetNADNamespaces() []string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
 	return nInfo.getNamespaces().UnsortedList()
 }
 
