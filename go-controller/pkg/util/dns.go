@@ -225,6 +225,7 @@ func (d *DNS) getIPsAndMinTTL(domain string) ([]net.IP, time.Duration, bool, err
 		return ips, defaultMinTTL, true, nil
 	}
 	if ttl == 0 {
+		klog.Warningf("TTL value is 0 for domain: %q, defaulting ttl=%s", domain, defaultMinTTL.String())
 		return ips, defaultMinTTL, false, nil
 	}
 

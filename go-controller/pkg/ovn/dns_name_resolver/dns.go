@@ -182,9 +182,11 @@ func (e *EgressDNS) updateEntryForName(dnsName string) error {
 // so that it can updates GetNextQueryTime() if needed
 func (e *EgressDNS) addToDNS(dnsName string) {
 	if err := e.dns.Add(dnsName); err != nil {
+		klog.Errorf("Add %s failed: %v", dnsName, err)
 		utilruntime.HandleError(err)
 	}
 	if err := e.updateEntryForName(dnsName); err != nil {
+		klog.Errorf("Update entry for name %s failed: %v", dnsName, err)
 		utilruntime.HandleError(err)
 	}
 	// No need to block waiting to signal the add.
@@ -229,9 +231,11 @@ func (e *EgressDNS) Run() error {
 			case <-timer.C:
 				if len(domainNameExpiringNext) > 0 {
 					if _, err := e.Update(domainNameExpiringNext); err != nil {
+						klog.Errorf("Update failed for %s: %v", domainNameExpiringNext, err)
 						utilruntime.HandleError(err)
 					}
 					if err := e.updateEntryForName(domainNameExpiringNext); err != nil {
+						klog.Errorf("Update entry for name failed for %s: %v", domainNameExpiringNext, err)
 						utilruntime.HandleError(err)
 					}
 				}
