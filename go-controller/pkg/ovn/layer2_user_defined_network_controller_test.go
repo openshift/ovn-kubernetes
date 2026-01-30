@@ -90,28 +90,28 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 				podInfo := dummyL2TestPod(ns, netInfo, podIdx, podIdx)
 				pod := newMultiHomedPod(podInfo, netInfo)
 
-				var remotePodInfo testPod
-				var remotePod *corev1.Pod
-				var extraObjects []runtime.Object
-				if testConfig.withRemotePod {
-					remotePodInfo = dummyL2TestPod(ns, netInfo, podIdx+1, podIdx+1)
-					remotePod = newMultiHomedPod(remotePodInfo, netInfo)
-					remotePod.Spec.NodeName = "remoteTestNode"
-					extraObjects = append(extraObjects, remotePod)
-				}
-
 				const nodeIPv4CIDR = "192.168.126.202/24"
 				By(fmt.Sprintf("Creating a node named %q, with IP: %s", nodeName, nodeIPv4CIDR))
 				testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR)
 				Expect(err).NotTo(HaveOccurred())
+
+				var extraObjects []runtime.Object
 				nodes := []corev1.Node{*testNode}
-				if config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
+				if testConfig.withRemoteNode || testConfig.withRemotePod {
+					By("adding a remote node")
 					testNode2, err := newNodeWithUserDefinedNetworks("test-node2", "192.168.127.202/24", netInfo)
 					Expect(err).NotTo(HaveOccurred())
 					testNode2.Annotations["k8s.ovn.org/zone-name"] = "blah"
-					By("adding an extra node that should be ignored by Dynamic UDN Allocation")
 					nodes = append(nodes, *testNode2)
 				}
+				if testConfig.withRemotePod {
+					By("adding a remote pod on the remote node")
+					remotePodInfo := dummyL2TestPod(ns, netInfo, podIdx+1, podIdx+1)
+					remotePod := newMultiHomedPod(remotePodInfo, netInfo)
+					remotePod.Spec.NodeName = "test-node2"
+					extraObjects = append(extraObjects, remotePod)
+				}
+
 				Expect(setupFakeOvnForLayer2Topology(fakeOvn, initialDB, netInfo, nodes, podInfo, pod, extraObjects...)).To(Succeed())
 				defer fakeOvn.networkManager.Stop()
 
@@ -194,6 +194,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			icClusterTestConfiguration(func(config *testConfiguration) {
 				config.configToOverride.EnableDynamicUDNAllocation = true
 				config.configToOverride.EnableNetworkSegmentation = true
+				config.withRemoteNode = true
 			}),
 			config.GatewayModeShared,
 		),
@@ -204,13 +205,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			config.GatewayModeShared,
 		),
 		*/
-		Entry("pod on a user defined primary network configured with an EVPN MACVRF",
-			dummyPrimaryLayer2MACVRFUserDefinedNetwork("100.200.0.0/16"),
-			icClusterTestConfiguration(),
-			config.GatewayModeLocal,
-		),
-		Entry("remote pod on a user defined primary network configured with an EVPN MACVRF",
-			dummyPrimaryLayer2MACVRFUserDefinedNetwork("100.200.0.0/16"),
+		Entry("local and remote pods on a CUDN configured with EVPN",
+			dummyPrimaryLayer2EVPNCUDN("100.200.0.0/16"),
 			icClusterTestConfiguration(func(config *testConfiguration) {
 				config.withRemotePod = true
 			}),
@@ -893,9 +889,9 @@ func dummyPrimaryLayer2UserDefinedNetwork(subnets string) userDefinedNetInfo {
 	return udnNetInfo
 }
 
-func dummyPrimaryLayer2MACVRFUserDefinedNetwork(subnets string) userDefinedNetInfo {
+func dummyPrimaryLayer2EVPNCUDN(subnets string) userDefinedNetInfo {
 	udnNetInfo := dummyPrimaryLayer2UserDefinedNetwork(subnets)
-	udnNetInfo.hasMACVRF = true
+	udnNetInfo.hasEVPN = true
 	return udnNetInfo
 }
 
@@ -1048,11 +1044,10 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		Policies:     []string{routerPolicyUUID1},
 		ExternalIDs:  clusterRouterExternalIDs,
 		Nat:          []string{masqSNATUUID1},
-		Copp:         ptr.To(string(coopUUID)),
-		Options:      map[string]string{libovsdbops.RequestedTnlKey: "16715780"},
+		Copp:         ptr.To(string(coppUUID)),
 	}
-	hasMACVRF := netInfo.EVPNMACVRFVNI() != 0
-	if config.OVNKubernetesFeature.EnableInterconnect && !hasMACVRF {
+	hasEVPN := netInfo.Transport() == ovntypes.NetworkTransportEVPN
+	if config.OVNKubernetesFeature.EnableInterconnect && !hasEVPN {
 		clusterRouter.Options = map[string]string{libovsdbops.RequestedTnlKey: "16715780"}
 	} else {
 		clusterRouter.Options = map[string]string{"always_learn_from_arp_request": "false"}

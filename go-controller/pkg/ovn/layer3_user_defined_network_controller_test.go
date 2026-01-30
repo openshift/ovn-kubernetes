@@ -42,7 +42,7 @@ type userDefinedNetInfo struct {
 	isPrimary          bool
 	allowPersistentIPs bool
 	ipamClaimReference string
-	hasMACVRF          bool
+	hasEVPN            bool
 }
 
 const (
@@ -58,6 +58,7 @@ const (
 type testConfiguration struct {
 	configToOverride   *config.OVNKubernetesFeatureConfig
 	gatewayConfig      *config.GatewayConfig
+	withRemoteNode     bool
 	withRemotePod      bool
 	expectationOptions []option
 }
@@ -879,13 +880,8 @@ func (sni *userDefinedNetInfo) netconf() *ovncnitypes.NetConf {
 		Transport:          types.NetworkTransportGeneve,
 	}
 
-	if sni.hasMACVRF {
+	if sni.hasEVPN {
 		netconf.Transport = types.NetworkTransportEVPN
-		netconf.EVPN = &ovncnitypes.EVPNConfig{
-			MACVRF: &ovncnitypes.VRFConfig{
-				VNI: MACVRFVNI,
-			},
-		}
 	}
 
 	return netconf
@@ -1079,7 +1075,7 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 			Ports:        []string{gwRouterLRPUUID, gwRouterToExtLRPUUID},
 			Nat:          nat,
 			StaticRoutes: []string{staticRoute1, staticRoute2, staticRoute3},
-			Copp:         ptr.To(string(coopUUID)),
+			Copp:         ptr.To(string(coppUUID)),
 			LoadBalancerGroup: []string{
 				netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName) + "-UUID",
 				netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterRouterLBGroupName) + "-UUID",
@@ -1175,7 +1171,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		UUID:        clusterRouterName + "-UUID",
 		Ports:       []string{rtosLRPUUID},
 		ExternalIDs: clusterRouterExternalIDs,
-		Copp:        ptr.To(string(coopUUID)),
+		Copp:        ptr.To(string(coppUUID)),
 		Options:     map[string]string{"always_learn_from_arp_request": "false"},
 	}
 

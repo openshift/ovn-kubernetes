@@ -187,7 +187,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 
 	var lsps []*nbdb.LogicalSwitchPort
 	switch {
-	case oc.hasLayer2EastWestInterconnect():
+	case oc.isLayer2WithInterconnectTransport():
 		tunnelKey := zoneinterconnect.BaseTransitSwitchTunnelKey + oc.GetNetworkID()
 		if config.Layer2UsesTransitRouter && oc.IsPrimaryNetwork() {
 			if len(oc.GetTunnelKeys()) != 2 {
@@ -199,7 +199,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 		if err != nil {
 			return nil, err
 		}
-	case oc.hasMACVRF():
+	case oc.Transport() == types.NetworkTransportEVPN:
 		// enable IGMP snooping to send multicast traffic just to registered
 		// pods, flood unregistered
 		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
@@ -221,7 +221,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
-	klog.Infof("JAIME creating LS")
 	err := libovsdbops.CreateOrUpdateLogicalSwitchPortsAndSwitch(oc.nbClient, &logicalSwitch, lsps...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)

@@ -164,7 +164,7 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 				if pod.noIfaceIdVer {
 					delete(lsp.Options, "iface-id-ver")
 				}
-				if ocInfo.bnc.hasLayer2EastWestInterconnect() {
+				if ocInfo.bnc.isLayer2WithInterconnectTransport() {
 					lsp.Options[libovsdbops.RequestedTnlKey] = "1" // hardcode this for now.
 				}
 				data = append(data, lsp)
@@ -198,7 +198,7 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 
 					if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded && ocInfo.bnc.IsPrimaryNetwork() {
 						// there are multiple mgmt ports in the cluster, thus the ports must be scoped with the node name
-						mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
+						mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(pod.nodeName))
 						mgmtPortUUID := mgmtPortName + "-UUID"
 						mgmtPort := expectedManagementPort(mgmtPortName, managementIP)
 						data = append(data, mgmtPort)
@@ -231,11 +231,9 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 				nodeslsps[switchName] = append(nodeslsps[switchName], lspUUID)
 			}
 
-			var otherConfig map[string]string
+			otherConfig := map[string]string{}
 			if hasSubnets {
-				otherConfig = map[string]string{
-					"subnet": subnet.String(),
-				}
+				otherConfig["subnet"] = subnet.String()
 				if !ocInfo.bnc.IsPrimaryNetwork() && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology {
 					// FIXME: This is weird that for secondary networks that don't have
 					// management ports these tests are expecting managementportIP to be
@@ -246,30 +244,30 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 				}
 			}
 
-			hasMACVRF := ocInfo.bnc.GetNetInfo().EVPNMACVRFVNI() != 0
+			hasEVPN := ocInfo.bnc.GetNetInfo().Transport() == ovntypes.NetworkTransportEVPN
 			if ocInfo.bnc.TopologyType() == ovntypes.Layer2Topology {
-				if em.isInterconnectCluster || hasMACVRF {
+				if em.isInterconnectCluster || hasEVPN {
 					otherConfig["mcast_snoop"] = "true"
 					otherConfig["mcast_flood_unregistered"] = "true"
 					otherConfig["mcast_querier"] = "false"
 				}
-				if em.isInterconnectCluster && !hasMACVRF {
+				if em.isInterconnectCluster && !hasEVPN {
 					otherConfig[libovsdbops.RequestedTnlKey] = "16711685"
 					otherConfig["interconn-ts"] = switchName
 				}
-			}
-			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded && hasMACVRF {
 				macvrfPortName := util.GetMACVRFPortName(switchName)
-				macvrfPortUUID := macvrfPortName + "-UUID"
-				macvrfPort := &nbdb.LogicalSwitchPort{
-					UUID:        macvrfPortName + "-UUID",
-					Name:        macvrfPortName,
-					Addresses:   []string{"unknown"},
-					ExternalIDs: standardNonDefaultNetworkExtIDs(ocInfo.bnc.GetNetInfo()),
+				if _, alreadyAdded := alreadyAddedManagementElements[macvrfPortName]; !alreadyAdded && hasEVPN {
+					macvrfPortUUID := macvrfPortName + "-UUID"
+					macvrfPort := &nbdb.LogicalSwitchPort{
+						UUID:        macvrfPortUUID,
+						Name:        macvrfPortName,
+						Addresses:   []string{"unknown"},
+						ExternalIDs: standardNonDefaultNetworkExtIDs(ocInfo.bnc.GetNetInfo()),
+					}
+					data = append(data, macvrfPort)
+					nodeslsps[switchName] = append(nodeslsps[switchName], macvrfPortUUID)
+					alreadyAddedManagementElements[macvrfPortName] = struct{}{}
 				}
-				data = append(data, macvrfPort)
-				nodeslsps[switchName] = append(nodeslsps[switchName], macvrfPortUUID)
-				alreadyAddedManagementElements[macvrfPortName] = struct{}{}
 			}
 
 			switchNodeMap[switchName] = &nbdb.LogicalSwitch{
@@ -278,12 +276,14 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 				Ports: nodeslsps[switchName],
 
 				ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(ocInfo.bnc),
-				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
 				LoadBalancerGroup: []string{
 					ocInfo.bnc.GetNetInfo().GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterLBGroupName) + "-UUID",
 					ocInfo.bnc.GetNetInfo().GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterSwitchLBGroupName) + "-UUID",
 				},
+			}
+			if len(otherConfig) > 0 {
+				switchNodeMap[switchName].OtherConfig = otherConfig
 			}
 
 			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded && em.gatewayConfig != nil {
@@ -305,7 +305,7 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 					ovntypes.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(ocInfo.bnc.IsPrimaryNetwork()),
 					ovntypes.TopologyExternalID:    ocInfo.bnc.TopologyType(),
 				}
-				transitSwitchPortName := ocInfo.bnc.GetNetworkScopedName(ovntypes.TransitSwitchToRouterPrefix + nodeName)
+				transitSwitchPortName := ocInfo.bnc.GetNetworkScopedName(ovntypes.TransitSwitchToRouterPrefix + pod.nodeName)
 				transitSwitchPortUUID := transitSwitchPortName + "-UUID"
 				data = append(data, &nbdb.LogicalSwitchPort{
 					UUID:      transitSwitchPortUUID,
@@ -313,11 +313,11 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 					Type:      "router",
 					Addresses: []string{"router"},
 					Options: map[string]string{
-						"router-port":               ocInfo.bnc.GetNetworkScopedName(ovntypes.RouterToTransitSwitchPrefix + nodeName),
+						"router-port":               ocInfo.bnc.GetNetworkScopedName(ovntypes.RouterToTransitSwitchPrefix + pod.nodeName),
 						libovsdbops.RequestedTnlKey: "4",
 					},
 					ExternalIDs: map[string]string{
-						"node": nodeName,
+						"node": pod.nodeName,
 					},
 				})
 				data = append(data, &nbdb.LogicalSwitch{
@@ -336,7 +336,7 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 			}
 			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
 				em.hasClusterPortGroup {
-				mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(nodeName))
+				mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(pod.nodeName))
 				mgmtPortUUID := mgmtPortName + "-UUID"
 
 				clusterPG := newNetworkClusterPortGroup(ocInfo.bnc)
