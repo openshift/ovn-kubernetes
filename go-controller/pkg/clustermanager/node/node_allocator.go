@@ -7,7 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -405,50 +404,43 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 	return nil
 }
 
-// updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation
+// updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation.
+// This function uses Server-Side Apply (SSA) to eliminate ResourceVersion conflicts when multiple
+// UDN controllers update the same node concurrently. Each network uses a unique fieldManager,
+// allowing the API server to merge annotations from different networks automatically.
 func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId, tunnelID int) error {
-	// Retry if it fails because of potential conflict which is transient. Return error in the
-	// case of other errors (say temporary API server down), and it will be taken care of by the
-	// retry mechanism.
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		// Informer cache should not be mutated, so get a copy of the object
-		node, err := na.nodeLister.Get(nodeName)
-		if err != nil {
-			return err
-		}
+	networkName := na.netInfo.GetNetworkName()
 
-		cnode := node.DeepCopy()
-		for netName, hostSubnets := range hostSubnetsMap {
-			cnode.Annotations, err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, netName)
-			if err != nil {
-				return fmt.Errorf("failed to update node %q annotation subnet %s: %w",
-					node.Name, util.JoinIPNets(hostSubnets, ","), err)
-			}
-		}
-
-		networkName := na.netInfo.GetNetworkName()
-
-		if networkId != types.NoNetworkID {
-			cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, networkName, networkId)
-			if err != nil {
-				return fmt.Errorf("failed to update node %q network id annotation %d for network %s: %w",
-					node.Name, networkId, networkName, err)
-			}
-		}
-		if tunnelID != types.NoTunnelID {
-			cnode.Annotations, err = util.UpdateUDNLayer2NodeGRLRPTunnelIDs(cnode.Annotations, networkName, tunnelID)
-			if err != nil {
-				return fmt.Errorf("failed to update node %q tunnel id annotation %d for network %s: %w",
-					node.Name, tunnelID, networkName, err)
-			}
-		}
-		// It is possible to update the node annotations using status subresource
-		// because changes to metadata via status subresource are not restricted for nodes.
-		return na.kube.UpdateNodeStatus(cnode)
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation: %w", nodeName, resultErr)
+	// Extract host subnets for this network from the map
+	// hostSubnetsMap should only contain entry for this network
+	var hostSubnets []*net.IPNet
+	if subnets, ok := hostSubnetsMap[networkName]; ok {
+		hostSubnets = subnets
 	}
+
+	// Marshal annotations into the format needed for Server-Side Apply
+	annotations, err := util.MarshalNodeAnnotationsForSSA(networkName, hostSubnets, networkId, tunnelID)
+	if err != nil {
+		return fmt.Errorf("failed to marshal node annotations for network %s: %w", networkName, err)
+	}
+
+	// Build unique field manager name for this network
+	// Format: "ovn-kubernetes-udn-{network-name}"
+	// This allows multiple UDN controllers to update the same node without conflicts
+	fieldManager := fmt.Sprintf("ovn-kubernetes-udn-%s", networkName)
+
+	// Use Server-Side Apply to update node annotations
+	// The API server merges annotations from different fieldManagers automatically,
+	// eliminating the need for retry loops on ResourceVersion conflicts
+	klog.V(5).Infof("Applying node annotations for network %s on node %s using SSA with fieldManager %s",
+		networkName, nodeName, fieldManager)
+
+	err = na.kube.ApplyNodeAnnotations(nodeName, annotations, fieldManager)
+	if err != nil {
+		return fmt.Errorf("failed to apply node %s annotations for network %s: %w", nodeName, networkName, err)
+	}
+
+	klog.V(5).Infof("Successfully applied node annotations for network %s on node %s", networkName, nodeName)
 	return nil
 }
 

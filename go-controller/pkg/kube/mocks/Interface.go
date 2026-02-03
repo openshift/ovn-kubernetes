@@ -235,6 +235,24 @@ func (_m *Interface) SetLabelsOnNode(nodeName string, labels map[string]interfac
 	return r0
 }
 
+// ApplyNodeAnnotations provides a mock function with given fields: nodeName, annotations, fieldManager
+func (_m *Interface) ApplyNodeAnnotations(nodeName string, annotations map[string]string, fieldManager string) error {
+	ret := _m.Called(nodeName, annotations, fieldManager)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyNodeAnnotations")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, map[string]string, string) error); ok {
+		r0 = rf(nodeName, annotations, fieldManager)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UpdateNodeStatus provides a mock function with given fields: node
 func (_m *Interface) UpdateNodeStatus(node *corev1.Node) error {
 	ret := _m.Called(node)

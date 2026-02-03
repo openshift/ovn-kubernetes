@@ -563,6 +563,62 @@ func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName st
 	return annotations, nil
 }
 
+// MarshalNodeAnnotationsForSSA prepares node annotations for Server-Side Apply.
+// It creates a map with just the annotations for a specific network, properly marshaled as JSON.
+// This function is used by NodeAllocator to prepare annotations before calling ApplyNodeAnnotations.
+//
+// Parameters:
+//   - netName: The network name (used as key in annotation JSON maps)
+//   - hostSubnets: Subnets allocated to this node for this network (can be nil/empty)
+//   - networkID: Network ID for this network (use types.NoNetworkID to skip)
+//   - tunnelID: Tunnel ID for Layer2 UDN (use types.NoTunnelID to skip)
+//
+// Returns a map of annotation keys to JSON-encoded string values ready for SSA.
+func MarshalNodeAnnotationsForSSA(netName string, hostSubnets []*net.IPNet, networkID, tunnelID int) (map[string]string, error) {
+	annotations := make(map[string]string)
+
+	// Marshal node subnets if provided
+	if len(hostSubnets) > 0 {
+		subnetsMap := map[string][]string{
+			netName: make([]string, len(hostSubnets)),
+		}
+		for i, subnet := range hostSubnets {
+			subnetsMap[netName][i] = subnet.String()
+		}
+		subnetsJSON, err := json.Marshal(subnetsMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal node subnets for network %s: %w", netName, err)
+		}
+		annotations[ovnNodeSubnets] = string(subnetsJSON)
+	}
+
+	// Marshal network ID if provided
+	if networkID != types.NoNetworkID {
+		networkIDMap := map[string]string{
+			netName: strconv.Itoa(networkID),
+		}
+		networkIDJSON, err := json.Marshal(networkIDMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal network ID for network %s: %w", netName, err)
+		}
+		annotations[OvnNetworkIDs] = string(networkIDJSON)
+	}
+
+	// Marshal tunnel ID if provided
+	if tunnelID != types.NoTunnelID {
+		tunnelIDMap := map[string]string{
+			netName: strconv.Itoa(tunnelID),
+		}
+		tunnelIDJSON, err := json.Marshal(tunnelIDMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal tunnel ID for network %s: %w", netName, err)
+		}
+		annotations[ovnUDNLayer2NodeGRLRPTunnelIDs] = string(tunnelIDJSON)
+	}
+
+	return annotations, nil
+}
+
 func UDNLayer2NodeUsesTransitRouter(node *corev1.Node) bool {
 	return node.Annotations[Layer2TopologyVersion] == TransitRouterTopoVersion
 }

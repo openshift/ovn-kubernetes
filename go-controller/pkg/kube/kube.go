@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
+	corev1apply "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/pager"
@@ -58,6 +60,10 @@ type Interface interface {
 	SetLabelsOnNode(nodeName string, labels map[string]interface{}) error
 	PatchNode(old, new *corev1.Node) error
 	UpdateNodeStatus(node *corev1.Node) error
+	// ApplyNodeAnnotations uses Server-Side Apply to update node annotations for a specific network.
+	// This allows multiple controllers (one per network) to update node annotations concurrently
+	// without conflicts by using unique fieldManager names.
+	ApplyNodeAnnotations(nodeName string, annotations map[string]string, fieldManager string) error
 	UpdatePodStatus(pod *corev1.Pod) error
 	// GetPodsForDBChecker should only be used by legacy DB checker. Use watchFactory instead to get pods.
 	GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error)
@@ -249,6 +255,45 @@ func (k *Kube) UpdateNodeStatus(node *corev1.Node) error {
 	klog.Infof("Updating status on node %s", node.Name)
 	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(context.TODO(), node, metav1.UpdateOptions{})
 	return err
+}
+
+// ApplyNodeAnnotations uses Server-Side Apply to update node annotations for a specific network.
+// This method enables multiple network controllers to update the same node's annotations
+// concurrently without ResourceVersion conflicts by using unique fieldManager names per network.
+//
+// Parameters:
+//   - nodeName: The name of the node to update
+//   - annotations: Map of annotation keys to values (must be string values, typically JSON)
+//   - fieldManager: Unique identifier for this controller (e.g., "ovn-kubernetes-udn-network1")
+//
+// The API server will merge annotations from different fieldManagers automatically,
+// eliminating the need for retry loops and preventing conflict storms when multiple
+// UDNs are created simultaneously.
+func (k *Kube) ApplyNodeAnnotations(nodeName string, annotations map[string]string, fieldManager string) error {
+	if fieldManager == "" {
+		return fmt.Errorf("fieldManager must be specified for ApplyNodeAnnotations")
+	}
+
+	// Build apply configuration with just the annotations for this network
+	nodeApply := corev1apply.Node(nodeName).
+		WithAnnotations(annotations)
+
+	// Server-side apply with network-specific field manager
+	klog.V(5).Infof("Applying annotations to node %s with fieldManager %s: %v", nodeName, fieldManager, annotations)
+	_, err := k.KClient.CoreV1().Nodes().Apply(
+		context.TODO(),
+		nodeApply,
+		metav1.ApplyOptions{
+			FieldManager: fieldManager,
+			Force:        false, // Don't force - allow API server to detect real conflicts
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to apply annotations to node %s: %w", nodeName, err)
+	}
+
+	klog.V(5).Infof("Successfully applied annotations to node %s", nodeName)
+	return nil
 }
 
 // UpdatePodStatus update pod with provided pod data, limited to .Status and .ObjectMeta fields
