@@ -3,8 +3,10 @@ package infraprovider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -21,58 +24,43 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/portalloc"
 
 	"github.com/onsi/ginkgo/v2"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
-	utilnet "k8s.io/utils/net"
 )
 
 const (
-	machineUserName = "fedora"
+	hypervisorUserName      = "root"
+	machineUserName         = "fedora"
+	ovnAnnotationNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 )
 
 // machine maps 1-1 with OpenShift machine and therefore represents either a VM or BM host
 type machine struct {
-	name                 string
-	ipv4Addresses        map[string]string                 // network name -> IPv4
-	ipv6Addresses        map[string]string                 // network name -> IPv6
-	containers           map[string]*api.ExternalContainer // container name -> api.ExternalContainer object
-	networksForContainer map[string]map[string]any         // container name -> set of network names
+	name             string
+	proxyIP          string                            // IP address of the hypervisor hosting VM
+	proxySshSigner   ssh.Signer                        // proxy signer for accessing machine via ssh
+	defaultIP        string                            // default IP address of the machine
+	sshSigner        ssh.Signer                        // ssh signer to access the machine
+	links            []linkInfo                        // net links attached with the machine
+	containers       map[string]*api.ExternalContainer // container name -> api.ExternalContainer object
+	hypervisorClient *ssh.Client                       // cached SSH connection to hypervisor (proxy)
 }
 
-func (m *machine) hasNetwork(name string) bool {
-	_, ok4 := m.ipv4Addresses[name]
-	_, ok6 := m.ipv6Addresses[name]
-	return ok4 || ok6
+type ipAddressInfo struct {
+	Family string `json:"family"`
+	Local  string `json:"local"`
 }
 
-func (m *machine) getIP() (string, error) {
-	for _, ipv4 := range m.ipv4Addresses {
-		return ipv4, nil
-	}
-	for _, ipv6 := range m.ipv6Addresses {
-		return ipv6, nil
-	}
-	return "", fmt.Errorf("no ip address found in the machine %s", m.name)
-}
-
-func (m *machine) isNetworkUsedByAnyContainer(networkName string) bool {
-	for _, networks := range m.networksForContainer {
-		if _, exists := networks[networkName]; exists {
-			return true
-		}
-	}
-	return false
+type linkInfo struct {
+	IfName   string          `json:"ifname"`
+	Mac      string          `json:"address"`
+	AddrInfo []ipAddressInfo `json:"addr_info"`
 }
 
 func (m *machine) addContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	network := container.Network.Name()
-	var (
-		nwIface api.NetworkInterface
-		err     error
-	)
-	if nwIface, err = m.attachNetwork(network); err != nil {
+	nwIface, err := m.getNetwork(container)
+	if err != nil {
 		return container, err
 	}
 	container.IPv4 = nwIface.IPv4
@@ -80,198 +68,35 @@ func (m *machine) addContainer(container api.ExternalContainer) (api.ExternalCon
 	cmd := buildDaemonContainerCmd(container.Name, container.Image, container.CmdArgs)
 	cmd = addElevatedPrivileges(cmd)
 	if _, err := m.execCmd(cmd); err != nil {
-		// Rollback: detach the network if container startup failed
-		_ = m.detachNetworkIfUnused(network)
 		return container, fmt.Errorf("failed to execute command on machine %s: %w", m.name, err)
 	}
 	m.containers[container.Name] = &container
-	// Track that this container uses this network
-	if m.networksForContainer[container.Name] == nil {
-		m.networksForContainer[container.Name] = make(map[string]any)
-	}
-	m.networksForContainer[container.Name][network] = nil
 	return container, nil
-}
-
-func (m *machine) attachNetwork(name string) (api.NetworkInterface, error) {
-	nwIface := api.NetworkInterface{}
-	// Check if network is already attached to the VM
-	if m.hasNetwork(name) {
-		// Network already attached, reuse it
-		nwIface.IPv4 = m.ipv4Addresses[name]
-		nwIface.IPv6 = m.ipv6Addresses[name]
-
-		// Get MAC and device info
-		testMachine, err := showMachine(m.name)
-		if err != nil {
-			return nwIface, fmt.Errorf("failed retrieving test machine: %w", err)
-		}
-		for _, net := range testMachine.Nets {
-			if net.Net == name {
-				nwIface.MAC = net.Mac
-				nwIface.InfName = net.Device
-				break
-			}
-		}
-		if nwIface.MAC == "" || nwIface.InfName == "" {
-			return nwIface, fmt.Errorf("network %s marked as attached but not found in VM network interfaces", name)
-		}
-		return nwIface, nil
-	}
-	// Network not attached yet, proceed with physical attachment
-	testMachine, err := showMachine(m.name)
-	if err != nil {
-		return nwIface, fmt.Errorf("failed retrieving test machine: %w", err)
-	}
-	if err := testMachine.attachNetwork(name); err != nil {
-		return nwIface, fmt.Errorf("failed attaching network %q to machine %q: %w", name, testMachine.Name, err)
-	}
-	network, err := getNetwork(name)
-	if err != nil {
-		// Rollback: detach the network
-		if updated, showErr := showMachine(m.name); showErr == nil {
-			for _, net := range updated.Nets {
-				if net.Net == name {
-					_ = updated.detachNetwork(name, net.Device) // Best effort cleanup
-					break
-				}
-			}
-		}
-		return nwIface, fmt.Errorf("failed to retrieve network %s, err: %w", name, err)
-	}
-
-	// Poll for IPs with timeout - wait for machine to get IPs in the container network
-	err = wait.PollUntilContextTimeout(context.TODO(), 2*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
-		updatedMachine, err := showMachine(m.name)
-		if err != nil {
-			ginkgo.GinkgoLogr.Info("Failed to retrieve machine, retrying", "machine", m.name, "error", err)
-			return false, nil
-		}
-
-		// Find and assign MAC, Device and IPs from the container network
-		for _, net := range updatedMachine.Nets {
-			if net.Net == name {
-				nwIface.MAC = net.Mac
-				nwIface.InfName = net.Device
-				break
-			}
-		}
-		foundIP := false
-		for _, ip := range updatedMachine.IPs {
-			in, err := ipInCIDR(ip, network.CIDR)
-			if err != nil {
-				ginkgo.GinkgoLogr.Info("Error checking IP against CIDR, retrying", "ip", ip, "cidr", network.CIDR, "error", err)
-				return false, nil
-			}
-			if in && utilnet.IsIPv4String(ip) {
-				m.ipv4Addresses[name] = ip
-				nwIface.IPv4 = ip
-				foundIP = true
-			} else if in {
-				m.ipv6Addresses[name] = ip
-				nwIface.IPv6 = ip
-				foundIP = true
-			}
-		}
-		if !foundIP || nwIface.MAC == "" || nwIface.InfName == "" {
-			ginkgo.GinkgoLogr.Info("Machine IPs, MAC and Device not yet populated in network, retrying", "machine", m.name, "network", name)
-			return false, nil
-		}
-		return true, nil
-	})
-	if err != nil {
-		// Rollback: detach the network
-		if updated, showErr := showMachine(m.name); showErr == nil {
-			for _, net := range updated.Nets {
-				if net.Net == name {
-					_ = updated.detachNetwork(name, net.Device) // Best effort cleanup
-					break
-				}
-			}
-		}
-		return nwIface, fmt.Errorf("timeout waiting for machine %s to get IPs in network %s: %w", m.name, name, err)
-	}
-	return nwIface, nil
-}
-
-func (m *machine) detachNetwork(name string) error {
-	testMachine, err := showMachine(m.name)
-	if err != nil {
-		return fmt.Errorf("failed retrieving test machine: %w", err)
-	}
-	var interfaceName string
-	for _, net := range testMachine.Nets {
-		if net.Net == name {
-			interfaceName = net.Device
-			break
-		}
-	}
-	if interfaceName == "" {
-		return fmt.Errorf("failed to find interface from machine %s for network %s", m.name, name)
-	}
-	if err := testMachine.detachNetwork(name, interfaceName); err != nil {
-		return err
-	}
-	// Clean up IP addresses after successful detach
-	delete(m.ipv4Addresses, name)
-	delete(m.ipv6Addresses, name)
-	return nil
-}
-
-func (m *machine) detachNetworkIfUnused(networkName string) error {
-	// Check if any container still uses this network
-	if m.isNetworkUsedByAnyContainer(networkName) {
-		return nil // Network still in use, don't detach
-	}
-
-	// No container uses this network, safe to detach
-	return m.detachNetwork(networkName)
 }
 
 func (m *machine) deleteContainer(container api.ExternalContainer) error {
 	isRunning, err := m.isContainerRunning(container)
 	if err != nil {
-		return fmt.Errorf("failed to check if container is running: %v", err)
+		return fmt.Errorf("failed to check if container is running: %w", err)
 	}
-	// Get networks used by this container before cleanup
-	containerNetworks := m.networksForContainer[container.Name]
-
 	if !isRunning {
-		// Container already stopped, just clean up state
-		delete(m.containers, container.Name)
-		delete(m.networksForContainer, container.Name)
-		// Detach networks that are no longer used by any container
-		for networkName := range containerNetworks {
-			_ = m.detachNetworkIfUnused(networkName) // Best effort
-		}
 		return nil
 	}
-
 	// remove the container
 	cmd := buildRemoveContainerCmd(container.Name)
 	cmd = addElevatedPrivileges(cmd)
 	if _, err := m.execCmd(cmd); err != nil {
 		return fmt.Errorf("failed to execute command on machine %s: %w", m.name, err)
 	}
-
 	// Clean up tracking
 	delete(m.containers, container.Name)
-	delete(m.networksForContainer, container.Name)
-
-	// Detach networks that are no longer used by any container
-	for networkName := range containerNetworks {
-		if err := m.detachNetworkIfUnused(networkName); err != nil {
-			return fmt.Errorf("failed to detach unused network %s: %w", networkName, err)
-		}
-	}
-
 	return nil
 }
 
 func (m *machine) getContainerLogs(container api.ExternalContainer) (string, error) {
 	isRunning, err := m.isContainerRunning(container)
 	if err != nil {
-		return "", fmt.Errorf("failed to check if container is running: %v", err)
+		return "", fmt.Errorf("failed to check if container is running: %w", err)
 	}
 	if !isRunning {
 		return "", fmt.Errorf("external container is not running on machine")
@@ -280,31 +105,58 @@ func (m *machine) getContainerLogs(container api.ExternalContainer) (string, err
 	logsCmd = addElevatedPrivileges(logsCmd)
 	res, err := m.execCmd(logsCmd)
 	if err != nil {
-		return "", fmt.Errorf("failed to execute command (%s) within machine %s: err: %v", logsCmd, m.name, err)
+		return "", fmt.Errorf("failed to execute command (%s) within machine %s: %w", logsCmd, m.name, err)
 	}
 	return res.stdout, nil
 }
 
+// getHypervisorClient returns the cached SSH client to the hypervisor, creating it if needed.
+// If the existing connection is broken, it will be recreated.
+func (m *machine) getHypervisorClient() (*ssh.Client, error) {
+	// If we already have a client, verify it's still alive
+	if m.hypervisorClient != nil {
+		// Quick check: try to create a session
+		session, err := m.hypervisorClient.NewSession()
+		if err == nil {
+			session.Close()
+			return m.hypervisorClient, nil
+		}
+		// Connection is dead, close it and create a new one
+		m.hypervisorClient.Close()
+		m.hypervisorClient = nil
+	}
+
+	// Create new connection
+	client, err := getSshClient(hypervisorUserName, fmt.Sprintf("%s:22", m.proxyIP), m.proxySshSigner)
+	if err != nil {
+		return nil, fmt.Errorf("error getting ssh proxy client: %w", err)
+	}
+
+	m.hypervisorClient = client
+	return m.hypervisorClient, nil
+}
+
+// Close closes the cached SSH connection to the hypervisor.
+func (m *machine) Close() error {
+	if m.hypervisorClient != nil {
+		err := m.hypervisorClient.Close()
+		m.hypervisorClient = nil
+		return err
+	}
+	return nil
+}
+
 func (m *machine) execCmd(cmd string) (result, error) {
-	ginkgo.By("Running command on test machine: " + cmd)
 	var r result
-	signer, err := getSigner()
+	hypervisorClient, err := m.getHypervisorClient()
 	if err != nil {
-		return r, fmt.Errorf("error getting signer: %w", err)
+		return r, err
 	}
-	var ip string
-	// When network string is empty, then retrieve any available IP address
-	// from the machine.
-	ip, err = m.getIP()
+	r, err = runSSHCommand(machineUserName, cmd, hypervisorClient, fmt.Sprintf("%s:22", m.defaultIP), m.sshSigner)
 	if err != nil {
-		return r, fmt.Errorf("failed to get valid IP: %w", err)
-	}
-	r, err = runSSHCommand(cmd, ip+":22", signer)
-	if err != nil {
-		return r, fmt.Errorf("failed to run SSH command for %s@%s: %w: %+v", machineUserName, ip, err, r)
+		return r, fmt.Errorf("failed to run SSH command for %s@%s: %w: %+v", machineUserName, m.defaultIP, err, r)
 	}
 	return r, nil
-
 }
 
 func (m *machine) execContainerCmd(container api.ExternalContainer, cmd []string) (result, error) {
@@ -326,6 +178,75 @@ func (m *machine) isContainerRunning(container api.ExternalContainer) (bool, err
 		return true, nil
 	}
 	return false, nil
+}
+
+func (m *machine) getNetwork(container api.ExternalContainer) (api.NetworkInterface, error) {
+	v4Subnet, v6Subnet, err := container.Network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, err
+	}
+
+	// Find a link with IPs matching the requested subnet(s)
+	for _, link := range m.links {
+		if iface := m.tryMatchLink(link, v4Subnet, v6Subnet); iface.InfName != "" {
+			return iface, nil
+		}
+	}
+
+	return api.NetworkInterface{}, fmt.Errorf("no network interface found matching network %s", container.Network.Name())
+}
+
+// tryMatchLink attempts to match IP addresses on a link to the given subnets.
+// Returns a populated NetworkInterface if the link has IPs in the requested subnet(s).
+func (m *machine) tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) api.NetworkInterface {
+	var iface api.NetworkInterface
+
+	for _, addr := range link.AddrInfo {
+		// Check for IPv4 match
+		if v4Subnet != "" && iface.IPv4 == "" {
+			if ok, _ := ipInCIDR(addr.Local, v4Subnet); ok {
+				iface.IPv4 = addr.Local
+				iface.IPv4Prefix = v4Subnet
+			}
+		}
+
+		// Check for IPv6 match
+		if v6Subnet != "" && iface.IPv6 == "" {
+			if ok, _ := ipInCIDR(addr.Local, v6Subnet); ok {
+				iface.IPv6 = addr.Local
+				iface.IPv6Prefix = v6Subnet
+			}
+		}
+	}
+
+	// Only consider this link a match if we found all requested IPs
+	hasV4Match := v4Subnet == "" || iface.IPv4 != ""
+	hasV6Match := v6Subnet == "" || iface.IPv6 != ""
+
+	if hasV4Match && hasV6Match {
+		iface.InfName = link.IfName
+		iface.MAC = link.Mac
+		return iface
+	}
+
+	// Not a complete match, return empty interface
+	return api.NetworkInterface{}
+}
+
+// initializeNetworkLinks retrieves and caches the network links information from the machine.
+func (m *machine) initializeNetworkLinks() error {
+	result, err := m.execCmd("ip -j addr")
+	if err != nil {
+		return fmt.Errorf("failed to retrieve network links: %w", err)
+	}
+
+	var links []linkInfo
+	if err := json.Unmarshal([]byte(result.stdout), &links); err != nil {
+		return fmt.Errorf("failed to parse network links: %w", err)
+	}
+
+	m.links = links
+	return nil
 }
 
 type openshift struct {
@@ -384,12 +305,27 @@ func New(config *rest.Config) (api.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes client: %w", err)
 	}
-	m, err := ensureTestMachine(testMachineName)
+	// Try to set up external container support (optional, may not be available)
+	var m *machine
+	m, err = ensureTestMachine()
 	if err != nil {
-		return nil, fmt.Errorf("failed to ensure %s machine to host the container: %v", testMachineName, err)
+		ginkgo.GinkgoLogr.Info("External container support not available, skipping machine setup", "error", err.Error())
+	} else {
+		// Verify SSH connectivity works
+		if _, err := m.execCmd("echo 'connection test'"); err != nil {
+			ginkgo.GinkgoLogr.Info("Failed to verify SSH connectivity to test machine, external container support disabled", "machine", testMachineName, "error", err.Error())
+			m = nil
+		} else {
+			// Initialize network links information
+			if err := m.initializeNetworkLinks(); err != nil {
+				ginkgo.GinkgoLogr.Info("Failed to initialize network links, external container support disabled", "machine", testMachineName, "error", err.Error())
+				m = nil
+			} else {
+				m.containers = map[string]*api.ExternalContainer{}
+				ginkgo.GinkgoLogr.Info("External container support enabled", "machine", testMachineName)
+			}
+		}
 	}
-	m.containers = map[string]*api.ExternalContainer{}
-	m.networksForContainer = map[string]map[string]any{}
 	o := openshift{externalContainerPortAlloc: portalloc.New(30000, 32767), hostPortAlloc: portalloc.New(30000, 32767),
 		kubeClient: kubeClient, platform: infra.Spec.PlatformSpec.Type, mu: &sync.Mutex{}, sharedMachine: m}
 	return o, nil
@@ -400,18 +336,47 @@ func (o openshift) Name() string {
 }
 
 func (o openshift) PrimaryNetwork() (api.Network, error) {
-	var networkName string
-	if o.platform == configv1.BareMetalPlatformType {
-		networkName = os.Getenv("BAREMETAL_NETWORK_NAME")
-		if networkName == "" {
-			ginkgo.GinkgoLogr.Info("Network name env is not set for baremetal cluster, using default network name")
-			networkName = defaultNetworkName
+	if o.platform != configv1.BareMetalPlatformType {
+		return nil, fmt.Errorf("external container provider is only supported on BareMetalPlatformType, current platform: %s", o.platform)
+	}
+
+	networkName := os.Getenv("BAREMETAL_NETWORK_NAME")
+	if networkName == "" {
+		ginkgo.GinkgoLogr.Info("Network name env is not set for baremetal cluster, using default network name")
+		networkName = defaultNetworkName
+	}
+	nodeList, err := o.kubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve nodes from the cluster: %w", err)
+	}
+	var (
+		nodeIfAddrAnno string
+		ok             bool
+	)
+	for _, node := range nodeList.Items {
+		if nodeIfAddrAnno, ok = node.Annotations[ovnAnnotationNodeIfAddr]; ok {
+			break
 		}
 	}
-	if networkName == "" {
-		return nil, fmt.Errorf("failed to find primary network for the cluster")
+	if nodeIfAddrAnno == "" {
+		return nil, fmt.Errorf("no nodes found with annotation %s", ovnAnnotationNodeIfAddr)
 	}
-	return getNetwork(networkName)
+	nodeIfAddr := make(map[string]string)
+	if err := json.Unmarshal([]byte(nodeIfAddrAnno), &nodeIfAddr); err != nil {
+		return nil, fmt.Errorf("failed to parse node annotation %s: %w", ovnAnnotationNodeIfAddr, err)
+	}
+	address, ok := nodeIfAddr["ipv4"]
+	if !ok {
+		address, ok = nodeIfAddr["ipv6"]
+	}
+	if !ok {
+		return nil, fmt.Errorf("failed to find node annotation %s in any of the cluster nodes", ovnAnnotationNodeIfAddr)
+	}
+	_, cidr, err := net.ParseCIDR(address)
+	if err != nil {
+		return nil, fmt.Errorf("unexpected error: node annotation ip %s entry is not a valid CIDR", address)
+	}
+	return hostNetwork{name: networkName, cidr: cidr.String()}, nil
 }
 
 func (o openshift) ExternalContainerPrimaryInterfaceName() string {
@@ -482,6 +447,9 @@ func (o openshift) NewTestContext() api.Context {
 func (o *openshift) execContainer(container api.ExternalContainer, cmd []string) (string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.sharedMachine == nil {
+		return "", fmt.Errorf("external container support is not available (test machine not configured)")
+	}
 	r, err := o.sharedMachine.execContainerCmd(container, cmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to execute command on remote container within machine: %v - stdout=%s, stderr=%s",
@@ -509,14 +477,15 @@ func (c *contextOpenshift) GetAllowedExternalContainerPort() int {
 }
 
 func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	if !isKcliInstalled() {
-		ginkgo.Skip("kcli is not installed, so creation of external container is unsupported with this cluster")
-	}
 	if valid, err := container.IsValidPreCreateContainer(); !valid {
 		return container, fmt.Errorf("failed to create external container: %w", err)
 	}
 	c.machineLock.Lock()
 	defer c.machineLock.Unlock()
+
+	if c.sharedMachine == nil {
+		return container, fmt.Errorf("external container support is not available (test machine not configured)")
+	}
 
 	if _, exists := c.sharedMachine.containers[container.Name]; exists {
 		return container, fmt.Errorf("container %s already exists", container.Name)
@@ -534,47 +503,31 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 
 func (c *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
 	if valid, err := container.IsValidPreDelete(); !valid {
-		return fmt.Errorf("external container is invalid: %v", err)
+		return fmt.Errorf("external container is invalid: %w", err)
 	}
 	c.machineLock.Lock()
 	defer c.machineLock.Unlock()
+	if c.sharedMachine == nil {
+		return fmt.Errorf("external container support is not available (test machine not configured)")
+	}
 	return c.sharedMachine.deleteContainer(container)
 }
 
 func (c *contextOpenshift) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
 	c.machineLock.Lock()
 	defer c.machineLock.Unlock()
+	if c.sharedMachine == nil {
+		return "", fmt.Errorf("external container support is not available (test machine not configured)")
+	}
 	return c.sharedMachine.getContainerLogs(container)
 }
 
 func (c contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	if len(subnets) != 1 {
-		return nil, fmt.Errorf("network must be provided with one subnet")
-	}
-	c.machineLock.Lock()
-	defer c.machineLock.Unlock()
-	networks, err := listNetworks()
-	if err != nil {
-		return nil, err
-	}
-	if net, ok := networks[name]; ok {
-		return &net, nil
-	}
-	return createNetwork(name, subnets[0])
+	panic("not implemented")
 }
 
 func (c contextOpenshift) DeleteNetwork(network api.Network) error {
-	name := network.Name()
-	_, err := getNetwork(name)
-	if err != nil {
-		return err
-	}
-	c.machineLock.Lock()
-	defer c.machineLock.Unlock()
-	if c.sharedMachine.isNetworkUsedByAnyContainer(name) {
-		return fmt.Errorf("container is still attached with network %s, can't delete it", name)
-	}
-	return deleteNetwork(name)
+	panic("not implemented")
 }
 
 func (c *contextOpenshift) GetAttachedNetworks() (api.Networks, error) {
@@ -586,61 +539,11 @@ func (c *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Un
 }
 
 func (c contextOpenshift) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
-	name := network.Name()
-	_, err := getNetwork(name)
-	if err != nil {
-		return api.NetworkInterface{}, err
-	}
-
-	c.machineLock.Lock()
-	defer c.machineLock.Unlock()
-
-	if _, ok := c.sharedMachine.containers[instance]; !ok {
-		return api.NetworkInterface{}, fmt.Errorf("container %s not found", instance)
-	}
-
-	nwIface, err := c.sharedMachine.attachNetwork(name)
-	if err != nil {
-		return api.NetworkInterface{}, err
-	}
-
-	// Track that this container now uses this network
-	if c.sharedMachine.networksForContainer[instance] == nil {
-		c.sharedMachine.networksForContainer[instance] = map[string]any{}
-	}
-	c.sharedMachine.networksForContainer[instance][name] = nil
-
-	return nwIface, nil
+	panic("not implemented")
 }
 
 func (c contextOpenshift) DetachNetwork(network api.Network, instance string) error {
-	name := network.Name()
-	_, err := getNetwork(name)
-	if err != nil {
-		return err
-	}
-
-	c.machineLock.Lock()
-	defer c.machineLock.Unlock()
-	// Check if container actually has this network
-	if networks, exists := c.sharedMachine.networksForContainer[instance]; exists {
-		if _, hasNet := networks[name]; !hasNet {
-			return fmt.Errorf("network %s is not attached to container %s", name, instance)
-		}
-	} else {
-		return fmt.Errorf("container %s not found in network tracking", instance)
-	}
-
-	// Remove network from container's tracking
-	delete(c.sharedMachine.networksForContainer[instance], name)
-
-	// Clean up empty map if no networks remain
-	if len(c.sharedMachine.networksForContainer[instance]) == 0 {
-		delete(c.sharedMachine.networksForContainer, instance)
-	}
-
-	// Detach network from VM only if no other container uses it
-	return c.sharedMachine.detachNetworkIfUnused(name)
+	panic("not implemented")
 }
 
 func (c *contextOpenshift) AddCleanUpFn(cleanUpFn func() error) {
@@ -666,6 +569,14 @@ func (c *contextOpenshift) CleanUp() error {
 		}
 	}
 	c.cleanUpFns = nil
+
+	// Close the shared machine SSH connection (idempotent, safe to call multiple times)
+	if c.sharedMachine != nil {
+		if err := c.sharedMachine.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close machine SSH connection: %w", err))
+		}
+	}
+
 	return condenseErrors(errs)
 }
 
