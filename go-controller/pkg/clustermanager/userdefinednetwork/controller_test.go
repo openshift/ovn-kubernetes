@@ -43,6 +43,7 @@ var _ = Describe("User Defined Network Controller", func() {
 	var (
 		cs *util.OVNClusterManagerClientset
 		f  *factory.WatchFactory
+		nm networkmanager.Controller
 	)
 
 	BeforeEach(func() {
@@ -56,6 +57,10 @@ var _ = Describe("User Defined Network Controller", func() {
 	})
 
 	AfterEach(func() {
+		if nm != nil {
+			nm.Stop()
+			nm = nil
+		}
 		if f != nil {
 			f.Shutdown()
 		}
@@ -84,7 +89,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.Start()).To(Succeed())
 
-		nm, err := networkmanager.NewForCluster(&networkmanager.FakeControllerManager{}, f, cs, nil, id.NewTunnelKeyAllocator("TunnelKeys"))
+		nm, err = networkmanager.NewForCluster(&networkmanager.FakeControllerManager{}, f, cs, nil, id.NewTunnelKeyAllocator("TunnelKeys"))
 		Expect(err).NotTo(HaveOccurred())
 		// Start NetworkManager - it will process existing NADs and cache their VIDs
 		Expect(nm.Start()).To(Succeed())
