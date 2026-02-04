@@ -128,6 +128,14 @@ var metricUDNNodeAllocOperationDuration = prometheus.NewHistogramVec(prometheus.
 	Help:      "Time spent in per-node operations during UDN network allocation. Operations vary by topology: L3 networks record parse_annotations and allocate_subnets; L2 primary networks record allocate_tunnel_id; all networks record sync_node_annotations and update_node_annotations.",
 	Buckets:   prometheus.ExponentialBuckets(.001, 2, 14), // 1ms to 8.192s
 }, []string{"name", "operation"})
+
+var metricUDNWorkflowPhaseDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
+	Name:      "udn_workflow_phase_duration_seconds",
+	Help:      "Wall-clock duration of each UDN workflow phase (elapsed time, not cumulative work). Phases: network_ready (total time until ready), async_node_allocation, nad_sync, queue_wait.",
+	Buckets:   prometheus.ExponentialBuckets(.01, 2, 18),
+}, []string{"name", "phase"})
 // RegisterClusterManagerBase registers ovnkube cluster manager base metrics with the Prometheus registry.
 // This function should only be called once.
 func RegisterClusterManagerBase() {
@@ -171,6 +179,7 @@ func RegisterClusterManagerFunctional() {
 	prometheus.MustRegister(metricCUDNCount)
 	prometheus.MustRegister(metricUDNReconciliationDuration)
 	prometheus.MustRegister(metricUDNNodeAllocOperationDuration)
+	prometheus.MustRegister(metricUDNWorkflowPhaseDuration)
 	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 			panic(err)
@@ -235,4 +244,9 @@ func RecordUDNReconciliationDuration(name string, duration float64) {
 // RecordUDNNodeAllocOperationDuration records duration of specific operations during node allocation
 func RecordUDNNodeAllocOperationDuration(name string, operation string, duration float64) {
 	metricUDNNodeAllocOperationDuration.WithLabelValues(name, operation).Observe(duration)
+}
+
+// RecordUDNWorkflowPhaseDuration records wall-clock duration of each UDN workflow phase
+func RecordUDNWorkflowPhaseDuration(name, phase string, duration float64) {
+	metricUDNWorkflowPhaseDuration.WithLabelValues(name, phase).Observe(duration)
 }
