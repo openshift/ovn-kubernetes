@@ -152,7 +152,7 @@ func getExpectedDataPodsAndSwitchesForUserDefinedNetwork(fakeOvn *FakeOVN, pods 
 						ovntypes.TopologyExternalID: ocInfo.bnc.TopologyType(),
 					},
 					Options: map[string]string{
-						libovsdbops.RequestedChassis: pod.nodeName,
+						libovsdbops.RequestedChassis: requestedChassisForPod(pod),
 						"iface-id-ver":               pod.podName,
 					},
 

@@ -1035,6 +1035,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	}
 	if staleNode {
 		staleNodeName := "stale-node"
+		staleNodeChassisID := chassisIDForNode("stale-node")
 		// create remote router port
 		remoteRouterName := fmt.Sprintf("GR_%s_%s", netInfo.GetNetworkName(), staleNodeName)
 		remotePortName := fmt.Sprintf("%s%s", ovntypes.TransitRouterToRouterPrefix, remoteRouterName)
@@ -1049,7 +1050,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			MAC:      util.IPAddrToHWAddr(remoteTRInfo.transitRouterNets[0].IP).String(),
 			Options: map[string]string{
 				libovsdbops.RequestedTnlKey:  "15", // as defined by getTransitRouterPortTunnelKey(nodeID)
-				libovsdbops.RequestedChassis: staleNodeName},
+				libovsdbops.RequestedChassis: staleNodeChassisID},
 			ExternalIDs: externalIDs,
 		}
 		expectedEntities = append(expectedEntities, remotePort)
