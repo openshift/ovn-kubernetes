@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sync"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -22,6 +23,7 @@ import (
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/netlinkdevicemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -33,6 +35,7 @@ type Controller struct {
 	nodeName     string
 	watchFactory factory.NodeWatchFactory
 	kube         kube.Interface
+	networkMgr   networkmanager.Interface
 	ndm          netlinkdevicemanager.Interface
 
 	// vtepController reconciles VTEP CRs: ensures bridge, VXLAN, SVI, and OVS port
@@ -41,16 +44,26 @@ type Controller struct {
 	// nodeEventHandler watches for node annotation changes that should
 	// trigger VTEP reconciliation if needed.
 	nodeEventHandler cache.ResourceEventHandlerRegistration
+	// nadReconciler triggers VTEP reconciliation when NADs referencing a VTEP
+	// are added or removed, so VID/VNI mappings and SVIs stay in sync.
+	nadReconciler   controller.Reconciler
+	nadReconcilerID uint64
+
+	// Cache NAD key -> VTEP name for cleanup when NADs are deleted.
+	nadVTEPInfoLock sync.Mutex
+	nadVTEPInfo     map[string]string
 
 	stopChan chan struct{}
 }
 
-func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Interface, ndm netlinkdevicemanager.Interface) (*Controller, error) {
+func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Interface, ndm netlinkdevicemanager.Interface, networkMgr networkmanager.Interface) (*Controller, error) {
 	c := &Controller{
 		nodeName:     nodeName,
 		watchFactory: wf,
 		kube:         kube,
+		networkMgr:   networkMgr,
 		ndm:          ndm,
+		nadVTEPInfo:  make(map[string]string),
 		stopChan:     make(chan struct{}),
 	}
 
@@ -62,6 +75,12 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 		Threadiness:    1,
 		Informer:       vtepInformer.Informer(),
 		Lister:         vtepInformer.Lister().List,
+	})
+	c.nadReconciler = controller.NewReconciler("evpn-nad-reconciler", &controller.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile:   c.reconcileNAD,
+		Threadiness: 1,
+		MaxAttempts: controller.InfiniteAttempts,
 	})
 
 	var err error
@@ -79,7 +98,12 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 func (c *Controller) Start() error {
 	klog.Info("Starting EVPN node controller")
 
-	return controller.StartWithInitialSync(c.initialSync, c.vtepController)
+	id, err := c.networkMgr.RegisterNADReconciler(c.nadReconciler)
+	if err != nil {
+		return fmt.Errorf("failed to register the EVPN NAD reconciler: %v", err)
+	}
+	c.nadReconcilerID = id
+	return controller.StartWithInitialSync(c.initialSync, c.vtepController, c.nadReconciler)
 }
 
 func (c *Controller) initialSync() error {
@@ -114,7 +138,13 @@ func (c *Controller) Stop() {
 		}
 	}
 
-	controller.Stop(c.vtepController)
+	if c.nadReconcilerID != 0 {
+		if err := c.networkMgr.DeRegisterNADReconciler(c.nadReconcilerID); err != nil {
+			klog.Warningf("Failed to deregister EVPN NAD reconciler: %v", err)
+		}
+	}
+
+	controller.Stop(c.vtepController, c.nadReconciler)
 
 	close(c.stopChan)
 }
@@ -242,10 +272,14 @@ func (c *Controller) reconcile(key string) error {
 		return fmt.Errorf("failed to apply bridge %s: %w", bridgeName, err)
 	}
 
-	var vxlan4Name, vxlan6Name string
+	mappings, err := c.getVIDVNIMappings(vtep.Name)
+	if err != nil {
+		return fmt.Errorf("failed to build VID/VNI mappings: %w", err)
+	}
+
 	if vtepIPv4 != nil {
-		vxlan4Name = GetEVPNVXLANName(vtep.Name, utilnet.IPv4)
-		if err := c.ensureVXLAN(vxlan4Name, bridgeName, vtepIPv4); err != nil {
+		vxlan4Name := GetEVPNVXLANName(vtep.Name, utilnet.IPv4)
+		if err := c.ensureVXLAN(vxlan4Name, bridgeName, vtepIPv4, mappings); err != nil {
 			return err
 		}
 	} else {
@@ -256,8 +290,8 @@ func (c *Controller) reconcile(key string) error {
 	}
 
 	if vtepIPv6 != nil {
-		vxlan6Name = GetEVPNVXLANName(vtep.Name, utilnet.IPv6)
-		if err := c.ensureVXLAN(vxlan6Name, bridgeName, vtepIPv6); err != nil {
+		vxlan6Name := GetEVPNVXLANName(vtep.Name, utilnet.IPv6)
+		if err := c.ensureVXLAN(vxlan6Name, bridgeName, vtepIPv6, mappings); err != nil {
 			return err
 		}
 	} else {
@@ -268,6 +302,68 @@ func (c *Controller) reconcile(key string) error {
 	}
 
 	return nil
+}
+
+func (c *Controller) reconcileNAD(key string) error {
+	netInfo := c.networkMgr.GetNetInfoForNADKey(key)
+	c.nadVTEPInfoLock.Lock()
+	defer c.nadVTEPInfoLock.Unlock()
+
+	if netInfo == nil {
+		vtepName, ok := c.nadVTEPInfo[key]
+		if ok {
+			klog.Infof("Network %s removed, reconciling VTEP %s", key, vtepName)
+			delete(c.nadVTEPInfo, key)
+			c.vtepController.Reconcile(vtepName)
+		}
+		return nil
+	}
+
+	vtepName := netInfo.EVPNVTEPName()
+	if vtepName == "" {
+		return nil
+	}
+
+	if c.nadVTEPInfo[key] == vtepName {
+		// NAD was already reconciled
+		return nil
+	}
+
+	c.nadVTEPInfo[key] = vtepName
+	c.vtepController.Reconcile(vtepName)
+
+	return nil
+}
+
+func (c *Controller) getVIDVNIMappings(vtepName string) ([]netlinkdevicemanager.VIDVNIMapping, error) {
+	var mappings []netlinkdevicemanager.VIDVNIMapping
+	err := c.networkMgr.DoWithLock(func(netInfo util.NetInfo) error {
+		if netInfo == nil || netInfo.EVPNVTEPName() != vtepName {
+			return nil
+		}
+
+		macVID, macVNI := netInfo.EVPNMACVRFVID(), netInfo.EVPNMACVRFVNI()
+		if macVID != 0 && macVNI != 0 {
+			mappings = append(mappings, netlinkdevicemanager.VIDVNIMapping{
+				VID: uint16(macVID),
+				VNI: uint32(macVNI),
+			})
+		}
+
+		ipVID, ipVNI := netInfo.EVPNIPVRFVID(), netInfo.EVPNIPVRFVNI()
+		if ipVID != 0 && ipVNI != 0 {
+			mappings = append(mappings, netlinkdevicemanager.VIDVNIMapping{
+				VID: uint16(ipVID),
+				VNI: uint32(ipVNI),
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mappings, nil
 }
 
 func (c *Controller) deleteVTEPDevices(vtepName string) error {
@@ -282,10 +378,18 @@ func (c *Controller) deleteVTEPDevices(vtepName string) error {
 		errs = append(errs, err)
 	}
 
+	c.nadVTEPInfoLock.Lock()
+	for key, name := range c.nadVTEPInfo {
+		if name == vtepName {
+			delete(c.nadVTEPInfo, key)
+		}
+	}
+	c.nadVTEPInfoLock.Unlock()
+
 	return utilerrors.Join(errs...)
 }
 
-func (c *Controller) ensureVXLAN(vxlanName, bridgeName string, srcIP net.IP) error {
+func (c *Controller) ensureVXLAN(vxlanName string, bridgeName string, srcIP net.IP, mappings []netlinkdevicemanager.VIDVNIMapping) error {
 	err := c.ndm.EnsureLink(netlinkdevicemanager.DeviceConfig{
 		Link: &netlink.Vxlan{
 			LinkAttrs: netlink.LinkAttrs{Name: vxlanName, MTU: config.Default.MTU},
@@ -309,6 +413,7 @@ func (c *Controller) ensureVXLAN(vxlanName, bridgeName string, srcIP net.IP) err
 			// the other, creating an amplification loop between VTEP peers.
 			Isolated: true,
 		},
+		VIDVNIMappings: mappings,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to apply VXLAN %s: %w", vxlanName, err)
