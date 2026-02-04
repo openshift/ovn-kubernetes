@@ -460,9 +460,18 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 		remotePortAddr = remotePortAddr + " " + tsNetwork
 	}
 
+	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// remote node may not have the annotation yet, suppress it
+			return types.NewSuppressedError(err)
+		}
+		return fmt.Errorf("failed to parse node chassis-id for node %s: %w", node.Name, err)
+	}
+
 	lspOptions := map[string]string{
 		libovsdbops.RequestedTnlKey:  strconv.Itoa(nodeID),
-		libovsdbops.RequestedChassis: node.Name,
+		libovsdbops.RequestedChassis: chassisID,
 	}
 	// Store the node name in the external_ids column for book keeping
 	externalIDs := map[string]string{
