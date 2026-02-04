@@ -381,6 +381,20 @@ func (c *Controller) reconcileUDN(key string) error {
 
 	udnCopy := udn.DeepCopy()
 
+	// Check if NetworkCreated was already True before this reconcile
+	wasNetworkCreatedBefore := meta.IsStatusConditionTrue(udnCopy.Status.Conditions, conditionTypeNetworkCreated)
+
+	// Defer metric recording to measure total reconciliation time including queue wait
+	// For first reconciliation, measure from UDN creation time to include queue wait
+	defer func() {
+		if !wasNetworkCreatedBefore && udnCopy != nil {
+			reconciliationDuration := time.Since(udnCopy.CreationTimestamp.Time)
+			metrics.RecordUDNReconciliationDuration(udnCopy.Name, reconciliationDuration.Seconds())
+			klog.Infof("Recorded reconciliation duration for UDN %s: %v (includes queue wait + processing)",
+				udnCopy.Name, reconciliationDuration)
+		}
+	}()
+
 	nadCopy, syncErr := c.syncUserDefinedNetwork(udnCopy)
 
 	updateStatusErr := c.updateUserDefinedNetworkStatus(udnCopy, nadCopy, syncErr)

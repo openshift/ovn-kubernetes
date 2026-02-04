@@ -113,6 +113,13 @@ var metricCUDNCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
+var metricUDNReconciliationDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
+	Name:      "udn_reconciliation_duration_seconds",
+	Help:      "Time to reconcile a UDN (includes NAD creation, allocation, status update)",
+	Buckets:   prometheus.ExponentialBuckets(.001, 2, 14), // 1ms to 8.192s
+}, []string{"name"})
 // RegisterClusterManagerBase registers ovnkube cluster manager base metrics with the Prometheus registry.
 // This function should only be called once.
 func RegisterClusterManagerBase() {
@@ -154,6 +161,7 @@ func RegisterClusterManagerFunctional() {
 	}
 	prometheus.MustRegister(metricUDNCount)
 	prometheus.MustRegister(metricCUDNCount)
+	prometheus.MustRegister(metricUDNReconciliationDuration)
 	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 			panic(err)
@@ -208,4 +216,9 @@ func IncrementCUDNCount(role, topology string) {
 // DecrementCUDNCount decrements the number of ClusterUserDefinedNetworks of the given type
 func DecrementCUDNCount(role, topology string) {
 	metricCUDNCount.WithLabelValues(role, topology).Dec()
+}
+
+// RecordUDNReconciliationDuration records the duration to reconcile a UDN
+func RecordUDNReconciliationDuration(name string, duration float64) {
+	metricUDNReconciliationDuration.WithLabelValues(name).Observe(duration)
 }
