@@ -68,6 +68,11 @@ func initializeTestFramework(provider string) error {
 	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
 		os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
 	}
+	// Set default SSH key path if not provided
+	if sshKeyPath := os.Getenv("SSH_KEY_PATH"); len(sshKeyPath) == 0 {
+		defaultPath := filepath.Join(os.Getenv("HOME"), ".ssh", "id_rsa")
+		os.Setenv("SSH_KEY_PATH", defaultPath)
+	}
 	// "debian" is used when not set. At least GlusterFS tests need "custom".
 	// (There is no option for "rhel" or "centos".)
 	testContext.NodeOSDistro = "custom"
