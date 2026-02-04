@@ -120,6 +120,14 @@ var metricUDNReconciliationDuration = prometheus.NewHistogramVec(prometheus.Hist
 	Help:      "Time to reconcile a UDN (includes NAD creation, allocation, status update)",
 	Buckets:   prometheus.ExponentialBuckets(.001, 2, 14), // 1ms to 8.192s
 }, []string{"name"})
+
+var metricUDNNodeAllocOperationDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemClusterManager,
+	Name:      "udn_node_alloc_operation_duration_seconds",
+	Help:      "Time spent in per-node operations during UDN network allocation. Operations vary by topology: L3 networks record parse_annotations and allocate_subnets; L2 primary networks record allocate_tunnel_id; all networks record sync_node_annotations and update_node_annotations.",
+	Buckets:   prometheus.ExponentialBuckets(.001, 2, 14), // 1ms to 8.192s
+}, []string{"name", "operation"})
 // RegisterClusterManagerBase registers ovnkube cluster manager base metrics with the Prometheus registry.
 // This function should only be called once.
 func RegisterClusterManagerBase() {
@@ -162,6 +170,7 @@ func RegisterClusterManagerFunctional() {
 	prometheus.MustRegister(metricUDNCount)
 	prometheus.MustRegister(metricCUDNCount)
 	prometheus.MustRegister(metricUDNReconciliationDuration)
+	prometheus.MustRegister(metricUDNNodeAllocOperationDuration)
 	if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 			panic(err)
@@ -221,4 +230,9 @@ func DecrementCUDNCount(role, topology string) {
 // RecordUDNReconciliationDuration records the duration to reconcile a UDN
 func RecordUDNReconciliationDuration(name string, duration float64) {
 	metricUDNReconciliationDuration.WithLabelValues(name).Observe(duration)
+}
+
+// RecordUDNNodeAllocOperationDuration records duration of specific operations during node allocation
+func RecordUDNNodeAllocOperationDuration(name string, operation string, duration float64) {
+	metricUDNNodeAllocOperationDuration.WithLabelValues(name, operation).Observe(duration)
 }
