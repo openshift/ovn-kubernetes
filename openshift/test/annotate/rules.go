@@ -81,6 +81,8 @@ var (
 			`Network Segmentation UserDefinedNetwork CRD Controller should correctly report subsystem error on node subnet allocation`,
 			// requires implementation of overlay method (provider API)
 			`Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology`,
+			// requires implementation of the SetupUnderlay() method
+			`Network Segmentation: Localnet should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart`,
 			// pods dont drop privileges
 			`should be able to send multicast UDP traffic between nodes`,
 			// TODO: fix the flakiness with net-seg overlapping CIDRs test in downstream.
