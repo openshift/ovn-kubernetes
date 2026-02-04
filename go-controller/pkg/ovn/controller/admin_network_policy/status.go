@@ -46,6 +46,22 @@ const (
 	policyNotReadyReason = "SetupFailed"
 )
 
+// doesStatusNeedAnUpdate compares the existing condition with the new condition
+// and returns true if an update is needed, false if the status is already in the desired state.
+// This helps avoid unnecessary API server calls when the status hasn't changed.
+func doesStatusNeedAnUpdate(existingCondition *metav1.Condition, newCondition metav1.Condition) bool {
+	if existingCondition == nil {
+		return true // condition doesn't exist yet, needs to be created
+	}
+	// Check if Status, Reason, and Message are all the same - if so, no update needed
+	if existingCondition.Status == newCondition.Status &&
+		existingCondition.Reason == newCondition.Reason &&
+		existingCondition.Message == newCondition.Message {
+		return false
+	}
+	return true
+}
+
 // updateANPStatusToReady updates the status of the policy to reflect that it is ready
 // Each zone's ovnkube-controller will call this, hence let's update status using server-side-apply
 func (c *Controller) updateANPStatusToReady(anpName string) error {
@@ -94,6 +110,10 @@ func (c *Controller) updateANPZoneStatusCondition(newCondition metav1.Condition,
 		return err
 	}
 	existingCondition := meta.FindStatusCondition(anp.Status.Conditions, newCondition.Type)
+	if !doesStatusNeedAnUpdate(existingCondition, newCondition) {
+		// status is already in the desired state, skip the update to reduce API server load
+		return nil
+	}
 	if existingCondition == nil {
 		newCondition.LastTransitionTime = metav1.NewTime(time.Now())
 	} else {
@@ -157,6 +177,10 @@ func (c *Controller) updateBANPZoneStatusCondition(newCondition metav1.Condition
 		return err
 	}
 	existingCondition := meta.FindStatusCondition(banp.Status.Conditions, newCondition.Type)
+	if !doesStatusNeedAnUpdate(existingCondition, newCondition) {
+		// status is already in the desired state, skip the update to reduce API server load
+		return nil
+	}
 	if existingCondition == nil {
 		newCondition.LastTransitionTime = metav1.NewTime(time.Now())
 	} else {
