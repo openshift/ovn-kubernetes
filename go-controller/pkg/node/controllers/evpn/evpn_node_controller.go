@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -53,6 +54,11 @@ type Controller struct {
 	nadVTEPInfoLock sync.Mutex
 	nadVTEPInfo     map[string]string
 
+	// svisByBridge tracks SVI names created per bridge, so we can detect
+	// stale SVIs
+	svisByBridgeLock sync.Mutex
+	svisByBridge     map[string]sets.Set[string]
+
 	stopChan chan struct{}
 }
 
@@ -64,6 +70,7 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 		networkMgr:   networkMgr,
 		ndm:          ndm,
 		nadVTEPInfo:  make(map[string]string),
+		svisByBridge: make(map[string]sets.Set[string]),
 		stopChan:     make(chan struct{}),
 	}
 
@@ -272,11 +279,12 @@ func (c *Controller) reconcile(key string) error {
 		return fmt.Errorf("failed to apply bridge %s: %w", bridgeName, err)
 	}
 
-	mappings, err := c.getVIDVNIMappings(vtep.Name)
+	networks, err := c.collectEVPNNetworks(vtep.Name)
 	if err != nil {
-		return fmt.Errorf("failed to build VID/VNI mappings: %w", err)
+		return fmt.Errorf("failed to collect EVPN networks: %w", err)
 	}
 
+	mappings := c.getVIDVNIMappings(networks)
 	if vtepIPv4 != nil {
 		vxlan4Name := GetEVPNVXLANName(vtep.Name, utilnet.IPv4)
 		if err := c.ensureVXLAN(vxlan4Name, bridgeName, vtepIPv4, mappings); err != nil {
@@ -299,6 +307,10 @@ func (c *Controller) reconcile(key string) error {
 		if err := c.ndm.DeleteLink(GetEVPNVXLANName(vtep.Name, utilnet.IPv6)); err != nil {
 			return fmt.Errorf("failed to delete VTEP VXLAN device: %w", err)
 		}
+	}
+
+	if err := c.reconcileSVIs(bridgeName, networks); err != nil {
+		return fmt.Errorf("failed to reconcile SVIs: %w", err)
 	}
 
 	return nil
@@ -335,47 +347,133 @@ func (c *Controller) reconcileNAD(key string) error {
 	return nil
 }
 
-func (c *Controller) getVIDVNIMappings(vtepName string) ([]netlinkdevicemanager.VIDVNIMapping, error) {
-	var mappings []netlinkdevicemanager.VIDVNIMapping
+// evpnNetworkInfo holds EVPN config for a network.
+type evpnNetworkInfo struct {
+	macVRFVID, macVRFVNI int
+	ipVRFVID, ipVRFVNI   int
+	l3SVIName            string
+	l2SVIName            string
+	vrfName              string
+}
+
+// collectEVPNNetworks gathers EVPN network info for all networks using this VTEP.
+// This is rebuilt on every reconcile to pick up network additions/removals without
+// maintaining a separate long-lived cache.
+func (c *Controller) collectEVPNNetworks(vtepName string) ([]evpnNetworkInfo, error) {
+	var networks []evpnNetworkInfo
+
 	err := c.networkMgr.DoWithLock(func(netInfo util.NetInfo) error {
 		if netInfo == nil || netInfo.EVPNVTEPName() != vtepName {
 			return nil
 		}
-
-		macVID, macVNI := netInfo.EVPNMACVRFVID(), netInfo.EVPNMACVRFVNI()
-		if macVID != 0 && macVNI != 0 {
-			mappings = append(mappings, netlinkdevicemanager.VIDVNIMapping{
-				VID: uint16(macVID),
-				VNI: uint32(macVNI),
-			})
-		}
-
-		ipVID, ipVNI := netInfo.EVPNIPVRFVID(), netInfo.EVPNIPVRFVNI()
-		if ipVID != 0 && ipVNI != 0 {
-			mappings = append(mappings, netlinkdevicemanager.VIDVNIMapping{
-				VID: uint16(ipVID),
-				VNI: uint32(ipVNI),
-			})
-		}
-
+		networks = append(networks, evpnNetworkInfo{
+			macVRFVID: netInfo.EVPNMACVRFVID(),
+			macVRFVNI: int(netInfo.EVPNMACVRFVNI()),
+			ipVRFVID:  netInfo.EVPNIPVRFVID(),
+			ipVRFVNI:  int(netInfo.EVPNIPVRFVNI()),
+			l3SVIName: GetEVPNL3SVIName(netInfo),
+			l2SVIName: GetEVPNL2SVIName(netInfo),
+			vrfName:   util.GetNetworkVRFName(netInfo),
+		})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return mappings, nil
+	return networks, nil
+}
+
+// getVIDVNIMappings builds the VID-VNI mapping table from the collected networks.
+// Returns a non-nil empty slice when no networks exist so NDM removes stale mappings.
+func (c *Controller) getVIDVNIMappings(networks []evpnNetworkInfo) []netlinkdevicemanager.VIDVNIMapping {
+	mappings := make([]netlinkdevicemanager.VIDVNIMapping, 0)
+	for _, n := range networks {
+		if n.macVRFVID != 0 && n.macVRFVNI != 0 {
+			mappings = append(mappings, netlinkdevicemanager.VIDVNIMapping{VID: uint16(n.macVRFVID), VNI: uint32(n.macVRFVNI)})
+		}
+		if n.ipVRFVID != 0 && n.ipVRFVNI != 0 {
+			mappings = append(mappings, netlinkdevicemanager.VIDVNIMapping{VID: uint16(n.ipVRFVID), VNI: uint32(n.ipVRFVNI)})
+		}
+	}
+	return mappings
+}
+
+// reconcileSVIs ensures desired SVIs exist and removes stale ones.
+// Creates L3 (IP-VRF) SVIs for routing and L2 (MAC-VRF) SVIs for ARP suppression
+// and L2VNI-to-VRF association. Tracks created SVIs in svisByBridge to detect
+// stale ones.
+func (c *Controller) reconcileSVIs(bridgeName string, networks []evpnNetworkInfo) error {
+	desiredSVIs := sets.New[string]()
+	for _, net := range networks {
+		if net.ipVRFVID != 0 {
+			desiredSVIs.Insert(net.l3SVIName)
+			if err := c.ndm.EnsureLink(netlinkdevicemanager.DeviceConfig{
+				Link: &netlink.Vlan{
+					LinkAttrs: netlink.LinkAttrs{Name: net.l3SVIName},
+					VlanId:    net.ipVRFVID,
+				},
+				VLANParent: bridgeName,
+				Master:     net.vrfName,
+			}); err != nil {
+				return fmt.Errorf("failed to ensure L3 SVI %s: %w", net.l3SVIName, err)
+			}
+		}
+
+		if net.macVRFVID != 0 {
+			desiredSVIs.Insert(net.l2SVIName)
+			if err := c.ndm.EnsureLink(netlinkdevicemanager.DeviceConfig{
+				Link: &netlink.Vlan{
+					LinkAttrs: netlink.LinkAttrs{Name: net.l2SVIName},
+					VlanId:    net.macVRFVID,
+				},
+				VLANParent: bridgeName,
+				Master:     net.vrfName,
+			}); err != nil {
+				return fmt.Errorf("failed to ensure L2 SVI %s: %w", net.l2SVIName, err)
+			}
+		}
+	}
+
+	c.svisByBridgeLock.Lock()
+	defer c.svisByBridgeLock.Unlock()
+	for sviName := range c.svisByBridge[bridgeName] {
+		if !desiredSVIs.Has(sviName) {
+			if err := c.ndm.DeleteLink(sviName); err != nil {
+				return fmt.Errorf("failed to delete stale SVI %s: %w", sviName, err)
+			}
+		}
+	}
+	c.svisByBridge[bridgeName] = desiredSVIs
+
+	return nil
 }
 
 func (c *Controller) deleteVTEPDevices(vtepName string) error {
+	bridgeName := GetEVPNBridgeName(vtepName)
 	var errs []error
+
+	// Delete all SVIs parented to this bridge
+	c.svisByBridgeLock.Lock()
+	for sviName := range c.svisByBridge[bridgeName] {
+		if err := c.ndm.DeleteLink(sviName); err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete VTEP %s SVI %s: %w", vtepName, sviName, err))
+		} else {
+			c.svisByBridge[bridgeName].Delete(sviName)
+		}
+	}
+	if c.svisByBridge[bridgeName].Len() == 0 {
+		delete(c.svisByBridge, bridgeName)
+	}
+	c.svisByBridgeLock.Unlock()
+
 	if err := c.ndm.DeleteLink(GetEVPNVXLANName(vtepName, utilnet.IPv4)); err != nil {
 		errs = append(errs, fmt.Errorf("failed to delete VTEP %s IPv4 VXLAN device: %w", vtepName, err))
 	}
 	if err := c.ndm.DeleteLink(GetEVPNVXLANName(vtepName, utilnet.IPv6)); err != nil {
 		errs = append(errs, fmt.Errorf("failed to delete VTEP %s IPv6 VXLAN device: %w", vtepName, err))
 	}
-	if err := c.ndm.DeleteLink(GetEVPNBridgeName(vtepName)); err != nil {
-		errs = append(errs, err)
+	if err := c.ndm.DeleteLink(bridgeName); err != nil {
+		errs = append(errs, fmt.Errorf("failed to delete VTEP %s bridge %s: %w", vtepName, bridgeName, err))
 	}
 
 	c.nadVTEPInfoLock.Lock()
