@@ -82,3 +82,4 @@ func getEVPNNetworkDeviceName(netInfo util.NetInfo, prefix string) string {
 	}
 	return fmt.Sprintf("%s%d", prefix, netInfo.GetNetworkID())
 }
+
