@@ -48,6 +48,26 @@ func (_m *Interface) EnsureLink(cfg netlinkdevicemanager.DeviceConfig) error {
 	return r0
 }
 
+// ListDevicesByVLANParent provides a mock function with given fields: parentName
+func (_m *Interface) ListDevicesByVLANParent(parentName string) []netlinkdevicemanager.DeviceConfig {
+	ret := _m.Called(parentName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListDevicesByVLANParent")
+	}
+
+	var r0 []netlinkdevicemanager.DeviceConfig
+	if rf, ok := ret.Get(0).(func(string) []netlinkdevicemanager.DeviceConfig); ok {
+		r0 = rf(parentName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]netlinkdevicemanager.DeviceConfig)
+		}
+	}
+
+	return r0
+}
+
 // NewInterface creates a new instance of Interface. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewInterface(t interface {

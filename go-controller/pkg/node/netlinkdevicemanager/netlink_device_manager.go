@@ -137,6 +137,9 @@ type Interface interface {
 	//
 	// Only devices with our ownership alias are deleted from the kernel.
 	DeleteLink(name string) error
+
+	// ListDevicesByVLANParent returns configs for all devices with the given VLANParent.
+	ListDevicesByVLANParent(parentName string) []DeviceConfig
 }
 
 // deviceState represents the lifecycle state of a managed device.
@@ -635,6 +638,20 @@ func (c *Controller) DeleteLink(name string) error {
 
 	c.reconciler.Reconcile(deviceKeyPrefix + name)
 	return nil
+}
+
+// ListDevicesByVLANParent returns configs for all devices with the given VLANParent.
+func (c *Controller) ListDevicesByVLANParent(parentName string) []DeviceConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var result []DeviceConfig
+	for _, device := range c.store {
+		if device.cfg.VLANParent == parentName {
+			cfgCopy := device.cfg
+			result = append(result, cfgCopy)
+		}
+	}
+	return result
 }
 
 // eventChanBufferSize is the buffer size for netlink event channels (link and addr).
