@@ -370,8 +370,7 @@ jobs:
     - name: Export kind logs
       if: always()
       run: |
-        mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
+        ./contrib/export-kind-logs.sh
         set -x
         docker ps -a
         docker exec ovn-control-plane crictl images
@@ -417,9 +416,7 @@ jobs:
 
     - name: Export kind logs
       if: always()
-      run: |
-        mkdir -p /tmp/kind/logs-kind-pr-branch
-        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs-kind-pr-branch
+      run: ./contrib/export-kind-logs.sh /tmp/kind/logs-kind-pr-branch
 
     - name: Upload kind logs
       if: always()
@@ -717,8 +714,7 @@ jobs:
     - name: Export kind logs
       if: always()
       run: |
-        mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
+        ./contrib/export-kind-logs.sh
         if [ -n "${TRAFFIC_FLOW_TESTS}" ]; then
             mv -v /tmp/{,kind/logs/}traffic_flow_test_result.json ||:
         fi
@@ -830,9 +826,7 @@ jobs:
 
     - name: Export kind logs
       if: always()
-      run: |
-        mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --verbosity 4 /tmp/kind/logs
+      run: ./contrib/export-kind-logs.sh
 
     - name: Upload kind logs
       if: always()

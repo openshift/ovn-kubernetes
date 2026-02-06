@@ -14,6 +14,9 @@ case $(uname -m) in
     aarch64) ARCH="arm64"   ;;
 esac
 
+# Directory for coredump collection (used by setup_coredumps and collect_coredump_binaries)
+readonly COREDUMP_DIR="/tmp/kind/logs/coredumps"
+
 if_error_exit() {
     ###########################################################################
     # Description:                                                            #
@@ -1180,18 +1183,18 @@ interconnect_arg_check() {
 setup_coredumps() {
   # Setup core dump collection
   #
-  # Core dumps will be saved on the HOST at /tmp/kind/logs/coredumps (not inside containers)
+  # Core dumps will be saved on the HOST at $COREDUMP_DIR (not inside containers)
   # because kernel.core_pattern is a kernel-level setting shared across all containers.
   #
   # - Using a pipe instead of a file path avoids needing to mount
-  #   /tmp/kind/logs/coredumps into every container that might crash
-  # - The pipe executes in the host's namespace, so /tmp/kind/logs/coredumps
+  #   $COREDUMP_DIR into every container that might crash
+  # - The pipe executes in the host's namespace, so $COREDUMP_DIR
   #   automatically refers to the host path
   #
-  # Location: /tmp/kind/logs is used to ensure coredumps are exported in CI
+  # Location: COREDUMP_DIR is under /tmp/kind/logs to ensure coredumps are exported in CI
   # Use container exec to avoid asking for root permissions
 
-  mkdir -p "/tmp/kind/logs/coredumps"
+  mkdir -p "$COREDUMP_DIR"
   ulimit -c unlimited
   for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}"); do
     # Core dump filename pattern variables:
@@ -1199,8 +1202,191 @@ setup_coredumps() {
     #   %e - executable filename
     #   %h - hostname (container hostname)
     #   %s - signal number that caused dump
-    ${OCI_BIN} exec "$node" sysctl -w kernel.core_pattern="|/bin/dd of=/tmp/kind/logs/coredumps/core.%P.%e.%h.%s bs=1M status=none"
+    ${OCI_BIN} exec "$node" sysctl -w kernel.core_pattern="|/bin/dd of=${COREDUMP_DIR}/core.%P.%e.%h.%s bs=1M status=none"
   done
+}
+
+wait_for_coredumps() {
+  # Wait for any in-progress coredump writes to complete
+  # The kernel pipes coredumps to dd processes, which can take 30+ seconds for large Go binaries
+  #
+  # Challenge: Go's crash handling (printing stack traces for all goroutines) takes
+  # several seconds BEFORE it calls abort() and the kernel starts the coredump.
+  # So we can't just check for dd processes - we need to wait for potential crashes
+  # to fully materialize.
+
+  local max_wait=120  # Maximum wait time in seconds
+  local initial_wait=15  # Initial wait for Go crash handling to complete
+  local waited=0
+
+  if [ ! -d "$COREDUMP_DIR" ]; then
+    return 0
+  fi
+
+  # Record initial coredump count
+  local initial_count
+  initial_count=$(find "$COREDUMP_DIR" -maxdepth 1 -name "core.*" -type f 2>/dev/null | wc -l || echo 0)
+  echo "Checking for in-progress coredump writes (initial count: $initial_count)..."
+
+  # Initial wait: Go's crash handling (printing goroutine stack traces) can take
+  # 10+ seconds before abort() is called and the kernel starts the coredump
+  echo "Waiting ${initial_wait}s for any pending crash handling to complete..."
+  sleep "$initial_wait"
+  waited=$initial_wait
+
+  while [ $waited -lt $max_wait ]; do
+    # Check for dd processes writing to the coredump directory
+    local dd_procs
+    dd_procs=$(pgrep -f "dd of=${COREDUMP_DIR}" 2>/dev/null || true)
+
+    # Check current coredump count
+    local current_count
+    current_count=$(find "$COREDUMP_DIR" -maxdepth 1 -name "core.*" -type f 2>/dev/null | wc -l || echo 0)
+
+    if [ -z "$dd_procs" ]; then
+      # No dd processes running
+      if [ "$current_count" -gt "$initial_count" ]; then
+        echo "New coredumps detected (initial: $initial_count, current: $current_count) after ${waited}s"
+      fi
+      echo "No coredump writes in progress after ${waited}s"
+      return 0
+    fi
+
+    echo "Waiting for coredump writes... (${waited}s, dd PIDs: $dd_procs, coredumps: $current_count)"
+    sleep 5
+    waited=$((waited + 5))
+  done
+
+  echo "Warning: Timed out waiting for coredump writes after ${max_wait}s"
+}
+
+export_logs() {
+  # Export kind logs and collect coredump binaries
+  # Usage: export_logs [logs_dir]
+  # Default logs_dir: /tmp/kind/logs
+
+  local logs_dir="${1:-/tmp/kind/logs}"
+
+  mkdir -p "$logs_dir"
+
+  # Wait for any in-progress coredump writes to complete before exporting
+  wait_for_coredumps
+
+  kind export logs --name "${KIND_CLUSTER_NAME}" --verbosity 4 "$logs_dir"
+  collect_coredump_binaries
+}
+
+# Helper function to try extracting a binary from a container
+# Used by collect_coredump_binaries()
+try_extract_binary() {
+  local node=$1
+  local container_id=$2
+  local exe=$3
+  local binary_dir=$4
+
+  # Get container's PID to access its rootfs via /proc/<pid>/root
+  local pid
+  pid=$(${OCI_BIN} exec "$node" crictl inspect "$container_id" 2>/dev/null | jq -r '.info.pid // empty')
+  if [ -z "$pid" ] || [ "$pid" = "null" ] || [ "$pid" = "0" ]; then
+    return 1
+  fi
+
+  # Common paths where binaries might be located
+  local binary_paths=("/usr/bin" "/bin" "/usr/sbin" "/sbin" "/usr/libexec/cni" "/usr/lib/frr")
+
+  for path in "${binary_paths[@]}"; do
+    local full_path="/proc/${pid}/root${path}/${exe}"
+    if ${OCI_BIN} exec "$node" test -f "$full_path" 2>/dev/null; then
+      if ${OCI_BIN} exec "$node" cat "$full_path" > "${binary_dir}/${exe}" 2>/dev/null && [ -s "${binary_dir}/${exe}" ]; then
+        echo "    Collected binary: ${exe} from container $container_id (pid $pid)"
+        return 0
+      fi
+    fi
+  done
+  rm -f "${binary_dir}/${exe}" 2>/dev/null
+  return 1
+}
+
+collect_coredump_binaries() {
+  # Collect binaries that caused coredumps for post-mortem debugging
+  # Parses coredump filenames (core.%P.%e.%h.%s) to identify executables
+  # Binaries run inside pod containers, so we use crictl to access them
+
+  local binary_dir="${COREDUMP_DIR}/binaries"
+
+  if [ ! -d "$COREDUMP_DIR" ]; then
+    echo "No coredump directory found, skipping binary collection"
+    return 0
+  fi
+
+  local coredumps
+  coredumps=$(find "$COREDUMP_DIR" -maxdepth 1 -name "core.*" -type f 2>/dev/null)
+  if [ -z "$coredumps" ]; then
+    echo "No coredumps found, skipping binary collection"
+    return 0
+  fi
+
+  mkdir -p "$binary_dir"
+
+  # Get all KIND nodes
+  local nodes
+  nodes=$(kind get nodes --name "${KIND_CLUSTER_NAME}" 2>/dev/null)
+  if [ -z "$nodes" ]; then
+    echo "Warning: No KIND nodes available, cannot collect binaries"
+    return 0
+  fi
+
+  # Process each coredump: extract exe name (%e, field 3)
+  # Filename format: core.%P.%e.%h.%s (see setup_coredumps)
+  for coredump in $coredumps; do
+    local filename
+    filename=$(basename "$coredump")
+    local exe
+    exe=$(echo "$filename" | cut -d. -f3)
+
+    echo "Processing coredump: $filename (exe=$exe)"
+
+    # Skip if we already collected this binary
+    if [ -f "${binary_dir}/${exe}" ]; then
+      echo "  Binary $exe already collected, skipping"
+      continue
+    fi
+
+    local found=false
+
+    # Search all containers on all nodes for the binary
+    for node in $nodes; do
+      local containers
+      containers=$(${OCI_BIN} exec "$node" crictl ps -q 2>/dev/null) || true
+      for container_id in $containers; do
+        if try_extract_binary "$node" "$container_id" "$exe" "$binary_dir"; then
+          echo "  Collected $exe from container $container_id on node $node"
+          found=true
+          break 2
+        fi
+      done
+    done
+
+    # Fallback: binary running directly on KIND node (not in container)
+    if [ "$found" = false ]; then
+      for node in $nodes; do
+        local bin_path
+        bin_path=$(${OCI_BIN} exec "$node" which "$exe" 2>/dev/null) || true
+        if [ -n "$bin_path" ]; then
+          echo "  Collected $exe from node $node at $bin_path"
+          ${OCI_BIN} cp "${node}:${bin_path}" "${binary_dir}/${exe}" && found=true || true
+          break
+        fi
+      done
+    fi
+
+    if [ "$found" = false ]; then
+      echo "  WARNING: Could not find binary '$exe'"
+    fi
+  done
+
+  echo "Binary collection complete:"
+  ls -la "$binary_dir" 2>/dev/null || true
 }
 
 # Some environments (Fedora32,31 on desktop), have problems when the cluster
