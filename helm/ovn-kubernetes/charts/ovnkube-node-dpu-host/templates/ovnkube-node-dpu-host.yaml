@@ -97,6 +97,9 @@ spec:
         # ovnkube-node dpu-host mounts
         - mountPath: /var/run/ovn
           name: var-run-ovn
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
         {{- if .Values.global.enableNetworkSegmentation }}
         - mountPath: /var/run/k8s.cni.cncf.io/devinfo/dp
           name: host-devinfo-dp
@@ -222,6 +225,8 @@ spec:
           value: {{ hasKey .Values.global "enableDynamicUDNAllocation" | ternary .Values.global.enableDynamicUDNAllocation false | quote }}
         - name: OVN_DYNAMIC_UDN_GRACE_PERIOD
           value: {{ default "" .Values.global.dynamicUDNGracePeriod | quote }}
+        - name: OVN_NO_OVERLAY_ENABLE
+          value: {{ default "false" .Values.global.enableNoOverlay | quote }}
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
           value: {{ default "" .Values.nodeMgmtPortNetdev | quote }}
         - name: OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME
@@ -281,6 +286,9 @@ spec:
           path: /run/systemd
       - name: var-run-ovn
         emptyDir: {}
+      - name: ovnkube-config
+        configMap:
+          name: ovnkube-config
       {{- if .Values.global.enableNetworkSegmentation }}
       - name: host-devinfo-dp
         hostPath:
