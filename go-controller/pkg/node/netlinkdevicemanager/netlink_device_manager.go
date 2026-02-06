@@ -378,6 +378,19 @@ func (c *Controller) GetConfig(name string) *DeviceConfig {
 	return &cfgCopy
 }
 
+// ListDevicesByVLANParent returns all managed devices that have the specified VLANParent.
+func (c *Controller) ListDevicesByVLANParent(parent string) []DeviceConfig {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var result []DeviceConfig
+	for _, dev := range c.store {
+		if dev.cfg.VLANParent == parent {
+			result = append(result, dev.cfg)
+		}
+	}
+	return result
+}
+
 // EnsureBridgeMappings ensures a VXLAN device has exactly the specified VID/VNI mappings.
 // It also ensures the bridge has the corresponding VLANs configured with 'self' flag.
 //
@@ -516,6 +529,39 @@ func (c *Controller) DeleteBridgePortVLAN(linkName string, vid int) error {
 
 	// Remove from kernel
 	return deleteBridgePortVLAN(linkName, vid)
+}
+
+// DeleteAllBridgePortVLANs removes all VLAN entries for a link from the store and kernel.
+// This is used when an entire port is being deleted and the caller doesn't know or care
+// about individual VIDs. All stored VIDs are removed from the kernel and the store entry
+// is fully cleaned up.
+func (c *Controller) DeleteAllBridgePortVLANs(linkName string) error {
+	c.mu.Lock()
+
+	vlans := c.portVLANStore[linkName]
+	// Collect VIDs before deleting from store
+	var vids []int
+	for vid := range vlans {
+		vids = append(vids, vid)
+	}
+	delete(c.portVLANStore, linkName)
+
+	started := c.started
+	c.mu.Unlock()
+
+	// Before Run(), just update desired state - don't touch kernel
+	if !started {
+		return nil
+	}
+
+	// Remove all VIDs from kernel
+	var errs []error
+	for _, vid := range vids {
+		if err := deleteBridgePortVLAN(linkName, vid); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // deleteBridgePortVLAN removes a VLAN from a bridge port in the kernel.
@@ -893,12 +939,27 @@ func (c *Controller) syncMappingsForVXLAN(vxlanName string, m *managedVIDVNIMapp
 
 // syncPortVLANs syncs bridge port VLAN configurations.
 // Always does a full scan of all stored port VLANs.
+// Garbage-collects entries for links that no longer exist in the kernel.
 func (c *Controller) syncPortVLANs() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var synced int
-	for _, vlans := range c.portVLANStore {
+	nlOps := util.GetNetLinkOps()
+	var synced, gcCount int
+	for linkName, vlans := range c.portVLANStore {
+		// Garbage-collect: if the link no longer exists, remove all its entries.
+		// This handles cases where the link was deleted externally (e.g., OVS port
+		// removed via OVSDB) without going through DeleteAllBridgePortVLANs.
+		if _, err := nlOps.LinkByName(linkName); err != nil {
+			if nlOps.IsLinkNotFoundError(err) {
+				delete(c.portVLANStore, linkName)
+				gcCount++
+				continue
+			}
+			klog.Warningf("NetlinkDeviceManager: failed to check link %s for port VLAN GC: %v", linkName, err)
+			continue
+		}
+
 		for _, v := range vlans {
 			current, err := getBridgePortVLAN(v.linkName, v.vlan.VID)
 			if err != nil {
@@ -923,8 +984,8 @@ func (c *Controller) syncPortVLANs() {
 		}
 	}
 
-	if synced > 0 {
-		klog.V(5).Infof("NetlinkDeviceManager: synced %d port VLAN entries", synced)
+	if synced > 0 || gcCount > 0 {
+		klog.V(5).Infof("NetlinkDeviceManager: synced %d port VLAN entries, GC'd %d stale links", synced, gcCount)
 	}
 }
 
