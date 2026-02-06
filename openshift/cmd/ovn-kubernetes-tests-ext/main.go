@@ -66,6 +66,12 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
+		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
+		// These tests require at least 2 nodes and will fail on single-node deployments
+		if spec.Labels.Has("Feature:NetworkSegmentation") {
+			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
+		}
+
 		if annotations, ok := generated.AppendedAnnotations[spec.Name]; ok {
 			spec.Name += " " + annotations
 		}
