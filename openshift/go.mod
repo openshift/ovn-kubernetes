@@ -1,4 +1,4 @@
-module github.com/ovn-org/ovn-kubernetes/openshift
+module github.com/ovn-kubernetes/ovn-kubernetes/openshift
 
 go 1.24.0
 
@@ -9,8 +9,8 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/openshift-eng/openshift-tests-extension v0.0.0-20250916161632-d81c09058835
 	github.com/openshift/api v0.0.0-20251020135558-286504b695bc
-	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0
-	github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
+	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
+	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
 	github.com/spf13/cobra v1.9.1
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
@@ -127,9 +127,9 @@ require (
 	github.com/openshift/library-go v0.0.0-20251015151611-6fc7a74b67c5 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/client_golang v1.22.0 // indirect
+	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.63.0 // indirect
+	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/safchain/ethtool v0.3.1-0.20231027162144-83e5e0097c91 // indirect
@@ -138,10 +138,10 @@ require (
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/urfave/cli/v2 v2.27.2 // indirect
 	github.com/vincent-petithory/dataurl v1.0.0 // indirect
-	github.com/vishvananda/netlink v1.3.1 // indirect
+	github.com/vishvananda/netlink v1.3.2-0.20260209201543-c7039a4139da // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240312152122-5f08fbb34913 // indirect
@@ -168,7 +168,7 @@ require (
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 	golang.org/x/net v0.46.0 // indirect
-	golang.org/x/oauth2 v0.29.0 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/term v0.36.0 // indirect
@@ -219,8 +219,8 @@ require (
 replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/onsi/ginkgo/v2 => github.com/openshift/onsi-ginkgo/v2 v2.6.1-0.20241205171354-8006f302fd12
-	github.com/ovn-org/ovn-kubernetes/go-controller => ../go-controller
-	github.com/ovn-org/ovn-kubernetes/test/e2e => ../test/e2e
+	github.com/ovn-kubernetes/ovn-kubernetes/go-controller => ../go-controller
+	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e => ../test/e2e
 	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
 	// The dependency must be with downstream kubernetes so that agnhost container image
 	// index is derived correctly.
