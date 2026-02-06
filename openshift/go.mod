@@ -141,7 +141,7 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/urfave/cli/v2 v2.27.2 // indirect
 	github.com/vincent-petithory/dataurl v1.0.0 // indirect
-	github.com/vishvananda/netlink v1.3.1 // indirect
+	github.com/vishvananda/netlink v1.3.2-0.20260209201543-c7039a4139da // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240312152122-5f08fbb34913 // indirect
@@ -221,6 +221,7 @@ replace (
 	github.com/onsi/ginkgo/v2 => github.com/openshift/onsi-ginkgo/v2 v2.6.1-0.20241205171354-8006f302fd12
 	github.com/ovn-org/ovn-kubernetes/go-controller => ../go-controller
 	github.com/ovn-org/ovn-kubernetes/test/e2e => ../test/e2e
+	github.com/vishvananda/netlink => github.com/kyrtapz/netlink v0.0.0-20260127093224-f8e95bf26303
 	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
 	// The dependency must be with downstream kubernetes so that agnhost container image
 	// index is derived correctly.

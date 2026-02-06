@@ -98,6 +98,10 @@ func (o openshift) GetExternalContainerLogs(container api.ExternalContainer) (st
 	panic("not implemented")
 }
 
+func (o openshift) GetExternalContainerPID(containerName string) (int, error) {
+	return 0, fmt.Errorf("GetExternalContainerPID not implemented for openshift provider")
+}
+
 func (o openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
 	if len(cmd) == 0 {
 		panic("ExecK8NodeCommand(): insufficient command arguments")
@@ -117,6 +121,10 @@ func (o openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, err
 
 func (o openshift) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	panic("not implemented")
+}
+
+func (o openshift) RunOneShotContainer(image string, cmd []string, runtimeArgs []string) (string, error) {
+	return "", fmt.Errorf("RunOneShotContainer not implemented for openshift provider")
 }
 
 func (o openshift) GetExternalContainerPort() uint16 {
