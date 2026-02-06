@@ -1125,8 +1125,8 @@ var _ = Describe("NetlinkDeviceManager", func() {
 				10: {linkName: "port0", vlan: BridgePortVLAN{VID: 10, PVID: true}},
 			}
 
-			controller.DeleteBridgePortVLAN("port0", 10)
-
+			err := controller.DeleteBridgePortVLAN("port0", 10)
+			Expect(err).NotTo(HaveOccurred())
 			// When last VID is removed, the entire linkName key is also removed
 			Expect(controller.portVLANStore).NotTo(HaveKey("port0"))
 		})
