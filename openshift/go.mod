@@ -9,14 +9,15 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/openshift-eng/openshift-tests-extension v0.0.0-20250916161632-d81c09058835
 	github.com/openshift/api v0.0.0-20251020135558-286504b695bc
-	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0
 	github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
 	github.com/spf13/cobra v1.9.1
+	golang.org/x/crypto v0.43.0
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
 	k8s.io/component-base v0.34.1
 	k8s.io/kubernetes v1.34.1
+	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 )
 
 require (
@@ -125,6 +126,7 @@ require (
 	github.com/openshift/client-go v0.0.0-20251015124057-db0dee36e235 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
 	github.com/openshift/library-go v0.0.0-20251015151611-6fc7a74b67c5 // indirect
+	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.22.0 // indirect
@@ -165,7 +167,6 @@ require (
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
@@ -203,7 +204,6 @@ require (
 	k8s.io/kubelet v0.34.1 // indirect
 	k8s.io/mount-utils v0.34.1 // indirect
 	k8s.io/pod-security-admission v0.34.1 // indirect
-	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
 	kubevirt.io/api v1.4.0 // indirect
 	kubevirt.io/containerized-data-importer-api v1.57.0-alpha1 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
