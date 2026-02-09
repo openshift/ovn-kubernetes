@@ -99,6 +99,14 @@ var metricOVNControllerSBDBConnection = prometheus.NewGauge(prometheus.GaugeOpts
 	Help:      "Specifies if OVN controller is connected to OVN southbound database (1) or not (0)",
 })
 
+var metricUDNNBDBProgrammedDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
+	Name:      "udn_nbdb_programmed_duration_seconds",
+	Help:      "NBDB programming duration for UDN network initialization (aggregated across all networks to reduce cardinality)",
+	Buckets:   prometheus.ExponentialBuckets(.001, 2, 14), // 1ms to 8.192s
+})
+
 var (
 	ovnControllerVersion       string
 	ovnControllerOvsLibVersion string
@@ -429,6 +437,7 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 
 	// ovn-controller metrics
 	ovnRegistry.MustRegister(metricOVNControllerSBDBConnection)
+	ovnRegistry.MustRegister(metricUDNNBDBProgrammedDuration)
 	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{
 			Namespace: types.MetricOvnNamespace,
@@ -498,4 +507,11 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 	go stopwatchShowMetricsUpdater(ovnController, stopChan)
 	// ovn-controller southbound database connection status updater
 	go ovnControllerSBDBConnectionCheckUpdater(stopChan, util.RunOVNControllerAppCtl, time.Minute*2)
+}
+
+// RecordUDNNBDBProgrammedDuration records the NBDB programming duration for UDN network initialization.
+// The network name parameter is currently unused because the histogram is aggregated across
+// all networks to reduce cardinality, but is retained for future extensibility.
+func RecordUDNNBDBProgrammedDuration(_ string, duration float64) {
+	metricUDNNBDBProgrammedDuration.Observe(duration)
 }
