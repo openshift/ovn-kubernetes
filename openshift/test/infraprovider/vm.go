@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/containerengine"
@@ -85,7 +86,7 @@ func (m *vm) addContainer(container api.ExternalContainer) (api.ExternalContaine
 }
 
 func (m *vm) deleteContainer(container api.ExternalContainer) error {
-	isRunning, err := m.isContainerRunning(container)
+	isRunning, err := m.isContainerRunning(container.Name)
 	if err != nil {
 		return fmt.Errorf("failed to check if container is running: %w", err)
 	}
@@ -104,7 +105,7 @@ func (m *vm) deleteContainer(container api.ExternalContainer) error {
 }
 
 func (m *vm) getContainerLogs(container api.ExternalContainer) (string, error) {
-	isRunning, err := m.isContainerRunning(container)
+	isRunning, err := m.isContainerRunning(container.Name)
 	if err != nil {
 		return "", fmt.Errorf("failed to check if container is running: %w", err)
 	}
@@ -118,6 +119,27 @@ func (m *vm) getContainerLogs(container api.ExternalContainer) (string, error) {
 		return "", fmt.Errorf("failed to execute command (%s) within VM: %w", logsCmd, err)
 	}
 	return res.stdout, nil
+}
+
+func (m *vm) getContainerPID(name string) (int, error) {
+	isRunning, err := m.isContainerRunning(name)
+	if err != nil {
+		return 0, fmt.Errorf("failed to check if container is running: %w", err)
+	}
+	if !isRunning {
+		return 0, fmt.Errorf("external container is not running on vm")
+	}
+	pidCmd := buildContainerPIDCmd(name)
+	pidCmd = addElevatedPrivileges(pidCmd)
+	res, err := m.execCmd(pidCmd)
+	if err != nil {
+		return 0, fmt.Errorf("failed to execute command (%s) within VM: %w", pidCmd, err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(res.stdout))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse PID for container %q: %w", name, err)
+	}
+	return pid, nil
 }
 
 // getHypervisorClient returns the cached SSH client to the hypervisor, creating it if needed.
@@ -165,9 +187,9 @@ func (m *vm) execContainerCmd(container api.ExternalContainer, cmd []string) (re
 	return m.execCmd(containerCmd)
 }
 
-func (m *vm) isContainerRunning(container api.ExternalContainer) (bool, error) {
+func (m *vm) isContainerRunning(name string) (bool, error) {
 	// check to see if the container is running before attempting to delete it
-	isPresentCmd := buildContainerCheckCmd(container.Name)
+	isPresentCmd := buildContainerCheckCmd(name)
 	isPresentCmd = addElevatedPrivileges(isPresentCmd)
 	r, err := m.execCmd(isPresentCmd)
 	if err != nil {
@@ -314,6 +336,10 @@ func buildContainerLogsCmd(name string) string {
 
 func buildRemoveContainerCmd(name string) string {
 	return fmt.Sprintf("%s rm -f %s", containerengine.Get(), escapeShellArgument(name))
+}
+
+func buildContainerPIDCmd(name string) string {
+	return fmt.Sprintf("%s inspect --format {{.State.Pid}} %s", containerengine.Get(), escapeShellArgument(name))
 }
 
 func buildOneShotContainerCmd(image string, cmd []string, runtimeArgs []string) string {

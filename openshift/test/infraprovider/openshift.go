@@ -179,7 +179,9 @@ func (o openshift) GetK8HostPort() uint16 {
 
 // GetExternalContainerPID implements api.Provider.
 func (o openshift) GetExternalContainerPID(containerName string) (int, error) {
-	panic("unimplemented")
+	o.vmLock.Lock()
+	defer o.vmLock.Unlock()
+	return o.vm.getContainerPID(containerName)
 }
 
 // RunOneShotContainer implements api.Provider.
