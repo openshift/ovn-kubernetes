@@ -13,17 +13,16 @@ RUN dnf install -y --nodocs \
 	dnf clean all
 
 ARG ovsver=3.3
-ARG ovnver=24.03.5-40.el9fdp
+ARG ovnver=24.03
 
 RUN INSTALL_PKGS="iptables" && \
-	ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
 	dnf install -y --nodocs $INSTALL_PKGS && \
 	dnf install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
-	dnf install -y --nodocs "ovn$ovnver_short = $ovnver" "ovn$ovnver_short-central = $ovnver" "ovn$ovnver_short-host = $ovnver" && \
+	dnf install -y --nodocs "ovn$ovnver" "ovn$ovnver-central" "ovn$ovnver-host" && \
 	dnf clean all && rm -rf /var/cache/*
 
 RUN ovnver_short=$(echo "$ovnver" | cut -d'.' -f1,2) && \
-	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver_short-vtep = $ovnver%" > /more-pkgs
+	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver-vtep%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
