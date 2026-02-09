@@ -81,6 +81,13 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 	namespace, name, nadName string, annotCond podAnnotWaitCond) (*corev1.Pod, map[string]string, *util.PodAnnotation, error) {
 	var notFoundCount uint
 
+	// Adaptive polling: start fast, gradually slow down
+	// Max wait time set to 50ms to avoid missing OVS port ready state
+	// OVS port binding typically completes in 50-300ms, so 200ms interval
+	// was causing timeouts by missing the ready window
+	waitTime := 10 * time.Millisecond  // Start with 10ms for fast operations
+	const maxWaitTime = 50 * time.Millisecond  // Max 50ms to avoid timeouts
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -110,8 +117,12 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 				}
 			}
 
-			// try again later
-			time.Sleep(200 * time.Millisecond)
+			// Adaptive backoff: double wait time each iteration, up to max
+			time.Sleep(waitTime)
+			waitTime *= 2
+			if waitTime > maxWaitTime {
+				waitTime = maxWaitTime
+			}
 		}
 	}
 }
