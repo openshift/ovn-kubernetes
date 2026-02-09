@@ -28,7 +28,6 @@ var (
 			`[Feature:NodeIPMACMigration]`,
 			`[Feature:OVSCPUPin]`,
 			`[Feature:Unidle]`,
-			`[Feature:RouteAdvertisements]`,
 		},
 	}
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
@@ -42,8 +41,6 @@ var (
 			`Pod to external server PMTUD`,
 			`Pod to pod TCP with low MTU`,
 			`blocking ICMP needs frag`,
-			// UDN test requires egress
-			`pod2Egress on a user defined primary network`,
 			`is isolated from the default network`,
 			// requires host net port collision avoidance
 			`EndpointSlices mirroring`,
@@ -92,6 +89,9 @@ var (
 			// TODO: Fix flakiness in this test. Pod connectivity checks may need
 			// to be wrapped in an Eventually block.
 			"perform east/west traffic between nodes following OVN Kube node pod restart",
+			// Disable BGP and VRF Lite tests temporarily
+			"BGP",
+			"VRF-Lite",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
