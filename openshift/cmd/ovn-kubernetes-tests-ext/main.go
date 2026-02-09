@@ -6,6 +6,8 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
+	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
+
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 
@@ -28,6 +30,8 @@ import (
 	// ensure that logging flags are part of the command line.
 	_ "k8s.io/component-base/logs/testinit"
 )
+
+var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 
 func main() {
 	// Create our registry of openshift-tests extensions
