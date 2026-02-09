@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -54,5 +53,7 @@ func (m openshift) PrimaryInterfaceName() string {
 }
 
 func (m openshift) GetAgnHostContainerImage() string {
-	return images.AgnHost()
+	// use downloadable image for external container.
+	// ref: https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L197
+	return "registry.k8s.io/e2e-test-images/agnhost:2.40"
 }
