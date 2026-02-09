@@ -184,7 +184,16 @@ func (o openshift) GetExternalContainerPID(containerName string) (int, error) {
 
 // RunOneShotContainer implements api.Provider.
 func (o openshift) RunOneShotContainer(image string, cmd []string, runtimeArgs []string) (string, error) {
-	panic("unimplemented")
+	o.vmLock.Lock()
+	defer o.vmLock.Unlock()
+	oneShotCmd := buildOneShotContainerCmd(image, cmd, runtimeArgs)
+	oneShotCmd = addElevatedPrivileges(oneShotCmd)
+	r, err := o.vm.execCmd(oneShotCmd)
+	if err != nil {
+		return "", fmt.Errorf("failed to run one-shot container %s, stdout=%s, stderr=%s, err: %v",
+			oneShotCmd, r.stdout, r.stderr, err)
+	}
+	return r.getStdOut(), nil
 }
 
 func (o openshift) NewTestContext() api.Context {

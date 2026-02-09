@@ -315,3 +315,20 @@ func buildContainerLogsCmd(name string) string {
 func buildRemoveContainerCmd(name string) string {
 	return fmt.Sprintf("%s rm -f %s", containerengine.Get(), escapeShellArgument(name))
 }
+
+func buildOneShotContainerCmd(image string, cmd []string, runtimeArgs []string) string {
+	var b strings.Builder
+	b.WriteString(containerengine.Get().String())
+	b.WriteString(" run --rm ")
+	for _, arg := range runtimeArgs {
+		b.WriteString(" ")
+		b.WriteString(escapeShellArgument(arg))
+	}
+	b.WriteString(" ")
+	b.WriteString(escapeShellArgument(image))
+	for _, arg := range cmd {
+		b.WriteString(" ")
+		b.WriteString(escapeShellArgument(arg))
+	}
+	return b.String()
+}
