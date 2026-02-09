@@ -42,10 +42,9 @@ func initializeTestFramework(provider string) error {
 		return fmt.Errorf("provider must decode into the ClusterConfig object: %v", err)
 	}
 
-	// update testContext with loaded config
-	testContext := &framework.TestContext
-	testContext.Provider = config.ProviderName
-	testContext.CloudConfig = framework.CloudConfig{
+	// update framework.TestContext with loaded config
+	framework.TestContext.Provider = config.ProviderName
+	framework.TestContext.CloudConfig = framework.CloudConfig{
 		ProjectID:   config.ProjectID,
 		Region:      config.Region,
 		Zone:        config.Zone,
@@ -56,41 +55,39 @@ func initializeTestFramework(provider string) error {
 		ConfigFile:  config.ConfigFile,
 		Provider:    framework.NullProvider{},
 	}
-	testContext.AllowedNotReadyNodes = 0
-	testContext.MinStartupPods = -1
-	testContext.MaxNodesToGather = 0
-	testContext.KubeConfig = os.Getenv("KUBECONFIG")
-	gomega.Expect(testContext.KubeConfig).NotTo(gomega.BeEmpty())
-	testContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
-	testContext.VerifyServiceAccount = false
+	framework.TestContext.AllowedNotReadyNodes = 0
+	framework.TestContext.MinStartupPods = -1
+	framework.TestContext.MaxNodesToGather = 0
+	framework.TestContext.KubeConfig = os.Getenv("KUBECONFIG")
+	gomega.Expect(framework.TestContext.KubeConfig).NotTo(gomega.BeEmpty())
+	framework.TestContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
+	framework.TestContext.VerifyServiceAccount = false
 	//TODO: do we really need the file systems?
-	testContext.KubectlPath = "oc"
+	framework.TestContext.KubectlPath = "oc"
 	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
 		os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
 	}
 	// "debian" is used when not set. At least GlusterFS tests need "custom".
 	// (There is no option for "rhel" or "centos".)
-	testContext.NodeOSDistro = "custom"
-	testContext.MasterOSDistro = "custom"
+	framework.TestContext.NodeOSDistro = "custom"
+	framework.TestContext.MasterOSDistro = "custom"
 	// load and set the host variable for kubectl
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: testContext.KubeConfig}, &clientcmd.ConfigOverrides{})
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: framework.TestContext.KubeConfig}, &clientcmd.ConfigOverrides{})
 	cfg, err := clientConfig.ClientConfig()
 	if err != nil {
 		return fmt.Errorf("failed to get client config: %v", err)
 	}
-	testContext.Host = cfg.Host
-	testContext.CreateTestingNS = func(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string) (*corev1.Namespace, error) {
+	framework.TestContext.Host = cfg.Host
+	framework.TestContext.CreateTestingNS = func(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string) (*corev1.Namespace, error) {
 		return ocphacke2e.CreateTestingNS(ctx, baseName, c, labels, true)
 	}
-	testContext.DumpLogsOnFailure = true
-	testContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
-	ocpInfra, err := ocpinfraprovider.New(cfg)
+	framework.TestContext.DumpLogsOnFailure = true
+	framework.TestContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
+	ocpInfra, err = ocpinfraprovider.New(cfg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(ocpInfra).NotTo(gomega.BeNil())
 	infraprovider.Set(ocpInfra)
-	ocpDeployment := ocpdeploymentconfig.New()
-	gomega.Expect(ocpDeployment).NotTo(gomega.BeNil())
-	deploymentconfig.Set(ocpDeployment)
+	deploymentconfig.Set(ocpdeploymentconfig.New())
 	return nil
 }
 
