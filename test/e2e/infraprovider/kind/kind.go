@@ -10,7 +10,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/internal/engine/container"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/portalloc"
 
 	corev1 "k8s.io/api/core/v1"
