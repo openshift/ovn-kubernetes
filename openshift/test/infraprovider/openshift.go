@@ -2,113 +2,108 @@ package infraprovider
 
 import (
 	"bytes"
-	"errors"
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/portalloc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/runner"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
+const (
+	hypervisorNodeUser = "root"
+	hypervisorSshport  = "22"
+)
+
 type openshift struct {
-	externalContainerPortAlloc *portalloc.PortAllocator
-	hostPortAlloc              *portalloc.PortAllocator
-	kubeClient                 *kubernetes.Clientset
-}
-
-func (o openshift) ShutdownNode(nodeName string) error {
-	panic("not implemented")
-}
-
-func (o openshift) StartNode(nodeName string) error {
-	panic("not implemented")
-}
-
-func (m openshift) GetDefaultTimeoutContext() *framework.TimeoutContext {
-	timeouts := framework.NewTimeoutContext()
-	timeouts.PodStart = 10 * time.Minute
-	return timeouts
-}
-
-func IsProvider(config *rest.Config) (bool, error) {
-	kubeClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return false, fmt.Errorf("failed to create kubernetes client: %w", err)
-	}
-	// Check for OpenShift-specific API groups
-	groups, err := kubeClient.Discovery().ServerGroups()
-	if err != nil {
-		return false, fmt.Errorf("failed to get server groups: %w", err)
-	}
-	for _, group := range groups.Groups {
-		if strings.HasSuffix(group.Name, ".openshift.io") {
-			return true, nil
-		}
-	}
-	return false, nil
+	engine   *container.Engine
+	HostPort *portalloc.PortAllocator
 }
 
 func New(config *rest.Config) (api.Provider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
-	kubeClient, err := kubernetes.NewForConfig(config)
+	// Initialize command runner for executing commands on hypervisor
+	// (optional, may not be available)
+	sshRunner, err := hypervisorSshCmdRunner()
 	if err != nil {
-		return nil, fmt.Errorf("unable to create kubernetes client: %w", err)
+		return nil, err
 	}
-	return openshift{
-		externalContainerPortAlloc: portalloc.New(30000, 32767),
-		hostPortAlloc:              portalloc.New(30000, 32767),
-		kubeClient:                 kubeClient,
-	}, nil
+	o := &openshift{HostPort: portalloc.New(30000, 32767)}
+	if sshRunner != nil {
+		// Initialize podman container engine
+		o.engine = container.NewEngine("podman", sshRunner)
+	}
+	return o, nil
+}
+
+func (o *openshift) ShutdownNode(nodeName string) error {
+	panic("not implemented")
+}
+
+func (o *openshift) StartNode(nodeName string) error {
+	panic("not implemented")
+}
+
+func (o *openshift) GetDefaultTimeoutContext() *framework.TimeoutContext {
+	timeouts := framework.NewTimeoutContext()
+	timeouts.PodStart = 10 * time.Minute
+	return timeouts
 }
 
 func (o openshift) PreloadImages(images []string) {
 	// no-op: OpenShift clusters pull images at runtime
 }
 
-func (o openshift) Name() string {
+func (o *openshift) Name() string {
 	return "openshift"
 }
 
-func (o openshift) PrimaryNetwork() (api.Network, error) {
+func (o *openshift) PrimaryNetwork() (api.Network, error) {
 	panic("not implemented")
 }
 
-func (o openshift) ExternalContainerPrimaryInterfaceName() string {
-	panic("not implemented")
+func (o *openshift) GetNetwork(name string) (api.Network, error) {
+	return o.getNetwork(name)
 }
 
-func (o openshift) GetNetwork(name string) (api.Network, error) {
-	panic("not implemented")
-}
-
-func (o openshift) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
-	panic("not implemented")
-}
-
-func (o openshift) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
-	panic("not implemented")
-}
-
-func (o openshift) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	panic("not implemented")
-}
-
-func (o openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
-	if len(cmd) == 0 {
-		panic("ExecK8NodeCommand(): insufficient command arguments")
+func (o *openshift) getNetwork(name string) (api.Network, error) {
+	if o.engine == nil {
+		return nil, fmt.Errorf("container engine not found, can not retrieve network %s", name)
 	}
+	return o.engine.GetNetwork(name)
+}
+
+func (o *openshift) GetK8HostPort() uint16 {
+	return o.HostPort.Allocate()
+}
+
+func (o *openshift) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
+	panic("not implemented")
+}
+
+func (o *openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
+	if len(cmd) == 0 {
+		return "", fmt.Errorf("insufficient command arguments")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
 	cmd = append([]string{"debug", fmt.Sprintf("node/%s", nodeName), "--to-namespace=default",
 		"--", "chroot", "/host"}, cmd...)
-	ocDebugCmd := exec.Command("oc", cmd...)
+	ocDebugCmd := exec.CommandContext(ctx, "oc", cmd...)
 	var stdout, stderr bytes.Buffer
 	ocDebugCmd.Stdout = &stdout
 	ocDebugCmd.Stderr = &stderr
@@ -119,99 +114,210 @@ func (o openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, err
 	return stdout.String(), nil
 }
 
-func (o openshift) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
-	panic("not implemented")
+func (o *openshift) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
+	if o.engine == nil {
+		return "", fmt.Errorf("container engine not found, can not execute command %v on the container %s", cmd, container.Name)
+	}
+	return o.engine.ExecExternalContainerCommand(container, cmd)
 }
 
-func (o openshift) GetExternalContainerPort() uint16 {
-	return o.externalContainerPortAlloc.Allocate()
+func (o *openshift) ExternalContainerPrimaryInterfaceName() string {
+	if o.engine == nil {
+		panic("container engine not found, can not retrieve external container primary interface")
+	}
+	return o.engine.ExternalContainerPrimaryInterfaceName()
 }
 
-func (o openshift) GetK8HostPort() uint16 {
-	return o.hostPortAlloc.Allocate()
+func (o *openshift) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
+	if o.engine == nil {
+		return "", fmt.Errorf("container engine not found, can not retrieve logs from external container %s", container.Name)
+	}
+	return o.engine.GetExternalContainerLogs(container)
 }
 
-func (o openshift) NewTestContext() api.Context {
-	co := &contextOpenshift{make([]func() error, 0)}
-	ginkgo.DeferCleanup(co.CleanUp)
+func (o *openshift) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
+	if o.engine == nil {
+		return api.NetworkInterface{}, fmt.Errorf("container engine not found, can not retrieve network %s interface from container %s",
+			network.Name(), container.Name)
+	}
+	return o.engine.GetExternalContainerNetworkInterface(container, network)
+}
+
+func (o *openshift) GetExternalContainerPort() uint16 {
+	if o.engine == nil {
+		panic("container engine not found, can not allocate port for external container")
+	}
+	return o.engine.GetExternalContainerPort()
+}
+
+func (o *openshift) ListNetworks() ([]string, error) {
+	if o.engine == nil {
+		return nil, fmt.Errorf("container engine not found, can not list networks")
+	}
+	return o.engine.ListNetworks()
+}
+
+func (o *openshift) NewTestContext() api.Context {
+	context := &testcontext.TestContext{}
+	ginkgo.DeferCleanup(context.CleanUp)
+	co := &contextOpenshift{
+		TestContext: context,
+		engine:      o.engine.WithTestContext(context),
+	}
 	return co
 }
 
 type contextOpenshift struct {
-	cleanUpFns []func() error
+	*testcontext.TestContext
+	engine *container.Engine
 }
 
-func (c *contextOpenshift) GetAllowedExternalContainerPort() int {
-	panic("not implemented")
+func (o *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+	if o.engine == nil {
+		return api.ExternalContainer{},
+			fmt.Errorf("container engine not found, can not create external container %s", container.Name)
+	}
+	return o.engine.CreateExternalContainer(container)
 }
 
-func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	panic("not implemented")
+func (o *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
+	if o.engine == nil {
+		return fmt.Errorf("container engine not found, can not delete external container %s", container.Name)
+	}
+	return o.engine.DeleteExternalContainer(container)
 }
 
-func (c *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
-	panic("not implemented")
+func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
+	if o.engine == nil {
+		return nil, fmt.Errorf("container engine not found, can not create network %s", name)
+	}
+	return o.engine.CreateNetwork(name, subnets...)
 }
 
-func (c *contextOpenshift) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	panic("not implemented")
+func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
+	if o.engine == nil {
+		return api.NetworkInterface{},
+			fmt.Errorf("container engine not found, can't attach network %s from container %s", network.Name(), container)
+	}
+	return o.engine.AttachNetwork(network, container)
 }
 
-func (o openshift) ListNetworks() ([]string, error) {
-	panic("not implemented")
+func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
+	if o.engine == nil {
+		return fmt.Errorf("container engine not found, can't detach network %s from container %s", network.Name(), container)
+	}
+	return o.engine.DetachNetwork(network, container)
 }
 
-func (c contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	panic("not implemented")
-}
-
-func (c contextOpenshift) DeleteNetwork(network api.Network) error {
-	panic("not implemented")
-}
-
-func (c *contextOpenshift) GetAttachedNetworks() (api.Networks, error) {
-	panic("not implemented")
+func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
+	if o.engine == nil {
+		return fmt.Errorf("container engine not found, can not delete network %s", network.Name())
+	}
+	return o.engine.DeleteNetwork(network)
 }
 
 func (c *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
-	panic("not implemented")
+	return fmt.Errorf("SetupUnderlay is not supported")
 }
 
-func (c contextOpenshift) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
-	panic("not implemented")
-}
-
-func (c contextOpenshift) DetachNetwork(network api.Network, instance string) error {
-	panic("not implemented")
-}
-
-func (c *contextOpenshift) AddCleanUpFn(cleanUpFn func() error) {
-	c.cleanUpFns = append(c.cleanUpFns, cleanUpFn)
-}
-
-func (c *contextOpenshift) CleanUp() error {
-	ginkgo.By("Cleaning up openshift test context")
-	var errs []error
-	// generic cleanup activities
-	for i := len(c.cleanUpFns) - 1; i >= 0; i-- {
-		if err := c.cleanUpFns[i](); err != nil {
-			errs = append(errs, err)
-		}
+func hypervisorSshCmdRunner() (api.Runner, error) {
+	// Read hypervisor IP from shared directory
+	ip, err := readHypervisorIP()
+	if err != nil {
+		return nil, err
 	}
-	c.cleanUpFns = nil
-	return condenseErrors(errs)
+	if ip == "" {
+		return nil, nil // Not configured
+	}
+
+	// Find SSH key for hypervisor access
+	sshKeyPath, err := findSSHKeyPath()
+	if err != nil {
+		return nil, err
+	}
+	if sshKeyPath == "" {
+		return nil, nil // Not configured
+	}
+
+	sshRunner, err := runner.NewSSHRunner(ip, hypervisorNodeUser, hypervisorSshport, sshKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ssh runner for hypervisor: %w", err)
+	}
+
+	return sshRunner, nil
 }
 
-func condenseErrors(errs []error) error {
-	switch len(errs) {
-	case 0:
-		return nil
-	case 1:
-		return errs[0]
+// readHypervisorIP reads the hypervisor IP from the SHARED_DIR/server-ip file.
+// Returns empty string if not configured, error if misconfigured.
+func readHypervisorIP() (string, error) {
+	sharedDir := os.Getenv("SHARED_DIR")
+	if sharedDir == "" {
+		return "", nil
 	}
-	err := errs[0]
-	for _, e := range errs[1:] {
-		err = errors.Join(err, e)
+
+	ipFile := filepath.Join(sharedDir, "server-ip")
+	exists, err := fileExists(ipFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to check hypervisor ip file: %w", err)
 	}
-	return err
+	if !exists {
+		return "", nil
+	}
+
+	data, err := os.ReadFile(ipFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read hypervisor ip file: %w", err)
+	}
+
+	ip := strings.TrimSpace(string(data))
+	if ip == "" {
+		return "", fmt.Errorf("hypervisor ip file is empty")
+	}
+
+	return ip, nil
+}
+
+// findSSHKeyPath locates the SSH private key file for hypervisor access.
+// Tries equinix-ssh-key first, falls back to packet-ssh-key.
+// Returns empty string if not configured, error if misconfigured.
+func findSSHKeyPath() (string, error) {
+	clusterProfileDir := os.Getenv("CLUSTER_PROFILE_DIR")
+	if clusterProfileDir == "" {
+		return "", nil
+	}
+
+	// Try equinix-ssh-key first
+	equinixKey := filepath.Join(clusterProfileDir, "equinix-ssh-key")
+	exists, err := fileExists(equinixKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to check equinix-ssh-key: %w", err)
+	}
+	if exists {
+		return equinixKey, nil
+	}
+
+	// Fall back to packet-ssh-key
+	packetKey := filepath.Join(clusterProfileDir, "packet-ssh-key")
+	exists, err = fileExists(packetKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to check packet-ssh-key: %w", err)
+	}
+	if exists {
+		return packetKey, nil
+	}
+
+	return "", nil
+}
+
+// fileExists checks if a file exists and is accessible.
+// Returns (false, nil) if file doesn't exist, (false, error) for access errors.
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }

@@ -6,8 +6,13 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
+
 	// import ovn-kubernetes tests
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -63,12 +68,21 @@ func main() {
 		panic(err)
 	}
 
-	// Initialization for kube ginkgo test framework needs to run before all tests execute
-	specs.AddBeforeAll(func() {
-		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER")); err != nil {
-			panic(err)
-		}
-	})
+	kubeConfig, err := getKubeConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	// Initialize test framework first.
+	if err := initializeTestFramework(kubeConfig, os.Getenv("TEST_PROVIDER")); err != nil {
+		panic(err)
+	}
+	ocpInfra, err := ocpinfraprovider.New(kubeConfig)
+	if err != nil {
+		panic(err)
+	}
+	infraprovider.Set(ocpInfra)
+	deploymentconfig.Set(ocpdeploymentconfig.New())
 
 	blockingTests := loadBlockingTests()
 
