@@ -761,7 +761,11 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					ports = append(ports, tPod.portUUID)
 				}
 				expectedData := getMulticastPolicyExpectedData(netInfo, namespace1.Name, ports)
-				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), tPods, []string{nodeName})...)
+				nadKey := ""
+				if nad != nil {
+					nadKey = util.GetNADName(nad.Namespace, nad.Name)
+				}
+				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), tPods, []string{nodeName}, nadKey)...)
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 				asf.ExpectAddressSetWithAddresses(namespace1.Name, tPodIPs)
 				return nil
@@ -840,7 +844,11 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					Expect(acl.Name).To(BeNil())
 					Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(Equal(longNameSpace2Name))
 				}
-				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), []testPod{}, []string{node.Name})...)
+				nadKey := ""
+				if nad != nil {
+					nadKey = util.GetNADName(nad.Namespace, nad.Name)
+				}
+				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), []testPod{}, []string{node.Name}, nadKey)...)
 				// Enable multicast in the namespace.
 				updateMulticast(fakeOvn, ns1, true)
 				updateMulticast(fakeOvn, ns2, true)
@@ -929,7 +937,11 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				// Check pods were added
 				asf.EventuallyExpectAddressSetWithAddresses(namespace1.Name, tPodIPs)
 				expectedDataWithPods := getMulticastPolicyExpectedData(netInfo, namespace1.Name, ports)
-				expectedDataWithPods = append(expectedDataWithPods, getExpectedPodsAndSwitches(bnc, tPods, []string{nodeName})...)
+				nadKey := ""
+				if nad != nil {
+					nadKey = util.GetNADName(nad.Namespace, nad.Name)
+				}
+				expectedDataWithPods = append(expectedDataWithPods, getExpectedPodsAndSwitches(bnc.GetNetInfo(), tPods, []string{nodeName}, nadKey)...)
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithPods...))
 
 				// Delete the pod from the namespace.

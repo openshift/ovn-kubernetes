@@ -657,11 +657,14 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 	})
 }
 
-// waitForRollout waits for the daemon set in a given namespace to be
+// updateAndWaitForRollout waits for the resource in a given namespace to be
 // successfully rolled out following an update.
 //
+// The updateFunc parameter is a callback that performs the update operation
+// (e.g., applying a new configuration).
+//
 // If allowedNotReadyNodes is -1, this method returns immediately without waiting.
-func waitForRollout(c kubernetes.Interface, ns string, resource string, allowedNotReadyNodes int32, timeout time.Duration) error {
+func updateAndWaitForRollout(c kubernetes.Interface, ns string, resource string, allowedNotReadyNodes int32, timeout time.Duration, updateFunc func()) error {
 	if allowedNotReadyNodes == -1 {
 		return nil
 	}
@@ -673,8 +676,25 @@ func waitForRollout(c kubernetes.Interface, ns string, resource string, allowedN
 	resourceType := resourceAtoms[0]
 	resourceName := resourceAtoms[1]
 
+	var oldGeneration int64
+	switch resourceType {
+	case "daemonset", "daemonsets", "ds":
+		ds, err := c.AppsV1().DaemonSets(ns).Get(context.TODO(), resourceName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		oldGeneration = ds.Generation
+	case "deployment", "deployments", "deploy":
+		dp, err := c.AppsV1().Deployments(ns).Get(context.TODO(), resourceName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		oldGeneration = dp.Generation
+	}
+	updateFunc()
+
 	start := time.Now()
-	framework.Logf("Waiting up to %v for daemonset %s in namespace %s to update",
+	framework.Logf("Waiting up to %v for %s in namespace %s to update",
 		timeout, resource, ns)
 
 	return wait.Poll(framework.Poll, timeout, func() (bool, error) {
@@ -710,6 +730,10 @@ func waitForRollout(c kubernetes.Interface, ns string, resource string, allowedN
 		}
 
 		if generation <= observedGeneration {
+			if generation <= oldGeneration {
+				framework.Logf("Waiting for %s generation to increase (currently %d)...", resource, generation)
+				return false, nil
+			}
 			if updated < desired {
 				framework.Logf("Waiting for %s rollout to finish: %d out of %d new pods have been updated (%d seconds elapsed)", resource,
 					updated, desired, int(time.Since(start).Seconds()))
@@ -1219,6 +1243,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
 	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	f.NamespacePodSecurityWarnLevel = admissionapi.LevelPrivileged
 	f.DumpAllNamespaceInfo = func(ctx context.Context, f *framework.Framework, namespace string) {
 		debug.DumpAllNamespaceInfo(context.TODO(), f.ClientSet, namespace)
 	}
@@ -1271,17 +1296,30 @@ func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, c
 	args := []string{"set", "env", resource, "-c", container}
 	env := make([]string, 0, len(set)+len(unset))
 	for k, v := range set {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
+		currentValue := getTemplateContainerEnv(namespace, resource, container, k)
+		if currentValue != v {
+			env = append(env, fmt.Sprintf("%s=%s", k, v))
+		}
 	}
 	for _, k := range unset {
-		env = append(env, fmt.Sprintf("%s-", k))
+		currentValue := getTemplateContainerEnv(namespace, resource, container, k)
+		if currentValue != "" {
+			env = append(env, fmt.Sprintf("%s-", k))
+		}
 	}
+
+	if len(env) == 0 {
+		framework.Logf("No environment changes needed for %s container %s in namespace %s, skipping update", resource, container, namespace)
+		return
+	}
+
 	framework.Logf("Setting environment in %s container %s of namespace %s to %v", resource, container, namespace, env)
-	e2ekubectl.RunKubectlOrDie(namespace, append(args, env...)...)
 
 	// Make sure the change has rolled out
 	// TODO (Change this to use the exported upstream function)
-	err := waitForRollout(c, namespace, resource, 0, rolloutTimeout)
+	err := updateAndWaitForRollout(c, namespace, resource, 0, rolloutTimeout, func() {
+		e2ekubectl.RunKubectlOrDie(namespace, append(args, env...)...)
+	})
 	framework.ExpectNoError(err)
 }
 
@@ -1392,6 +1430,11 @@ func isInterconnectEnabled() bool {
 	return present && val == "true"
 }
 
+func isDynamicUDNEnabled() bool {
+	val, present := os.LookupEnv("DYNAMIC_UDN_ALLOCATION")
+	return present && val == "true"
+}
+
 func isNetworkSegmentationEnabled() bool {
 	val, present := os.LookupEnv("ENABLE_NETWORK_SEGMENTATION")
 	return present && val == "true"
@@ -1400,6 +1443,11 @@ func isNetworkSegmentationEnabled() bool {
 func isLocalGWModeEnabled() bool {
 	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
 	return present && val == "local"
+}
+
+func isHelmEnabled() bool {
+	val, present := os.LookupEnv("USE_HELM")
+	return present && val == "true"
 }
 
 func isPreConfiguredUdnAddressesEnabled() bool {
