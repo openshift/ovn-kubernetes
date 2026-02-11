@@ -29,19 +29,8 @@ type vm struct {
 	containers          map[string]*api.ExternalContainer // container name -> api.ExternalContainer object
 	hypervisorIP        string                            // IP address of the hypervisor hosting VM
 	hypervisorSshSigner ssh.Signer                        // ssh signer to access the hypervisor
-	netLinks            []linkInfo                        // net links attached with the VM
+	attachedNetworks    map[string]*netInfo               // networks attached with VM
 	hypervisorClient    *ssh.Client                       // cached SSH connection to hypervisor (proxy)
-}
-
-type ipAddressInfo struct {
-	Family string `json:"family"`
-	Local  string `json:"local"`
-}
-
-type linkInfo struct {
-	IfName   string          `json:"ifname"`
-	Mac      string          `json:"address"`
-	AddrInfo []ipAddressInfo `json:"addr_info"`
 }
 
 func loadVMConfig() (*vm, error) {
@@ -65,17 +54,20 @@ func loadVMConfig() (*vm, error) {
 		IP:                  vmIP,
 		hypervisorSshSigner: signerForHypervisor,
 		sshSigner:           signerForVM,
+		attachedNetworks:    map[string]*netInfo{},
 	}
 	return m, nil
 }
 
 func (m *vm) addContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	nwIface, err := m.getNetwork(container)
-	if err != nil {
-		return container, err
+	if container.Network != nil {
+		if network, ok := m.attachedNetworks[container.Network.Name()]; ok {
+			container.IPv4 = network.v4
+			container.IPv6 = network.v6
+		} else {
+			return container, fmt.Errorf("container network %s is not found", container.Network.Name())
+		}
 	}
-	container.IPv4 = nwIface.IPv4
-	container.IPv6 = nwIface.IPv6
 	cmd := buildDaemonContainerCmd(container)
 	cmd = addElevatedPrivileges(cmd)
 	if _, err := m.execCmd(cmd); err != nil {
@@ -202,61 +194,20 @@ func (m *vm) isContainerRunning(name string) (bool, error) {
 	return false, nil
 }
 
-func (m *vm) getNetwork(container api.ExternalContainer) (api.NetworkInterface, error) {
-	v4Subnet, v6Subnet, err := container.Network.IPv4IPv6Subnets()
-	if err != nil {
-		return api.NetworkInterface{}, err
-	}
-
-	// Find a link with IPs matching the requested subnet(s)
-	for _, link := range m.netLinks {
-		if iface := m.tryMatchLink(link, v4Subnet, v6Subnet); iface.InfName != "" {
-			return iface, nil
-		}
-	}
-
-	return api.NetworkInterface{}, fmt.Errorf("no network interface found matching network %s", container.Network.Name())
+type ipAddressInfo struct {
+	Family string `json:"family"`
+	Local  string `json:"local"`
 }
 
-// tryMatchLink attempts to match IP addresses on a link to the given subnets.
-// Returns a populated NetworkInterface if the link has IPs in the requested subnet(s).
-func (m *vm) tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) api.NetworkInterface {
-	var iface api.NetworkInterface
-
-	for _, addr := range link.AddrInfo {
-		// Check for IPv4 match
-		if v4Subnet != "" && iface.IPv4 == "" {
-			if ok, _ := ipInCIDR(addr.Local, v4Subnet); ok {
-				iface.IPv4 = addr.Local
-				iface.IPv4Prefix = v4Subnet
-			}
-		}
-
-		// Check for IPv6 match
-		if v6Subnet != "" && iface.IPv6 == "" {
-			if ok, _ := ipInCIDR(addr.Local, v6Subnet); ok {
-				iface.IPv6 = addr.Local
-				iface.IPv6Prefix = v6Subnet
-			}
-		}
-	}
-
-	// Only consider this link a match if we found all requested IPs
-	hasV4Match := v4Subnet == "" || iface.IPv4 != ""
-	hasV6Match := v6Subnet == "" || iface.IPv6 != ""
-
-	if hasV4Match && hasV6Match {
-		iface.InfName = link.IfName
-		iface.MAC = link.Mac
-		return iface
-	}
-
-	// Not a complete match, return empty interface
-	return api.NetworkInterface{}
+type linkInfo struct {
+	IfName   string          `json:"ifname"`
+	Mac      string          `json:"address"`
+	AddrInfo []ipAddressInfo `json:"addr_info"`
 }
 
-// initializeNetworkLinks retrieves and caches the network links information from the vm.
-func (m *vm) initializeNetworkLinks() error {
+// findAndInitializeNetwork retrieves and caches the attached network information
+// for the vm.
+func (m *vm) findAndInitializeNetwork(name, v4Subnet, v6Subnet string) error {
 	result, err := m.execCmd("ip -j addr")
 	if err != nil {
 		return fmt.Errorf("failed to retrieve network links: %w", err)
@@ -267,7 +218,47 @@ func (m *vm) initializeNetworkLinks() error {
 		return fmt.Errorf("failed to parse network links: %w", err)
 	}
 
-	m.netLinks = links
+	for _, link := range links {
+		if netInfo := m.tryMatchLink(link, v4Subnet, v6Subnet); netInfo != nil {
+			m.attachedNetworks[name] = netInfo
+			break
+		}
+	}
+	return nil
+}
+
+func (m *vm) tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) *netInfo {
+	net := &netInfo{}
+
+	for _, addr := range link.AddrInfo {
+		// Check for IPv4 match
+		if v4Subnet != "" && net.v4 == "" {
+			if ok, _ := ipInCIDR(addr.Local, v4Subnet); ok {
+				net.v4 = addr.Local
+				net.v4Subnet = v4Subnet
+			}
+		}
+
+		// Check for IPv6 match
+		if v6Subnet != "" && net.v6 == "" {
+			if ok, _ := ipInCIDR(addr.Local, v6Subnet); ok {
+				net.v6 = addr.Local
+				net.v6Subnet = v6Subnet
+			}
+		}
+	}
+
+	// Only consider this link a match if we found all requested IPs
+	hasV4Match := v4Subnet == "" || net.v4 != ""
+	hasV6Match := v6Subnet == "" || net.v6 != ""
+
+	if hasV4Match && hasV6Match {
+		net.ifName = link.IfName
+		net.mac = link.Mac
+		return net
+	}
+
+	// Not a complete match, return nil
 	return nil
 }
 

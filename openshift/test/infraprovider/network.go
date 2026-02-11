@@ -3,20 +3,28 @@ package infraprovider
 import (
 	"fmt"
 	"net"
+	"sync/atomic"
 
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
 	utilnet "k8s.io/utils/net"
 )
 
 const (
-	defaultNetworkName = "default"
+	primaryNetworkName = "primary"
 )
+
+var vniCurrentValue uint32 = 99
+
+func NextVNI() uint32 {
+	return atomic.AddUint32(&vniCurrentValue, 1)
+}
 
 // hostNetwork implements the api.Network interface for OpenShift test provider.
 // Contains the raw kcli network JSON fields from 'kcli show network' command.
 type hostNetwork struct {
-	name string
-	cidr string
+	name   string
+	ifName string
+	cidrs  []string
 }
 
 func (n hostNetwork) Name() string {
@@ -24,17 +32,19 @@ func (n hostNetwork) Name() string {
 }
 
 func (n hostNetwork) IPv4IPv6Subnets() (string, string, error) {
-	if n.cidr == "" {
+	if len(n.cidrs) == 0 {
 		return "", "", fmt.Errorf("network %s has no CIDR configured", n.Name())
 	}
 
 	var v4, v6 string
-	if utilnet.IsIPv4CIDRString(n.cidr) {
-		v4 = n.cidr
-	} else if utilnet.IsIPv6CIDRString(n.cidr) {
-		v6 = n.cidr
-	} else {
-		return "", "", fmt.Errorf("network %s CIDR %s is neither valid IPv4 nor IPv6", n.Name(), n.cidr)
+	for _, cidr := range n.cidrs {
+		if utilnet.IsIPv4CIDRString(cidr) {
+			v4 = cidr
+		} else if utilnet.IsIPv6CIDRString(cidr) {
+			v6 = cidr
+		} else {
+			return "", "", fmt.Errorf("network %s CIDR %s is neither valid IPv4 nor IPv6", n.Name(), cidr)
+		}
 	}
 	return v4, v6, nil
 }
