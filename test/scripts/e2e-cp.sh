@@ -161,9 +161,8 @@ if [[ "${WHAT}" = "$SERIAL_LABEL" ]]; then
   shift # don't "focus" on Serial since we filter by label
 fi
 
-BGP_TESTS="BGP"
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
-  skip $BGP_TESTS
+  skip_label "Feature:RouteAdvertisements"
 else
   if [ "$ADVERTISE_DEFAULT_NETWORK" = true ]; then
     # Filter out extended RouteAdvertisements tests to keep job run time down
@@ -201,6 +200,7 @@ else
     skip "e2e egress IP validation Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object"
     skip "e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up"
     skip "Pod to external server PMTUD when a client ovnk pod targeting an external server is created when tests are run towards the agnhost echo server queries to the hostNetworked server pod on another node shall work for UDP"
+    skip "e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates"
 
     # https://issues.redhat.com/browse/OCPBUGS-55028
     skip "e2e egress IP validation Cluster Default Network \[secondary-host-eip\]"
