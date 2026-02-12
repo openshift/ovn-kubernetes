@@ -111,9 +111,7 @@ spec:
             memory: 300Mi
             {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
             {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
-            {{- end }}
           limits:
-            {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
             {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
             {{- end }}
         env:
