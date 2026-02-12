@@ -187,6 +187,11 @@ else
       # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5569
       skip "Multi Homing"
     fi
+    if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
+      # Skip IPv6/dual-stack multihoming secondary network tests in IPv4-only clusters.
+      skip "Multi Homing.*L3 - routed - secondary network with IPv6 subnet"
+      skip "Multi Homing.*L3 - routed - secondary network with a dual stack configuration"
+    fi
     # these tests require metallb but the configuration we do for it is not compatible with the configuration we do to advertise the default network
     # TODO: consolidate configuration
     skip "Load Balancer Service Tests with MetalLB"
@@ -223,6 +228,20 @@ if [ "${PARALLEL:-false}" = "true" ]; then
   export GINKGO_PARALLEL=y
   export GINKGO_PARALLEL_NODES=10
   skip_label "$SERIAL_LABEL"
+fi
+
+if [ "$ENABLE_NO_OVERLAY" == true ]; then
+  # No-overlay mode uses underlying network infrastructure directly.
+  # Overlay-dependent features are not supported.
+  skip_label "Feature:Multicast"
+  skip_label "Feature:EgressIP"
+  skip_label "Feature:EgressService"
+  # This test validates MTU reduction behavior specific to overlay mode (1500->1400).
+  # In no-overlay mode, pods use the full underlying network MTU without reduction.
+  skip "blocking ICMP needs frag"
+  # This test validates MTU reduction due to Geneve encapsulation overhead (1400->1342).
+  # In no-overlay mode, there is no encapsulation and thus no MTU overhead.
+  skip "Pod to pod TCP with low MTU"
 fi
 
 # setting these is required to make RuntimeClass tests work ... :/
