@@ -253,7 +253,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 								fakeOvn,
 								[]testPod{podInfo},
 								expectationOptions...,
-							).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...)))
+							).expectedLogicalSwitchesAndPorts()...)))
 
 				return nil
 			}
@@ -841,10 +841,6 @@ func makeCUDNOwnerRef(name string) metav1.OwnerReference {
 	}
 }
 
-func (sni *userDefinedNetInfo) getNetworkRole() string {
-	return util.GetUserDefinedNetworkRole(sni.isPrimary)
-}
-
 func getNetworkRole(netInfo util.NetInfo) string {
 	return util.GetUserDefinedNetworkRole(netInfo.IsPrimaryNetwork())
 }
@@ -855,10 +851,7 @@ func (sni *userDefinedNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSet
 		return err
 	}
 
-	externalIDs := map[string]string{
-		types.NetworkExternalID:     sni.netName,
-		types.NetworkRoleExternalID: sni.getNetworkRole(),
-	}
+	externalIDs := util.GenerateExternalIDsForSwitchOrRouter(netInfo)
 	switch sni.topology {
 	case types.Layer2Topology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
@@ -1010,7 +1003,7 @@ func newNodeWithUserDefinedNetworks(nodeName string, nodeIPv4CIDR string, netInf
 				util.OVNNodeHostCIDRs:                                       fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
 				"k8s.ovn.org/zone-name":                                     zone,
 				"k8s.ovn.org/l3-gateway-config":                             fmt.Sprintf("{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":%q,\"ip-addresses\":[%[2]q],\"ip-address\":%[2]q,\"next-hops\":[%[3]q],\"next-hop\":%[3]q,\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}", util.IPAddrToHWAddr(nodeIP), nodeCIDR, nextHopIP),
-				util.OvnNodeChassisID:                                       "abdcef",
+				util.OvnNodeChassisID:                                       chassisIDForNode(nodeName),
 				"k8s.ovn.org/network-ids":                                   fmt.Sprintf("{\"default\":\"0\",\"isolatednet\":\"%s\"}", userDefinedNetworkID),
 				util.OvnNodeID:                                              "4",
 				"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"isolatednet\":\"25\"}",

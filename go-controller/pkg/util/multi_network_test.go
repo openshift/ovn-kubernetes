@@ -1829,6 +1829,13 @@ func TestAreNetworksCompatible(t *testing.T) {
 			expectedResult:         false,
 			expectationDescription: "we should reconcile on physical network name updates",
 		},
+		{
+			desc:                   "empty transport and geneve config should be compatible",
+			aNetwork:               &userDefinedNetInfo{transport: ""},
+			anotherNetwork:         &userDefinedNetInfo{transport: "geneve"},
+			expectedResult:         true,
+			expectationDescription: "networks with no EVPN config should be compatible",
+		},
 	}
 
 	for _, test := range tests {
@@ -2005,8 +2012,10 @@ func TestEVPNConfig(t *testing.T) {
 		expectedVTEPName          string
 		expectedMACVRFVNI         int32
 		expectedMACVRFRouteTarget string
+		expectedMACVRFVID         int
 		expectedIPVRFVNI          int32
 		expectedIPVRFRouteTarget  string
+		expectedIPVRFVID          int
 	}
 
 	tests := []testConfig{
@@ -2016,7 +2025,7 @@ func TestEVPNConfig(t *testing.T) {
 				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
 				Topology: ovntypes.Layer3Topology,
 			},
-			expectedTransport:         "",
+			expectedTransport:         "geneve",
 			expectedVTEPName:          "",
 			expectedMACVRFVNI:         0,
 			expectedMACVRFRouteTarget: "",
@@ -2029,7 +2038,7 @@ func TestEVPNConfig(t *testing.T) {
 				NetConf:  cnitypes.NetConf{Name: "l3-network"},
 				Topology: ovntypes.Layer3Topology,
 			},
-			expectedTransport:         "",
+			expectedTransport:         "geneve",
 			expectedVTEPName:          "",
 			expectedMACVRFVNI:         0,
 			expectedMACVRFRouteTarget: "",
@@ -2104,18 +2113,33 @@ func TestEVPNConfig(t *testing.T) {
 			expectedIPVRFRouteTarget:  "65000:1000",
 		},
 		{
-			desc: "layer2 network with nooverlay transport",
+			desc: "layer2 network with EVPN transport including VIDs (allocated by controller)",
 			inputNetConf: &ovncnitypes.NetConf{
-				NetConf:   cnitypes.NetConf{Name: "nooverlay-network"},
+				NetConf:   cnitypes.NetConf{Name: "evpn-with-vids"},
 				Topology:  ovntypes.Layer2Topology,
-				Transport: "nooverlay",
+				Transport: "evpn",
+				EVPN: &ovncnitypes.EVPNConfig{
+					VTEP: "vid-vtep",
+					MACVRF: &ovncnitypes.VRFConfig{
+						VNI:         100,
+						RouteTarget: "65000:100",
+						VID:         12,
+					},
+					IPVRF: &ovncnitypes.VRFConfig{
+						VNI:         1000,
+						RouteTarget: "65000:1000",
+						VID:         13,
+					},
+				},
 			},
-			expectedTransport:         "nooverlay",
-			expectedVTEPName:          "",
-			expectedMACVRFVNI:         0,
-			expectedMACVRFRouteTarget: "",
-			expectedIPVRFVNI:          0,
-			expectedIPVRFRouteTarget:  "",
+			expectedTransport:         "evpn",
+			expectedVTEPName:          "vid-vtep",
+			expectedMACVRFVNI:         100,
+			expectedMACVRFRouteTarget: "65000:100",
+			expectedMACVRFVID:         12,
+			expectedIPVRFVNI:          1000,
+			expectedIPVRFRouteTarget:  "65000:1000",
+			expectedIPVRFVID:          13,
 		},
 		{
 			desc: "EVPN config with VNI only (no route target)",
@@ -2149,8 +2173,10 @@ func TestEVPNConfig(t *testing.T) {
 			g.Expect(netInfo.EVPNVTEPName()).To(gomega.Equal(test.expectedVTEPName), "VTEP name mismatch")
 			g.Expect(netInfo.EVPNMACVRFVNI()).To(gomega.Equal(test.expectedMACVRFVNI), "MAC-VRF VNI mismatch")
 			g.Expect(netInfo.EVPNMACVRFRouteTarget()).To(gomega.Equal(test.expectedMACVRFRouteTarget), "MAC-VRF RouteTarget mismatch")
+			g.Expect(netInfo.EVPNMACVRFVID()).To(gomega.Equal(test.expectedMACVRFVID), "MAC-VRF VID mismatch")
 			g.Expect(netInfo.EVPNIPVRFVNI()).To(gomega.Equal(test.expectedIPVRFVNI), "IP-VRF VNI mismatch")
 			g.Expect(netInfo.EVPNIPVRFRouteTarget()).To(gomega.Equal(test.expectedIPVRFRouteTarget), "IP-VRF RouteTarget mismatch")
+			g.Expect(netInfo.EVPNIPVRFVID()).To(gomega.Equal(test.expectedIPVRFVID), "IP-VRF VID mismatch")
 		})
 	}
 }
@@ -2173,7 +2199,7 @@ func TestEVPNNetworkCompatibility(t *testing.T) {
 		{
 			desc:                   "different transport should not be compatible",
 			aNetwork:               &userDefinedNetInfo{transport: "evpn"},
-			anotherNetwork:         &userDefinedNetInfo{transport: "nooverlay"},
+			anotherNetwork:         &userDefinedNetInfo{transport: "no-overlay"},
 			expectedResult:         false,
 			expectationDescription: "networks with different transport should not be compatible",
 		},

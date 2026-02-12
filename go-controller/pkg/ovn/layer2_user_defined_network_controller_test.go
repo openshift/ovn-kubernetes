@@ -135,7 +135,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 							fakeOvn,
 							[]testPod{podInfo},
 							expectationOptions...,
-						).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...))
+						).expectedLogicalSwitchesAndPorts()...))
 
 				return nil
 			}
@@ -266,7 +266,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 							fakeOvn,
 							[]testPod{sourcePodInfo},
 							expectationOptions...,
-						).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...))
+						).expectedLogicalSwitchesAndPorts()...))
 
 				targetPodInfo := dummyL2TestPod(ns, netInfo, targetPodInfoIdx, userDefinedNetworkIdx)
 				targetKvPod := newMultiHomedKubevirtPod(
@@ -293,7 +293,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 							fakeOvn,
 							testPods,
 							expectationOptions...,
-						).expectedLogicalSwitchesAndPortsWithLspEnabled(netInfo.isPrimary, expectedPodLspEnabled)...))
+						).expectedLogicalSwitchesAndPortsWithLspEnabled(expectedPodLspEnabled)...))
 				return nil
 			}
 
@@ -365,13 +365,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 		"user-defined network controller DB entities are properly cleaned up",
 		func(netInfo userDefinedNetInfo, testConfig testConfiguration) {
 			podInfo := dummyTestPod(ns, netInfo)
-			if testConfig.configToOverride != nil {
-				config.OVNKubernetesFeature = *testConfig.configToOverride
-				if testConfig.gatewayConfig != nil {
-					config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
-				}
-				config.OVNKubernetesFeature.EnableMultiNetwork = true
-			}
+			setupConfig(netInfo, testConfig, config.GatewayModeShared)
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			app.Action = func(*cli.Context) error {
 				netConf := netInfo.netconf()
 				networkConfig, err := util.NewNetInfo(netConf)
@@ -395,7 +390,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 				gwConfig, err := util.ParseNodeL3GatewayAnnotation(testNode)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(gwConfig.NextHops).NotTo(BeEmpty())
-				nbZone := &nbdb.NBGlobal{Name: ovntypes.OvnDefaultZone, UUID: ovntypes.OvnDefaultZone}
+				nbZone := &nbdb.NBGlobal{Name: config.Default.Zone, UUID: config.Default.Zone}
 
 				n := newNamespace(ns)
 				if netInfo.isPrimary {
@@ -1040,6 +1035,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	}
 	if staleNode {
 		staleNodeName := "stale-node"
+		staleNodeChassisID := chassisIDForNode("stale-node")
 		// create remote router port
 		remoteRouterName := fmt.Sprintf("GR_%s_%s", netInfo.GetNetworkName(), staleNodeName)
 		remotePortName := fmt.Sprintf("%s%s", ovntypes.TransitRouterToRouterPrefix, remoteRouterName)
@@ -1054,7 +1050,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			MAC:      util.IPAddrToHWAddr(remoteTRInfo.transitRouterNets[0].IP).String(),
 			Options: map[string]string{
 				libovsdbops.RequestedTnlKey:  "15", // as defined by getTransitRouterPortTunnelKey(nodeID)
-				libovsdbops.RequestedChassis: staleNodeName},
+				libovsdbops.RequestedChassis: staleNodeChassisID},
 			ExternalIDs: externalIDs,
 		}
 		expectedEntities = append(expectedEntities, remotePort)
