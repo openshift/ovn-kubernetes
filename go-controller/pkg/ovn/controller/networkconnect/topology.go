@@ -557,8 +557,15 @@ func (c *Controller) ensureConnectPortsOps(ops []ovsdb.Operation, cnc *networkco
 			} else {
 				// Remote node: create only the connect-router side port with requested-chassis set
 				// This makes the port type: remote in SB, enabling cross-zone tunneling
+				chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+				if err != nil {
+					if util.IsAnnotationNotSetError(err) {
+						return nil, ovntypes.NewSuppressedError(err)
+					}
+					return nil, fmt.Errorf("failed to parse node chassis-id for node %s: %w", node.Name, err)
+				}
 				ops, err = c.createRouterPortOps(ops, connectRouterName, connectPortName, portPairInfo.connectPortIPs,
-					"", cncName, networkID, nodeID, tunnelKey, node.Name)
+					"", cncName, networkID, nodeID, tunnelKey, chassisID)
 				if err != nil {
 					return nil, fmt.Errorf("failed to create remote connect router port ops %s: %v", connectPortName, err)
 				}

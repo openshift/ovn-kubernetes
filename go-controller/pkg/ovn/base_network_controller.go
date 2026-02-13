@@ -634,7 +634,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
-		&logicalSwitch.LoadBalancerGroup)
+		&logicalSwitch.LoadBalancerGroup, &logicalSwitch.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
@@ -1035,20 +1035,6 @@ func (bnc *BaseNetworkController) GetLocalZoneNodes() ([]*corev1.Node, error) {
 
 // isLocalZoneNode returns true if the node is part of the local zone.
 func (bnc *BaseNetworkController) isLocalZoneNode(node *corev1.Node) bool {
-	/** HACK BEGIN **/
-	// TODO(tssurya): Remove this HACK a few months from now. This has been added only to
-	// minimize disruption for upgrades when moving to interconnect=true.
-	// We want the legacy ovnkube-master to wait for remote ovnkube-node to
-	// signal it using "k8s.ovn.org/remote-zone-migrated" annotation before
-	// considering a node as remote when we upgrade from "global" (1 zone IC)
-	// zone to multi-zone. This is so that network disruption for the existing workloads
-	// is negligible and until the point where ovnkube-node flips the switch to connect
-	// to the new SBDB, it would continue talking to the legacy RAFT ovnkube-sbdb to ensure
-	// OVN/OVS flows are intact.
-	if bnc.zone == types.OvnDefaultZone {
-		return !util.HasNodeMigratedZone(node)
-	}
-	/** HACK END **/
 	return util.GetNodeZone(node) == bnc.zone
 }
 
@@ -1070,8 +1056,18 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *corev1.Pod) (string, error
 	return role, nil
 }
 
-func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
-	return config.OVNKubernetesFeature.EnableInterconnect && bnc.TopologyType() == types.Layer2Topology
+// hasInterconnectTransport returns whether the network East/West traffic goes
+// through the interconnect overlay or not. This is not the case for networks
+// that have no overlay or that use EVPN, and this method would typically be
+// used to inhibit the configuration of interconnect resources in those cases.
+func (bnc *BaseNetworkController) hasInterconnectTransport() bool {
+	return config.OVNKubernetesFeature.EnableInterconnect && bnc.Transport() == types.NetworkTransportGeneve
+}
+
+// isLayer2WithInterconnectTransport returns whether this is Layer 2 network
+// that has East/West interconnect traffic. See hasInterconnectTransport.
+func (bnc *BaseNetworkController) isLayer2WithInterconnectTransport() bool {
+	return bnc.hasInterconnectTransport() && bnc.TopologyType() == types.Layer2Topology
 }
 
 // HandleNetworkRefChange enqueues node reconciliation when a NAD reference becomes active/inactive.

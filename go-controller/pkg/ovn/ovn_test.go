@@ -39,6 +39,7 @@ import (
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
+	vtepfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -64,6 +65,7 @@ const (
 	fakePgUUID                  = "bf02f460-5058-4689-8fcb-d31a1e484ed2"
 	ovnClusterPortGroupUUID     = fakePgUUID
 	testICZone                  = "test"
+	coppUUID                    = "copp-UUID"
 )
 
 type userDefinedNetworkControllerInfo struct {
@@ -179,6 +181,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(ipamClaimObjects...),
 		NetworkAttchDefClient:    nadClient,
 		UserDefinedNetworkClient: udnclientfake.NewSimpleClientset(),
+		VTEPClient:               vtepfake.NewSimpleClientset(),
 	}
 	o.init(nads)
 }
@@ -331,7 +334,7 @@ func generateUDNPostInitDB(testData []libovsdbtest.TestData) []libovsdbtest.Test
 	}
 
 	copp := &nbdb.Copp{
-		UUID:   "copp-UUID",
+		UUID:   coppUUID,
 		Name:   "ovnkube-default",
 		Meters: meters,
 	}
