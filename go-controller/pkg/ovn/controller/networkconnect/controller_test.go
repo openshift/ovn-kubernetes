@@ -3166,7 +3166,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							Direction:   nbdb.ACLDirectionFromLport,
 							Match:       "ip4",
 							Priority:    1000,
-							ExternalIDs: buildACLDBIDs(validCNCName, "allow-service").GetExternalIDs(),
+							ExternalIDs: buildACLDBIDs(validCNCName, "pass-service").GetExternalIDs(),
 						},
 						&nbdb.ACL{
 							UUID:        staleACLUUID,
@@ -3174,7 +3174,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							Direction:   nbdb.ACLDirectionFromLport,
 							Match:       "ip4",
 							Priority:    1000,
-							ExternalIDs: buildACLDBIDs(staleCNCName, "allow-service").GetExternalIDs(),
+							ExternalIDs: buildACLDBIDs(staleCNCName, "pass-service").GetExternalIDs(),
 						},
 						// Switch referencing both LBGs and both ACLs
 						&nbdb.LogicalSwitch{
@@ -3661,10 +3661,10 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				}
 
-				// How many ACLs per switch: shared (allow-service + drop-pod) + per-network (allow-same-network)
+				// How many ACLs per switch: shared (pass-service + drop-pod) + per-network (pass-same-network)
 				expectedACLsPerSwitch := func() int {
-					count := 2 // allow-service + drop-pod (always)
-					count++    // allow-same-network (1 per switch)
+					count := 2 // pass-service + drop-pod (always)
+					count++    // pass-same-network (1 per switch)
 					return count
 				}
 

@@ -3111,52 +3111,52 @@ func TestCleanupLoadBalancerGroupOps(t *testing.T) {
 
 func TestBuildSharedPartialConnectivityACLs(t *testing.T) {
 	tests := []struct {
-		name                      string
-		ipv4Mode                  bool
-		ipv6Mode                  bool
-		serviceCIDRs              []string
-		asNameV4                  string
-		asNameV6                  string
-		expectedACLCount          int
-		allowServiceMatchContains []string // substrings expected in allow-service match
-		allowServiceMatchExcludes []string // substrings that must NOT appear in allow-service match
-		dropPodMatchContains      []string // substrings expected in drop-pod match
-		dropPodMatchExcludes      []string // substrings that must NOT appear in drop-pod match
+		name                     string
+		ipv4Mode                 bool
+		ipv6Mode                 bool
+		serviceCIDRs             []string
+		asNameV4                 string
+		asNameV6                 string
+		expectedACLCount         int
+		passServiceMatchContains []string // substrings expected in from-lport pass-service match
+		passServiceMatchExcludes []string // substrings that must NOT appear in pass-service match
+		dropPodMatchContains     []string // substrings expected in drop-pod match
+		dropPodMatchExcludes     []string // substrings that must NOT appear in drop-pod match
 	}{
 		{
-			name:                      "IPv4 only - allow-service + drop-pod",
-			ipv4Mode:                  true,
-			ipv6Mode:                  false,
-			serviceCIDRs:              []string{"172.16.1.0/24"},
-			asNameV4:                  "as_v4_hash",
-			asNameV6:                  "as_v6_hash",
-			expectedACLCount:          2,
-			allowServiceMatchContains: []string{"ip4.dst == 172.16.1.0/24"},
-			dropPodMatchContains:      []string{"ip4.dst == $as_v4_hash", "ct.new"},
+			name:                     "IPv4 only - pass-service + drop-pod",
+			ipv4Mode:                 true,
+			ipv6Mode:                 false,
+			serviceCIDRs:             []string{"172.16.1.0/24"},
+			asNameV4:                 "as_v4_hash",
+			asNameV6:                 "as_v6_hash",
+			expectedACLCount:         2,
+			passServiceMatchContains: []string{"ip4.dst == 172.16.1.0/24"},
+			dropPodMatchContains:     []string{"ip4.dst == $as_v4_hash", "ct.new"},
 		},
 		{
-			name:                      "IPv6 only - allow-service + drop-pod",
-			ipv4Mode:                  false,
-			ipv6Mode:                  true,
-			serviceCIDRs:              []string{"fd00:10:96::/112"},
-			asNameV4:                  "as_v4_hash",
-			asNameV6:                  "as_v6_hash",
-			expectedACLCount:          2,
-			allowServiceMatchContains: []string{"ip6.dst == fd00:10:96::/112"},
-			allowServiceMatchExcludes: []string{"ip4"},
-			dropPodMatchContains:      []string{"ip6.dst == $as_v6_hash", "ct.new"},
-			dropPodMatchExcludes:      []string{"ip4"},
+			name:                     "IPv6 only - pass-service + drop-pod",
+			ipv4Mode:                 false,
+			ipv6Mode:                 true,
+			serviceCIDRs:             []string{"fd00:10:96::/112"},
+			asNameV4:                 "as_v4_hash",
+			asNameV6:                 "as_v6_hash",
+			expectedACLCount:         2,
+			passServiceMatchContains: []string{"ip6.dst == fd00:10:96::/112"},
+			passServiceMatchExcludes: []string{"ip4"},
+			dropPodMatchContains:     []string{"ip6.dst == $as_v6_hash", "ct.new"},
+			dropPodMatchExcludes:     []string{"ip4"},
 		},
 		{
-			name:                      "dual-stack - allow-service combines both CIDRs, drop-pod uses both address sets",
-			ipv4Mode:                  true,
-			ipv6Mode:                  true,
-			serviceCIDRs:              []string{"172.16.1.0/24", "fd00:10:96::/112"},
-			asNameV4:                  "as_v4_hash",
-			asNameV6:                  "as_v6_hash",
-			expectedACLCount:          2,
-			allowServiceMatchContains: []string{"ip4.dst == 172.16.1.0/24", "ip6.dst == fd00:10:96::/112"},
-			dropPodMatchContains:      []string{"ip4.dst == $as_v4_hash", "ip6.dst == $as_v6_hash", "ct.new"},
+			name:                     "dual-stack - pass-service combines both CIDRs, drop-pod uses both address sets",
+			ipv4Mode:                 true,
+			ipv6Mode:                 true,
+			serviceCIDRs:             []string{"172.16.1.0/24", "fd00:10:96::/112"},
+			asNameV4:                 "as_v4_hash",
+			asNameV6:                 "as_v6_hash",
+			expectedACLCount:         2,
+			passServiceMatchContains: []string{"ip4.dst == 172.16.1.0/24", "ip6.dst == fd00:10:96::/112"},
+			dropPodMatchContains:     []string{"ip4.dst == $as_v4_hash", "ip6.dst == $as_v6_hash", "ct.new"},
 		},
 		{
 			name:                 "no service CIDRs - only drop ACL (edge case)",
@@ -3165,8 +3165,8 @@ func TestBuildSharedPartialConnectivityACLs(t *testing.T) {
 			serviceCIDRs:         []string{},
 			asNameV4:             "as_v4_hash",
 			asNameV6:             "as_v6_hash",
-			expectedACLCount:     1, // only drop-pod, no allow-service
-			dropPodMatchContains: []string{"ip4.dst == $as_v4_hash", "ct.new"},
+			expectedACLCount:     1, // only drop-pod, no pass-service ACLs
+			dropPodMatchContains: []string{"ip4.dst == $as_v4_hash"},
 		},
 	}
 
@@ -3189,30 +3189,36 @@ func TestBuildSharedPartialConnectivityACLs(t *testing.T) {
 			acls := c.buildSharedPartialConnectivityACLs("test-cnc", tt.asNameV4, tt.asNameV6)
 			require.Len(t, acls, tt.expectedACLCount)
 
-			// All ACLs should be owned by the CNC and on egress (from-lport)
+			// All ACLs should be owned by the CNC
 			for _, acl := range acls {
 				assert.Equal(t, "test-cnc", acl.ExternalIDs[libovsdbops.ObjectNameKey.String()])
-				assert.Equal(t, nbdb.ACLDirectionFromLport, acl.Direction)
 			}
 
-			// Find ACLs by priority
-			aclByPriority := make(map[int]*nbdb.ACL)
+			// Find ACLs by ExternalID key
+			aclByKey := make(map[string]*nbdb.ACL)
 			for _, acl := range acls {
-				aclByPriority[acl.Priority] = acl
+				key := acl.ExternalIDs[libovsdbops.PrimaryIDKey.String()]
+				aclByKey[key] = acl
 			}
 
-			if allowService, ok := aclByPriority[ovntypes.NetworkConnectAllowServiceTrafficPriority]; ok {
-				assert.Equal(t, nbdb.ACLActionPass, allowService.Action)
-				for _, s := range tt.allowServiceMatchContains {
-					assert.Contains(t, allowService.Match, s)
+			// Verify from-lport pass-service ACL (request direction)
+			passServiceKey := buildACLDBIDs("test-cnc", "pass-service").GetExternalIDs()[libovsdbops.PrimaryIDKey.String()]
+			if passService, ok := aclByKey[passServiceKey]; ok {
+				assert.Equal(t, nbdb.ACLActionPass, passService.Action)
+				assert.Equal(t, nbdb.ACLDirectionFromLport, passService.Direction)
+				for _, s := range tt.passServiceMatchContains {
+					assert.Contains(t, passService.Match, s)
 				}
-				for _, s := range tt.allowServiceMatchExcludes {
-					assert.NotContains(t, allowService.Match, s)
+				for _, s := range tt.passServiceMatchExcludes {
+					assert.NotContains(t, passService.Match, s)
 				}
 			}
 
-			if dropPod, ok := aclByPriority[ovntypes.NetworkConnectDropPodTrafficPriority]; ok {
+			// Verify drop-pod ACL
+			dropKey := buildACLDBIDs("test-cnc", "drop-pod").GetExternalIDs()[libovsdbops.PrimaryIDKey.String()]
+			if dropPod, ok := aclByKey[dropKey]; ok {
 				assert.Equal(t, nbdb.ACLActionDrop, dropPod.Action)
+				assert.Equal(t, nbdb.ACLDirectionFromLport, dropPod.Direction)
 				for _, s := range tt.dropPodMatchContains {
 					assert.Contains(t, dropPod.Match, s)
 				}
@@ -3270,14 +3276,14 @@ func TestBuildAllowSameNetworkACL(t *testing.T) {
 			cncName:      "my-cnc",
 			networkID:    42,
 			subnets:      []string{"10.0.0.0/8"},
-			expectedType: "allow-same-network-42",
+			expectedType: "pass-same-network-42",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &Controller{}
-			acl := c.buildAllowSameNetworkACL(tt.cncName, tt.networkID, tt.subnets)
+			acl := c.buildPassSameNetworkACL(tt.cncName, tt.networkID, tt.subnets)
 			if tt.expectNil {
 				assert.Nil(t, acl)
 				return
@@ -3285,7 +3291,7 @@ func TestBuildAllowSameNetworkACL(t *testing.T) {
 			require.NotNil(t, acl)
 
 			// Common assertions for all non-nil ACLs
-			assert.Equal(t, ovntypes.NetworkConnectAllowSameNetworkPriority, acl.Priority)
+			assert.Equal(t, ovntypes.NetworkConnectPassSameNetworkPriority, acl.Priority)
 			assert.Equal(t, nbdb.ACLActionPass, acl.Action)
 			assert.Equal(t, nbdb.ACLDirectionFromLport, acl.Direction)
 			assert.Equal(t, tt.cncName, acl.ExternalIDs[libovsdbops.ObjectNameKey.String()])
@@ -3360,7 +3366,7 @@ func TestPreparePartialConnectivityACLs(t *testing.T) {
 	require.NotNil(t, state)
 
 	// Verify state structure
-	assert.Len(t, state.sharedACLs, 2, "should have allow-service + drop-pod")
+	assert.Len(t, state.sharedACLs, 2, "should have pass-service + drop-pod")
 	assert.Len(t, state.perNetworkACLs, 2, "should have per-network ACL for each network")
 	assert.Len(t, state.networkSwitches, 2, "should have switch name for each network")
 
@@ -3370,7 +3376,7 @@ func TestPreparePartialConnectivityACLs(t *testing.T) {
 
 	// Verify per-network ACLs have correct priorities
 	for _, acl := range state.perNetworkACLs {
-		assert.Equal(t, ovntypes.NetworkConnectAllowSameNetworkPriority, acl.Priority)
+		assert.Equal(t, ovntypes.NetworkConnectPassSameNetworkPriority, acl.Priority)
 		assert.Equal(t, nbdb.ACLActionPass, acl.Action)
 	}
 
@@ -3379,7 +3385,7 @@ func TestPreparePartialConnectivityACLs(t *testing.T) {
 	for _, acl := range state.sharedACLs {
 		priorities[acl.Priority] = true
 	}
-	assert.True(t, priorities[ovntypes.NetworkConnectAllowServiceTrafficPriority], "allow-service ACL should exist")
+	assert.True(t, priorities[ovntypes.NetworkConnectPassServiceTrafficPriority], "pass-service ACL should exist")
 	assert.True(t, priorities[ovntypes.NetworkConnectDropPodTrafficPriority], "drop-pod ACL should exist")
 }
 
@@ -3399,12 +3405,12 @@ func TestEnsurePartialConnectivityACLsOps(t *testing.T) {
 			state: &partialConnectivityState{
 				sharedACLs: []*nbdb.ACL{
 					{
-						UUID:        "allow-svc-uuid",
+						UUID:        "pass-svc-uuid",
 						Action:      nbdb.ACLActionPass,
 						Direction:   nbdb.ACLDirectionFromLport,
 						Match:       "(ip4.dst == 172.16.1.0/24)",
-						Priority:    ovntypes.NetworkConnectAllowServiceTrafficPriority,
-						ExternalIDs: buildACLDBIDs("test-cnc", "allow-service").GetExternalIDs(),
+						Priority:    ovntypes.NetworkConnectPassServiceTrafficPriority,
+						ExternalIDs: buildACLDBIDs("test-cnc", "pass-service").GetExternalIDs(),
 					},
 					{
 						UUID:        "drop-pod-uuid",
@@ -3417,12 +3423,12 @@ func TestEnsurePartialConnectivityACLsOps(t *testing.T) {
 				},
 				perNetworkACLs: map[int]*nbdb.ACL{
 					1: {
-						UUID:        "allow-same-1-uuid",
+						UUID:        "pass-same-1-uuid",
 						Action:      nbdb.ACLActionPass,
 						Direction:   nbdb.ACLDirectionFromLport,
 						Match:       "ip4.dst == 10.128.0.0/16",
-						Priority:    ovntypes.NetworkConnectAllowSameNetworkPriority,
-						ExternalIDs: buildACLDBIDs("test-cnc", "allow-same-network-1").GetExternalIDs(),
+						Priority:    ovntypes.NetworkConnectPassSameNetworkPriority,
+						ExternalIDs: buildACLDBIDs("test-cnc", "pass-same-network-1").GetExternalIDs(),
 					},
 				},
 				networkSwitches: map[int]string{1: "switch_netA"},
@@ -3433,7 +3439,7 @@ func TestEnsurePartialConnectivityACLsOps(t *testing.T) {
 					Name: "switch_netA",
 				},
 			},
-			verifyACLCount:       3, // allow-service, drop-pod, allow-same-network-1
+			verifyACLCount:       3, // pass-service, drop-pod, pass-same-network-1
 			verifySwitchACLCount: 3,
 		},
 		{
@@ -3466,12 +3472,12 @@ func TestEnsurePartialConnectivityACLsOps(t *testing.T) {
 			state: &partialConnectivityState{
 				sharedACLs: []*nbdb.ACL{
 					{
-						UUID:        "allow-svc-uuid",
+						UUID:        "pass-svc-uuid",
 						Action:      nbdb.ACLActionPass,
 						Direction:   nbdb.ACLDirectionFromLport,
 						Match:       "(ip4.dst == 172.16.1.0/24)",
-						Priority:    ovntypes.NetworkConnectAllowServiceTrafficPriority,
-						ExternalIDs: buildACLDBIDs("test-cnc", "allow-service").GetExternalIDs(),
+						Priority:    ovntypes.NetworkConnectPassServiceTrafficPriority,
+						ExternalIDs: buildACLDBIDs("test-cnc", "pass-service").GetExternalIDs(),
 					},
 				},
 				perNetworkACLs:  map[int]*nbdb.ACL{},
@@ -3533,7 +3539,7 @@ func TestEnsurePartialConnectivityACLsOps(t *testing.T) {
 
 func TestCleanupPartialConnectivityACLsOps(t *testing.T) {
 	cncName := "test-cnc"
-	aclExternalIDs := buildACLDBIDs(cncName, "allow-service").GetExternalIDs()
+	aclExternalIDs := buildACLDBIDs(cncName, "pass-service").GetExternalIDs()
 
 	tests := []struct {
 		name             string
@@ -3556,7 +3562,7 @@ func TestCleanupPartialConnectivityACLsOps(t *testing.T) {
 					Action:      nbdb.ACLActionPass,
 					Direction:   nbdb.ACLDirectionFromLport,
 					Match:       "(ip4.dst == 172.16.1.0/24)",
-					Priority:    ovntypes.NetworkConnectAllowServiceTrafficPriority,
+					Priority:    ovntypes.NetworkConnectPassServiceTrafficPriority,
 					ExternalIDs: aclExternalIDs,
 				},
 				&nbdb.ACL{
@@ -3585,7 +3591,7 @@ func TestCleanupPartialConnectivityACLsOps(t *testing.T) {
 					Action:      nbdb.ACLActionPass,
 					Direction:   nbdb.ACLDirectionFromLport,
 					Match:       "(ip4.dst == 172.16.1.0/24)",
-					Priority:    ovntypes.NetworkConnectAllowServiceTrafficPriority,
+					Priority:    ovntypes.NetworkConnectPassServiceTrafficPriority,
 					ExternalIDs: aclExternalIDs,
 				},
 				&nbdb.LogicalSwitch{
@@ -3668,8 +3674,8 @@ func TestCleanupPartialConnectivity(t *testing.T) {
 					Action:      nbdb.ACLActionPass,
 					Direction:   nbdb.ACLDirectionFromLport,
 					Match:       "(ip4.dst == 172.16.1.0/24)",
-					Priority:    ovntypes.NetworkConnectAllowServiceTrafficPriority,
-					ExternalIDs: buildACLDBIDs("test-cnc", "allow-service").GetExternalIDs(),
+					Priority:    ovntypes.NetworkConnectPassServiceTrafficPriority,
+					ExternalIDs: buildACLDBIDs("test-cnc", "pass-service").GetExternalIDs(),
 				},
 				&nbdb.ACL{
 					UUID:        "acl-2",
@@ -3684,8 +3690,8 @@ func TestCleanupPartialConnectivity(t *testing.T) {
 					Action:      nbdb.ACLActionPass,
 					Direction:   nbdb.ACLDirectionFromLport,
 					Match:       "ip4.dst == 10.128.0.0/16",
-					Priority:    ovntypes.NetworkConnectAllowSameNetworkPriority,
-					ExternalIDs: buildACLDBIDs("test-cnc", "allow-same-network-1").GetExternalIDs(),
+					Priority:    ovntypes.NetworkConnectPassSameNetworkPriority,
+					ExternalIDs: buildACLDBIDs("test-cnc", "pass-same-network-1").GetExternalIDs(),
 				},
 				// switchA has all 3 ACLs
 				&nbdb.LogicalSwitch{
@@ -3730,8 +3736,8 @@ func TestCleanupPartialConnectivity(t *testing.T) {
 					Action:      nbdb.ACLActionPass,
 					Direction:   nbdb.ACLDirectionFromLport,
 					Match:       "(ip4.dst == 172.16.1.0/24)",
-					Priority:    ovntypes.NetworkConnectAllowServiceTrafficPriority,
-					ExternalIDs: buildACLDBIDs("cnc-a", "allow-service").GetExternalIDs(),
+					Priority:    ovntypes.NetworkConnectPassServiceTrafficPriority,
+					ExternalIDs: buildACLDBIDs("cnc-a", "pass-service").GetExternalIDs(),
 				},
 				// CNC-B's ACL (should not be touched)
 				&nbdb.ACL{
@@ -3739,8 +3745,8 @@ func TestCleanupPartialConnectivity(t *testing.T) {
 					Action:      nbdb.ACLActionPass,
 					Direction:   nbdb.ACLDirectionFromLport,
 					Match:       "(ip4.dst == 172.16.1.0/24)",
-					Priority:    ovntypes.NetworkConnectAllowServiceTrafficPriority,
-					ExternalIDs: buildACLDBIDs("cnc-b", "allow-service").GetExternalIDs(),
+					Priority:    ovntypes.NetworkConnectPassServiceTrafficPriority,
+					ExternalIDs: buildACLDBIDs("cnc-b", "pass-service").GetExternalIDs(),
 				},
 				&nbdb.LogicalSwitch{
 					UUID: "sw-A",

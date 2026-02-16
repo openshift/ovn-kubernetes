@@ -151,7 +151,7 @@ func TestRepairStaleCNCs_StaleACLs(t *testing.T) {
 			Direction:   nbdb.ACLDirectionFromLport,
 			Match:       "ip4",
 			Priority:    1000,
-			ExternalIDs: buildACLDBIDs(staleCNCName, "allow-service").GetExternalIDs(),
+			ExternalIDs: buildACLDBIDs(staleCNCName, "pass-service").GetExternalIDs(),
 		},
 		&nbdb.LogicalSwitch{
 			UUID: "switch-uuid",

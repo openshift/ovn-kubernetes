@@ -100,10 +100,10 @@ const (
 	PrimaryUDNDenyPriority = 1000
 	// Priority for allowing service traffic to pass through before the drop ACL
 	// for network connect partial service connectivity
-	NetworkConnectAllowServiceTrafficPriority = 500
+	NetworkConnectPassServiceTrafficPriority = 500
 	// Priority for allowing same-network traffic to pass through before the drop ACL
 	// This prevents the drop ACL from blocking intra-network communication
-	NetworkConnectAllowSameNetworkPriority = 475
+	NetworkConnectPassSameNetworkPriority = 475
 	// Priority for dropping pod-to-pod traffic between connected networks
 	NetworkConnectDropPodTrafficPriority = 450
 

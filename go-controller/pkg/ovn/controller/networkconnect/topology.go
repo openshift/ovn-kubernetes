@@ -1484,8 +1484,8 @@ func getConnectedUDNSubnetsAddressSetDbIDs(cncName string) *libovsdbops.DbObject
 // partialConnectivityState holds pre-computed ACLs for partial connectivity.
 // This is built once at the start of syncNetworkConnections and reused per-network.
 type partialConnectivityState struct {
-	sharedACLs      []*nbdb.ACL       // allow-service + drop-pod (same for all switches)
-	perNetworkACLs  map[int]*nbdb.ACL // networkID -> allow-same-network ACL
+	sharedACLs      []*nbdb.ACL       // pass-service + drop-pod (same for all switches)
+	perNetworkACLs  map[int]*nbdb.ACL // networkID -> pass-same-network ACL
 	networkSwitches map[int]string    // networkID -> switch name
 }
 
@@ -1532,9 +1532,9 @@ func (c *Controller) preparePartialConnectivityACLs(cncName string, allocatedSub
 			}
 		}
 
-		// Build allow-same-network ACL for this network (priority 475)
+		// Build pass-same-network ACL for this network (priority 475)
 		if len(networkSubnets) > 0 {
-			acl := c.buildAllowSameNetworkACL(cncName, networkID, networkSubnets)
+			acl := c.buildPassSameNetworkACL(cncName, networkID, networkSubnets)
 			if acl != nil {
 				state.perNetworkACLs[networkID] = acl
 			}
@@ -1551,7 +1551,7 @@ func (c *Controller) preparePartialConnectivityACLs(cncName string, allocatedSub
 	// Get the hashed address set names for ACL matches
 	hashNameV4, hashNameV6 := as.GetASHashNames()
 
-	// Build shared ACLs (allow-service at 500, drop at 450)
+	// Build shared ACLs (pass-service at 500, drop at 450)
 	state.sharedACLs = c.buildSharedPartialConnectivityACLs(cncName, hashNameV4, hashNameV6)
 
 	return state, nil
@@ -1572,7 +1572,7 @@ func (c *Controller) ensurePartialConnectivityACLsOps(ops []ovsdb.Operation, sta
 		return ops, fmt.Errorf("switch name not found for network ID %d in partial connectivity state", networkID)
 	}
 
-	// Build the ACL list for this switch: shared ACLs + this network's allow-same-network ACL
+	// Build the ACL list for this switch: shared ACLs + this network's pass-same-network ACL
 	switchACLs := append([]*nbdb.ACL{}, state.sharedACLs...)
 	if perNetACL, exists := state.perNetworkACLs[networkID]; exists {
 		switchACLs = append(switchACLs, perNetACL)
@@ -1642,12 +1642,15 @@ func (c *Controller) cleanupPartialConnectivityACLsOps(ops []ovsdb.Operation, cn
 }
 
 // buildSharedPartialConnectivityACLs builds the shared ACLs for partial connectivity.
-// These ACLs are identical across all switches: allow-service (500) and drop-pod (450).
-// The allow-same-network ACLs (475) are built separately per-network.
+// These ACLs are identical across all switches: pass-service (500) and drop-pod (450).
+// The pass-same-network ACLs (475) are built separately per-network.
+//
+// The drop ACL (from-lport, priority 450) drops outbound traffic to connected networks'
+// pod subnets. The ct.new match limits the drop to new connections only.
 func (c *Controller) buildSharedPartialConnectivityACLs(cncName, addressSetNameV4, addressSetNameV6 string) []*nbdb.ACL {
 	var acls []*nbdb.ACL
 
-	// Build allow-service ACL match combining all service CIDRs (single ACL)
+	// Build pass-service ACL matches combining all service CIDRs
 	var serviceMatches []string
 	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
 		ipPrefix := "ip4"
@@ -1657,22 +1660,23 @@ func (c *Controller) buildSharedPartialConnectivityACLs(cncName, addressSetNameV
 		serviceMatches = append(serviceMatches, fmt.Sprintf("%s.dst == %s", ipPrefix, serviceCIDR.String()))
 	}
 
+	// from-lport pass-service: request direction (pod -> service VIP)
 	if len(serviceMatches) > 0 {
-		allowMatch := fmt.Sprintf("(%s)", strings.Join(serviceMatches, " || "))
-		dbIDs := buildACLDBIDs(cncName, "allow-service")
-		allowServiceACL := libovsdbutil.BuildACL(dbIDs, ovntypes.NetworkConnectAllowServiceTrafficPriority,
-			allowMatch, nbdb.ACLActionPass, nil, libovsdbutil.LportEgress, 0)
-		acls = append(acls, allowServiceACL)
+		passMatch := fmt.Sprintf("(%s)", strings.Join(serviceMatches, " || "))
+		dbIDs := buildACLDBIDs(cncName, "pass-service")
+		passServiceACL := libovsdbutil.BuildACL(dbIDs, ovntypes.NetworkConnectPassServiceTrafficPriority,
+			passMatch, nbdb.ACLActionPass, nil, libovsdbutil.LportEgress, 0)
+		acls = append(acls, passServiceACL)
 	}
 
 	// Build drop-pod ACL match based on IP mode (single ACL)
 	// This drops any new connections to connected networks' pod subnets.
-	// Same-network traffic is allowed by the per-network allow-same-network ACLs
-	// at higher priority (475). Service traffic is allowed by allow-service ACL (500).
+	// Same-network traffic is allowed by the per-network pass-same-network ACLs
+	// at higher priority (475). Service traffic is allowed by pass-service ACL (500).
 	// We only match on dst (not src) because:
 	// 1. This ACL is on egress (from-lport), so it only evaluates outbound pod traffic
 	// 2. Matching only dst is more restrictive - blocks traffic regardless of source
-	// ct.new is required because the allow-service ACL uses "pass" action which sends
+	// ct.new is required because the pass-service ACL uses "pass" action which sends
 	// traffic to the LB pipeline. After DNAT, the packet's dst becomes the backend pod IP
 	// (which is in the connected subnets). Without ct.new, the drop ACL would match the
 	// DNAT'd packet and drop it. With ct.new, only new connections are dropped; DNAT'd
@@ -1699,11 +1703,11 @@ func (c *Controller) buildSharedPartialConnectivityACLs(cncName, addressSetNameV
 	return acls
 }
 
-// buildAllowSameNetworkACL builds an ACL that allows traffic within the same network.
-// This ACL has priority 475, sitting between allow-service (500) and drop-pod (450).
+// buildPassSameNetworkACL builds an ACL that passes traffic within the same network.
+// This ACL has priority 475, sitting between pass-service (500) and drop-pod (450).
 // It prevents the drop ACL from blocking intra-network communication when only
 // ClusterIPServiceNetwork connectivity is requested (without PodNetwork).
-func (c *Controller) buildAllowSameNetworkACL(cncName string, networkID int, subnets []string) *nbdb.ACL {
+func (c *Controller) buildPassSameNetworkACL(cncName string, networkID int, subnets []string) *nbdb.ACL {
 	// Separate subnets by IP family
 	var v4Subnets, v6Subnets []string
 	for _, subnet := range subnets {
@@ -1736,12 +1740,12 @@ func (c *Controller) buildAllowSameNetworkACL(cncName string, networkID int, sub
 		return nil
 	}
 
-	allowMatch := strings.Join(matches, " || ")
+	passMatch := strings.Join(matches, " || ")
 
-	dbIDs := buildACLDBIDs(cncName, fmt.Sprintf("allow-same-network-%d", networkID))
+	dbIDs := buildACLDBIDs(cncName, fmt.Sprintf("pass-same-network-%d", networkID))
 
-	return libovsdbutil.BuildACL(dbIDs, ovntypes.NetworkConnectAllowSameNetworkPriority,
-		allowMatch, nbdb.ACLActionPass, nil, libovsdbutil.LportEgress, 0)
+	return libovsdbutil.BuildACL(dbIDs, ovntypes.NetworkConnectPassSameNetworkPriority,
+		passMatch, nbdb.ACLActionPass, nil, libovsdbutil.LportEgress, 0)
 }
 
 // cleanupPartialConnectivity removes partial connectivity ACLs and address sets for a CNC.
