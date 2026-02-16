@@ -411,6 +411,13 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId, tunnelID int) error {
 	networkName := na.netInfo.GetNetworkName()
 
+	// Get the latest node from the lister to read current annotations
+	// This ensures we merge with existing data from other networks
+	node, err := na.nodeLister.Get(nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get node %s: %w", nodeName, err)
+	}
+
 	// Extract host subnets for this network from the map
 	// hostSubnetsMap should only contain entry for this network
 	var hostSubnets []*net.IPNet
@@ -418,8 +425,9 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 		hostSubnets = subnets
 	}
 
-	// Marshal annotations into the format needed for Server-Side Apply
-	annotations, err := util.MarshalNodeAnnotationsForSSA(networkName, hostSubnets, networkId, tunnelID)
+	// Marshal annotations with merging - this will parse existing annotations and merge in this network's data
+	// This is critical because SSA doesn't do deep merging of JSON content within annotation values
+	annotations, err := util.MarshalNodeAnnotationsForSSA(node.Annotations, networkName, hostSubnets, networkId, tunnelID)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node annotations for network %s: %w", networkName, err)
 	}

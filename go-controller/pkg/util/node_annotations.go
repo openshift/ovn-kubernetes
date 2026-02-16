@@ -564,27 +564,37 @@ func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName st
 }
 
 // MarshalNodeAnnotationsForSSA prepares node annotations for Server-Side Apply.
-// It creates a map with just the annotations for a specific network, properly marshaled as JSON.
-// This function is used by NodeAllocator to prepare annotations before calling ApplyNodeAnnotations.
+// It merges the new network's data with existing annotations from the node to ensure
+// data from other networks is preserved.
 //
 // Parameters:
+//   - existingAnnotations: Current annotations from the node (can be nil for new nodes)
 //   - netName: The network name (used as key in annotation JSON maps)
 //   - hostSubnets: Subnets allocated to this node for this network (can be nil/empty)
 //   - networkID: Network ID for this network (use types.NoNetworkID to skip)
 //   - tunnelID: Tunnel ID for Layer2 UDN (use types.NoTunnelID to skip)
 //
 // Returns a map of annotation keys to JSON-encoded string values ready for SSA.
-func MarshalNodeAnnotationsForSSA(netName string, hostSubnets []*net.IPNet, networkID, tunnelID int) (map[string]string, error) {
+// The returned annotations contain merged data from all networks.
+func MarshalNodeAnnotationsForSSA(existingAnnotations map[string]string, netName string, hostSubnets []*net.IPNet, networkID, tunnelID int) (map[string]string, error) {
 	annotations := make(map[string]string)
 
 	// Marshal node subnets if provided
 	if len(hostSubnets) > 0 {
-		subnetsMap := map[string][]string{
-			netName: make([]string, len(hostSubnets)),
+		// Parse existing subnets annotation if it exists
+		subnetsMap := make(map[string][]string)
+		if existingSubnets, ok := existingAnnotations[ovnNodeSubnets]; ok && existingSubnets != "" {
+			if err := json.Unmarshal([]byte(existingSubnets), &subnetsMap); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal existing node subnets: %w", err)
+			}
 		}
+
+		// Add/update this network's subnets
+		subnetsMap[netName] = make([]string, len(hostSubnets))
 		for i, subnet := range hostSubnets {
 			subnetsMap[netName][i] = subnet.String()
 		}
+
 		subnetsJSON, err := json.Marshal(subnetsMap)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal node subnets for network %s: %w", netName, err)
@@ -594,9 +604,17 @@ func MarshalNodeAnnotationsForSSA(netName string, hostSubnets []*net.IPNet, netw
 
 	// Marshal network ID if provided
 	if networkID != types.NoNetworkID {
-		networkIDMap := map[string]string{
-			netName: strconv.Itoa(networkID),
+		// Parse existing network IDs annotation if it exists
+		networkIDMap := make(map[string]string)
+		if existingNetworkIDs, ok := existingAnnotations[OvnNetworkIDs]; ok && existingNetworkIDs != "" {
+			if err := json.Unmarshal([]byte(existingNetworkIDs), &networkIDMap); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal existing network IDs: %w", err)
+			}
 		}
+
+		// Add/update this network's ID
+		networkIDMap[netName] = strconv.Itoa(networkID)
+
 		networkIDJSON, err := json.Marshal(networkIDMap)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal network ID for network %s: %w", netName, err)
@@ -606,9 +624,17 @@ func MarshalNodeAnnotationsForSSA(netName string, hostSubnets []*net.IPNet, netw
 
 	// Marshal tunnel ID if provided
 	if tunnelID != types.NoTunnelID {
-		tunnelIDMap := map[string]string{
-			netName: strconv.Itoa(tunnelID),
+		// Parse existing tunnel IDs annotation if it exists
+		tunnelIDMap := make(map[string]string)
+		if existingTunnelIDs, ok := existingAnnotations[ovnUDNLayer2NodeGRLRPTunnelIDs]; ok && existingTunnelIDs != "" {
+			if err := json.Unmarshal([]byte(existingTunnelIDs), &tunnelIDMap); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal existing tunnel IDs: %w", err)
+			}
 		}
+
+		// Add/update this network's tunnel ID
+		tunnelIDMap[netName] = strconv.Itoa(tunnelID)
+
 		tunnelIDJSON, err := json.Marshal(tunnelIDMap)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal tunnel ID for network %s: %w", netName, err)

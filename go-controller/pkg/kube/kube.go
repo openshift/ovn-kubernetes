@@ -261,9 +261,13 @@ func (k *Kube) UpdateNodeStatus(node *corev1.Node) error {
 // This method enables multiple network controllers to update the same node's annotations
 // concurrently without ResourceVersion conflicts by using unique fieldManager names per network.
 //
+// IMPORTANT: The annotations map must contain the complete merged state including data from
+// other networks. SSA does not do deep merging of JSON content within annotation values.
+// Use util.MarshalNodeAnnotationsForSSA() to properly merge with existing annotations.
+//
 // Parameters:
 //   - nodeName: The name of the node to update
-//   - annotations: Map of annotation keys to values (must be string values, typically JSON)
+//   - annotations: Map of annotation keys to merged values (must include data from all networks)
 //   - fieldManager: Unique identifier for this controller (e.g., "ovn-kubernetes-udn-network1")
 //
 // The API server will merge annotations from different fieldManagers automatically,
@@ -274,7 +278,7 @@ func (k *Kube) ApplyNodeAnnotations(nodeName string, annotations map[string]stri
 		return fmt.Errorf("fieldManager must be specified for ApplyNodeAnnotations")
 	}
 
-	// Build apply configuration with just the annotations for this network
+	// Build apply configuration with the merged annotations
 	nodeApply := corev1apply.Node(nodeName).
 		WithAnnotations(annotations)
 
