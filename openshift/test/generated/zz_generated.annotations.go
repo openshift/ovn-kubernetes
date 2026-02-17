@@ -481,21 +481,37 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created tests are run towards the external agnhost echo server": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
-
 	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to local node should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks host to a different node UDN pod should not work": "[Disabled:Unimplemented]",
 
@@ -525,21 +541,37 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
-
 	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to local node should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks host to a different node UDN pod should not work": "[Disabled:Unimplemented]",
 
@@ -645,11 +677,19 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect ClusterManagerController when networks exist before CNC creation single network: has both subnet and tunnel ID annotations L3 P-UDN": "[Disabled:Unimplemented]",
 
+	"ClusterNetworkConnect OVN-Kubernetes Controller End-to-end connectivity validation should manage cross-network connectivity through CNC lifecycle": "[Disabled:Unimplemented]",
+
+	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain non-transitive connectivity when a network is selected by multiple CNCs": "[Disabled:Unimplemented]",
+
 	"ClusterNetworkConnect: API validations api-server should accept valid ClusterNetworkConnect CRs Valid ClusterNetworkConnect configurations": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect: API validations api-server should reject invalid ClusterNetworkConnect CRs Invalid network selector types": "[Disabled:Unimplemented]",
 
 	"Creating a static pod on a node Should successfully create then remove a static pod": "[Disabled:Unimplemented]",
+
+	"EVPN: VTEP API validations api-server should accept valid VTEP CRs Valid VTEP configurations": "[Disabled:Unimplemented]",
+
+	"EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations": "[Disabled:Unimplemented]",
 
 	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
 
@@ -959,6 +999,10 @@ var AppendedAnnotations = map[string]string{
 
 	"Multi Homing A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
 
+	"Multi Homing A pod with multiple attachments to the same secondary NAD features multiple different IPs and connectivity redundancy L2 secondary NAD": "[Disabled:Unimplemented]",
+
+	"Multi Homing A pod with multiple attachments to the same secondary NAD features multiple different IPs and connectivity redundancy L3 secondary NAD": "[Disabled:Unimplemented]",
+
 	"Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on a different node, when the localnet uses a VLAN and an external router": "[Disabled:Unimplemented]",
 
 	"Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on a different node, when the localnet uses an IP in the host subnet": "[Disabled:Unimplemented]",
@@ -1253,6 +1297,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready": "[Suite:openshift/conformance/parallel]",
 
+	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, evpn": "[Disabled:Unimplemented]",
+
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, localnet": "[Disabled:Unimplemented]",
@@ -1260,6 +1306,8 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, no-overlay, valid": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should accept valid CRs UserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
+
+	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, evpn": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
 
@@ -1503,6 +1551,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-2": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
@@ -1540,6 +1590,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation Cluster Default Network [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Cluster Default Network of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
@@ -1579,6 +1631,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
@@ -1617,6 +1671,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
@@ -1654,6 +1710,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
