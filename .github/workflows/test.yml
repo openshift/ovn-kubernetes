@@ -342,7 +342,9 @@ jobs:
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Free up disk space
-      uses: ./.github/actions/free-disk-space
+      uses: palmsoftware/quick-cleanup@v0
+      with:
+        cleanup-mode: aggressive
 
     - name: Download test-image-base
       uses: actions/download-artifact@v4
@@ -545,7 +547,9 @@ jobs:
         sudo modprobe vrf
 
     - name: Free up disk space
-      uses: ./.github/actions/free-disk-space
+      uses: palmsoftware/quick-cleanup@v0
+      with:
+        cleanup-mode: aggressive
 
     - name: Setup /mnt/runner directory
       run: |
