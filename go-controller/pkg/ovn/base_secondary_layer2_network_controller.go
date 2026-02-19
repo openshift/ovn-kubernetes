@@ -59,6 +59,9 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 	if oc.routeImportManager != nil && config.Gateway.Mode == config.GatewayModeShared {
 		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
 	}
+	if oc.addressSetManager != nil {
+		oc.addressSetManager.Stop()
+	}
 }
 
 // cleanup cleans up logical entities for the given network, called from net-attach-def routine
@@ -127,6 +130,10 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 	}
 
 	if err := oc.WatchPods(); err != nil {
+		return err
+	}
+
+	if err := oc.addressSetManager.Start(); err != nil {
 		return err
 	}
 
