@@ -18,13 +18,13 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // podSelectorAddressSet stores address set for modifications and used selectors that define this address set.
@@ -174,11 +174,11 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector *met
 		err = fmt.Errorf("can't parse pod selector %v: %w", podSelector, err)
 		return
 	}
-	addrSetKey = getPodSelectorKey(podSelector, namespaceSelector, namespace)
+	addrSetKey = GetPodSelectorKey(podSelector, namespaceSelector, namespace)
 	err = m.addressSets.DoWithLock(addrSetKey, func(key string) error {
 		psAddrSet, found := m.addressSets.Load(key)
 		if !found {
-			addrSetDbIDs := getPodSelectorAddrSetDbIDs(addrSetKey, m.controllerName)
+			addrSetDbIDs := GetPodSelectorAddrSetDbIDs(addrSetKey, m.controllerName)
 			addrSet, err := m.addressSetFactory.NewAddressSet(addrSetDbIDs, nil)
 			// if the first step of creating address set fails, return error since there is nothing to cleanup
 			if err != nil {
@@ -439,7 +439,7 @@ func (m *AddressSetManager) getPodIPs(pods []*corev1.Pod) ([]string, error) {
 	return ips, nil
 }
 
-func getPodSelectorAddrSetDbIDs(psasKey, controller string) *libovsdbops.DbObjectIDs {
+func GetPodSelectorAddrSetDbIDs(psasKey, controller string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetPodSelector, controller, map[libovsdbops.ExternalIDKey]string{
 		// pod selector address sets are cluster-scoped, only need name
 		libovsdbops.ObjectNameKey: psasKey,
@@ -510,7 +510,7 @@ func shortLabelSelectorString(sel *metav1.LabelSelector) string {
 	return s
 }
 
-func getPodSelectorKey(podSelector, namespaceSelector *metav1.LabelSelector, namespace string) string {
+func GetPodSelectorKey(podSelector, namespaceSelector *metav1.LabelSelector, namespace string) string {
 	var namespaceKey string
 	if namespaceSelector == nil {
 		// namespace is static
