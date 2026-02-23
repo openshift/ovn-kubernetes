@@ -67,6 +67,7 @@ type Underlay struct {
 type Context interface {
 	CreateExternalContainer(container ExternalContainer) (ExternalContainer, error)
 	DeleteExternalContainer(container ExternalContainer) error
+	GetExternalContainerImage() string
 
 	CreateNetwork(name string, subnets ...string) (Network, error)
 	DeleteNetwork(network Network) error

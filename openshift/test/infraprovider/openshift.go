@@ -305,6 +305,12 @@ type contextOpenshift struct {
 	container.TestContext
 }
 
+func (c *contextOpenshift) GetExternalContainerImage() string {
+	// use downloadable image for external container.
+	// ref: https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L197
+	return "registry.k8s.io/e2e-test-images/agnhost:2.40"
+}
+
 func (c *contextOpenshift) GetAttachedNetworks() (api.Networks, error) {
 	c.Lock()
 	defer c.Unlock()
