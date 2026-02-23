@@ -1328,7 +1328,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		rtojLRPUUID := rtojLRPName + "-UUID"
 		nodeIP := gwConfig.IPAddresses[0].IP.String()
 		masqSNAT := newNATEntry(masqSNATUUID1, "169.254.169.14", nodeSubnet.String(), standardNonDefaultNetworkExtIDs(netInfo), "")
-		masqSNAT.Match = getMasqueradeManagementIPSNATMatch(util.IPAddrToHWAddr(managementPortIP(nodeSubnet)).String())
+		masqSNAT.Match = getMasqueradeManagementIPSNATMatch(netInfo.GetNodeManagementPortMAC(nodeName, nodeSubnet).String())
 		masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtos-%s_%s", netInfo.GetNetworkName(), nodeName))
 		if !config.OVNKubernetesFeature.EnableInterconnect {
 			masqSNAT.GatewayPort = ptr.To(fmt.Sprintf("rtos-%s_%s", netInfo.GetNetworkName(), nodeName) + "-UUID")

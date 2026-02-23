@@ -182,7 +182,8 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 					if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded && ocInfo.bnc.IsPrimaryNetwork() {
 						mgmtPortName := managementPortName(switchName)
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := expectedManagementPort(mgmtPortName, managementIP)
+						mgmtMAC := ocInfo.bnc.GetNetInfo().GetNodeManagementPortMAC(pod.nodeName, subnet)
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP, mgmtMAC)
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 						const aclUUID = "acl1-UUID"
@@ -200,7 +201,8 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 						// there are multiple mgmt ports in the cluster, thus the ports must be scoped with the node name
 						mgmtPortName := managementPortName(ocInfo.bnc.GetNetworkScopedName(pod.nodeName))
 						mgmtPortUUID := mgmtPortName + "-UUID"
-						mgmtPort := expectedManagementPort(mgmtPortName, managementIP)
+						mgmtMAC := ocInfo.bnc.GetNetInfo().GetNodeManagementPortMAC(pod.nodeName, subnet)
+						mgmtPort := expectedManagementPort(mgmtPortName, managementIP, mgmtMAC)
 						data = append(data, mgmtPort)
 						nodeslsps[switchName] = append(nodeslsps[switchName], mgmtPortUUID)
 
@@ -399,10 +401,10 @@ func managementPortName(switchName string) string {
 	return fmt.Sprintf("k8s-%s", switchName)
 }
 
-func expectedManagementPort(portName string, ip net.IP) *nbdb.LogicalSwitchPort {
+func expectedManagementPort(portName string, ip net.IP, mac net.HardwareAddr) *nbdb.LogicalSwitchPort {
 	return &nbdb.LogicalSwitchPort{
 		UUID:      portName + "-UUID",
-		Addresses: []string{fmt.Sprintf("%s %s", util.IPAddrToHWAddr(ip).String(), ip.String())},
+		Addresses: []string{fmt.Sprintf("%s %s", mac.String(), ip.String())},
 		Name:      portName,
 	}
 }
