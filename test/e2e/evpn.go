@@ -788,18 +788,12 @@ func setupIPVRFAgnhost(ictx infraapi.Context, vid int, vrfName string, ipFamilie
 //   - f: Test framework (used to get client config)
 //   - ictx: Infrastructure context for cleanup registration
 //   - name: Name of the VTEP CR
-//   - cidrs: CIDR ranges for VTEP IP allocation (supports dual-stack with 2 CIDRs)
+//   - cidr: CIDR for VTEP IP allocation
 //   - mode: VTEP mode - "Managed" (OVN-K allocates IPs) or "Unmanaged" (external provider)
-func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidrs []string, mode vtepv1.VTEPMode) error {
+func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr string, mode vtepv1.VTEPMode) error {
 	client, err := vtepclientset.NewForConfig(f.ClientConfig())
 	if err != nil {
 		return fmt.Errorf("failed to create VTEP client: %w", err)
-	}
-
-	// Convert string CIDRs to vtepv1.CIDR type
-	vtepCIDRs := make(vtepv1.DualStackCIDRs, len(cidrs))
-	for i, cidr := range cidrs {
-		vtepCIDRs[i] = vtepv1.CIDR(cidr)
 	}
 
 	vtep := &vtepv1.VTEP{
@@ -807,7 +801,7 @@ func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr
 			Name: name,
 		},
 		Spec: vtepv1.VTEPSpec{
-			CIDRs: vtepCIDRs,
+			CIDRs: vtepv1.DualStackCIDRs{vtepv1.CIDR(cidr)},
 			Mode:  mode,
 		},
 	}
@@ -833,7 +827,7 @@ func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr
 	})
 
 	// TODO: Add status check once VTEP controller implements status conditions
-	framework.Logf("VTEP created: %s (CIDRs: %v, Mode: %s)", name, cidrs, mode)
+	framework.Logf("VTEP created: %s (CIDR: %v, Mode: %s)", name, cidr, mode)
 	return nil
 }
 
@@ -1037,7 +1031,7 @@ var _ = ginkgo.Describe("EVPN", func() {
 
 		// Subnets (dual-stack aware, populated in BeforeEach based on cluster IP family support)
 		ipVRFAgnhostSubnets []string
-		vtepSubnets         []string
+		vtepSubnet          string
 
 		// Unique bridge and VXLAN device names per test for parallel isolation
 		// (Linux interface names are limited to 15 characters)
@@ -1074,24 +1068,21 @@ var _ = ginkgo.Describe("EVPN", func() {
 
 		// Reset slices for each test
 		ipVRFAgnhostSubnets = nil
-		vtepSubnets = nil
+		vtepSubnet = ""
 		nodeIPs = nil
 
 		// Generate random subnets for parallel test isolation
 		ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
-		vtepIPv4, vtepIPv6 := randomVTEPSubnets()
 
 		// Configure subnets based on cluster IP family support
 		if ipFamilies.Has(utilnet.IPv4) {
 			ipVRFAgnhostSubnets = append(ipVRFAgnhostSubnets, ipVRFAgnhostIPv4)
-			vtepSubnets = append(vtepSubnets, vtepIPv4)
 		}
 		if ipFamilies.Has(utilnet.IPv6) {
 			ipVRFAgnhostSubnets = append(ipVRFAgnhostSubnets, ipVRFAgnhostIPv6)
-			vtepSubnets = append(vtepSubnets, vtepIPv6)
 		}
 
-		// Discover external FRR IP
+		// Discover external FRR IP and VTEP subnets from kind network
 		kindNetwork, err := infraprovider.Get().GetNetwork("kind")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		frrNetIf, err := infraprovider.Get().GetExternalContainerNetworkInterface(
@@ -1106,6 +1097,20 @@ var _ = ginkgo.Describe("EVPN", func() {
 		}
 		gomega.Expect(externalFRRIP).NotTo(gomega.BeEmpty(), "External FRR must have an IP on kind network")
 		framework.Logf("External FRR IP: %s", externalFRRIP)
+
+		// Derive VTEP subnet from the kind network CIDRs(unmanaged mode)
+		// NOTE: FRR does not support dualstack VTEPs so pick one preferring v4
+		kindV4Subnet, kindV6Subnet, err := kindNetwork.IPv4IPv6Subnets()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		if isIPv6Supported(f.ClientSet) && kindV6Subnet != "" {
+			vtepSubnet = kindV6Subnet
+		}
+
+		if isIPv4Supported(f.ClientSet) && kindV4Subnet != "" {
+			vtepSubnet = kindV4Subnet
+		}
+		gomega.Expect(vtepSubnet).NotTo(gomega.BeEmpty(), "Kind network must have subnets for VTEP CIDR")
+		framework.Logf("VTEP subnet (from kind network): %v", vtepSubnet)
 
 		// Collect node IPs for BGP neighbors
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
@@ -1211,9 +1216,9 @@ var _ = ginkgo.Describe("EVPN", func() {
 				gomega.Expect(setupIPVRFBGPOnExternalFRR(ictx, ipVRFName, bgpASN, int(networkSpec.EVPN.IPVRF.VNI), ipFamilies, ipVRFAgnhostSubnets)).To(gomega.Succeed())
 			}
 
-			ginkgo.By("Creating VTEP CR")
+			ginkgo.By("Creating VTEP CR (Unmanaged - using node IPs)")
 			testVTEPName := testBaseName + "-vtep"
-			err := createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeManaged)
+			err := createVTEP(f, ictx, testVTEPName, vtepSubnet, vtepv1.VTEPModeUnmanaged)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Update VTEP name in network spec
