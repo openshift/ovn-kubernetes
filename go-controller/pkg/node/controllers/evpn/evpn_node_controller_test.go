@@ -3,8 +3,7 @@ package evpn
 import (
 	"context"
 	"net"
-
-	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"sync"
 
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/mock"
@@ -16,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	utilnet "k8s.io/utils/net"
+
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedroutefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
@@ -171,7 +172,7 @@ var _ = Describe("EVPN node controller", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeVTEPIPs: `{"vtep1":["100.64.0.1","fd00::1"]}`},
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","fd00::1/64"]`},
 				},
 			}
 
@@ -464,9 +465,18 @@ var _ = Describe("EVPN node controller", func() {
 			vxlan6Name := GetEVPNVXLANName(vtepName, utilnet.IPv6)
 			dummyName := GetEVPNDummyName(vtepName)
 
+			// testify's mock.Calls is not safe to read concurrently, so we
+			// collect EnsureLink configs via a Run callback under our own lock.
+			var ensuredMu sync.Mutex
+			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+
 			By("allowing any NDM calls throughout the test")
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
-			ndm.On("EnsureLink", mock.Anything).Return(nil)
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+			})
 			ndm.On("ListDevicesByVLANParent", mock.Anything).Return([]netlinkdevicemanager.DeviceConfig(nil))
 
 			By("creating a managed VTEP and waiting for informer sync")
@@ -495,14 +505,13 @@ var _ = Describe("EVPN node controller", func() {
 
 			By("verifying the full chain: onNodeUpdate → reconcile → NDM creates bridge, VXLAN, dummy")
 			Eventually(func() []string {
-				var ensured []string
-				for _, call := range ndm.Calls {
-					if call.Method == "EnsureLink" {
-						cfg := call.Arguments.Get(0).(netlinkdevicemanager.DeviceConfig)
-						ensured = append(ensured, cfg.Link.Attrs().Name)
-					}
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				var names []string
+				for _, cfg := range ensuredCfgs {
+					names = append(names, cfg.Link.Attrs().Name)
 				}
-				return ensured
+				return names
 			}).Should(ContainElements(bridgeName, vxlan4Name, dummyName))
 
 			By("verifying IPv6 VXLAN was deleted (no IPv6 in annotation)")
@@ -512,9 +521,16 @@ var _ = Describe("EVPN node controller", func() {
 		It("creates SVIs with correct mappings when a network is added and removes them when removed", func() {
 			const nadKey = "test-ns/test-nad"
 
+			var ensuredMu sync.Mutex
+			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+
 			By("allowing any NDM calls throughout the test")
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
-			ndm.On("EnsureLink", mock.Anything).Return(nil)
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+			})
 			ndm.On("ListDevicesByVLANParent", mock.Anything).Return([]netlinkdevicemanager.DeviceConfig(nil))
 
 			By("creating a managed VTEP and annotating the node with IPs")
@@ -560,12 +576,11 @@ var _ = Describe("EVPN node controller", func() {
 
 			By("verifying VID/VNI mappings on the VXLAN device")
 			Eventually(func() []netlinkdevicemanager.VIDVNIMapping {
-				for _, call := range ndm.Calls {
-					if call.Method == "EnsureLink" {
-						cfg := call.Arguments.Get(0).(netlinkdevicemanager.DeviceConfig)
-						if cfg.Link.Attrs().Name == vxlan4Name && len(cfg.VIDVNIMappings) > 0 {
-							return cfg.VIDVNIMappings
-						}
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				for _, cfg := range ensuredCfgs {
+					if cfg.Link.Attrs().Name == vxlan4Name && len(cfg.VIDVNIMappings) > 0 {
+						return cfg.VIDVNIMappings
 					}
 				}
 				return nil
@@ -576,23 +591,19 @@ var _ = Describe("EVPN node controller", func() {
 
 			By("verifying L3 and L2 SVIs were created with correct VLAN IDs and bridge parent")
 			Eventually(func() []string {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
 				var svis []string
-				for _, call := range ndm.Calls {
-					if call.Method == "EnsureLink" {
-						cfg := call.Arguments.Get(0).(netlinkdevicemanager.DeviceConfig)
-						if _, ok := cfg.Link.(*netlink.Vlan); ok {
-							svis = append(svis, cfg.Link.Attrs().Name)
-						}
+				for _, cfg := range ensuredCfgs {
+					if _, ok := cfg.Link.(*netlink.Vlan); ok {
+						svis = append(svis, cfg.Link.Attrs().Name)
 					}
 				}
 				return svis
 			}).Should(ContainElements(l3SVIName, l2SVIName))
 
-			for _, call := range ndm.Calls {
-				if call.Method != "EnsureLink" {
-					continue
-				}
-				cfg := call.Arguments.Get(0).(netlinkdevicemanager.DeviceConfig)
+			ensuredMu.Lock()
+			for _, cfg := range ensuredCfgs {
 				vlan, ok := cfg.Link.(*netlink.Vlan)
 				if !ok {
 					continue
@@ -606,20 +617,22 @@ var _ = Describe("EVPN node controller", func() {
 					Expect(cfg.VLANParent).To(Equal(bridgeName))
 				}
 			}
+			ensuredMu.Unlock()
 
 			By("simulating network removal and verifying VXLAN has no mappings")
-			ndm.Calls = nil
+			ensuredMu.Lock()
+			ensuredCfgs = nil
+			ensuredMu.Unlock()
 			fakeNM.NADNetworks = nil
 			fakeNM.PrimaryNetworks = nil
 			fakeNM.TriggerHandlers(nadKey, nil, true)
 
 			Eventually(func() bool {
-				for _, call := range ndm.Calls {
-					if call.Method == "EnsureLink" {
-						cfg := call.Arguments.Get(0).(netlinkdevicemanager.DeviceConfig)
-						if cfg.Link.Attrs().Name == vxlan4Name {
-							return len(cfg.VIDVNIMappings) == 0
-						}
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				for _, cfg := range ensuredCfgs {
+					if cfg.Link.Attrs().Name == vxlan4Name {
+						return len(cfg.VIDVNIMappings) == 0
 					}
 				}
 				return false
