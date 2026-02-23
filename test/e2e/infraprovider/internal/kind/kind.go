@@ -11,6 +11,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/portalloc"
@@ -157,6 +158,10 @@ func (k *kind) NewTestContext() api.Context {
 
 type contextKind struct {
 	container.TestContext
+}
+
+func (c *contextKind) GetExternalContainerImage() string {
+	return images.AgnHost()
 }
 
 func (c *contextKind) GetAttachedNetworks() (api.Networks, error) {
