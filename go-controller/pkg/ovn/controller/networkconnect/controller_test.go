@@ -144,6 +144,7 @@ func createTestNode(n testNode) *corev1.Node {
 	if len(n.nodeSubnets) > 0 {
 		annotations[ovnNodeSubnetsAnnotation] = buildNodeSubnetAnnotation(n.nodeSubnets)
 	}
+	annotations[util.OvnNodeChassisID] = chassisIDForNode(n.name)
 
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
