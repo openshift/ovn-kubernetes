@@ -33,12 +33,15 @@ const (
 	// use network name created for attaching frr container with
 	// cluster priamary network as per changes in the link:
 	// https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L123-L124
-	primaryNetworkName = "ostestbm_net"
+	primaryNetworkName         = "ostestbm_net"
+	frrContainerPrimaryNetIPv4 = "192.168.111.3"
+	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
 )
 
 type openshift struct {
 	container.Provider
 	nodes        map[string]*ocpNode
+	host         *hypervisor
 	hostNetworks map[string]*container.ContainerEngineNetwork
 	kubeClient   *kubernetes.Clientset
 }
@@ -105,6 +108,7 @@ func New(config *rest.Config) (api.Provider, error) {
 			} else {
 				// Initialize command runner for executing podman commands on hypervisor
 				o.ContainerOps = &container.ContainerOps{CmdRunner: host}
+				o.host = host
 				ginkgo.GinkgoLogr.Info("External container support enabled")
 			}
 		}
@@ -219,6 +223,27 @@ func findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (st
 		}
 	}
 	return "", fmt.Errorf("failed to find network interface from ovnkube-node pod %s", ovnKubeNodePodName)
+}
+
+func (o *openshift) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
+	if container.Name == "frr" && network.Name() == primaryNetworkName {
+		// frr container uses static ip configuration for ostestbm_net,
+		// querying it with podman inspect returns empty values, so build
+		// it explicitly.
+		if o.host == nil {
+			return api.NetworkInterface{}, fmt.Errorf("can not find gateway node for frr container")
+		}
+		gwIface, ok := o.host.attachedIfaces[primaryNetworkName]
+		if !ok {
+			return api.NetworkInterface{}, fmt.Errorf("can not find primary network gateway node for frr container")
+		}
+		return api.NetworkInterface{
+			IPv4: frrContainerPrimaryNetIPv4, IPv6: frrContainerPrimaryNetIPv6,
+			IPv4Gateway: gwIface.v4, IPv6Gateway: gwIface.v6,
+			InfName:    "eth0",
+			IPv4Prefix: gwIface.v4Subnet, IPv6Prefix: gwIface.v6Subnet}, nil
+	}
+	return o.GetNetworkInterface(container.Name, network.Name())
 }
 
 func (o *openshift) ShutdownNode(nodeName string) error {
