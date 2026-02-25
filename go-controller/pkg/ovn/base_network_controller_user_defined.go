@@ -381,7 +381,10 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 	}
 
 	if shouldHandleLiveMigration && kubevirtLiveMigrationStatus.IsTargetDomainReady() {
-		hasSourcePodLogicalPort := bsnc.isPodScheduledinLocalZone(kubevirtLiveMigrationStatus.SourcePod) || bsnc.isLayer2WithInterconnectTransport()
+		// We have a source pod LSP at this zone if the source pod and:
+		// - layer2 IC There is one at all the zones since we have the remote LSP to implement east/west
+		// - localnet only if this is the zone where the source pod is running
+		hasSourcePodLogicalPort := kubevirtLiveMigrationStatus.SourcePod != nil && (bsnc.isPodScheduledinLocalZone(kubevirtLiveMigrationStatus.SourcePod) || bsnc.isLayer2WithInterconnectTransport())
 		if hasSourcePodLogicalPort {
 			ops, err = bsnc.disableLiveMigrationSourceLSPOps(kubevirtLiveMigrationStatus, nadKey, ops)
 			if err != nil {
