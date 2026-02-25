@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/endpointslicemirror"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/networkconnect"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/routeadvertisements"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	udncontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
@@ -65,6 +67,13 @@ type ClusterManager struct {
 	networkManager networkmanager.Controller
 
 	raController *routeadvertisements.Controller
+
+	// nodeAnnotationBatcher batches node annotation updates across all networks
+	nodeAnnotationBatcher *node.NodeAnnotationBatcher
+	// wgForBatcher is used to wait for the batcher to finish when stopping
+	wgForBatcher sync.WaitGroup
+	// batcherStopChan is used to signal the batcher to stop
+	batcherStopChan chan struct{}
 }
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
@@ -76,22 +85,36 @@ func NewClusterManager(
 ) (*ClusterManager, error) {
 
 	wf = wf.ShallowClone()
-	defaultNetClusterController := newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf, recorder)
+
+	cm := &ClusterManager{
+		client:          ovnClient.KubeClient,
+		wf:              wf,
+		recorder:        recorder,
+		identity:        identity,
+		statusManager:   status_manager.NewStatusManager(wf, ovnClient),
+		batcherStopChan: make(chan struct{}),
+	}
+
+	// Create the node annotation batcher for efficient batching of annotation updates
+	// across all networks. Pass nil for annotation cache since cluster-manager doesn't
+	// have one - the batcher will parse annotations without caching.
+	kubeInterface := &kube.Kube{KClient: ovnClient.KubeClient}
+	cm.nodeAnnotationBatcher = node.NewNodeAnnotationBatcher(
+		kubeInterface,
+		wf.NodeCoreInformer().Lister(),
+		nil, // no annotation cache in cluster-manager
+		cm.batcherStopChan,
+		&cm.wgForBatcher,
+	)
+
+	// Create controllers with the batcher
+	cm.defaultNetClusterController = newDefaultNetworkClusterController(&util.DefaultNetInfo{}, ovnClient, wf, recorder, cm.nodeAnnotationBatcher)
 
 	zoneClusterController, err := newZoneClusterController(ovnClient, wf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create zone cluster controller, err : %w", err)
 	}
-
-	cm := &ClusterManager{
-		client:                      ovnClient.KubeClient,
-		defaultNetClusterController: defaultNetClusterController,
-		zoneClusterController:       zoneClusterController,
-		wf:                          wf,
-		recorder:                    recorder,
-		identity:                    identity,
-		statusManager:               status_manager.NewStatusManager(wf, ovnClient),
-	}
+	cm.zoneClusterController = zoneClusterController
 
 	cm.networkManager = networkmanager.Default()
 	var tunnelKeysAllocator *id.TunnelKeysAllocator
@@ -110,7 +133,7 @@ func NewClusterManager(
 			return nil, err
 		}
 
-		cm.udnClusterManager, err = newUserDefinedNetworkClusterManager(ovnClient, wf, cm.networkManager.Interface(), recorder)
+		cm.udnClusterManager, err = newUserDefinedNetworkClusterManager(ovnClient, wf, cm.networkManager.Interface(), recorder, cm.nodeAnnotationBatcher)
 		if err != nil {
 			return nil, err
 		}
@@ -202,6 +225,9 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Start the node annotation batcher for efficient batching
+	cm.nodeAnnotationBatcher.Start()
+
 	// Start networkManager before other controllers
 	if err := cm.networkManager.Start(); err != nil {
 		return err
@@ -266,6 +292,14 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 // Stop the cluster manager.
 func (cm *ClusterManager) Stop() {
 	klog.Info("Stopping the cluster manager")
+
+	// Stop the node annotation batcher first to flush any pending updates
+	if cm.batcherStopChan != nil {
+		close(cm.batcherStopChan)
+		cm.wgForBatcher.Wait()
+		klog.Info("Node annotation batcher stopped")
+	}
+
 	cm.defaultNetClusterController.Stop()
 	cm.zoneClusterController.Stop()
 
