@@ -170,6 +170,9 @@ spec:
         - mountPath: /ovn-cert
           name: host-ovn-cert
           readOnly: true
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
         {% if ovnkube_compact_mode_enable=="true" %}
         # Common mounts
         # for the iptables wrapper
@@ -275,6 +278,8 @@ spec:
           value: "{{ ovn_enable_dynamic_udn_allocation }}"
         - name: OVN_DYNAMIC_UDN_GRACE_PERIOD
           value: "{{ ovn_dynamic_udn_grace_period }}"
+        - name: OVN_NO_OVERLAY_ENABLE
+          value: "{{ ovn_no_overlay_enable }}"
         - name: OVN_EGRESSSERVICE_ENABLE
           value: "{{ ovn_egress_service_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
@@ -326,6 +331,8 @@ spec:
           value: "{{ ovn_network_qos_enable }}"
         - name: OVN_ENABLE_DNSNAMERESOLVER
           value: "{{ ovn_enable_dnsnameresolver }}"
+        - name: OVN_ALLOW_ICMP_NETPOL
+          value: "{{ ovn_allow_icmp_netpol }}"
       # end of container
 
       volumes:
@@ -346,6 +353,9 @@ spec:
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      - name: ovnkube-config
+        configMap:
+          name: ovnkube-config
       {% if ovnkube_compact_mode_enable=="true" %}
       - name: host-slash
         hostPath:

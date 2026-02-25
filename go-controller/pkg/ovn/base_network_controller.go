@@ -13,7 +13,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
@@ -125,6 +124,9 @@ type BaseNetworkController struct {
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *PortCache
+	// optional callback for consumers that need to react when a pod's logical
+	// port info is inserted/refreshed in logicalPortCache.
+	onLogicalPortCacheAdd func(pod *corev1.Pod, nadKey string)
 
 	// Info about known namespaces. You must use oc.getNamespaceLocked() or
 	// oc.waitForNamespaceLocked() to read this map, and oc.createNamespaceLocked()
@@ -338,12 +340,6 @@ func (oc *BaseUserDefinedNetworkController) shouldFilterNamespace(namespace stri
 
 	nadKey, err := oc.networkManager.GetPrimaryNADForNamespace(namespace)
 	if err != nil {
-		if util.IsUnprocessedActiveNetworkError(err) {
-			return false
-		}
-		if util.IsInvalidPrimaryNetworkError(err) {
-			return true
-		}
 		return false
 	}
 	if nadKey == types.DefaultNetworkName {
@@ -634,7 +630,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
-		&logicalSwitch.LoadBalancerGroup)
+		&logicalSwitch.LoadBalancerGroup, &logicalSwitch.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
@@ -1035,20 +1031,6 @@ func (bnc *BaseNetworkController) GetLocalZoneNodes() ([]*corev1.Node, error) {
 
 // isLocalZoneNode returns true if the node is part of the local zone.
 func (bnc *BaseNetworkController) isLocalZoneNode(node *corev1.Node) bool {
-	/** HACK BEGIN **/
-	// TODO(tssurya): Remove this HACK a few months from now. This has been added only to
-	// minimize disruption for upgrades when moving to interconnect=true.
-	// We want the legacy ovnkube-master to wait for remote ovnkube-node to
-	// signal it using "k8s.ovn.org/remote-zone-migrated" annotation before
-	// considering a node as remote when we upgrade from "global" (1 zone IC)
-	// zone to multi-zone. This is so that network disruption for the existing workloads
-	// is negligible and until the point where ovnkube-node flips the switch to connect
-	// to the new SBDB, it would continue talking to the legacy RAFT ovnkube-sbdb to ensure
-	// OVN/OVS flows are intact.
-	if bnc.zone == types.OvnDefaultZone {
-		return !util.HasNodeMigratedZone(node)
-	}
-	/** HACK END **/
 	return util.GetNodeZone(node) == bnc.zone
 }
 
@@ -1061,7 +1043,7 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *corev1.Pod) (string, error
 		pod,
 	)
 	if err != nil {
-		if util.IsUnprocessedActiveNetworkError(err) {
+		if util.IsInvalidPrimaryNetworkError(err) {
 			bnc.recordPodErrorEvent(pod, err)
 		}
 		return "", err
@@ -1182,11 +1164,39 @@ func (bnc *BaseNetworkController) AddResourceCommon(objType reflect.Type, obj in
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(np.Namespace)
+		foundNamespaceNAD, err := bnc.networkManager.GetPrimaryNADForNamespace(np.Namespace)
+		if err != nil {
+			// If this is a UDN namespace that hasn't been processed yet, the default
+			// controller should skip it while UDN controllers should retry.
+			if bnc.GetNetworkName() == types.DefaultNetworkName && util.IsInvalidPrimaryNetworkError(err) {
+				return nil
+			}
+			// Retry until the NAD controller has processed the primary NAD for this namespace.
+			return fmt.Errorf("could not get primary network NAD for namespace %s: %v", np.Namespace, err)
+		}
+		if foundNamespaceNAD == types.DefaultNetworkName {
+			// Only the default network controller should handle policies in default namespaces.
+			if bnc.GetNetworkName() != types.DefaultNetworkName {
+				return nil
+			}
+		} else {
+			networkName := bnc.networkManager.GetNetworkNameForNADKey(foundNamespaceNAD)
+			if networkName == "" {
+				return fmt.Errorf("no primary network found for namespace %s", np.Namespace)
+			}
+			if bnc.GetNetworkName() != networkName {
+				return nil
+			}
+		}
+		netInfo, err := bnc.networkManager.GetActiveNetworkForNamespace(np.Namespace)
 		if err != nil {
 			return fmt.Errorf("could not get active network for namespace %s: %v", np.Namespace, err)
 		}
-		if bnc.GetNetworkName() != netinfo.GetNetworkName() {
+		if netInfo == nil {
+			// no active network, nothing to do
+			return nil
+		}
+		if bnc.GetNetworkName() != netInfo.GetNetworkName() {
 			return nil
 		}
 		if err := bnc.addNetworkPolicy(np); err != nil {
@@ -1206,15 +1216,6 @@ func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj
 		knp, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
-		}
-		netinfo, err := bnc.networkManager.GetActiveNetworkForNamespace(knp.Namespace)
-		// The InvalidPrimaryNetworkError is returned when the UDN is not found because it has already been deleted,
-		// while the NotFound error occurs when the namespace no longer exists. In both cases, proceed with deleting the NetworkPolicy.
-		if err != nil && !util.IsInvalidPrimaryNetworkError(err) && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("could not get active network for namespace %s: %w", knp.Namespace, err)
-		}
-		if err == nil && bnc.GetNetworkName() != netinfo.GetNetworkName() {
-			return nil
 		}
 		return bnc.deleteNetworkPolicy(knp)
 	default:

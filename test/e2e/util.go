@@ -1243,6 +1243,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
 	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	f.NamespacePodSecurityWarnLevel = admissionapi.LevelPrivileged
 	f.DumpAllNamespaceInfo = func(ctx context.Context, f *framework.Framework, namespace string) {
 		debug.DumpAllNamespaceInfo(context.TODO(), f.ClientSet, namespace)
 	}
@@ -1439,9 +1440,20 @@ func isNetworkSegmentationEnabled() bool {
 	return present && val == "true"
 }
 
+func isICMPNetworkPolicyBypassEnabled() bool {
+	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+	val := getTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_ALLOW_ICMP_NETPOL")
+	return val == "true"
+}
+
 func isLocalGWModeEnabled() bool {
 	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
 	return present && val == "local"
+}
+
+func isHelmEnabled() bool {
+	val, present := os.LookupEnv("USE_HELM")
+	return present && val == "true"
 }
 
 func isPreConfiguredUdnAddressesEnabled() bool {

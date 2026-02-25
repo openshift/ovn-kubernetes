@@ -398,6 +398,11 @@ func NewLayer2UserDefinedNetworkController(
 		eIPController:          eIPController,
 		remoteNodesNoRouter:    sync.Map{},
 	}
+	if oc.IsPrimaryNetwork() && oc.eIPController != nil {
+		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
+			oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update")
+		}
+	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		oc.zoneICHandler = zoneinterconnect.NewZoneInterconnectHandler(oc.GetNetInfo(), oc.nbClient, oc.sbClient, oc.watchFactory)
@@ -490,6 +495,20 @@ func (oc *Layer2UserDefinedNetworkController) run() error {
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
 func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	networkName := oc.GetNetworkName()
+
+	// For primary Layer2 UDN only: when this is a cleanup-only controller (dummy for stale UDN
+	// cleanup; GetNetworkID() is InvalidID because netInfo was never reconciled from a NAD),
+	// discover and cleanup all gateway routers from the NB DB. DB-driven cleanup works even
+	// when nodes are already gone.
+	if oc.IsPrimaryNetwork() && oc.GetNetworkID() == types.InvalidID {
+		if err := cleanupGatewayRoutersForNetworkFromDB(oc.nbClient, oc.GetNetInfo(),
+			oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkScopedJoinSwitchName()); err != nil {
+			return fmt.Errorf("failed to cleanup gateway routers for network %s: %w", networkName, err)
+		}
+	}
+
+	// Switch that holds management ports is deleted below (BaseLayer2UserDefinedNetworkController.cleanup);
+	// LSPs are cascade-deleted with the logical switch.
 	if err := oc.BaseLayer2UserDefinedNetworkController.cleanup(); err != nil {
 		return fmt.Errorf("failed to cleanup network %q: %w", networkName, err)
 	}
@@ -526,13 +545,8 @@ func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	}
 
 	// remove load balancer groups
-	lbGroups := make([]*nbdb.LoadBalancerGroup, 0, 3)
-	for _, lbGroupUUID := range []string{oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID} {
-		lbGroups = append(lbGroups, &nbdb.LoadBalancerGroup{UUID: lbGroupUUID})
-	}
-	if err := libovsdbops.DeleteLoadBalancerGroups(oc.nbClient, lbGroups); err != nil {
-		klog.Errorf("Failed to delete load balancer groups on network: %q, error: %v", oc.GetNetworkName(), err)
-	}
+	cleanupLoadBalancerGroups(oc.nbClient, oc.GetNetInfo(),
+		oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID)
 
 	return nil
 }
@@ -817,9 +831,19 @@ func (oc *Layer2UserDefinedNetworkController) addSwitchPortForRemoteNodeGR(node 
 		return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %w",
 			node.Name, oc.GetNetworkName(), err)
 	}
+
+	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// remote node may not have the annotation yet, suppress it
+			return types.NewSuppressedError(err)
+		}
+		return fmt.Errorf("failed to parse node chassis-id for node %s: %w", node.Name, err)
+	}
+
 	logicalSwitchPort.Options = map[string]string{
 		libovsdbops.RequestedTnlKey:  strconv.Itoa(tunnelID),
-		libovsdbops.RequestedChassis: node.Name,
+		libovsdbops.RequestedChassis: chassisID,
 	}
 	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
@@ -889,13 +913,23 @@ func (oc *Layer2UserDefinedNetworkController) addRouterSetupForRemoteNodeGR(node
 	if err != nil {
 		return nil
 	}
+
+	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// remote node may not have the annotation yet, suppress it
+			return types.NewSuppressedError(err)
+		}
+		return fmt.Errorf("failed to parse node chassis-id for node %s: %w", node.Name, err)
+	}
+
 	transitPort := nbdb.LogicalRouterPort{
 		Name:     types.TransitRouterToRouterPrefix + oc.GetNetworkScopedGWRouterName(node.Name),
 		MAC:      util.IPAddrToHWAddr(transitRouterInfo.transitRouterNets[0].IP).String(),
 		Networks: util.IPNetsToStringSlice(transitRouterInfo.transitRouterNets),
 		Options: map[string]string{
 			libovsdbops.RequestedTnlKey:  getTransitRouterPortTunnelKey(transitRouterInfo.nodeID),
-			libovsdbops.RequestedChassis: node.Name,
+			libovsdbops.RequestedChassis: chassisID,
 		},
 		ExternalIDs: map[string]string{
 			types.NetworkExternalID:  oc.GetNetworkName(),
@@ -992,10 +1026,12 @@ func (oc *Layer2UserDefinedNetworkController) cleanupRouterSetupForRemoteNodeGR(
 
 func (oc *Layer2UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node) error {
 	if _, local := oc.localZoneNodes.Load(node.Name); local {
-		if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
-			return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+		if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+			if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
+				return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+			}
+			oc.gatewayManagers.Delete(node.Name)
 		}
-		oc.gatewayManagers.Delete(node.Name)
 	} else {
 		if config.Layer2UsesTransitRouter {
 			// this is a no-op for local nodes
