@@ -31,6 +31,7 @@ import (
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -2262,6 +2263,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						testNamespace.Name+"-netexec-pod",
 						func(p *corev1.Pod) {
 							p.Spec.Containers[0].Args = []string{"netexec"}
+							setRuntimeDefaultPSA(p)
 						},
 					)
 				})
@@ -2434,6 +2436,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 									p.Spec.Containers[0].Args = []string{"netexec"}
 									p.Spec.NodeName = getNode()
 									p.Labels = map[string]string{"app": "netexec-pod"}
+									setRuntimeDefaultPSA(p)
 								},
 							)
 						})
@@ -2564,6 +2567,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 											p.Spec.Containers[0].Args = []string{"netexec"}
 											p.Spec.NodeName = getSameNode()
 											p.Labels = map[string]string{"app": "netexec-samenode-pod"}
+											setRuntimeDefaultPSA(p)
 										},
 									)
 								}()
@@ -2580,6 +2584,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 											p.Spec.Containers[0].Args = []string{"netexec"}
 											p.Spec.NodeName = getDifferentNode()
 											p.Labels = map[string]string{"app": "netexec-diffnode-pod"}
+											setRuntimeDefaultPSA(p)
 										},
 									)
 								}()
@@ -3307,4 +3312,21 @@ func checkRouteInFRR(node corev1.Node, podCIDR, routerContainerName string, isIP
 		framework.Logf("Routes in FRR for %s: %s", podCIDR, routes)
 		return strings.Contains(routes, nodeIP[0])
 	}, 30*time.Second).Should(gomega.BeTrue(), "route for %s via %s not found on %s", podCIDR, nodeIP[0], routerContainerName)
+}
+
+func setRuntimeDefaultPSA(pod *v1.Pod) {
+	dontEscape := false
+	noRoot := true
+	pod.Spec.SecurityContext = &v1.PodSecurityContext{
+		RunAsNonRoot: &noRoot,
+		SeccompProfile: &v1.SeccompProfile{
+			Type: v1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+	pod.Spec.Containers[0].SecurityContext = &v1.SecurityContext{
+		AllowPrivilegeEscalation: &dontEscape,
+		Capabilities: &v1.Capabilities{
+			Drop: []v1.Capability{"ALL"},
+		},
+	}
 }

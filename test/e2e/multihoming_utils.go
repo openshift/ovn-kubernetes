@@ -199,7 +199,7 @@ type podConfiguration struct {
 	nodeSelector           map[string]string
 	isPrivileged           bool
 	labels                 map[string]string
-	annotations                  map[string]string
+	annotations            map[string]string
 	requiresExtraNamespace bool
 	hostNetwork            bool
 	ipRequestFromSubnet    string
