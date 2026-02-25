@@ -29,7 +29,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
-	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
@@ -341,7 +340,7 @@ func vtyshCommand(args ...string) []string {
 	for _, arg := range args {
 		parts = append(parts, fmt.Sprintf("-c '%s'", arg))
 	}
-	return []string{"sh", "-c", "vtysh " + strings.Join(parts, " ")}
+	return []string{"sh", "-c", "\"vtysh " + strings.Join(parts, " ") + "\""}
 }
 
 // setupEVPNBGPOnExternalFRR ensures the global BGP EVPN settings are present on the external FRR container.
@@ -1184,16 +1183,15 @@ var _ = ginkgo.Describe("EVPN", func() {
 
 		// Generate random subnets for parallel test isolation
 		ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
-		vtepIPv4, vtepIPv6 := randomVTEPSubnets()
+		vtepSubnets = append(vtepSubnets, "192.168.111.0/24")
 
 		// Configure subnets based on cluster IP family support
 		if ipFamilies.Has(utilnet.IPv4) {
 			ipVRFAgnhostSubnets = append(ipVRFAgnhostSubnets, ipVRFAgnhostIPv4)
-			vtepSubnets = append(vtepSubnets, vtepIPv4)
 		}
 		if ipFamilies.Has(utilnet.IPv6) {
 			ipVRFAgnhostSubnets = append(ipVRFAgnhostSubnets, ipVRFAgnhostIPv6)
-			vtepSubnets = append(vtepSubnets, vtepIPv6)
+
 		}
 
 		// Discover external FRR IP
@@ -1318,7 +1316,7 @@ var _ = ginkgo.Describe("EVPN", func() {
 
 			ginkgo.By("Creating VTEP CR")
 			testVTEPName := testBaseName + "-vtep"
-			err := createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeManaged)
+			err := createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeUnmanaged)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Update VTEP name in network spec
@@ -1334,37 +1332,12 @@ var _ = ginkgo.Describe("EVPN", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			f.Namespace = testNamespace
 
-			// REVERT ME: Temporary cluster-side EVPN setup until OVN-K implements it natively
-			// Generate random VIDs for cluster-side EVPN setup (OVN-K side).
-			// VID is local to each side - these don't need to match the FRR side VIDs.
-			clusterMACVRFVID := randomVID()
-			clusterIPVRFVID := randomVID()
-			framework.Logf("Generated random VIDs for cluster side: MAC-VRF VID=%d, IP-VRF VID=%d", clusterMACVRFVID, clusterIPVRFVID)
-			ginkgo.By("Running cluster-side EVPN setup script (REVERT ME)")
-			var macVRFVNI, ipVRFVNI int
-			if hasMACVRF {
-				macVRFVNI = int(networkSpec.EVPN.MACVRF.VNI)
-			}
-			if hasIPVRF {
-				ipVRFVNI = int(networkSpec.EVPN.IPVRF.VNI)
-			}
-			err = runClusterEVPNSetupScript(ictx,
-				testBaseName, externalFRRIP, bgpASN,
-				hasMACVRF, macVRFVNI, clusterMACVRFVID,
-				hasIPVRF, ipVRFVNI, clusterIPVRFVID,
-				cudnSubnetsFromSpec)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			ginkgo.By("Creating test pod on CUDN")
-			testPod := e2epod.CreateExecPodOrFail(
-				context.Background(),
-				f.ClientSet,
-				f.Namespace.Name,
-				f.Namespace.Name+"-netexec-pod",
-				func(p *corev1.Pod) {
-					p.Spec.Containers[0].Args = []string{"netexec"}
-				},
+			testPodConfig := *podConfig(
+				f.Namespace.Name + "-netexec-pod",
 			)
+			testPodConfig.namespace = f.Namespace.Name
+			testPod := runUDNPod(f.ClientSet, f.Namespace.Name, testPodConfig, nil)
 
 			// Test connectivity to external servers
 			if hasMACVRF {
