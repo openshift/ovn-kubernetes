@@ -199,11 +199,12 @@ type podConfiguration struct {
 	nodeSelector           map[string]string
 	isPrivileged           bool
 	labels                 map[string]string
-	annotations                  map[string]string
+	annotations            map[string]string
 	requiresExtraNamespace bool
 	hostNetwork            bool
 	ipRequestFromSubnet    string
 	usesExternalRouter     bool
+	nodeName               string
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
@@ -226,6 +227,7 @@ func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec.Spec.NodeSelector = config.nodeSelector
 	podSpec.Labels = config.labels
 	podSpec.Spec.HostNetwork = config.hostNetwork
+	podSpec.Spec.NodeName = config.nodeName
 	if config.isPrivileged {
 		podSpec.Spec.Containers[0].SecurityContext.Privileged = ptr.To(true)
 	} else {

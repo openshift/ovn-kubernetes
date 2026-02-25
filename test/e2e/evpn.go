@@ -335,7 +335,7 @@ func vtyshCommand(args ...string) []string {
 	for _, arg := range args {
 		parts = append(parts, fmt.Sprintf("-c '%s'", arg))
 	}
-	return []string{"sh", "-c", "vtysh " + strings.Join(parts, " ")}
+	return []string{"sh", "-c", "\"vtysh " + strings.Join(parts, " ") + "\""}
 }
 
 // setupEVPNBGPOnExternalFRR ensures the global BGP EVPN settings are present on the external FRR container.
@@ -1276,7 +1276,7 @@ func runEVPNNetworkAndServers(
 
 	testVTEPName := testName + "-vtep"
 	framework.Logf("Creating VTEP CR")
-	err = createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeManaged)
+	err = createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeUnmanaged)
 	if err != nil {
 		return err
 	}

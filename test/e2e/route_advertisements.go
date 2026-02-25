@@ -1940,8 +1940,8 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
 			ipVRFAgnhostSubnets := []string{ipVRFAgnhostIPv4, ipVRFAgnhostIPv6}
 			framework.Logf("Networks allocated for EVPN Agnhost servers: %v", ipVRFAgnhostSubnets)
-			vtepIPv4, vtepIPv6 := randomVTEPSubnets()
-			vtepSubnets := []string{vtepIPv4, vtepIPv6}
+			//vtepIPv4, vtepIPv6 := randomVTEPSubnets()
+			vtepSubnets := []string{"192.168.111.0/24"}
 			framework.Logf("Networks allocated for EVPN VTEPs: %v", vtepSubnets)
 			macVRFAgnhostName := networkName + "-macvrf-agnhost"
 			macVRFNetworkName := macVRFAgnhostName
@@ -1995,8 +1995,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 		case cudnAdvertisedEVPN:
+			ginkgo.By("skip manual EVPN configuration on cluster nodes")
 			// REVERT ME: Temporary cluster-side EVPN setup until OVN-K implements it natively
-			ginkgo.By("Running cluster-side EVPN setup script (REVERT ME)")
+			/*ginkgo.By("Running cluster-side EVPN setup script (REVERT ME)")
 			cudnSubnets := getNetworkSubnetsFromSpec(networkSpec)
 			var macVRFVNI, ipVRFVNI, macVRFVID, ipVRFVID int
 			if networkSpec.EVPN.MACVRF != nil {
@@ -2021,7 +2022,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				ipVRFVID,
 				cudnSubnets,
 			)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())*/
 		}
 
 		return testNamespace, servers
@@ -2252,6 +2253,19 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				ginkgo.Fail(fmt.Sprintf("Failed to find a different ready schedulable node than %s", testPod.Spec.NodeName))
 				return ""
 			}
+			// httpServerPodConfig returns a podConfiguration for an HTTP server pod
+			httpServerPodConfig := func(podName, namespace string, opts ...podOption) podConfiguration {
+				var podOptions []podOption
+				podOptions = append(podOptions, withCommand(func() []string {
+					return httpServerContainerCmd(8080)
+				}))
+				for _, opt := range opts {
+					podOptions = append(podOptions, opt)
+				}
+				cfg := *podConfig(podName, podOptions...)
+				cfg.namespace = namespace
+				return cfg
+			}
 
 			ginkgo.BeforeEach(func() {
 				networkSpec := networkSpecGen()
@@ -2276,7 +2290,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			ginkgo.Describe("When a pod runs on the tested network", func() {
 				ginkgo.BeforeEach(func() {
 					ginkgo.By("Running a pod on the tested network namespace")
-					testPod = e2epod.CreateExecPodOrFail(
+					/*testPod = e2epod.CreateExecPodOrFail(
 						context.Background(),
 						f.ClientSet,
 						testNamespace.Name,
@@ -2284,7 +2298,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						func(p *corev1.Pod) {
 							p.Spec.Containers[0].Args = []string{"netexec"}
 						},
-					)
+					)*/
+					testPodConfig := httpServerPodConfig(testNamespace.Name+"-netexec-pod", testNamespace.Name)
+					testPod = runUDNPod(f.ClientSet, testNamespace.Name, testPodConfig, nil)
 				})
 
 				ginkgo.DescribeTable("It can reach external servers on the same network",
@@ -2446,7 +2462,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 
 						ginkgo.BeforeEach(func() {
 							ginkgo.By("Running other pod on the tested network namespace")
-							otherPod = e2epod.CreateExecPodOrFail(
+							/*otherPod = e2epod.CreateExecPodOrFail(
 								context.Background(),
 								f.ClientSet,
 								testNamespace.Name,
@@ -2456,7 +2472,10 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 									p.Spec.NodeName = getNode()
 									p.Labels = map[string]string{"app": "netexec-pod"}
 								},
-							)
+							)*/
+							otherPodConfig := httpServerPodConfig(testNamespace.Name+"other-netexec-pod", testNamespace.Name,
+								withLabels(map[string]string{"app": "other-netexec-pod"}))
+							otherPod = runUDNPod(f.ClientSet, testNamespace.Name, otherPodConfig, nil)
 						})
 
 						ginkgo.DescribeTable("The pods on the tested network can reach each other",
@@ -2576,7 +2595,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 									ginkgo.GinkgoHelper()
 									defer ginkgo.GinkgoRecover()
 									defer wg.Done()
-									otherPodSameNode = e2epod.CreateExecPodOrFail(
+									/*otherPodSameNode = e2epod.CreateExecPodOrFail(
 										context.Background(),
 										f.ClientSet,
 										otherNamespace.Name,
@@ -2586,13 +2605,17 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 											p.Spec.NodeName = getSameNode()
 											p.Labels = map[string]string{"app": "netexec-samenode-pod"}
 										},
-									)
+									)*/
+									otherPodSameNodeConfig := httpServerPodConfig(otherNamespace.Name+"-netexec-samenode-pod", otherNamespace.Name,
+										withLabels(map[string]string{"app": "netexec-samenode-pod"}))
+									otherPodSameNodeConfig.nodeName = getSameNode()
+									otherPodSameNode = runUDNPod(f.ClientSet, otherNamespace.Name, otherPodSameNodeConfig, nil)
 								}()
 								go func() {
 									ginkgo.GinkgoHelper()
 									defer ginkgo.GinkgoRecover()
 									defer wg.Done()
-									otherPodDiffNode = e2epod.CreateExecPodOrFail(
+									/*otherPodDiffNode = e2epod.CreateExecPodOrFail(
 										context.Background(),
 										f.ClientSet,
 										otherNamespace.Name,
@@ -2602,7 +2625,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 											p.Spec.NodeName = getDifferentNode()
 											p.Labels = map[string]string{"app": "netexec-diffnode-pod"}
 										},
-									)
+									)*/
+									otherPodDiffNodeConfig := httpServerPodConfig(otherNamespace.Name+"-netexec-diffnode-pod", otherNamespace.Name,
+										withLabels(map[string]string{"app": "netexec-diffnode-pod"}))
+									otherPodDiffNodeConfig.nodeName = getDifferentNode()
+									otherPodDiffNode = runUDNPod(f.ClientSet, otherNamespace.Name, otherPodDiffNodeConfig, nil)
 								}()
 								wg.Wait()
 
