@@ -339,6 +339,53 @@ func ParseNodeHostSubnetAnnotation(node *corev1.Node, netName string) ([]*net.IP
 	return ret, nil
 }
 
+// ParseNodeHostSubnetAnnotationWithCache parses the "k8s.ovn.org/node-subnets" annotation
+// for all networks using the provided cache if available. Returns the full map of
+// network name -> host subnets for all networks.
+func ParseNodeHostSubnetAnnotationWithCache(node *corev1.Node, cache NodeAnnotationCache) (map[string][]*net.IPNet, error) {
+	return parseSubnetAnnotationWithCache(node, ovnNodeSubnets, cache)
+}
+
+// UpdateNodeHostSubnetAnnotationMap updates the "k8s.ovn.org/node-subnets" annotation
+// with a complete map of all network subnets. This is more efficient than updating
+// networks individually when batching updates from multiple networks.
+func UpdateNodeHostSubnetAnnotationMap(annotations map[string]string, subnetsMap map[string][]*net.IPNet) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	// Filter out nil or empty subnet lists (represents deletion)
+	filteredMap := make(map[string][]*net.IPNet)
+	for netName, subnets := range subnetsMap {
+		if len(subnets) > 0 {
+			filteredMap[netName] = subnets
+		}
+	}
+
+	if len(filteredMap) == 0 {
+		delete(annotations, ovnNodeSubnets)
+		return annotations, nil
+	}
+
+	// Convert IPNets to strings before marshaling (same as updateSubnetAnnotation)
+	subnetsStrMap := make(map[string][]string)
+	for netName, subnets := range filteredMap {
+		subnetsStr := make([]string, len(subnets))
+		for i, subnet := range subnets {
+			subnetsStr[i] = subnet.String()
+		}
+		subnetsStrMap[netName] = subnetsStr
+	}
+
+	// Marshal the string map
+	bytes, err := json.Marshal(subnetsStrMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal node-subnets map: %v", err)
+	}
+	annotations[ovnNodeSubnets] = string(bytes)
+	return annotations, nil
+}
+
 // GetNodeSubnetAnnotationNetworkNames parses the "k8s.ovn.org/node-subnets" annotation
 // on a node and returns the list of network names set.
 func GetNodeSubnetAnnotationNetworkNames(node *corev1.Node) ([]string, error) {

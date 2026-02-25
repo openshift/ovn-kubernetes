@@ -43,9 +43,12 @@ type NodeAllocator struct {
 
 	// nodeSubnets is a list of node subnets that are managed by the cluster subnet allocator
 	nodeSubnets []*net.IPNet
+
+	// batcher batches annotation updates across all networks for better API server efficiency
+	batcher *NodeAnnotationBatcher
 }
 
-func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface, tunnelIDAllocator id.Allocator) *NodeAllocator {
+func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.NodeLister, kube kube.Interface, tunnelIDAllocator id.Allocator, batcher *NodeAnnotationBatcher) *NodeAllocator {
 	na := &NodeAllocator{
 		kube:                         kube,
 		nodeLister:                   nodeLister,
@@ -54,6 +57,7 @@ func NewNodeAllocator(networkID int, netInfo util.NetInfo, nodeLister listers.No
 		clusterSubnetAllocator:       NewSubnetAllocator(),
 		hybridOverlaySubnetAllocator: NewSubnetAllocator(),
 		idAllocator:                  tunnelIDAllocator,
+		batcher:                      batcher,
 	}
 
 	if na.hasNodeSubnetAllocation() {
@@ -404,8 +408,26 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 	return nil
 }
 
-// updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation
+// updateNodeNetworkAnnotationsWithRetry will update the node's subnet annotation and network id annotation.
+// If a batcher is configured, it will enqueue the updates to be batched with other network updates.
+// Otherwise, it will update the node directly.
 func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet, networkId, tunnelID int) error {
+	networkName := na.netInfo.GetNetworkName()
+
+	// If we have a batcher, enqueue the update for batching
+	if na.batcher != nil {
+		// Extract the subnets for this network from the map
+		var hostSubnets []*net.IPNet
+		if subnets, ok := hostSubnetsMap[networkName]; ok {
+			hostSubnets = subnets
+		}
+
+		na.batcher.EnqueueUpdate(nodeName, networkName, hostSubnets, networkId, tunnelID)
+		klog.V(5).Infof("Enqueued annotation update for node %s network %s to batcher", nodeName, networkName)
+		return nil
+	}
+
+	// Fallback to direct update if no batcher is configured (for backwards compatibility)
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
@@ -424,8 +446,6 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 					node.Name, util.JoinIPNets(hostSubnets, ","), err)
 			}
 		}
-
-		networkName := na.netInfo.GetNetworkName()
 
 		if networkId != types.NoNetworkID {
 			cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, networkName, networkId)
