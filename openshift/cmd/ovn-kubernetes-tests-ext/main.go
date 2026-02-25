@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/openshift/test"
 	"github.com/ovn-org/ovn-kubernetes/openshift/test/generated"
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-org/ovn-kubernetes/test/e2e"
@@ -25,6 +26,14 @@ import (
 	// ensure that logging flags are part of the command line.
 	_ "k8s.io/component-base/logs/testinit"
 )
+
+func loadBlockingTests() map[string]bool {
+	blockingTests := make(map[string]bool)
+	for _, testName := range test.BlockingTests {
+		blockingTests[testName] = true
+	}
+	return blockingTests
+}
 
 func main() {
 	// Create our registry of openshift-tests extensions
@@ -61,6 +70,8 @@ func main() {
 		}
 	})
 
+	blockingTests := loadBlockingTests()
+
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
 		for _, label := range getTestExtensionLabels() {
 			spec.Labels.Insert(label)
@@ -76,6 +87,10 @@ func main() {
 			spec.Name += " " + annotations
 		}
 		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+
+		if !blockingTests[spec.Name] {
+			spec.Lifecycle = extensiontests.LifecycleInforming
+		}
 	})
 
 	specs = specs.Select(func(spec *extensiontests.ExtensionTestSpec) bool {
