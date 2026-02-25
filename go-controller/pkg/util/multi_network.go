@@ -60,8 +60,10 @@ type NetInfo interface {
 	EVPNVTEPName() string
 	EVPNMACVRFVNI() int32
 	EVPNMACVRFRouteTarget() string
+	EVPNMACVRFVID() int
 	EVPNIPVRFVNI() int32
 	EVPNIPVRFRouteTarget() string
+	EVPNIPVRFVID() int
 	GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet
 	GetNodeManagementIP(hostSubnet *net.IPNet) *net.IPNet
 
@@ -459,6 +461,8 @@ func (nInfo *mutableNetInfo) getNamespaces() sets.Set[string] {
 }
 
 func (nInfo *mutableNetInfo) GetNADNamespaces() []string {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
 	return nInfo.getNamespaces().UnsortedList()
 }
 
@@ -658,7 +662,7 @@ func (nInfo *DefaultNetInfo) PhysicalNetworkName() string {
 
 // Transport returns the transport protocol for east-west traffic
 func (nInfo *DefaultNetInfo) Transport() string {
-	return ""
+	return config.Default.Transport
 }
 
 // EVPNVTEPName returns empty as EVPN is not supported on the default network
@@ -684,6 +688,16 @@ func (nInfo *DefaultNetInfo) EVPNIPVRFVNI() int32 {
 // EVPNIPVRFRouteTarget returns empty as EVPN is not supported on the default network
 func (nInfo *DefaultNetInfo) EVPNIPVRFRouteTarget() string {
 	return ""
+}
+
+// EVPNMACVRFVID returns 0 as EVPN is not supported on the default network
+func (nInfo *DefaultNetInfo) EVPNMACVRFVID() int {
+	return 0
+}
+
+// EVPNIPVRFVID returns 0 as EVPN is not supported on the default network
+func (nInfo *DefaultNetInfo) EVPNIPVRFVID() int {
+	return 0
 }
 
 func (nInfo *DefaultNetInfo) GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet {
@@ -853,6 +867,9 @@ func (nInfo *userDefinedNetInfo) PhysicalNetworkName() string {
 
 // Transport returns the transport protocol for east-west traffic
 func (nInfo *userDefinedNetInfo) Transport() string {
+	if nInfo.transport == "" {
+		return types.NetworkTransportGeneve
+	}
 	return nInfo.transport
 }
 
@@ -894,6 +911,22 @@ func (nInfo *userDefinedNetInfo) EVPNIPVRFRouteTarget() string {
 		return ""
 	}
 	return nInfo.evpn.IPVRF.RouteTarget
+}
+
+// EVPNMACVRFVID returns the MAC-VRF VID for EVPN
+func (nInfo *userDefinedNetInfo) EVPNMACVRFVID() int {
+	if nInfo.evpn == nil || nInfo.evpn.MACVRF == nil {
+		return 0
+	}
+	return nInfo.evpn.MACVRF.VID
+}
+
+// EVPNIPVRFVID returns the IP-VRF VID for EVPN
+func (nInfo *userDefinedNetInfo) EVPNIPVRFVID() int {
+	if nInfo.evpn == nil || nInfo.evpn.IPVRF == nil {
+		return 0
+	}
+	return nInfo.evpn.IPVRF.VID
 }
 
 func (nInfo *userDefinedNetInfo) GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet {
@@ -1009,7 +1042,7 @@ func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.physicalNetworkName != other.PhysicalNetworkName() {
 		return false
 	}
-	if nInfo.transport != other.Transport() {
+	if nInfo.Transport() != other.Transport() {
 		return false
 	}
 	if nInfo.EVPNVTEPName() != other.EVPNVTEPName() {
@@ -1501,6 +1534,18 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 
 	if netconf.IPAM.Type != "" {
 		return fmt.Errorf("error parsing Network Attachment Definition %s: %w", nadName, ErrorUnsupportedIPAMKey)
+	}
+
+	// Validate transport if specified
+	if netconf.Transport != "" &&
+		netconf.Transport != types.NetworkTransportGeneve &&
+		netconf.Transport != types.NetworkTransportNoOverlay &&
+		netconf.Transport != types.NetworkTransportEVPN {
+		return fmt.Errorf("invalid transport %q: must be one of %q", netconf.Transport, []string{
+			types.NetworkTransportGeneve,
+			types.NetworkTransportNoOverlay,
+			types.NetworkTransportEVPN,
+		})
 	}
 
 	if netconf.JoinSubnet != "" && netconf.Topology == types.LocalnetTopology {

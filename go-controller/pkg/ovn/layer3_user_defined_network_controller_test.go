@@ -253,7 +253,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 								fakeOvn,
 								[]testPod{podInfo},
 								expectationOptions...,
-							).expectedLogicalSwitchesAndPorts(netInfo.isPrimary)...)))
+							).expectedLogicalSwitchesAndPorts()...)))
 
 				return nil
 			}
@@ -459,6 +459,112 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			}),
 		),
 	)
+
+	It("primary Layer 3 UDN: controller creates entities via init/watchers, then dummy Cleanup() removes them", func() {
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		netInfo := dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24")
+		app.Action = func(ctx *cli.Context) error {
+			netConf := netInfo.netconf()
+			networkConfig, err := util.NewNetInfo(netConf)
+			Expect(err).NotTo(HaveOccurred())
+			// For cleanup we use a copy with InvalidID so the dummy controller treats the network as stale.
+			mutableNetInfoCleanup := util.NewMutableNetInfo(networkConfig)
+			mutableNetInfoCleanup.SetNetworkID(types.InvalidID)
+
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netConf)
+			Expect(err).NotTo(HaveOccurred())
+			// Dummy controller only runs Cleanup(), which does not use the network manager; empty fake is enough.
+			fakeNetworkManager := &networkmanager.FakeNetworkManager{
+				PrimaryNetworks: make(map[string]util.NetInfo),
+			}
+
+			const nodeIPv4CIDR = "192.168.126.202/24"
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, netInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			// NB_Global with default zone so GetNBZone returns it; node without zone annotation is treated as local.
+			nbZone := &nbdb.NBGlobal{Name: types.OvnDefaultZone, UUID: types.OvnDefaultZone}
+			// Post-cleanup DB: default net node switch + NB_Global + global entities (Copp, meters) as in Layer2 test.
+			defaultNetExpectations := generateUDNPostInitDB(append(emptyDefaultClusterNetworkNodeSwitch(nodeName), nbZone))
+
+			// Minimal initialDB: default net node switch, no UDN entities. The UDN controller's Start()
+			// runs init() which creates cluster router and join switch; then node sync creates per-node entities.
+			initialDB.NBData = append(initialDB.NBData, nbZone)
+			Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
+
+			fakeOvn.startWithDBSetup(
+				initialDB,
+				&corev1.NamespaceList{Items: []corev1.Namespace{*newUDNNamespace(ns)}},
+				&corev1.NodeList{Items: []corev1.Node{*testNode}},
+				&corev1.PodList{Items: []corev1.Pod{}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+
+			// Mock ovn-nbctl list Load_Balancer_Group (used by UDN controller init; default controller init is not run in this test).
+			fexec := util.GetExec().(*testing.FakeExec)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group",
+			})
+
+			// networkManager is already started by startWithDBSetup (via init()) and stopped by AfterEach (shutdown).
+			Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
+			Expect(fakeOvn.controller.WatchPods()).To(Succeed())
+
+			// Run init() to create cluster-level entities (cluster router, join switch, LB groups, etc.),
+			// then start watchers so node sync creates per-node entities (node LS, GW router, etc.).
+			l3Controller, ok := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
+			Expect(ok).To(BeTrue())
+			Expect(l3Controller.init()).To(Succeed())
+			Expect(l3Controller.WatchNodes()).To(Succeed())
+			Expect(l3Controller.WatchPods()).To(Succeed())
+			Expect(l3Controller.WatchNetworkPolicy()).To(Succeed())
+
+			// Wait for the controller to create UDN entities: assert any switches and routers exist with this network's external-ids,
+			// and that the gateway router for this node exists.
+			networkName := networkConfig.GetNetworkName()
+			gwRouterName := networkConfig.GetNetworkScopedGWRouterName(nodeName)
+			Eventually(func(g Gomega) {
+				switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(fakeOvn.nbClient, func(ls *nbdb.LogicalSwitch) bool {
+					return ls.ExternalIDs != nil && ls.ExternalIDs[types.NetworkExternalID] == networkName
+				})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(switches).NotTo(BeEmpty(), "at least one LogicalSwitch for network %q should exist", networkName)
+			}).WithTimeout(10 * time.Second).Should(Succeed())
+			Eventually(func(g Gomega) {
+				routers, err := libovsdbops.FindLogicalRoutersWithPredicate(fakeOvn.nbClient, func(lr *nbdb.LogicalRouter) bool {
+					return lr.ExternalIDs != nil && lr.ExternalIDs[types.NetworkExternalID] == networkName
+				})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(routers).NotTo(BeEmpty(), "at least one LogicalRouter for network %q should exist", networkName)
+			}).WithTimeout(10 * time.Second).Should(Succeed())
+			Eventually(func(g Gomega) {
+				routers, err := libovsdbops.FindLogicalRoutersWithPredicate(fakeOvn.nbClient, func(lr *nbdb.LogicalRouter) bool {
+					return lr.Name == gwRouterName
+				})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(routers).NotTo(BeEmpty(), "gateway router %q should exist", gwRouterName)
+			}).WithTimeout(10 * time.Second).Should(Succeed())
+
+			// Do NOT delete the NAD. Simulate CleanupStaleNetworks(no valid networks): dummy controller
+			// with InvalidID runs Cleanup() so our network is treated as stale and all its entities are removed.
+			dummyController, err := NewLayer3UserDefinedNetworkController(
+				&l3Controller.CommonNetworkControllerInfo,
+				mutableNetInfoCleanup,
+				fakeNetworkManager,
+				nil,
+				nil,
+				NewPortCache(ctx.Done()),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(dummyController.Cleanup()).To(Succeed())
+
+			Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(defaultNetExpectations))
+			return nil
+		}
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
 	Describe("Dynamic UDN allocation with remote node", func() {
 		It("activates a remote node when a NAD becomes active and cleans it up when inactive", func() {
 			Expect(config.PrepareTestConfig()).To(Succeed())
@@ -841,10 +947,6 @@ func makeCUDNOwnerRef(name string) metav1.OwnerReference {
 	}
 }
 
-func (sni *userDefinedNetInfo) getNetworkRole() string {
-	return util.GetUserDefinedNetworkRole(sni.isPrimary)
-}
-
 func getNetworkRole(netInfo util.NetInfo) string {
 	return util.GetUserDefinedNetworkRole(netInfo.IsPrimaryNetwork())
 }
@@ -855,10 +957,7 @@ func (sni *userDefinedNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSet
 		return err
 	}
 
-	externalIDs := map[string]string{
-		types.NetworkExternalID:     sni.netName,
-		types.NetworkRoleExternalID: sni.getNetworkRole(),
-	}
+	externalIDs := util.GenerateExternalIDsForSwitchOrRouter(netInfo)
 	switch sni.topology {
 	case types.Layer2Topology:
 		dbData.NBData = append(dbData.NBData, &nbdb.LogicalSwitch{
@@ -1010,7 +1109,7 @@ func newNodeWithUserDefinedNetworks(nodeName string, nodeIPv4CIDR string, netInf
 				util.OVNNodeHostCIDRs:                                       fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
 				"k8s.ovn.org/zone-name":                                     zone,
 				"k8s.ovn.org/l3-gateway-config":                             fmt.Sprintf("{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":%q,\"ip-addresses\":[%[2]q],\"ip-address\":%[2]q,\"next-hops\":[%[3]q],\"next-hop\":%[3]q,\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}", util.IPAddrToHWAddr(nodeIP), nodeCIDR, nextHopIP),
-				util.OvnNodeChassisID:                                       "abdcef",
+				util.OvnNodeChassisID:                                       chassisIDForNode(nodeName),
 				"k8s.ovn.org/network-ids":                                   fmt.Sprintf("{\"default\":\"0\",\"isolatednet\":\"%s\"}", userDefinedNetworkID),
 				util.OvnNodeID:                                              "4",
 				"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"isolatednet\":\"25\"}",
