@@ -316,18 +316,36 @@ func SyncConntrackForExternalGateways(gwIPsToKeep sets.Set[string], isPodInLocal
 			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}
 		for _, podIP := range podIPs {
-			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
-			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
-			_, err := DeleteConntrack(podIP.String(), 0, "", netlink.ConntrackOrigDstIP, validNextHopMACs)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
-			}
-			_, err = DeleteConntrack(podIP.String(), 0, "", netlink.ConntrackOrigSrcIP, validNextHopMACs)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
-			}
+			errs = append(errs, deletePodConntrackEntriesForGW(podIP.String(), validNextHopMACs, netlink.ConntrackOrigDstIP)...)
+			errs = append(errs, deletePodConntrackEntriesForGW(podIP.String(), validNextHopMACs, netlink.ConntrackOrigSrcIP)...)
 		}
 	}
 
 	return utilerrors.Join(errs...)
+}
+
+func deletePodConntrackEntriesForGW(podIP string, validNextHopMACs [][]byte, filterType netlink.ConntrackFilterType) []error {
+	var errs []error
+	// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
+	// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
+	flows, err := ConntrackListMatchingEntries(map[string]netlink.ConntrackFilterType{podIP: filterType}, 0, "", validNextHopMACs)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("failed to list conntrack entries for pod %s: %v", podIP, err))
+	}
+	for _, flow := range flows {
+		ipFilter := make(map[string]netlink.ConntrackFilterType)
+		ipFilter[flow.Forward.SrcIP.String()] = netlink.ConntrackOrigDstIP
+		ipFilter[flow.Forward.DstIP.String()] = netlink.ConntrackOrigSrcIP
+		ipFilter[flow.Reverse.SrcIP.String()] = netlink.ConntrackReplySrcIP
+		ipFilter[flow.Reverse.DstIP.String()] = netlink.ConntrackReplyDstIP
+		_, err = DeleteConntrack(ipFilter, 0, "", validNextHopMACs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP, err))
+		}
+		_, err = DeleteConntrack(ipFilter, 0, "", nil)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP, err))
+		}
+	}
+	return errs
 }
