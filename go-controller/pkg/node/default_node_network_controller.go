@@ -969,10 +969,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return err
 		}
 		nc.wg.Add(1)
-		go func() {
+		go func(stopCh <-chan struct{}) {
 			defer nc.wg.Done()
-			nodeController.Run(nc.stopChan)
-		}()
+			nodeController.Run(stopCh)
+		}(nc.stopChan)
 	} else if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// attempt to cleanup the possibly stale bridge
 		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
@@ -1080,7 +1080,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
-	go func() {
+	go func(stopCh <-chan struct{}) {
 		defer nc.wg.Done()
 		podResClient, err := podresourcesapi.New()
 		if err != nil {
@@ -1092,8 +1092,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				klog.V(4).Infof("Error closing PodResourcesAPI client: %v", err)
 			}
 		}()
-		ovspinning.Run(ctx, nc.stopChan, podResClient)
-	}()
+		ovspinning.Run(ctx, stopCh, podResClient)
+	}(nc.stopChan)
 
 	klog.Infof("Default node network controller initialized and ready.")
 	return nil
@@ -1135,10 +1135,10 @@ func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPo
 	}
 
 	nc.wg.Add(1)
-	go func() {
+	go func(stopCh <-chan struct{}) {
 		defer nc.wg.Done()
-		healthServer.Run(nc.stopChan)
-	}()
+		healthServer.Run(stopCh)
+	}(nc.stopChan)
 	return nil
 }
 

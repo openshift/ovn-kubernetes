@@ -567,6 +567,10 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 			if err != nil {
 				return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs, fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 			}
+			if netInfo == nil {
+				// no active network
+				continue
+			}
 			if netInfo.IsUserDefinedNetwork() {
 				// EIP for secondary host interfaces is not supported for secondary networks
 				continue
@@ -1036,6 +1040,10 @@ func (c *Controller) repairNode() error {
 					if err != nil {
 						return fmt.Errorf("failed to get active network for namespace %s: %v", namespace.Name, err)
 					}
+					if netInfo == nil {
+						// no active network
+						continue
+					}
 					if netInfo.IsUserDefinedNetwork() {
 						// EIP for secondary host interfaces is not supported for secondary networks
 						continue
@@ -1142,8 +1150,12 @@ func (c *Controller) migrateFromAddrLabelToAnnotation() error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
-		return c.kube.UpdateNodeStatus(node)
+		nodeToUpdate := node.DeepCopy()
+		if nodeToUpdate.Annotations == nil {
+			nodeToUpdate.Annotations = map[string]string{}
+		}
+		nodeToUpdate.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
+		return c.kube.UpdateNodeStatus(nodeToUpdate)
 	})
 }
 
@@ -1174,8 +1186,12 @@ func (c *Controller) addIPToAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
-		return c.kube.UpdateNodeStatus(node)
+		nodeToUpdate := node.DeepCopy()
+		if nodeToUpdate.Annotations == nil {
+			nodeToUpdate.Annotations = map[string]string{}
+		}
+		nodeToUpdate.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
+		return c.kube.UpdateNodeStatus(nodeToUpdate)
 	})
 }
 
@@ -1206,8 +1222,12 @@ func (c *Controller) deleteIPFromAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
-		return c.kube.UpdateNodeStatus(node)
+		nodeToUpdate := node.DeepCopy()
+		if nodeToUpdate.Annotations == nil {
+			nodeToUpdate.Annotations = map[string]string{}
+		}
+		nodeToUpdate.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
+		return c.kube.UpdateNodeStatus(nodeToUpdate)
 	})
 }
 

@@ -68,6 +68,10 @@ func (k *kind) GetNetwork(name string) (api.Network, error) {
 	return getNetwork(name)
 }
 
+func (k *kind) ListNetworks() ([]string, error) {
+	return listNetworks()
+}
+
 func (k *kind) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
 	return getNetworkInterface(container.Name, network.Name())
 }
@@ -607,6 +611,8 @@ const (
 	inspectNetworkMACKeyStr        = "{{ with index .NetworkSettings.Networks %q }}{{ .MacAddress }}{{ end }}"
 	inspectNetworkContainersKeyStr = "{{ range $key, $value := .Containers }}{{ printf \"%s\\n\" $value.Name}}{{ end }}'"
 	emptyValue                     = "<no value>"
+	// Docker 29+ returns "invalid IP" for IP fields
+	emptyIPValue                   = "invalid IP"
 )
 
 func isNetworkAttachedToContainer(networkName, containerName string) bool {
@@ -627,13 +633,27 @@ func doesContainerNameExist(name string) (bool, error) {
 	return state != "", nil
 }
 
-func doesNetworkExist(networkName string) (bool, error) {
-	dataBytes, err := exec.Command(containerengine.Get().String(), "network", "ls", "--format", nameFormat).CombinedOutput()
+func listNetworks() ([]string, error) {
+	output, err := exec.Command(containerengine.Get().String(), "network", "ls", "--format", nameFormat).CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("failed to list networks: %w", err)
+		return nil, fmt.Errorf("failed to list networks: %w", err)
 	}
-	for _, existingNetworkName := range strings.Split(strings.Trim(string(dataBytes), "\n"), "\n") {
-		if existingNetworkName == networkName {
+	var networks []string
+	for _, name := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if name != "" {
+			networks = append(networks, name)
+		}
+	}
+	return networks, nil
+}
+
+func doesNetworkExist(networkName string) (bool, error) {
+	networks, err := listNetworks()
+	if err != nil {
+		return false, err
+	}
+	for _, name := range networks {
+		if name == networkName {
 			return true, nil
 		}
 	}
@@ -715,7 +735,7 @@ func getNetworkInterface(containerName, networkName string) (api.NetworkInterfac
 		}
 		valueStr := strings.Trim(string(value), "\n")
 		valueStr = strings.Trim(valueStr, "'")
-		if valueStr == emptyValue {
+		if valueStr == emptyValue || valueStr == emptyIPValue {
 			return "", nil
 		}
 		return valueStr, nil
