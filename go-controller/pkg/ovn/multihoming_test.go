@@ -118,11 +118,11 @@ func withClusterPortGroup() option {
 	}
 }
 
-func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(isPrimary bool) []libovsdbtest.TestData {
-	return em.expectedLogicalSwitchesAndPortsWithLspEnabled(isPrimary, nil)
+func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPorts() []libovsdbtest.TestData {
+	return em.expectedLogicalSwitchesAndPortsWithLspEnabled(nil)
 }
 
-func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWithLspEnabled(isPrimary bool, expectedPodLspEnabled map[string]*bool) []libovsdbtest.TestData {
+func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsWithLspEnabled(expectedPodLspEnabled map[string]*bool) []libovsdbtest.TestData {
 	data := []libovsdbtest.TestData{}
 	for _, ocInfo := range em.fakeOvn.userDefinedNetworkControllers {
 		nodeslsps := make(map[string][]string)
@@ -260,10 +260,8 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 				UUID:  switchName + "-UUID",
 				Name:  switchName,
 				Ports: nodeslsps[switchName],
-				ExternalIDs: map[string]string{
-					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
-					ovntypes.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(isPrimary),
-				},
+
+				ExternalIDs: util.GenerateExternalIDsForSwitchOrRouter(ocInfo.bnc),
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],
 			}
@@ -331,7 +329,7 @@ func newExpectedSwitchPort(lspUUID string, portName string, podAddr string, pod 
 			ovntypes.TopologyExternalID: netInfo.TopologyType(),
 		},
 		Options: map[string]string{
-			libovsdbops.RequestedChassis: pod.nodeName,
+			libovsdbops.RequestedChassis: requestedChassisForPod(pod),
 			"iface-id-ver":               pod.podName,
 		},
 		PortSecurity: []string{podAddr},
