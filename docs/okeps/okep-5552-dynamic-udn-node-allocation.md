@@ -63,9 +63,16 @@ advertising this subnet with BGP and want to use the smallest subnet possible.
 ## Proposed Solution
 
 The proposed solution is to add a configuration knob to OVN-Kubernetes, "--dynamic-udn-allocation", which will enable
-this feature. Once enabled, NADs derived from CUDNs and UDNs will only be rendered on nodes where there is a pod
-scheduled in that respective network. Additionally, if the node is scheduled as an Egress IP Node for a UDN, this node
-will also render the UDN.
+this feature. Once enabled, NADs derived from CUDNs and UDNs will only be rendered on nodes where one of the conditions
+below are true:
+
+1. There is a pod scheduled in the respective network.
+2. The node is scheduled as an Egress IP Node for a network.
+3. If Cluster Network Connect (CNC) CR exists which selects a network that meets 1 or 2, then all other networks and NADs
+selected by the CNC will also be included.
+
+If a node meets the conditions above, the node is considered *active*. A node where a network is not rendered and
+does not meet the above criteria is considered *inactive*.
 
 When the last pod on the network is deleted from a node, OVNK will not immediately tear down the UDN.
 Instead, OVNK will rely on a dead timer to expire to conclude that this UDN is no longer in use and
@@ -82,9 +89,6 @@ In OVN-Kubernetes we have three main controllers that handle rendering of networ
  - Controller Manager - runs on a per-zone basis, handles configuring OVN for all networking features
  - Node Controller Manager - runs on a per-node basis, handles configuring node specific things like nftables, VRFs, etc.
 
-With this change, Cluster Manger will be largely untouched, while Controller Manager and Node Controller Manager will be
-modified in a few places to filter out rendering UDNs when a pod doesn't exist.
-
 #### Internal Controller Details
 
 In OVN-Kubernetes we have many controllers that handle features for different networks, encompassed under three
@@ -99,13 +103,20 @@ controller manager containers. The breakdown of how these will be modified is ou
   * Unidling Controller — No change
   * DNS Resolver — No change
   * Network Cluster Controller — Modified to report status and exclude nodes not serving the UDN. Ignore node allocation
-for NADs that are not active on a particular node (no pods for the UDN and not an EIP node).
+for NADs that are not active on a particular node.
+  * CNC — No change (continues CNC-level allocation only: connect-router tunnel key and connect subnets).
 * Controller Manager (ovnkube-controller)
   * Default Network — No change
-  * NAD Controller — Ignore NADs for UDNs that are not active on this node (no pods for the UDN and not an EIP node)
+  * NAD Controller — Ignore NADs for UDNs that are not active on this node
+  * CNC — Modified for Dynamic UDN to use effective node activity from Network Manager.
+For inactive local networks, skip/remove local connect-router/network-router ports and local routing policies.
+For Layer 3 remote nodes, also skip/remove remote connect-router ports and per-node static routes when the remote
+node is inactive, and add them back when active. Layer 2 remains network-level in CNC (no per-remote-node CNC
+objects) so remote nodes will not be filtered for Layer 2.
+Requeues for both local and remote active/inactive transitions are handled through NAD and network reference change events.
 * Node Controller Manager
   * Default Network — No change
-  * NAD Controller — Ignore NADs for UDNs that are not active on this node (no pods for the UDN and not an EIP node)
+  * NAD Controller — Ignore NADs for UDNs that are not active on this node
 
 The resulting NAD Controller change will filter out NADs that do not apply to this node, stopping NAD keys from being
 enqueued to the Controller Manager/Node Controller Manager's Network Manager. Those Controller Managers will not need
@@ -115,12 +126,13 @@ Cluster Manager, this function will not apply, but for Controller Manager and No
 that filters based on if the UDN is serving pods on this node.
 
 For Cluster Manager, Network Cluster Controller (NCC) is spawned per UDN to handle cluster-wide allocation of IDs, keys and
-subnets. NCC will be modified to query the NAD Controller to see if a node is active or not. If not, then it will not
-allocate subnets and in the case of Layer 2 networks, it also will not allocate udn-layer2-node-gateway-router-lrp-tunnel-ids.
-Upon an inactive network going active on a node, the network change will be propagated to the NCC, and NCC will then
-allocate and annotate the node.
+subnets. NCC will be modified to query the NAD Controller/Network Manager to see if a node is active or not. This active
+decision is based on effective activity (direct pod/egress IP activity plus CNC-connected PodNetwork relationships). If not
+active, NCC will not allocate subnets and in the case of Layer 2 networks, it also will not allocate
+udn-layer2-node-gateway-router-lrp-tunnel-ids. Upon an inactive network going active on a node, the network change will be
+propagated to NCC, and NCC will then allocate and annotate the node.
 
-#### New Pod/EgressIP Tracker Controller
+#### New Pod/EgressIP/CNC Tracker Controller
 
 In order to know whether the Managers should filter out a UDN, a pod controller and egress IP controller will be used
 in the Managers to track this information in memory. The pod controller will be a new level driven controller for
@@ -138,6 +150,10 @@ Controller Manager and Node Controller Manager will leverage this callback, so t
 reconcile the NAD for these events. This is important as it provides a way to signal that NADController should remove
 a UDN controller if it is no longer active, or alternatively, force the NAD Controller to reconcile a UDN Controller if for example,
 a new remote node has activated.
+
+NAD Controller/Network Manager will also maintain a lightweight CNC relationship cache (derived from CNC objects with
+PodNetwork connectivity). Node activity inputs remain Pod and EgressIP trackers; effective activity is computed by taking
+that direct activity and expanding it across CNC-connected PodNetwork relationships for reconciliation decisions.
 
 #### Other Controller Changes
 
