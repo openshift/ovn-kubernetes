@@ -153,6 +153,10 @@ func (c *contextOpenshift) GetExternalContainerLogs(container api.ExternalContai
 	panic("not implemented")
 }
 
+func (o openshift) ListNetworks() ([]string, error) {
+	panic("not implemented")
+}
+
 func (c contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
 	panic("not implemented")
 }
