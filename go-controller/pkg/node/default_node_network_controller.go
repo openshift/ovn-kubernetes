@@ -420,6 +420,8 @@ func setupOVNNode(node *corev1.Node) error {
 		}
 	}
 
+	klog.Infof("set ovs bundle-idle-timeout to: %d", config.Default.OpenFlowProbe)
+
 	setExternalIdsCmd := []string{
 		"set",
 		"Open_vSwitch",
