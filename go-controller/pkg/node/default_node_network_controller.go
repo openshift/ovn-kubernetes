@@ -42,6 +42,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/podresourcesapi"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -713,13 +714,6 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	var subnets []*net.IPNet
 	var cniServer *cni.Server
 
-	// Setting debug log level during node bring up to expose bring up process.
-	// Log level is returned to configured value when bring up is complete.
-	var level klog.Level
-	if err := level.Set("5"); err != nil {
-		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
-	}
-
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		if err = configureGlobalForwarding(); err != nil {
 			return err
@@ -894,9 +888,6 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
-		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
-	}
 	nc.sbZone = sbZone
 
 	return nil
@@ -911,13 +902,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	if nc.mgmtPortController == nil {
 		return fmt.Errorf("default node network controller hasn't been pre-started")
-	}
-
-	// Setting debug log level during node bring up to expose bring up process.
-	// Log level is returned to configured value when bring up is complete.
-	var level klog.Level
-	if err := level.Set("5"); err != nil {
-		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
 	waiter := newStartupWaiter()
@@ -989,7 +973,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			defer nc.wg.Done()
 			nodeController.Run(nc.stopChan)
 		}()
-	} else {
+	} else if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// attempt to cleanup the possibly stale bridge
 		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
 		if err != nil {
@@ -999,10 +983,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			klog.Errorf("Deletion of port int on  br-int failed: %v (%v)", err, stderr)
 		}
-	}
-
-	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
-		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
 	// start management port controller
@@ -1102,7 +1082,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nc.wg.Add(1)
 	go func() {
 		defer nc.wg.Done()
-		ovspinning.Run(nc.stopChan)
+		podResClient, err := podresourcesapi.New()
+		if err != nil {
+			klog.Errorf("Failed to initialize PodResourcesAPI client: %v", err)
+			return
+		}
+		defer func() {
+			if err := podResClient.Close(); err != nil {
+				klog.V(4).Infof("Error closing PodResourcesAPI client: %v", err)
+			}
+		}()
+		ovspinning.Run(ctx, nc.stopChan, podResClient)
 	}()
 
 	klog.Infof("Default node network controller initialized and ready.")
@@ -1112,7 +1102,12 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 // deleteLogicalEntities will never be true for default network
 func (nc *DefaultNodeNetworkController) Stop() {
+	if nc.stopChan == nil {
+		klog.Infof("Default node network controller is already stopped")
+		return
+	}
 	close(nc.stopChan)
+	nc.stopChan = nil
 	nc.wg.Wait()
 }
 
@@ -1189,11 +1184,22 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 					klog.Errorf("Failed to get service port for endpoint %s: %v", oldIPStr, err)
 					continue
 				}
-				// upon update and delete events, flush conntrack only for UDP
+				// upon update and delete events, flush UDP conntrack for Service port
 				if _, err := util.DeleteConntrackServicePort(oldIPStr, servicePort.Port, *oldPort.Protocol,
 					netlink.ConntrackReplyAnyIP, nil); err != nil {
 					klog.Errorf("Failed to delete conntrack entry for %s port %d: %v", oldIPStr, servicePort.Port, err)
 					errors = append(errors, err)
+				}
+
+				// Flush UDP conntrack entries for NodePort (and LoadBalancer services that allocate NodePorts)
+				// TODO: Once vishvananda/netlink support ConntrackFilterType '--reply-port-src', we can use one DeleteConntrackServicePort() call
+				//       conntrack entries for both ClusterIP and NodePort.
+				if util.ServiceTypeHasNodePort(svc) && servicePort.NodePort > 0 {
+					if _, err := util.DeleteConntrackServicePort(oldIPStr, servicePort.NodePort, *oldPort.Protocol,
+						netlink.ConntrackReplyAnyIP, nil); err != nil {
+						klog.Errorf("Failed to delete conntrack entry for %s NodePort %d: %v", oldIPStr, servicePort.NodePort, err)
+						errors = append(errors, err)
+					}
 				}
 			}
 		}
@@ -1418,9 +1424,23 @@ func (nc *DefaultNodeNetworkController) syncNodes(objs []interface{}) error {
 }
 
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
-// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
-// enough, it will return an error
+// enough to carry the `config.Default.MTU` and the Geneve header (if overlay transport is used).
+// If the MTU is not big enough, it will return an error
 func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
+	// calc required MTU
+	var requiredMTU int
+	if config.Gateway.SingleNode || config.Default.Transport == types.NetworkTransportNoOverlay {
+		requiredMTU = config.Default.MTU
+	} else {
+		if config.IPv4Mode && !config.IPv6Mode {
+			// we run in single-stack IPv4 only
+			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
+		} else {
+			// we run in single-stack IPv6 or dual-stack mode
+			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
+		}
+	}
+
 	// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma
 	ovnEncapIps := strings.Split(config.Default.EffectiveEncapIP, ",")
 	for _, ip := range ovnEncapIps {
@@ -1431,20 +1451,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 		if err != nil {
 			return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
-		}
-
-		// calc required MTU
-		var requiredMTU int
-		if config.Gateway.SingleNode {
-			requiredMTU = config.Default.MTU
-		} else {
-			if config.IPv4Mode && !config.IPv6Mode {
-				// we run in single-stack IPv4 only
-				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
-			} else {
-				// we run in single-stack IPv6 or dual-stack mode
-				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
-			}
 		}
 
 		if mtu < requiredMTU {
