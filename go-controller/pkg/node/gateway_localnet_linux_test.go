@@ -42,21 +42,7 @@ const (
 	linkName            = "breth0"
 )
 
-func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher {
-	initIPTable := map[string]util.FakeTable{
-		"nat":    {},
-		"filter": {},
-		"mangle": {},
-	}
-
-	f4 := iptV4.(*util.FakeIPTables)
-	err := f4.MatchState(initIPTable, nil)
-	Expect(err).NotTo(HaveOccurred())
-
-	f6 := iptV6.(*util.FakeIPTables)
-	err = f6.MatchState(initIPTable, nil)
-	Expect(err).NotTo(HaveOccurred())
-
+func initFakeNodePortWatcher() *nodePortWatcher {
 	gwMACParsed, _ := net.ParseMAC(gwMAC)
 
 	defaultBridge := bridgeconfig.TestDefaultBridgeConfig()
@@ -291,7 +277,7 @@ var _ = Describe("Node Operations", func() {
 		err = nft.ParseDump(getBaseNFTRules(types.K8sMgmtIntfName))
 		Expect(err).NotTo(HaveOccurred())
 
-		fNPW = initFakeNodePortWatcher(iptV4, iptV6)
+		fNPW = initFakeNodePortWatcher()
 	})
 
 	AfterEach(func() {

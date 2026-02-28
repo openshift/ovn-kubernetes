@@ -214,7 +214,6 @@ var _ = Describe("DeleteEndpointSlice", func() {
 		watcher    *factory.WatchFactory
 		npw        *nodePortWatcher
 		iptV4      util.IPTablesHelper
-		iptV6      util.IPTablesHelper
 	)
 
 	const (
@@ -244,8 +243,8 @@ var _ = Describe("DeleteEndpointSlice", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Initialize nodePortWatcher with default network manager
-		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
-		npw = initFakeNodePortWatcher(iptV4, iptV6)
+		iptV4, _ = util.SetFakeIPTablesHelpers()
+		npw = initFakeNodePortWatcher()
 		npw.watchFactory = watcher
 		npw.networkManager = networkmanager.Default().Interface()
 
@@ -338,7 +337,6 @@ var _ = Describe("SyncServices", func() {
 		watcher    *factory.WatchFactory
 		npw        *nodePortWatcher
 		iptV4      util.IPTablesHelper
-		iptV6      util.IPTablesHelper
 	)
 
 	const (
@@ -367,8 +365,8 @@ var _ = Describe("SyncServices", func() {
 		err = watcher.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
-		npw = initFakeNodePortWatcher(iptV4, iptV6)
+		iptV4, _ = util.SetFakeIPTablesHelpers()
+		npw = initFakeNodePortWatcher()
 		npw.watchFactory = watcher
 		npw.networkManager = networkmanager.Default().Interface()
 
