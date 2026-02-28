@@ -611,7 +611,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -844,7 +843,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -1047,7 +1045,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}()
 		err = wf.Start()
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		Expect(err).NotTo(HaveOccurred())
@@ -1284,7 +1281,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -1731,7 +1727,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		defer func() {
 			wf.Shutdown()
 		}()
-		_, _ = util.SetFakeIPTablesHelpers()
 		nodenft.SetFakeNFTablesHelper()
 		fNPW := initFakeNodePortWatcher()
 		fNPW.watchFactory = wf
