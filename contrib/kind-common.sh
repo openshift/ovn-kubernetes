@@ -1010,6 +1010,23 @@ deploy_frr_external_container() {
     # Enable IPv6 forwarding in FRR
     $OCI_BIN exec frr sysctl -w net.ipv6.conf.all.forwarding=1
   fi
+
+  if [ "$ENABLE_EVPN" == true ]; then
+    echo "Configuring global EVPN BGP on external FRR (advertise-all-vni + neighbor activation)..."
+    # Enable l2vpn evpn address-family, activate all neighbors, and advertise-all-vni.
+    # Neighbors are already configured by demo.sh; extract them from the running config.
+    # This is cluster-level infrastructure shared across all EVPN tests; configured once
+    # at install time so individual tests don't need to manage it.
+    local bgp_neighbors vtysh_cmds
+    bgp_neighbors=$($OCI_BIN exec frr vtysh -c "show running-config" | grep "^ neighbor.*remote-as" | awk '{print $2}')
+    vtysh_cmds=(-c "configure terminal" -c "router bgp 64512" -c "address-family l2vpn evpn")
+    for neighbor in $bgp_neighbors; do
+      vtysh_cmds+=(-c "neighbor $neighbor activate")
+    done
+    vtysh_cmds+=(-c "advertise-all-vni" -c "exit-address-family" -c "end" -c "write memory")
+    $OCI_BIN exec frr vtysh "${vtysh_cmds[@]}"
+    echo "Global EVPN BGP config complete on external FRR"
+  fi
 }
 
 deploy_bgp_external_server() {
