@@ -5,6 +5,7 @@ import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
 var LocalnetValid = []testscenario.ValidateCRScenario{
 	{
 		Description: "should create localnet topology successfully - minimal",
+		Name:        "localnet-minimal-success",
 		Manifest: `
 ---
 apiVersion: k8s.ovn.org/v1
@@ -25,6 +26,7 @@ spec:
 	},
 	{
 		Description: "should create localnet topology successfully - ipam persistent",
+		Name:        "localnet-ipam-lifecycle-persistent-success",
 		Manifest: `
 ---
 apiVersion: k8s.ovn.org/v1
@@ -53,6 +55,7 @@ spec:
 	},
 	{
 		Description: "should create localnet topology successfully - ipam disabled",
+		Name:        "localnet-ipam-disabled-success",
 		Manifest: `
 ---
 apiVersion: k8s.ovn.org/v1
