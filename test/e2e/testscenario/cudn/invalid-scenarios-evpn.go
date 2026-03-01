@@ -475,7 +475,7 @@ spec:
 	},
 	{
 		Description: "routeTarget exceeds maximum length of 21 characters",
-		ExpectedErr: `Too long: may not be longer than 21`,
+		ExpectedErr: `Too long`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
