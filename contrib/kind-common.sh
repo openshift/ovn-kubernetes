@@ -950,6 +950,19 @@ clone_frr() {
     # Change into the cloned repo directory before applying patches
     pushd frr-k8s
     git apply ../patches/*
+
+    # The upstream frr-k8s demo.sh hardcodes quay.io/frrouting/frr:9.1.0,
+    # which crashes on musl libc (Alpine) due to a race condition in
+    # pthread_setname_np during BGP keepalive thread startup
+    # (https://github.com/FRRouting/frr/issues/15699, fixed in FRR 10.1 by
+    # https://github.com/FRRouting/frr/pull/15714).
+    #
+    # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
+    # We bump further to 10.4.2 to include additional fixes for EVPN:
+    # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
+    # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
+    sed -i 's|quay.io/frrouting/frr:9.1.0|quay.io/frrouting/frr:10.4.2|g' hack/demo/demo.sh
+
     popd
 
     popd || exit 1
