@@ -1,4 +1,4 @@
-module github.com/ovn-org/ovn-kubernetes/openshift
+module github.com/ovn-kubernetes/ovn-kubernetes/openshift
 
 go 1.24.0
 
@@ -9,8 +9,8 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/openshift-eng/openshift-tests-extension v0.0.0-20250916161632-d81c09058835
 	github.com/openshift/api v0.0.0-20251020135558-286504b695bc
-	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0
-	github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
+	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
+	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
 	github.com/spf13/cobra v1.9.1
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
@@ -219,8 +219,8 @@ require (
 replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/onsi/ginkgo/v2 => github.com/openshift/onsi-ginkgo/v2 v2.6.1-0.20241205171354-8006f302fd12
-	github.com/ovn-org/ovn-kubernetes/go-controller => ../go-controller
-	github.com/ovn-org/ovn-kubernetes/test/e2e => ../test/e2e
+	github.com/ovn-kubernetes/ovn-kubernetes/go-controller => ../go-controller
+	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e => ../test/e2e
 	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
 	// The dependency must be with downstream kubernetes so that agnhost container image
 	// index is derived correctly.

@@ -2,7 +2,7 @@ package test
 
 import (
 	// import OVN-Kubernetes E2Es
-	_ "github.com/ovn-org/ovn-kubernetes/test/e2e"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 
 	// Ensure that logging flags are part of the command line.
 	_ "k8s.io/component-base/logs/testinit"
