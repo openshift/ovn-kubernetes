@@ -46,5 +46,12 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 COPY dist/images/ovnkube.sh dist/images/ovndb-raft-functions.sh /root/
 
 
+# Copy and install custom OVS/OVN RPMs.
+RUN mkdir -p /root/fdp/
+COPY *fdp.*.rpm /root/fdp/
+RUN dnf install -y 'dnf-command(versionlock)'
+RUN dnf install -y /root/fdp/*.rpm
+RUN dnf versionlock add python3-openvswitch* openvswitch* ovn*
+
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
