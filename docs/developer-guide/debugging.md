@@ -156,12 +156,31 @@ You need:
 
 #### Debugging Procedure
 
-1. **Start a Fedora 42 container** (matching the build environment):
+1. **Start a Fedora container** (matching the build environment):
+
+   CI records the exact Fedora base image digest used to build the OVN image in
+   `coredumps/binaries/fedora-base-image.txt`. Use this digest to ensure your
+   debugging container matches the CI environment:
 
    ```bash
    cd ~/kind-logs-*/coredumps
+   cat binaries/fedora-base-image.txt
+   # Example output:
+   # quay.io/fedora/fedora@sha256:b489f8cafcb6e79d...
 
    docker run --rm -it \
+     --platform linux/amd64 \
+     -v "$(pwd):/coredumps:ro" \
+     --name ovn-debug \
+     "$(cat binaries/fedora-base-image.txt)" \
+     bash
+   ```
+
+   If `fedora-base-image.txt` is not available, fall back to the floating tag:
+
+   ```bash
+   docker run --rm -it \
+     --platform linux/amd64 \
      -v "$(pwd):/coredumps:ro" \
      --name ovn-debug \
      quay.io/fedora/fedora:42 \
@@ -171,7 +190,7 @@ You need:
 2. **Inside the container, install debugging tools**:
 
    ```bash
-   dnf install -y gdb dnf-utils koji file
+   dnf install -y gdb dnf-utils dnf5-plugins koji file
    ```
 
 3. **Determine the OVN version** from the binary:
