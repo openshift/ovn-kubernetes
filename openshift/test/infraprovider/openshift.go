@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	v1 "github.com/openshift/api/operator/v1"
+	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -27,8 +30,10 @@ import (
 const (
 	ovnAnnotationNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 	ovnpodNamespace         = "openshift-ovn-kubernetes"
-	// network name for OCP cluster primary network.
-	primaryNetworkName = "host"
+	// use network name created for attaching frr container with
+	// cluster priamary network as per changes in the link:
+	// https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L123-L124
+	primaryNetworkName = "ostestbm_net"
 )
 
 type openshift struct {
@@ -55,6 +60,18 @@ func New(config *rest.Config) (api.Provider, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes client: %w", err)
+	}
+	operatorClient, err := operatorv1client.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create operator client: %w", err)
+	}
+	network, err := operatorClient.OperatorV1().Networks().Get(context.Background(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve networks operator config: %w", err)
+	}
+	err = loadOvnConfig(network.Spec.DefaultNetwork.OVNKubernetesConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unable to load ovn configuration: %w", err)
 	}
 	infraNodes, primaryNet, err := loadKubeNodes(kubeClient)
 	if err != nil {
@@ -93,6 +110,19 @@ func New(config *rest.Config) (api.Provider, error) {
 		}
 	}
 	return &o, nil
+}
+
+func loadOvnConfig(conf *v1.OVNKubernetesConfig) error {
+	if conf == nil {
+		return fmt.Errorf("no ovn configuration found")
+	}
+	if conf.GatewayConfig == nil {
+		return fmt.Errorf("ovn gateway config not found")
+	}
+	if conf.GatewayConfig.RoutingViaHost {
+		os.Setenv("OVN_GATEWAY_MODE", "local")
+	}
+	return nil
 }
 
 func loadKubeNodes(kubeClient *kubernetes.Clientset) (map[string]*ocpNode, *container.ContainerEngineNetwork, error) {
@@ -214,7 +244,13 @@ func (o *openshift) PrimaryNetwork() (api.Network, error) {
 }
 
 func (o *openshift) GetNetwork(name string) (api.Network, error) {
+	// Override "kind" network queries with the actual primary network name
+	if name == "kind" {
+		framework.Logf("overriding kind network with actual primary network name %s for the query", primaryNetworkName)
+		name = primaryNetworkName
+	}
 	return o.getNetwork(name)
+
 }
 
 func (o *openshift) getNetwork(name string) (api.Network, error) {

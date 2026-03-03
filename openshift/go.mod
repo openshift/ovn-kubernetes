@@ -9,6 +9,7 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/openshift-eng/openshift-tests-extension v0.0.0-20250916161632-d81c09058835
 	github.com/openshift/api v0.0.0-20251020135558-286504b695bc
+	github.com/openshift/client-go v0.0.0-20251015124057-db0dee36e235
 	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e v0.0.0-20260311182142-cd2f08c7a486
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/crypto v0.43.0
@@ -122,7 +123,6 @@ require (
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/opencontainers/selinux v1.11.1 // indirect
 	github.com/openshift-kni/k8sreporter v1.0.6 // indirect
-	github.com/openshift/client-go v0.0.0-20251015124057-db0dee36e235 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
 	github.com/openshift/library-go v0.0.0-20251015151611-6fc7a74b67c5 // indirect
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0 // indirect
