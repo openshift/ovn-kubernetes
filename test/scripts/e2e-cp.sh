@@ -161,6 +161,10 @@ if [[ "${WHAT}" = "$SERIAL_LABEL" ]]; then
   shift # don't "focus" on Serial since we filter by label
 fi
 
+if [ "$ENABLE_EVPN" != true ]; then
+  skip_label "Feature:EVPN"
+fi
+
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
   skip_label "Feature:RouteAdvertisements"
 else
@@ -260,16 +264,40 @@ GO_TEST_TIMEOUT=$((TEST_TIMEOUT + 5))
 pushd e2e
 
 go mod download
-go test -test.timeout ${GO_TEST_TIMEOUT}m -v . \
-        -ginkgo.v \
-        -ginkgo.focus ${FOCUS:-.} \
-        -ginkgo.timeout ${TEST_TIMEOUT}m \
-        -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
-        -ginkgo.skip="${SKIPPED_TESTS}" \
-        ${LABELED_TESTS:+-ginkgo.label-filter="${LABELED_TESTS}"} \
-        -ginkgo.junit-report=${E2E_REPORT_DIR}/junit_${E2E_REPORT_PREFIX}report.xml \
+
+if [ "$ENABLE_EVPN" = true ]; then
+  # EVPN tests are parallel-safe (unique per-test resource names, randomized
+  # subnets). Use the ginkgo CLI so that -procs=3 spawns 3 coordinated worker
+  # processes — one per DescribeTable entry.  go test cannot drive Ginkgo
+  # parallelism directly; only the ginkgo binary can start the sync server and
+  # fan out the worker processes.
+  ginkgo run \
+        -procs=3 \
+        -v \
+        --focus="${FOCUS:-.}" \
+        --timeout="${TEST_TIMEOUT}m" \
+        --flake-attempts="${FLAKE_ATTEMPTS:-2}" \
+        --skip="${SKIPPED_TESTS}" \
+        ${LABELED_TESTS:+--label-filter="${LABELED_TESTS}"} \
+        --junit-report="${E2E_REPORT_DIR}/junit_${E2E_REPORT_PREFIX}report.xml" \
+        . \
+        -- \
         -provider skeleton \
-        -kubeconfig ${KUBECONFIG} \
+        -kubeconfig "${KUBECONFIG}" \
         ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
         ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"}
+else
+  go test -test.timeout ${GO_TEST_TIMEOUT}m -v . \
+          -ginkgo.v \
+          -ginkgo.focus ${FOCUS:-.} \
+          -ginkgo.timeout ${TEST_TIMEOUT}m \
+          -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
+          -ginkgo.skip="${SKIPPED_TESTS}" \
+          ${LABELED_TESTS:+-ginkgo.label-filter="${LABELED_TESTS}"} \
+          -ginkgo.junit-report=${E2E_REPORT_DIR}/junit_${E2E_REPORT_PREFIX}report.xml \
+          -provider skeleton \
+          -kubeconfig ${KUBECONFIG} \
+          ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
+          ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"}
+fi
 popd

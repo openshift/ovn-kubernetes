@@ -236,6 +236,12 @@ func (c *contextKind) createExternalContainer(container api.ExternalContainer) (
 		return container, fmt.Errorf("container %s already exists", container.Name)
 	}
 	cmd := []string{"run", "-itd", "--privileged", "--name", container.Name, "--network", container.Network.Name(), "--hostname", container.Name}
+	if container.IPv4 != "" {
+		cmd = append(cmd, "--ip", container.IPv4)
+	}
+	if container.IPv6 != "" {
+		cmd = append(cmd, "--ip6", container.IPv6)
+	}
 	if container.Entrypoint != "" {
 		cmd = append(cmd, "--entrypoint", container.Entrypoint)
 	}
@@ -612,7 +618,7 @@ const (
 	inspectNetworkContainersKeyStr = "{{ range $key, $value := .Containers }}{{ printf \"%s\\n\" $value.Name}}{{ end }}'"
 	emptyValue                     = "<no value>"
 	// Docker 29+ returns "invalid IP" for IP fields
-	emptyIPValue                   = "invalid IP"
+	emptyIPValue = "invalid IP"
 )
 
 func isNetworkAttachedToContainer(networkName, containerName string) bool {
@@ -801,7 +807,7 @@ func getNetworkInterface(containerName, networkName string) (api.NetworkInterfac
 	if ni.IPv4 != "" {
 		ni.InfName, err = getInterfaceNameUsingIP(ni.IPv4)
 		if err != nil {
-			framework.Logf("failed to get network interface name using IPv4 address %s: %v", ni.IPv4, err)
+			framework.Logf("failed to get network interface name using IPv4 address %s on container %q: %v", ni.IPv4, containerName, err)
 		}
 	}
 	ni.IPv6Gateway, err = getContainerNetwork(inspectNetworkIPv6GWKeyStr)
@@ -819,7 +825,7 @@ func getNetworkInterface(containerName, networkName string) (api.NetworkInterfac
 	if ni.IPv6 != "" {
 		ni.InfName, err = getInterfaceNameUsingIP(ni.IPv6)
 		if err != nil {
-			framework.Logf("failed to get network interface name using IPv6 address %s: %v", ni.IPv6, err)
+			framework.Logf("failed to get network interface name using IPv6 address %s on container %q: %v", ni.IPv6, containerName, err)
 		}
 	}
 	ni.IPv6Prefix, err = getContainerNetwork(inspectNetworkIPv6PrefixKeyStr)

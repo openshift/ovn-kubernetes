@@ -1009,6 +1009,30 @@ deploy_frr_external_container() {
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     # Enable IPv6 forwarding in FRR
     $OCI_BIN exec frr sysctl -w net.ipv6.conf.all.forwarding=1
+    # Enable keep_addr_on_down to preserve IPv6 addresses during VRF enslavement.
+    # Without this, IPv6 global addresses are removed when interfaces are moved to a VRF,
+    # causing FRR/zebra to fail creating FIB nexthop groups ("no fib nhg" bug).
+    # See: https://docs.kernel.org/networking/vrf.html (section 4: Enslave L3 interfaces)
+    #      https://github.com/FRRouting/frr/issues/1666
+    $OCI_BIN exec frr sysctl -w net.ipv6.conf.all.keep_addr_on_down=1
+  fi
+
+  if [ "$ENABLE_EVPN" == true ]; then
+    echo "Configuring global EVPN BGP on external FRR (advertise-all-vni + neighbor activation)..."
+    # Enable l2vpn evpn address-family, activate all neighbors, and advertise-all-vni.
+    # Neighbors are already configured by demo.sh; extract them from the running config.
+    # This is cluster-level infrastructure shared across all EVPN tests; configured once
+    # at install time so individual tests don't need to manage it.
+    local bgp_neighbors vtysh_cmds
+    bgp_neighbors=$($OCI_BIN exec frr vtysh -c "show running-config" | grep "^ neighbor.*remote-as" | awk '{print $2}')
+    vtysh_cmds=(-c "configure terminal" -c "router bgp 64512" -c "address-family l2vpn evpn")
+    for neighbor in $bgp_neighbors; do
+      vtysh_cmds+=(-c "neighbor $neighbor activate")
+      vtysh_cmds+=(-c "neighbor $neighbor route-reflector-client")
+    done
+    vtysh_cmds+=(-c "advertise-all-vni" -c "exit-address-family" -c "end" -c "write memory")
+    $OCI_BIN exec frr vtysh "${vtysh_cmds[@]}"
+    echo "Global EVPN BGP config complete on external FRR"
   fi
 }
 

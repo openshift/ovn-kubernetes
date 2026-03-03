@@ -5,6 +5,7 @@ import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
 var NoOverlayValid = []testscenario.ValidateCRScenario{
 	{
 		Description: "NoOverlay transport with managed routing and enabled SNAT",
+		Name:        "no-overlay-managed-enabled-snat",
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -28,6 +29,7 @@ spec:
 	},
 	{
 		Description: "NoOverlay transport with unmanaged routing and disabled SNAT",
+		Name:        "no-overlay-unmanaged-disabled-snat",
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -51,6 +53,7 @@ spec:
 	},
 	{
 		Description: "NoOverlay transport with managed routing and disabled SNAT",
+		Name:        "no-overlay-managed-disabled-snat",
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -74,6 +77,7 @@ spec:
 	},
 	{
 		Description: "NoOverlay transport with unmanaged routing and enabled SNAT",
+		Name:        "no-overlay-unmanaged-enabled-snat",
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -97,6 +101,7 @@ spec:
 	},
 	{
 		Description: "NoOverlay transport with dual-stack subnets",
+		Name:        "no-overlay-dual-stack",
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -122,6 +127,7 @@ spec:
 	},
 	{
 		Description: "Layer3 primary network with unset default transport (no transport field set)",
+		Name:        "unset-default-transport",
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
