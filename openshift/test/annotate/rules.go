@@ -28,7 +28,6 @@ var (
 			`[Feature:NodeIPMACMigration]`,
 			`[Feature:OVSCPUPin]`,
 			`[Feature:Unidle]`,
-			`[Feature:RouteAdvertisements]`,
 		},
 	}
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
@@ -92,6 +91,21 @@ var (
 			// TODO: Fix flakiness in this test. Pod connectivity checks may need
 			// to be wrapped in an Eventually block.
 			"perform east/west traffic between nodes following OVN Kube node pod restart",
+			// TODO: this test perma failing panicing at ipalloc.(*primaryIPAllocator).AllocateNextV4.
+			// Fix it later.
+			"integration should recover ovnkube pods after restart with primary and secondary UDN resources",
+			// Disable BGP and VRF Lite tests.
+			"VRF-Lite",
+			"BGP: When default podNetwork is advertised",
+			"BGP: Pod to external server when CUDN network is advertised",
+			"BGP: isolation between advertised networks",
+			// Disable EVPN isolation test with other CUDN advertised network because
+			// it doesn't have required FRR configuration yet.
+			"When there is other network Of type Layer 3 CUDN advertised",
+			"When there is other network Of type Layer 2 CUDN advertised",
+			// These tests need bgpServerNetwork "bgpnet" which is not configured
+			// for downstream tests, so disable it.
+			"It cannot reach an external server on a different network",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},

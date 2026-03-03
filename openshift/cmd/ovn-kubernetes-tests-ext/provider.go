@@ -9,10 +9,6 @@ import (
 	"strings"
 
 	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
-	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/reporters"
@@ -20,13 +16,15 @@ import (
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	kclientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 // partially copied from https://github.com/openshift/origin/blob/17371a2c6a91e0426045fdd0ab3455c5b457622a/pkg/test/extensions/binary.go
 // and https://github.com/openshift/origin/blob/e0a2fbc82ac1f97dc4fa84a00ed5739c94366926/pkg/clioptions/clusterdiscovery/provider.go
-func initializeTestFramework(provider string) error {
+func initializeTestFramework(provider string, cfg *rest.Config) error {
 	if len(provider) == 0 {
 		provider = "{\"type\":\"skeleton\"}"
 	}
@@ -71,23 +69,14 @@ func initializeTestFramework(provider string) error {
 	// (There is no option for "rhel" or "centos".)
 	framework.TestContext.NodeOSDistro = "custom"
 	framework.TestContext.MasterOSDistro = "custom"
-	// load and set the host variable for kubectl
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: framework.TestContext.KubeConfig}, &clientcmd.ConfigOverrides{})
-	cfg, err := clientConfig.ClientConfig()
-	if err != nil {
-		return fmt.Errorf("failed to get client config: %v", err)
-	}
+	// set the host variable for kubectl
+	gomega.Expect(cfg).NotTo(gomega.BeNil())
 	framework.TestContext.Host = cfg.Host
 	framework.TestContext.CreateTestingNS = func(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string) (*corev1.Namespace, error) {
 		return ocphacke2e.CreateTestingNS(ctx, baseName, c, labels, true)
 	}
 	framework.TestContext.DumpLogsOnFailure = true
 	framework.TestContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
-	ocpInfra, err = ocpinfraprovider.New(cfg)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(ocpInfra).NotTo(gomega.BeNil())
-	infraprovider.Set(ocpInfra)
-	deploymentconfig.Set(ocpdeploymentconfig.New())
 	return nil
 }
 
@@ -112,4 +101,17 @@ func writeJUnitReport(report ginkgo.Report, filename string) error {
 	}
 
 	return reporters.GenerateJUnitReportWithConfig(report, filename, config)
+}
+
+func getKubeConfig() (*restclient.Config, error) {
+	kubeConfig := os.Getenv("KUBECONFIG")
+	if kubeConfig == "" {
+		return nil, fmt.Errorf("KUBECONFIG env variable not set")
+	}
+	if _, err := os.Stat(kubeConfig); err != nil {
+		return nil, fmt.Errorf("KUBECONFIG file %q not accessible: %w", kubeConfig, err)
+	}
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeConfig},
+		&clientcmd.ConfigOverrides{})
+	return clientConfig.ClientConfig()
 }
