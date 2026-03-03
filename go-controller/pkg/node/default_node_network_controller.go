@@ -1227,12 +1227,23 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 					klog.Errorf("Failed to get service port for endpoint %s: %v", oldIPStr, err)
 					continue
 				}
-				// upon update and delete events, flush conntrack only for UDP
+				// upon update and delete events, flush UDP conntrack for Service port
 				klog.V(5).Infof("Deleting conntrack entry for endpoint %s, port %d, protocol %s", oldIPStr, servicePort.Port, *oldPort.Protocol)
 				if err := util.DeleteConntrackServicePort(oldIPStr, servicePort.Port, *oldPort.Protocol,
 					netlink.ConntrackReplyAnyIP, nil); err != nil {
 					klog.Errorf("Failed to delete conntrack entry for %s port %d: %v", oldIPStr, servicePort.Port, err)
 					errors = append(errors, err)
+				}
+
+				// Flush UDP conntrack entries for NodePort (and LoadBalancer services that allocate NodePorts)
+				// TODO: Once vishvananda/netlink support ConntrackFilterType '--reply-port-src', we can use one DeleteConntrackServicePort() call
+				//       conntrack entries for both ClusterIP and NodePort.
+				if util.ServiceTypeHasNodePort(svc) && servicePort.NodePort > 0 {
+					if err := util.DeleteConntrackServicePort(oldIPStr, servicePort.NodePort, *oldPort.Protocol,
+						netlink.ConntrackReplyAnyIP, nil); err != nil {
+						klog.Errorf("Failed to delete conntrack entry for %s NodePort %d: %v", oldIPStr, servicePort.NodePort, err)
+						errors = append(errors, err)
+					}
 				}
 			}
 		}
