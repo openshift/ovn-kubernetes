@@ -32,6 +32,35 @@ import (
 	_ "k8s.io/component-base/logs/testinit"
 )
 
+const (
+	// Feature labels used for test categorization and filtering
+	featureLabelEVPN                = "Feature:EVPN"
+	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+)
+
+// shouldIncludeTest determines if a test should be included based on cluster capabilities
+// and test labels.
+func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
+	// Exclude explicitly disabled tests
+	if strings.Contains(spec.Name, "[Disabled:") {
+		return false
+	}
+
+	// EVPN tests: only include if EVPN is enabled in the cluster
+	evpnEnabled := os.Getenv(ocpinfraprovider.EnvVarEVPNFeatureEnabled) == "true"
+	if !evpnEnabled && spec.Labels.Has(featureLabelEVPN) {
+		return false
+	}
+
+	// Future feature-based filters can be added here
+	// Example:
+	// if !someFeatureEnabled && spec.Labels.Has(featureLabelSomeFeature) {
+	//     return false
+	// }
+
+	return true
+}
+
 func loadBlockingTests() map[string]bool {
 	blockingTests := make(map[string]bool)
 	for _, testName := range test.BlockingTests {
@@ -93,7 +122,7 @@ func main() {
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
 		// These tests require at least 2 nodes and will fail on single-node deployments
-		if spec.Labels.Has("Feature:NetworkSegmentation") {
+		if spec.Labels.Has(featureLabelNetworkSegmentation) {
 			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
 		}
 
@@ -107,9 +136,7 @@ func main() {
 		}
 	})
 
-	specs = specs.Select(func(spec *extensiontests.ExtensionTestSpec) bool {
-		return !strings.Contains(spec.Name, "[Disabled:")
-	})
+	specs = specs.Select(shouldIncludeTest)
 
 	ovnTestsExtension.AddSpecs(specs)
 	extensionRegistry.Register(ovnTestsExtension)
