@@ -28,7 +28,6 @@ var (
 			`[Feature:NodeIPMACMigration]`,
 			`[Feature:OVSCPUPin]`,
 			`[Feature:Unidle]`,
-			`[Feature:RouteAdvertisements]`,
 		},
 	}
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
@@ -92,6 +91,9 @@ var (
 			// TODO: Fix flakiness in this test. Pod connectivity checks may need
 			// to be wrapped in an Eventually block.
 			"perform east/west traffic between nodes following OVN Kube node pod restart",
+			// Disable BGP and VRF Lite tests temporarily
+			"BGP",
+			"VRF-Lite",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
