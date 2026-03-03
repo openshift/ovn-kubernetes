@@ -611,7 +611,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -844,7 +843,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -1047,7 +1045,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}()
 		err = wf.Start()
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		Expect(err).NotTo(HaveOccurred())
@@ -1284,7 +1281,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -1731,9 +1727,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		defer func() {
 			wf.Shutdown()
 		}()
-		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 		nodenft.SetFakeNFTablesHelper()
-		fNPW := initFakeNodePortWatcher(iptV4, iptV6)
+		fNPW := initFakeNodePortWatcher()
 		fNPW.watchFactory = wf
 		// in-order to simulate a namespace with an Invalid UDN (when GetActiveNamespace is called), we add an entry
 		// to the fake network manager but no specified network. GetActiveNetwork will return the appropriate error of Invalid Network for namespace.

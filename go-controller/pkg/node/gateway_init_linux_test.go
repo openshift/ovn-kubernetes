@@ -1593,7 +1593,6 @@ var _ = Describe("Gateway Operations DPU", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
-		_, _ = util.SetFakeIPTablesHelpers()
 	})
 
 	AfterEach(func() {

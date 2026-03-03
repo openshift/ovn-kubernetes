@@ -55,7 +55,6 @@ var _ = Describe("Egress Service Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
-		_, _ = util.SetFakeIPTablesHelpers()
 		fExec = ovntest.NewLooseCompareFakeExec()
 		err := util.SetExec(fExec)
 		Expect(err).NotTo(HaveOccurred())
@@ -325,7 +324,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "nam
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
-		It("manages iptables rules for LoadBalancer egress service backed by cluster networked pods", func() {
+		It("manages nftables rules for LoadBalancer egress service backed by cluster networked pods", func() {
 			app.Action = func(*cli.Context) error {
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ip -4 --json rule show",
@@ -439,7 +438,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "nam
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("manages iptables/ip rules for LoadBalancer egress service backed by ovn-k pods with Network", func() {
+		It("manages nftables/ip rules for LoadBalancer egress service backed by ovn-k pods with Network", func() {
 			app.Action = func(*cli.Context) error {
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ip -4 --json rule show",
