@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -67,6 +68,13 @@ type Controller struct {
 	svisByBridgeLock sync.Mutex
 	svisByBridge     map[string]sets.Set[string]
 
+	// podController manages static FDB and neighbor entries for local pods
+	// on EVPN networks, enabling ARP/ND suppression and known-unicast forwarding.
+	podController controller.Controller
+	podLister     corelisters.PodLister
+	podNeighLock  sync.Mutex
+	podNeighbors  map[string]*neighEntries
+
 	stopChan chan struct{}
 }
 
@@ -99,6 +107,19 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 		MaxAttempts: controller.InfiniteAttempts,
 	})
 
+	podInformer := wf.PodCoreInformer()
+	c.podLister = podInformer.Lister()
+	c.podNeighbors = make(map[string]*neighEntries)
+	c.podController = controller.NewController("evpn-pod-neighbor-controller",
+		&controller.ControllerConfig[corev1.Pod]{
+			RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+			Reconcile:      c.reconcilePod,
+			ObjNeedsUpdate: c.podNeedsUpdate,
+			Threadiness:    1,
+			Informer:       podInformer.Informer(),
+			Lister:         c.podLister.List,
+		})
+
 	var err error
 	c.nodeEventHandler, err = wf.NodeCoreInformer().Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
@@ -119,7 +140,7 @@ func (c *Controller) Start() error {
 		return fmt.Errorf("failed to register the EVPN NAD reconciler: %v", err)
 	}
 	c.nadReconcilerID = id
-	return controller.StartWithInitialSync(c.initialSync, c.vtepController, c.nadReconciler)
+	return controller.StartWithInitialSync(c.initialSync, c.vtepController, c.nadReconciler, c.podController)
 }
 
 func (c *Controller) initialSync() error {
@@ -140,7 +161,7 @@ func (c *Controller) initialSync() error {
 	for _, vtep := range vteps {
 		activeVTEPs.Insert(vtep.Name)
 		if err := c.reconcile(vtep.Name); err != nil {
-			return fmt.Errorf("failed to reconcile VTEP %s: %w", vtep.Name, err)
+			klog.Errorf("Failed to reconcile VTEP %s during initial sync: %v", vtep.Name, err)
 		}
 	}
 
@@ -148,7 +169,11 @@ func (c *Controller) initialSync() error {
 	// NDM handles netlink device cleanup via alias-based ownership, but OVS ports are managed
 	// directly through libovsdb and need explicit cleanup here.
 	if err := c.cleanupStaleOVSPorts(activeVTEPs); err != nil {
-		return fmt.Errorf("failed to clean up stale OVS ports: %w", err)
+		klog.Errorf("Failed to to clean up stale OVS ports: %v", err)
+	}
+
+	if err := c.podInitialSync(); err != nil {
+		klog.Errorf("Failed to sync pod neighbors: %v", err)
 	}
 
 	return nil
@@ -169,7 +194,7 @@ func (c *Controller) Stop() {
 		}
 	}
 
-	controller.Stop(c.vtepController, c.nadReconciler)
+	controller.Stop(c.vtepController, c.nadReconciler, c.podController)
 
 	close(c.stopChan)
 }
@@ -348,7 +373,7 @@ func (c *Controller) reconcileNAD(key string) error {
 		if ok {
 			klog.Infof("Network %s removed, reconciling VTEP %s", key, vtepName)
 			delete(c.nadVTEPInfo, key)
-			c.vtepController.Reconcile(vtepName)
+			c.vtepController.ReconcileRateLimited(vtepName)
 		}
 		return nil
 	}
@@ -364,7 +389,7 @@ func (c *Controller) reconcileNAD(key string) error {
 	}
 
 	c.nadVTEPInfo[key] = vtepName
-	c.vtepController.Reconcile(vtepName)
+	c.vtepController.ReconcileRateLimited(vtepName)
 
 	return nil
 }
