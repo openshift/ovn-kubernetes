@@ -400,8 +400,12 @@ github.com/openshift-kni/k8sreporter v1.0.6 h1:aaxDzZx3s9bo1I3nopR63RGVZxcJgR94j
 github.com/openshift-kni/k8sreporter v1.0.6/go.mod h1:tX6LOg0m0oXje7WNLFo8LKHC9Ix8VV0a7vUc6eyeFBQ=
 github.com/openshift/api v0.0.0-20260311143357-f6ee4c095675 h1:5yWWatBRhf5p1t0B+UGgWIAMNkz/YeoXyHqW6qm2GK0=
 github.com/openshift/api v0.0.0-20260311143357-f6ee4c095675/go.mod h1:pyVjK0nZ4sRs4fuQVQ4rubsJdahI1PB94LnQ8sGdvxo=
+github.com/openshift/api v0.0.0-20260330162214-96f1f5ac7ff2 h1:q89bR1UvKEH9kNh9me1oqLYszKuhaeghorpkO3+DNwY=
+github.com/openshift/api v0.0.0-20260330162214-96f1f5ac7ff2/go.mod h1:pyVjK0nZ4sRs4fuQVQ4rubsJdahI1PB94LnQ8sGdvxo=
 github.com/openshift/client-go v0.0.0-20260306160707-3935d929fc7d h1:T+9HFgEEcnu1TDDfsO5JcJC6N0/Kzob5AtG9IpITHJ8=
 github.com/openshift/client-go v0.0.0-20260306160707-3935d929fc7d/go.mod h1:tIA3XSb/WsC/Fg0YNRfs/JrMrloBKPGF+NKVutd7nMI=
+github.com/openshift/client-go v0.0.0-20260330134249-7e1499aaacd7 h1:5GSoQlywIwYsRCw3qN+ZDmN6HrXTMZfI33bdRNm2jRQ=
+github.com/openshift/client-go v0.0.0-20260330134249-7e1499aaacd7/go.mod h1:HhXTUIMhgzxR3Ln/zEkr4QjTL0NN7A+t9Py/we9j2ug=
 github.com/openshift/custom-resource-status v1.1.2 h1:C3DL44LEbvlbItfd8mT5jWrqPfHnSOQoQf/sypqA6A4=
 github.com/openshift/custom-resource-status v1.1.2/go.mod h1:DB/Mf2oTeiAmVVX1gN+NEqweonAPY0TKUwADizj8+ZA=
 github.com/openshift/kubernetes v1.30.1-0.20260313023409-2034d92b4a3a h1:YMcmbHtdDnBHU8AnbESirN5o4phdKH3htyncsldvo/g=

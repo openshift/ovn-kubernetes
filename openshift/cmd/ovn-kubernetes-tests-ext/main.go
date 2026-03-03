@@ -6,8 +6,13 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
+
 	// import ovn-kubernetes tests
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -26,6 +31,35 @@ import (
 	// ensure that logging flags are part of the command line.
 	_ "k8s.io/component-base/logs/testinit"
 )
+
+const (
+	// Feature labels used for test categorization and filtering
+	featureLabelEVPN                = "Feature:EVPN"
+	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+)
+
+// shouldIncludeTest determines if a test should be included based on cluster capabilities
+// and test labels.
+func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
+	// Exclude explicitly disabled tests
+	if strings.Contains(spec.Name, "[Disabled:") {
+		return false
+	}
+
+	// EVPN tests: only include if EVPN is enabled in the cluster
+	evpnEnabled := os.Getenv(ocpinfraprovider.EnvVarEVPNFeatureEnabled) == "true"
+	if !evpnEnabled && spec.Labels.Has(featureLabelEVPN) {
+		return false
+	}
+
+	// Future feature-based filters can be added here
+	// Example:
+	// if !someFeatureEnabled && spec.Labels.Has(featureLabelSomeFeature) {
+	//     return false
+	// }
+
+	return true
+}
 
 func loadBlockingTests() map[string]bool {
 	blockingTests := make(map[string]bool)
@@ -63,10 +97,30 @@ func main() {
 		panic(err)
 	}
 
+	kubeConfig, err := getKubeConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	// Initialize test framework first.
+	if err := initializeTestFramework(kubeConfig, os.Getenv("TEST_PROVIDER")); err != nil {
+		panic(err)
+	}
+	ocpInfra, err := ocpinfraprovider.New(kubeConfig)
+	if err != nil {
+		panic(err)
+	}
+	err = ocpInfra.LoadTestConfigs()
+	if err != nil {
+		panic(err)
+	}
+	infraprovider.Set(ocpInfra)
+	deploymentconfig.Set(ocpdeploymentconfig.New())
+
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
 	specs.AddBeforeAll(func() {
-		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER")); err != nil {
-			panic(err)
+		if initErr := ocpInfra.InitProvider(); initErr != nil {
+			panic(initErr)
 		}
 	})
 
@@ -79,7 +133,7 @@ func main() {
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
 		// These tests require at least 2 nodes and will fail on single-node deployments
-		if spec.Labels.Has("Feature:NetworkSegmentation") {
+		if spec.Labels.Has(featureLabelNetworkSegmentation) {
 			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
 		}
 
@@ -93,9 +147,7 @@ func main() {
 		}
 	})
 
-	specs = specs.Select(func(spec *extensiontests.ExtensionTestSpec) bool {
-		return !strings.Contains(spec.Name, "[Disabled:")
-	})
+	specs = specs.Select(shouldIncludeTest)
 
 	ovnTestsExtension.AddSpecs(specs)
 	extensionRegistry.Register(ovnTestsExtension)
